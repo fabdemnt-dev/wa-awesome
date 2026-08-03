@@ -21,7 +21,7 @@
       box-shadow: 0 4px 12px rgba(0,0,0,0.05);
       margin-bottom: 16px;
     }
-    input[type="text"], button {
+    input[type="text"], input[type="number"], button {
       font-size: 16px;
       padding: 12px;
       border-radius: 8px;
@@ -86,6 +86,20 @@
       font-size: 14px;
       font-weight: bold;
     }
+    .setting-box {
+      background: #f1f5f9;
+      padding: 12px;
+      border-radius: 8px;
+      margin-bottom: 16px;
+    }
+    .setting-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .setting-item:last-child { margin-bottom: 0; }
+    .setting-item input { width: 70px; margin-bottom: 0; text-align: center; }
   </style>
 </head>
 <body>
@@ -102,13 +116,22 @@
 
   <!-- 2. ロビー & 素材登録 -->
   <div id="lobby-sec" class="card-panel" style="display:none;">
-    <h2>1. ポエムの素材あつめ（素材を3つ入力）</h2>
+    <h2>1. ゲーム設定 & ポエムの素材あつめ</h2>
     
-    <input type="text" id="word-input-1" placeholder="そざい 1（例：眼鏡）">
-    <input type="text" id="word-input-2" placeholder="そざい 2（例：黒髪）">
-    <input type="text" id="word-input-3" placeholder="そざい 3（例：束縛）">
+    <div class="setting-box">
+      <div class="setting-item">
+        <label>入力するそざいの数（1人あたり）:</label>
+        <input type="number" id="setting-words-count" value="3" min="1" max="5" onchange="updateSettings()">
+      </div>
+      <div class="setting-item">
+        <label>配る手札の枚数（1人あたり）:</label>
+        <input type="number" id="setting-hand-count" value="3" min="1" max="10" onchange="updateSettings()">
+      </div>
+    </div>
+
+    <div id="inputs-container"></div>
     
-    <button id="add-word-btn" onclick="addWords()">3つのそざいを追加</button>
+    <button id="add-word-btn" onclick="addWords()">そざいを追加</button>
     <p style="margin-top: 12px;">あつまったそざい: <strong id="total-words">0</strong> 個</p>
     
     <div style="margin-top: 20px;">
@@ -116,14 +139,14 @@
       <div id="player-list"></div>
     </div>
     
-    <button onclick="startGame()" style="background-color: #16a34a; margin-top: 20px;">ポエムづくりを開始（手札3枚を配布）</button>
+    <button onclick="startGame()" style="background-color: #16a34a; margin-top: 20px;">ポエムづくりを開始</button>
   </div>
 
   <!-- 3. ゲーム画面（作成 & 発表 & 投票） -->
   <div id="game-sec" class="card-panel" style="display:none;">
     <h2>2. ポエムをつくる</h2>
     
-    <h3>あなたの手札（3枚）</h3>
+    <h3>あなたの手札</h3>
     <div class="word-list" id="hand-list"></div>
 
     <h3 style="margin-top: 20px;">完成したポエム（披露用）</h3>
@@ -187,7 +210,8 @@
           hands: {},
           phrases: {},
           votes: {},
-          scores: {}
+          scores: {},
+          settings: { wordsPerPlayer: 3, handSize: 3 }
         }, { merge: true });
 
         document.getElementById('login-sec').style.display = 'none';
@@ -196,6 +220,12 @@
         onSnapshot(roomRef, (snapshot) => {
           currentData = snapshot.data();
           if (!currentData) return;
+
+          const settings = currentData.settings || { wordsPerPlayer: 3, handSize: 3 };
+          document.getElementById('setting-words-count').value = settings.wordsPerPlayer;
+          document.getElementById('setting-hand-count').value = settings.handSize;
+          
+          renderInputFields(settings.wordsPerPlayer);
 
           document.getElementById('total-words').innerText = currentData.words ? currentData.words.length : 0;
           
@@ -232,6 +262,30 @@
       }
     };
 
+    function renderInputFields(count) {
+      const container = document.getElementById('inputs-container');
+      if (container.children.length === count) return;
+      
+      container.innerHTML = '';
+      for (let i = 1; i <= count; i++) {
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.id = `word-input-${i}`;
+        input.placeholder = `そざい ${i}`;
+        container.appendChild(input);
+      }
+      document.getElementById('add-word-btn').innerText = `${count}つのそざいを追加`;
+    }
+
+    window.updateSettings = async function() {
+      const wordsCount = parseInt(document.getElementById('setting-words-count').value) || 3;
+      const handCount = parseInt(document.getElementById('setting-hand-count').value) || 3;
+
+      await updateDoc(roomRef, {
+        settings: { wordsPerPlayer: wordsCount, handSize: handCount }
+      });
+    };
+
     window.removePlayer = async function(targetPlayer) {
       if (!confirm(`${targetPlayer} さんを鯖落ちさせますか？`)) return;
       await updateDoc(roomRef, {
@@ -240,23 +294,27 @@
     };
 
     window.addWords = async function() {
-      const w1 = document.getElementById('word-input-1').value.trim();
-      const w2 = document.getElementById('word-input-2').value.trim();
-      const w3 = document.getElementById('word-input-3').value.trim();
+      const settings = currentData.settings || { wordsPerPlayer: 3 };
+      const count = settings.wordsPerPlayer;
+      const newWords = [];
 
-      if (!w1 || !w2 || !w3) return alert('3つすべての枠にそざいを入力してください！');
+      for (let i = 1; i <= count; i++) {
+        const val = document.getElementById(`word-input-${i}`).value.trim();
+        if (!val) return alert(`${count}つすべての枠にそざいを入力してください！`);
+        newWords.push(val);
+      }
 
       await updateDoc(roomRef, { 
-        words: arrayUnion(w1, w2, w3) 
+        words: arrayUnion(...newWords) 
       });
 
       const btn = document.getElementById('add-word-btn');
       btn.innerText = "追加完了！";
       btn.disabled = true;
 
-      document.getElementById('word-input-1').disabled = true;
-      document.getElementById('word-input-2').disabled = true;
-      document.getElementById('word-input-3').disabled = true;
+      for (let i = 1; i <= count; i++) {
+        document.getElementById(`word-input-${i}`).disabled = true;
+      }
     };
 
     window.startGame = async function() {
@@ -264,12 +322,19 @@
 
       const words = [...currentData.words];
       const players = currentData.players || [];
-      const shuffled = words.sort(() => Math.random() - 0.5);
+      const settings = currentData.settings || { handSize: 3 };
+      const handSize = settings.handSize;
 
+      if (words.length < players.length * handSize) {
+        return alert(`そざいの数が足りません！（必要な数: ${players.length * handSize}個 / 現在: ${words.length}個）`);
+      }
+
+      const shuffled = words.sort(() => Math.random() - 0.5);
       const newHands = {};
+
       players.forEach((player, index) => {
-        const start = index * 3;
-        newHands[player] = shuffled.slice(start, start + 3);
+        const start = index * handSize;
+        newHands[player] = shuffled.slice(start, start + handSize);
       });
 
       await updateDoc(roomRef, { 
@@ -279,14 +344,19 @@
     };
 
     window.nextRound = async function() {
+      const settings = currentData.settings || { wordsPerPlayer: 3 };
+      const count = settings.wordsPerPlayer;
+
       const btn = document.getElementById('add-word-btn');
-      btn.innerText = "3つのそざいを追加";
+      btn.innerText = `${count}つのそざいを追加`;
       btn.disabled = false;
 
-      for (let i = 1; i <= 3; i++) {
+      for (let i = 1; i <= count; i++) {
         const inp = document.getElementById(`word-input-${i}`);
-        inp.value = '';
-        inp.disabled = false;
+        if (inp) {
+          inp.value = '';
+          inp.disabled = false;
+        }
       }
 
       await updateDoc(roomRef, {
