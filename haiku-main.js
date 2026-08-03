@@ -1,9 +1,8 @@
-import { db } from "./firebase-config.js";
+import db from "./firebase-config.js";
 import { doc, setDoc, onSnapshot, updateDoc, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { evalOptionsMaster, hostOptionKeys, childOptionKeys, renderResults } from "./haiku-eval.js";
 import { exportText as expText, exportCSV as expCSV } from "./haiku-export.js";
 
-// 変数を先頭で確実に宣言
 let roomId = "";
 let myName = "";
 let isSpectator = false;
