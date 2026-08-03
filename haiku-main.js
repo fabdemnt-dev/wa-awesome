@@ -388,10 +388,19 @@ window.nextRound = async function() {
 window.exportText = function() { expText(currentData); };
 window.exportCSV = function() { expCSV(currentData, roomId); };
 
-// DOM読み込み完了時に直接ボタンにクリックイベントを登録
-document.addEventListener('DOMContentLoaded', () => {
-  const joinBtn = document.getElementById('join-btn');
-  if (joinBtn) {
-    joinBtn.addEventListener('click', window.joinRoom);
+// スクリプト読み込み時にボタンイベントをバインド
+function bindJoinButton() {
+  const btn = document.getElementById('join-btn');
+  if (btn) {
+    btn.removeEventListener('click', window.joinRoom);
+    btn.addEventListener('click', window.joinRoom);
+  } else {
+    setTimeout(bindJoinButton, 100);
   }
-});
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', bindJoinButton);
+} else {
+  bindJoinButton();
+}
