@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>わ〜鯖せーへき俳句</title>
+  <title>わ〜鯖せーへきはぃく</title>
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -118,7 +118,7 @@
 </head>
 <body>
 
-  <h1>わ〜鯖せーへき俳句</h1>
+  <h1>わ〜鯖せーへきはぃく</h1>
 
   <!-- 1. ログイン & ルーム参加 -->
   <div id="login-sec" class="card-panel">
@@ -130,7 +130,7 @@
 
   <!-- 2. ロビー & 素材登録 -->
   <div id="lobby-sec" class="card-panel" style="display:none;">
-    <h2>1. 俳句の素材あつめ</h2>
+    <h2>1. はぃくの素材あつめ</h2>
     
     <div class="setting-box">
       <div class="setting-header" onclick="toggleSettings()">
@@ -159,17 +159,17 @@
       <div id="player-list"></div>
     </div>
     
-    <button onclick="startGame()" style="background-color: #16a34a; margin-top: 20px;">俳句づくりを開始</button>
+    <button onclick="startGame()" style="background-color: #16a34a; margin-top: 20px;">はぃくづくりを開始</button>
   </div>
 
   <!-- 3. ゲーム画面（作成 & 発表 & 投票） -->
   <div id="game-sec" class="card-panel" style="display:none;">
-    <h2>2. 俳句を詠む</h2>
+    <h2>2. はぃくを詠む</h2>
     
     <h3>あなたの手札</h3>
     <div class="word-list" id="hand-list"></div>
 
-    <h3 style="margin-top: 20px;">詠んだ俳句（五・七・五）</h3>
+    <h3 style="margin-top: 20px;">詠んだはぃく（五・七・五）</h3>
     <div class="display-area" id="my-phrase"></div>
     <div style="display: flex; gap: 8px;">
       <button onclick="clearPhrase()" style="background-color: #dc2626; margin-top: 8px;">やりなおす</button>
@@ -178,7 +178,7 @@
 
     <hr style="margin: 24px 0; border: none; border-top: 1px solid #e2e8f0;">
 
-    <h2>みんなの俳句 & 投票</h2>
+    <h2>みんなのはぃく & 投票</h2>
     <div id="board-list"></div>
 
     <!-- ランキング・結果表示領域 -->
@@ -493,4 +493,3 @@
   </script>
 </body>
 </html>
-
