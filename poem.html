@@ -66,6 +66,15 @@
     <h2>みんなの作品</h2>
     <div id="board-list"></div>
 
+    <!-- 履歴出力領域 -->
+    <div style="margin-top: 20px; border-top: 1px solid #e2e8f0; padding-top: 12px;">
+      <h3 style="font-size: 14px; margin-bottom: 8px;">📜 作品の出力</h3>
+      <div style="display: flex; gap: 8px;">
+        <button onclick="exportText()" style="background-color: #5865F2;">📋 コピー (Discord用)</button>
+        <button onclick="exportCSV()" style="background-color: #059669;">📥 CSV保存</button>
+      </div>
+    </div>
+
     <button onclick="nextGame()" style="background-color: #0284c7; margin-top: 24px;">🔄 新しいポエムを作る（ロビーへ戻る）</button>
   </div>
 
