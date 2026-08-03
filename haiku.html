@@ -21,9 +21,9 @@
       box-shadow: 0 4px 12px rgba(0,0,0,0.05);
       margin-bottom: 16px;
     }
-    input[type="text"], input[type="number"], button {
-      font-size: 16px;
-      padding: 12px;
+    input[type="text"], input[type="number"], select, button {
+      font-size: 15px;
+      padding: 10px;
       border-radius: 8px;
       border: 1px solid #cbd5e1;
       box-sizing: border-box;
@@ -103,22 +103,27 @@
     .board-header {
       display: flex;
       justify-content: space-between;
-      align-items: flex-start;
+      align-items: center;
+      gap: 8px;
     }
-    .vote-btn-group {
+    .vote-select-group {
       display: flex;
       gap: 6px;
-      margin-top: 4px;
+      align-items: center;
     }
-    .vote-btn {
+    .vote-select {
+      background: white;
+      font-size: 13px;
+      padding: 6px 8px;
+    }
+    .vote-submit-btn {
       width: auto;
       margin-top: 0;
-      padding: 6px 10px;
+      padding: 6px 12px;
       font-size: 13px;
-      border-radius: 6px;
+      background-color: #f59e0b;
+      white-space: nowrap;
     }
-    .vote-okashi { background-color: #f59e0b; }
-    .vote-aware { background-color: #7c3aed; }
 
     .score-badge {
       background: #e0f2fe;
@@ -321,6 +326,22 @@
     let myHand7 = [];
     let selectedHand = [null, null, null];
     let currentData = null;
+
+    // 全評価の定義（ラベル、獲得ポイント）
+    const evalOptionsMaster = {
+      okashi: { label: "🌸 いとおかし", pts: 1 },
+      aware:  { label: "🌾 もののあはれ", pts: 1 },
+      wabisabi:{ label: "❄️ わびさび", pts: 1 },
+      ayashi: { label: "🌀 あやし", pts: 1 },
+      kuruoshi:{ label: "🍶 狂おし", pts: 1 },
+      wabishi:{ label: "🍃 わびし", pts: 1 },
+      yugen:  { label: "🌙 幽玄", pts: 1 },
+      tae:    { label: "🪭 妙なり (+2誉)", pts: 2 }
+    };
+
+    // 親（全種）と子（3種）の選択肢キー
+    const hostOptionKeys = ['okashi', 'aware', 'wabisabi', 'ayashi', 'kuruoshi', 'wabishi', 'yugen', 'tae'];
+    const childOptionKeys = ['okashi', 'aware', 'wabisabi'];
 
     const colorPalette = [
       { bg: '#dbeafe', text: '#1e40af', border: '#bfdbfe' },
@@ -652,8 +673,14 @@
       await updateDoc(roomRef, updateData);
     };
 
-    window.voteFor = async function(targetPlayer, type, points = 1) {
+    window.submitVote = async function(targetPlayer) {
       if (!currentData) return;
+      const selectElem = document.getElementById(`vote-select-${targetPlayer}`);
+      if (!selectElem) return;
+      const selectedKey = selectElem.value;
+      const evalItem = evalOptionsMaster[selectedKey];
+      if (!evalItem) return;
+
       const players = currentData.players || [];
       const hostIndex = currentData.hostIndex || 0;
       const currentHost = players[hostIndex % players.length];
@@ -662,22 +689,20 @@
       const votes = currentData.votes || {};
       const myVotes = votes[myName] || [];
 
-      // 子（一般プレイヤー）は1人分（1件）しか投票できない
       if (!isHost && myVotes.length >= 1) {
         return alert('子は評価を1つまでしか選べません');
       }
 
-      // 既に同じ作品に同じ評価をしている場合は二重投票を防ぐ
-      if (myVotes.some(v => v.target === targetPlayer && v.type === type)) {
+      if (myVotes.some(v => v.target === targetPlayer && v.type === selectedKey)) {
         return alert('この句にはすでに同じ評価を付けました');
       }
 
-      const newVoteList = [...myVotes, { target: targetPlayer, type: type, points: points }];
+      const newVoteList = [...myVotes, { target: targetPlayer, type: selectedKey, points: evalItem.pts }];
       const updateData = {};
       updateData[`votes.${myName}`] = newVoteList;
 
       const currentScores = currentData.scores || {};
-      const newScore = (currentScores[targetPlayer] || 0) + points;
+      const newScore = (currentScores[targetPlayer] || 0) + evalItem.pts;
       updateData[`scores.${targetPlayer}`] = newScore;
 
       await updateDoc(roomRef, updateData);
@@ -695,6 +720,7 @@
 
       const myVoteList = votes[myName] || [];
       const isResultRevealed = Object.keys(votes).length > 0;
+      const availableKeys = isHost ? hostOptionKeys : childOptionKeys;
 
       const container = document.getElementById('board-list');
       container.innerHTML = Object.entries(phrases).map(([player, phrase]) => {
@@ -727,17 +753,17 @@
               <strong>${player} の一句:</strong>
               <div>
                 ${!isSelf ? `
-                  <div class="vote-btn-group">
-                    <button class="vote-btn vote-okashi" onclick="voteFor('${player}', 'okashi', 1)" ${(!isHost && myVoteList.length >= 1) ? 'disabled' : ''}>
-                      🌸 いとおかし
-                    </button>
-                    <button class="vote-btn vote-aware" onclick="voteFor('${player}', 'aware', 1)" ${(!isHost && myVoteList.length >= 1) ? 'disabled' : ''}>
-                      🌾 もののあはれ
+                  <div class="vote-select-group">
+                    <select id="vote-select-${player}" class="vote-select" ${(!isHost && myVoteList.length >= 1) ? 'disabled' : ''}>
+                      ${availableKeys.map(k => `<option value="${k}">${evalOptionsMaster[k].label}</option>`).join('')}
+                    </select>
+                    <button class="vote-submit-btn" onclick="submitVote('${player}')" ${(!isHost && myVoteList.length >= 1) ? 'disabled' : ''}>
+                      進上
                     </button>
                   </div>
                   ${myVotesForThisPlayer.length > 0 ? `
-                    <div style="font-size:11px; color:#64748b; margin-top:2px; text-align:right;">
-                      評価済: ${myVotesForThisPlayer.map(v => v.type === 'okashi' ? '🌸' : '🌾').join(' ')}
+                    <div style="font-size:11px; color:#64748b; margin-top:4px; text-align:right;">
+                      評価済: ${myVotesForThisPlayer.map(v => evalOptionsMaster[v.type]?.label || '').join(', ')}
                     </div>
                   ` : ''}
                 ` : '<span style="font-size:12px; color:#94a3b8;">手前が作</span>'}
@@ -760,22 +786,29 @@
           voteArr.forEach(v => {
             if (!v || !v.target) return;
             if (!playerCounts[v.target]) {
-              playerCounts[v.target] = { okashi: 0, aware: 0, pts: 0 };
+              playerCounts[v.target] = { details: {}, pts: 0 };
             }
-            if (v.type === 'okashi') playerCounts[v.target].okashi += 1;
-            if (v.type === 'aware') playerCounts[v.target].aware += 1;
+            playerCounts[v.target].details[v.type] = (playerCounts[v.target].details[v.type] || 0) + 1;
             playerCounts[v.target].pts += (v.points || 1);
           });
         });
 
-        resList.innerHTML = Object.entries(playerCounts).map(([p, data]) => `
-          <div style="margin-bottom:6px;">
-            <strong>${p}</strong>: +${data.pts} 誉 
-            <span style="font-size:12px; color:#475569;">（🌸 いとおかし: ${data.okashi} ／ 🌾 もののあはれ: ${data.aware}）</span>
-            <br>
-            <span style="font-size:13px; color:#166534; font-weight:bold;">累計: ${currentData.scores?.[p] || 0} 誉</span>
-          </div>
-        `).join('');
+        resList.innerHTML = Object.entries(playerCounts).map(([p, data]) => {
+          const detailStr = Object.entries(data.details).map(([k, count]) => {
+            const label = evalOptionsMaster[k]?.label || k;
+            return `${label}: ${count}`;
+          }).join(' ／ ');
+
+          return `
+            <div style="margin-bottom:8px;">
+              <strong>${p}</strong>: +${data.pts} 誉 
+              <br>
+              <span style="font-size:12px; color:#475569;">（${detailStr}）</span>
+              <br>
+              <span style="font-size:13px; color:#166534; font-weight:bold;">累計: ${currentData.scores?.[p] || 0} 誉</span>
+            </div>
+          `;
+        }).join('');
       } else {
         resArea.style.display = 'none';
       }
