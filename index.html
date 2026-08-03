@@ -3,493 +3,62 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>わ〜鯖せーへきポエム</title>
+  <title>わ〜鯖せーへきゲーム</title>
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      max-width: 600px;
+      max-width: 500px;
       margin: 0 auto;
-      padding: 16px;
+      padding: 24px 16px;
       background-color: #f8fafc;
       color: #1e293b;
+      text-align: center;
     }
-    h1, h2, h3 { text-align: center; margin-top: 0; }
+    h1 { margin-bottom: 8px; font-size: 24px; }
+    p { color: #64748b; font-size: 14px; margin-bottom: 24px; }
     .card-panel {
       background: white;
       border-radius: 12px;
-      padding: 20px;
+      padding: 24px 20px;
       box-shadow: 0 4px 12px rgba(0,0,0,0.05);
       margin-bottom: 16px;
+      display: block;
+      text-decoration: none;
+      color: inherit;
+      border: 2px solid transparent;
+      transition: all 0.2s;
     }
-    input[type="text"], input[type="number"], button {
-      font-size: 16px;
-      padding: 12px;
-      border-radius: 8px;
-      border: 1px solid #cbd5e1;
-      box-sizing: border-box;
+    .card-panel:active {
+      border-color: #2563eb;
+      transform: scale(0.98);
     }
-    input[type="text"] { width: 100%; margin-bottom: 8px; }
-    button {
-      background-color: #2563eb;
-      color: white;
-      border: none;
+    .game-title {
+      font-size: 20px;
       font-weight: bold;
-      cursor: pointer;
-      width: 100%;
-      margin-top: 8px;
-    }
-    button:disabled { background-color: #94a3b8; cursor: not-allowed; }
-    .word-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-    .card {
-      background: #f1f5f9;
-      border: 2px solid #cbd5e1;
-      border-radius: 8px;
-      padding: 8px 14px;
-      font-weight: bold;
-      cursor: pointer;
-      user-select: none;
-    }
-    .card.selected { background: #2563eb; color: white; border-color: #1d4ed8; }
-    .display-area {
-      min-height: 60px;
-      border: 2px dashed #94a3b8;
-      border-radius: 8px;
-      padding: 10px;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      align-items: center;
-      background: #fafafa;
-    }
-    .player-board {
-      background: #f8fafc;
-      border: 1px solid #e2e8f0;
-      border-radius: 8px;
-      padding: 12px;
-      margin-bottom: 12px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .vote-btn {
-      width: auto;
-      margin-top: 0;
-      padding: 6px 12px;
-      font-size: 14px;
-      background-color: #f59e0b;
-    }
-    .score-badge {
-      background: #e0f2fe;
-      color: #0369a1;
-      padding: 2px 8px;
-      border-radius: 12px;
-      font-size: 14px;
-      font-weight: bold;
-    }
-    .setting-box {
-      background: #f1f5f9;
-      border-radius: 8px;
-      margin-bottom: 16px;
-      overflow: hidden;
-      border: 1px solid #e2e8f0;
-    }
-    .setting-header {
-      padding: 12px;
-      font-weight: bold;
-      cursor: pointer;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      background: #e2e8f0;
-      user-select: none;
-    }
-    .setting-content {
-      padding: 12px;
-    }
-    .setting-item {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
+      color: #2563eb;
       margin-bottom: 8px;
     }
-    .setting-item:last-child { margin-bottom: 0; }
-    .setting-item input { width: 70px; margin-bottom: 0; text-align: center; }
+    .game-desc {
+      font-size: 13px;
+      color: #475569;
+      margin: 0;
+    }
   </style>
 </head>
 <body>
 
-  <h1>わ〜鯖せーへきポエム</h1>
+  <h1>わ〜鯖せーへきゲーム</h1>
+  <p>あそぶゲームをえらんでね！</p>
 
-  <!-- 1. ログイン & ルーム参加 -->
-  <div id="login-sec" class="card-panel">
-    <h2>ルームに入る</h2>
-    <input type="text" id="player-name" placeholder="あなたの名前">
-    <input type="text" id="room-id" placeholder="ルームID（例：123）">
-    <button onclick="joinRoom()">参加する</button>
-  </div>
+  <a href="poem.html" class="card-panel">
+    <div class="game-title">📝 ポエム版</div>
+    <p class="game-desc">自由にカードをくみあわせてポエムをつくろう！</p>
+  </a>
 
-  <!-- 2. ロビー & 素材登録 -->
-  <div id="lobby-sec" class="card-panel" style="display:none;">
-    <h2>1. ポエムの素材あつめ</h2>
-    
-    <div class="setting-box">
-      <div class="setting-header" onclick="toggleSettings()">
-        <span>⚙️ 設定</span>
-        <span id="setting-toggle-icon">▼</span>
-      </div>
-      <div class="setting-content" id="setting-content" style="display: none;">
-        <div class="setting-item">
-          <label>入力するそざいの数（1人あたり）:</label>
-          <input type="number" id="setting-words-count" value="3" min="1" max="5" onchange="updateSettings()">
-        </div>
-        <div class="setting-item">
-          <label>配る手札の枚数（1人あたり）:</label>
-          <input type="number" id="setting-hand-count" value="3" min="1" max="10" onchange="updateSettings()">
-        </div>
-      </div>
-    </div>
+  <a href="haiku.html" class="card-panel">
+    <div class="game-title">🎋 俳句版</div>
+    <p class="game-desc">五・七・五のカードをえらんで一句よもう！</p>
+  </a>
 
-    <div id="inputs-container"></div>
-    
-    <button id="add-word-btn" onclick="addWords()">そざいを追加</button>
-    <p style="margin-top: 12px;">あつまったそざい: <strong id="total-words">0</strong> 個</p>
-    
-    <div style="margin-top: 20px;">
-      <h3>参加メンバーと現在のスコア</h3>
-      <div id="player-list"></div>
-    </div>
-    
-    <button onclick="startGame()" style="background-color: #16a34a; margin-top: 20px;">ポエムづくりを開始</button>
-  </div>
-
-  <!-- 3. ゲーム画面（作成 & 発表 & 投票） -->
-  <div id="game-sec" class="card-panel" style="display:none;">
-    <h2>2. ポエムをつくる</h2>
-    
-    <h3>あなたの手札</h3>
-    <div class="word-list" id="hand-list"></div>
-
-    <h3 style="margin-top: 20px;">完成したポエム（披露用）</h3>
-    <div class="display-area" id="my-phrase"></div>
-    <div style="display: flex; gap: 8px;">
-      <button onclick="clearPhrase()" style="background-color: #dc2626; margin-top: 8px;">やりなおす</button>
-      <button onclick="submitPhrase()" style="background-color: #2563eb; margin-top: 8px;">ポエムを披露する</button>
-    </div>
-
-    <hr style="margin: 24px 0; border: none; border-top: 1px solid #e2e8f0;">
-
-    <h2>みんなのポエム & 投票</h2>
-    <div id="board-list"></div>
-
-    <!-- ランキング・結果表示領域 -->
-    <div id="result-area" style="display:none; margin-top:20px; background:#f0fdf4; border:1px solid #bbf7d0; padding:12px; border-radius:8px;">
-      <h3 style="color:#166534; margin-bottom:8px;">🏆 今回の投票結果</h3>
-      <div id="round-results"></div>
-    </div>
-
-    <button onclick="nextRound()" style="background-color: #0284c7; margin-top: 24px;">🔄 つぎのポエムをつくる（スコア引継ぎ）</button>
-  </div>
-
-  <!-- Firebase SDK -->
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-    import { getFirestore, doc, setDoc, onSnapshot, updateDoc, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-
-    const firebaseConfig = {
-      apiKey: "AIzaSyBtb74uz6clsoc9uA_AkDHi7DdepEWn2dw",
-      authDomain: "wa-awesome.firebaseapp.com",
-      projectId: "wa-awesome",
-      storageBucket: "wa-awesome.firebasestorage.app",
-      messagingSenderId: "1074804319870",
-      appId: "1:1074804319870:web:923f0ec866812f98ae5a2f",
-      measurementId: "G-DH30YVYB2X"
-    };
-
-    const app = initializeApp(firebaseConfig);
-    const db = getFirestore(app);
-
-    let roomId = "";
-    let myName = "";
-    let roomRef = null;
-    let myHand = [];
-    let selectedIndices = [];
-    let currentData = null;
-
-    window.toggleSettings = function() {
-      const content = document.getElementById('setting-content');
-      const icon = document.getElementById('setting-toggle-icon');
-      if (content.style.display === 'none') {
-        content.style.display = 'block';
-        icon.innerText = '▲';
-      } else {
-        content.style.display = 'none';
-        icon.innerText = '▼';
-      }
-    };
-
-    window.joinRoom = async function() {
-      myName = document.getElementById('player-name').value.trim();
-      roomId = document.getElementById('room-id').value.trim();
-      if (!myName || !roomId) return alert('名前とルームIDを入力してください');
-
-      try {
-        roomRef = doc(db, "rooms", roomId);
-
-        await setDoc(roomRef, {
-          players: arrayUnion(myName),
-          status: "lobby",
-          words: [],
-          hands: {},
-          phrases: {},
-          votes: {},
-          scores: {},
-          settings: { wordsPerPlayer: 3, handSize: 3 }
-        }, { merge: true });
-
-        document.getElementById('login-sec').style.display = 'none';
-        document.getElementById('lobby-sec').style.display = 'block';
-
-        onSnapshot(roomRef, (snapshot) => {
-          currentData = snapshot.data();
-          if (!currentData) return;
-
-          const settings = currentData.settings || { wordsPerPlayer: 3, handSize: 3 };
-          document.getElementById('setting-words-count').value = settings.wordsPerPlayer;
-          document.getElementById('setting-hand-count').value = settings.handSize;
-          
-          renderInputFields(settings.wordsPerPlayer);
-
-          document.getElementById('total-words').innerText = currentData.words ? currentData.words.length : 0;
-          
-          const scores = currentData.scores || {};
-          document.getElementById('player-list').innerHTML = currentData.players ? currentData.players.map(p => 
-            `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-              <span>・ ${p}</span>
-              <div>
-                <span class="score-badge" style="margin-right:8px;">${scores[p] || 0} pt</span>
-                <button onclick="removePlayer('${p}')" style="width:auto; margin:0; padding:4px 8px; font-size:12px; background-color:#ef4444;">鯖落ち</button>
-              </div>
-            </div>`
-          ).join('') : '';
-
-          if (currentData.status === 'lobby') {
-            document.getElementById('game-sec').style.display = 'none';
-            document.getElementById('lobby-sec').style.display = 'block';
-            myHand = [];
-            selectedIndices = [];
-          } else if (currentData.status === 'playing') {
-            document.getElementById('lobby-sec').style.display = 'none';
-            document.getElementById('game-sec').style.display = 'block';
-
-            if (currentData.hands && currentData.hands[myName]) {
-              myHand = currentData.hands[myName];
-              renderHand();
-            }
-            renderBoards();
-          }
-        });
-      } catch (e) {
-        console.error(e);
-        alert('接続エラーが発生しました: ' + e.message);
-      }
-    };
-
-    function renderInputFields(count) {
-      const container = document.getElementById('inputs-container');
-      if (container.children.length === count) return;
-      
-      container.innerHTML = '';
-      for (let i = 1; i <= count; i++) {
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.id = `word-input-${i}`;
-        input.placeholder = `そざい ${i}`;
-        container.appendChild(input);
-      }
-      document.getElementById('add-word-btn').innerText = `${count}つのそざいを追加`;
-    }
-
-    window.updateSettings = async function() {
-      const wordsCount = parseInt(document.getElementById('setting-words-count').value) || 3;
-      const handCount = parseInt(document.getElementById('setting-hand-count').value) || 3;
-
-      await updateDoc(roomRef, {
-        settings: { wordsPerPlayer: wordsCount, handSize: handCount }
-      });
-    };
-
-    window.removePlayer = async function(targetPlayer) {
-      if (!confirm(`${targetPlayer} さんを鯖落ちさせますか？`)) return;
-      await updateDoc(roomRef, {
-        players: arrayRemove(targetPlayer)
-      });
-    };
-
-    window.addWords = async function() {
-      const settings = currentData.settings || { wordsPerPlayer: 3 };
-      const count = settings.wordsPerPlayer;
-      const newWords = [];
-
-      for (let i = 1; i <= count; i++) {
-        const val = document.getElementById(`word-input-${i}`).value.trim();
-        if (!val) return alert(`${count}つすべての枠にそざいを入力してください！`);
-        newWords.push(val);
-      }
-
-      await updateDoc(roomRef, { 
-        words: arrayUnion(...newWords) 
-      });
-
-      const btn = document.getElementById('add-word-btn');
-      btn.innerText = "追加完了！";
-      btn.disabled = true;
-
-      for (let i = 1; i <= count; i++) {
-        document.getElementById(`word-input-${i}`).disabled = true;
-      }
-    };
-
-    window.startGame = async function() {
-      if (!currentData || !currentData.words) return;
-
-      const words = [...currentData.words];
-      const players = currentData.players || [];
-      const settings = currentData.settings || { handSize: 3 };
-      const handSize = settings.handSize;
-
-      if (words.length < players.length * handSize) {
-        return alert(`そざいの数が足りません！（必要な数: ${players.length * handSize}個 / 現在: ${words.length}個）`);
-      }
-
-      const shuffled = words.sort(() => Math.random() - 0.5);
-      const newHands = {};
-
-      players.forEach((player, index) => {
-        const start = index * handSize;
-        newHands[player] = shuffled.slice(start, start + handSize);
-      });
-
-      await updateDoc(roomRef, { 
-        status: 'playing',
-        hands: newHands 
-      });
-    };
-
-    window.nextRound = async function() {
-      const settings = currentData.settings || { wordsPerPlayer: 3 };
-      const count = settings.wordsPerPlayer;
-
-      const btn = document.getElementById('add-word-btn');
-      btn.innerText = `${count}つのそざいを追加`;
-      btn.disabled = false;
-
-      for (let i = 1; i <= count; i++) {
-        const inp = document.getElementById(`word-input-${i}`);
-        if (inp) {
-          inp.value = '';
-          inp.disabled = false;
-        }
-      }
-
-      await updateDoc(roomRef, {
-        status: 'lobby',
-        words: [],
-        hands: {},
-        phrases: {},
-        votes: {}
-      });
-    };
-
-    function renderHand() {
-      const list = document.getElementById('hand-list');
-      list.innerHTML = myHand.map((w, idx) => {
-        const sel = selectedIndices.includes(idx) ? 'selected' : '';
-        return `<div class="card ${sel}" onclick="toggleCard(${idx})">${w}</div>`;
-      }).join('');
-
-      const phrase = document.getElementById('my-phrase');
-      phrase.innerHTML = selectedIndices.map(idx => `<div class="card selected">${myHand[idx]}</div>`).join('');
-    }
-
-    window.toggleCard = function(idx) {
-      const pos = selectedIndices.indexOf(idx);
-      if (pos === -1) selectedIndices.push(idx);
-      else selectedIndices.splice(pos, 1);
-      renderHand();
-    };
-
-    window.clearPhrase = function() {
-      selectedIndices = [];
-      renderHand();
-    };
-
-    window.submitPhrase = async function() {
-      const phraseText = selectedIndices.map(idx => myHand[idx]).join(' ');
-      if (!phraseText) return alert('カードを選んでください');
-      
-      const updateData = {};
-      updateData[`phrases.${myName}`] = phraseText;
-      await updateDoc(roomRef, updateData);
-    };
-
-    window.voteFor = async function(targetPlayer) {
-      if (!currentData) return;
-      const votes = currentData.votes || {};
-      if (votes[myName]) return alert('投票は1人1回までです');
-
-      const updateData = {};
-      updateData[`votes.${myName}`] = targetPlayer;
-
-      const currentScores = currentData.scores || {};
-      const newScore = (currentScores[targetPlayer] || 0) + 1;
-      updateData[`scores.${targetPlayer}`] = newScore;
-
-      await updateDoc(roomRef, updateData);
-    };
-
-    function renderBoards() {
-      if (!currentData) return;
-      const phrases = currentData.phrases || {};
-      const votes = currentData.votes || {};
-      const myVoted = votes[myName];
-
-      const container = document.getElementById('board-list');
-      container.innerHTML = Object.entries(phrases).map(([player, phrase]) => {
-        const isSelf = player === myName;
-
-        return `
-          <div class="player-board">
-            <div>
-              <strong>${player} のポエム:</strong>
-              <div style="font-size: 18px; margin-top: 4px; color: #1e3a8a;">${phrase}</div>
-            </div>
-            <div>
-              ${!isSelf ? `
-                <button class="vote-btn" onclick="voteFor('${player}')" ${myVoted ? 'disabled' : ''}>
-                  ${myVoted === player ? '投票済み' : '👍 投票'}
-                </button>
-              ` : '<span style="font-size:12px; color:#94a3b8;">自分の作品</span>'}
-            </div>
-          </div>
-        `;
-      }).join('');
-
-      const resArea = document.getElementById('result-area');
-      const resList = document.getElementById('round-results');
-      if (Object.keys(votes).length > 0) {
-        resArea.style.display = 'block';
-        const voteCounts = {};
-        Object.values(votes).forEach(target => {
-          voteCounts[target] = (voteCounts[target] || 0) + 1;
-        });
-
-        resList.innerHTML = Object.entries(voteCounts).map(([p, c]) => `
-          <div><strong>${p}</strong>: +${c}票 (累計: ${currentData.scores?.[p] || 0}pt)</div>
-        `).join('');
-      } else {
-        resArea.style.display = 'none';
-      }
-    }
-  </script>
 </body>
 </html>
