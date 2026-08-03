@@ -80,6 +80,15 @@
       font-size: 14px;
       color: #64748b;
     }
+    .swap-btn {
+      width: auto;
+      margin-top: 0;
+      padding: 4px 10px;
+      font-size: 12px;
+      background-color: #0284c7;
+      border-radius: 6px;
+      align-self: flex-start;
+    }
 
     .player-board {
       background: #f8fafc;
@@ -209,6 +218,7 @@
     <h3 style="margin-top: 20px;">詠んだはぃく（五・七・五）</h3>
     <div class="display-area">
       <div class="display-line"><span>初句(五):</span> <div id="phrase-1"></div></div>
+      <button class="swap-btn" onclick="swap5Cards()">⇄ 五音（初句・結句）を入れ替える</button>
       <div class="display-line"><span>二句(七):</span> <div id="phrase-2"></div></div>
       <div class="display-line"><span>結句(五):</span> <div id="phrase-3"></div></div>
     </div>
@@ -256,7 +266,8 @@
 
     let myHand5 = [];
     let myHand7 = [];
-    let selectedHand = [];
+    // [0]: 初句(五), [1]: 二句(七), [2]: 結句(五)
+    let selectedHand = [null, null, null];
     let currentData = null;
 
     window.toggleSettings = function() {
@@ -326,7 +337,7 @@
             document.getElementById('lobby-sec').style.display = 'block';
             myHand5 = [];
             myHand7 = [];
-            selectedHand = [];
+            selectedHand = [null, null, null];
           } else if (currentData.status === 'playing') {
             document.getElementById('lobby-sec').style.display = 'none';
             document.getElementById('game-sec').style.display = 'block';
@@ -463,44 +474,62 @@
       const list7 = document.getElementById('hand-7-list');
 
       list5.innerHTML = myHand5.map((w, idx) => {
-        const isSel = selectedHand.some(item => item.type === 5 && item.idx === idx);
+        const isSel = selectedHand.some(item => item && item.type === 5 && item.idx === idx);
         return `<div class="card card-5 ${isSel ? 'selected' : ''}" onclick="selectCard(5, ${idx})">${w}</div>`;
       }).join('');
 
       list7.innerHTML = myHand7.map((w, idx) => {
-        const isSel = selectedHand.some(item => item.type === 7 && item.idx === idx);
+        const isSel = selectedHand.some(item => item && item.type === 7 && item.idx === idx);
         return `<div class="card card-7 ${isSel ? 'selected' : ''}" onclick="selectCard(7, ${idx})">${w}</div>`;
       }).join('');
 
-      document.getElementById('phrase-1').innerHTML = selectedHand[0] ? `<div class="card card-5 selected">${selectedHand[0].word}</div>` : '';
-      document.getElementById('phrase-2').innerHTML = selectedHand[1] ? `<div class="card card-7 selected">${selectedHand[1].word}</div>` : '';
-      document.getElementById('phrase-3').innerHTML = selectedHand[2] ? `<div class="card card-5 selected">${selectedHand[2].word}</div>` : '';
+      document.getElementById('phrase-1').innerHTML = selectedHand[0] ? `<div class="card card-5 selected" onclick="removeSlot(0)">${selectedHand[0].word}</div>` : '';
+      document.getElementById('phrase-2').innerHTML = selectedHand[1] ? `<div class="card card-7 selected" onclick="removeSlot(1)">${selectedHand[1].word}</div>` : '';
+      document.getElementById('phrase-3').innerHTML = selectedHand[2] ? `<div class="card card-5 selected" onclick="removeSlot(2)">${selectedHand[2].word}</div>` : '';
     }
 
     window.selectCard = function(type, idx) {
       const word = type === 5 ? myHand5[idx] : myHand7[idx];
       
-      const selPos = selectedHand.findIndex(item => item.type === type && item.idx === idx);
-      if (selPos !== -1) {
-        selectedHand.splice(selPos, 1);
+      const existingPos = selectedHand.findIndex(item => item && item.type === type && item.idx === idx);
+      if (existingPos !== -1) {
+        selectedHand[existingPos] = null;
         renderHand();
         return;
       }
 
-      if (!selectedHand[0] && type === 5) {
-        selectedHand[0] = { type, idx, word };
-      } else if (!selectedHand[1] && type === 7) {
-        selectedHand[1] = { type, idx, word };
-      } else if (!selectedHand[2] && type === 5) {
-        selectedHand[2] = { type, idx, word };
-      } else {
-        alert('その枠（初句/二句/結句）は埋まっているか、音の構成が合いません。やり直すボタンを押すかカードを外してください。');
+      if (type === 5) {
+        if (!selectedHand[0]) {
+          selectedHand[0] = { type, idx, word };
+        } else if (!selectedHand[2]) {
+          selectedHand[2] = { type, idx, word };
+        } else {
+          alert('五音の枠（初句・結句）はどちらも埋まっています');
+        }
+      } else if (type === 7) {
+        if (!selectedHand[1]) {
+          selectedHand[1] = { type, idx, word };
+        } else {
+          alert('七音の枠（二句）はすでに埋まっています');
+        }
       }
       renderHand();
     };
 
+    window.swap5Cards = function() {
+      const temp = selectedHand[0];
+      selectedHand[0] = selectedHand[2];
+      selectedHand[2] = temp;
+      renderHand();
+    };
+
+    window.removeSlot = function(slotIdx) {
+      selectedHand[slotIdx] = null;
+      renderHand();
+    };
+
     window.clearPhrase = function() {
-      selectedHand = [];
+      selectedHand = [null, null, null];
       renderHand();
     };
 
@@ -557,22 +586,4 @@
         `;
       }).join('');
 
-      const resArea = document.getElementById('result-area');
-      const resList = document.getElementById('round-results');
-      if (Object.keys(votes).length > 0) {
-        resArea.style.display = 'block';
-        const voteCounts = {};
-        Object.values(votes).forEach(target => {
-          voteCounts[target] = (voteCounts[target] || 0) + 1;
-        });
-
-        resList.innerHTML = Object.entries(voteCounts).map(([p, c]) => `
-          <div><strong>${p}</strong>: +${c}票 (累計: ${currentData.scores?.[p] || 0}pt)</div>
-        `).join('');
-      } else {
-        resArea.style.display = 'none';
-      }
-    }
-  </script>
-</body>
-</html>
+      const resArea 
