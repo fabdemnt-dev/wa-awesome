@@ -312,7 +312,7 @@
           hands: {},
           phrases: {},
           phraseDetails: {},
-          settings: { inWords: 5, handWords: 7 }
+          settings: { inWords: 3, handWords: 3 }
         }, { merge: true });
 
         document.getElementById('login-sec').style.display = 'none';
@@ -323,7 +323,7 @@
           if (!currentData) return;
 
           const players = currentData.players || [];
-          const st = currentData.settings || { inWords: 5, handWords: 7 };
+          const st = currentData.settings || { inWords: 3, handWords: 3 };
           
           document.getElementById('set-in-words').value = st.inWords;
           document.getElementById('set-hand-words').value = st.handWords;
@@ -380,8 +380,8 @@
     }
 
     window.updateSettings = async function() {
-      const inWords = parseInt(document.getElementById('set-in-words').value) || 5;
-      const handWords = parseInt(document.getElementById('set-hand-words').value) || 7;
+      const inWords = parseInt(document.getElementById('set-in-words').value) || 3;
+      const handWords = parseInt(document.getElementById('set-hand-words').value) || 3;
 
       await updateDoc(roomRef, {
         settings: { inWords, handWords }
@@ -394,7 +394,7 @@
     };
 
     window.addWords = async function() {
-      const st = currentData.settings || { inWords: 5 };
+      const st = currentData.settings || { inWords: 3 };
       const newWords = [];
 
       for (let i = 1; i <= st.inWords; i++) {
@@ -422,7 +422,7 @@
       if (!currentData) return;
       const w = [...(currentData.words || [])];
       const players = currentData.players || [];
-      const st = currentData.settings || { handWords: 7 };
+      const st = currentData.settings || { handWords: 3 };
 
       if (w.length < players.length * st.handWords) {
         return alert(`素材が足りません！（必要: ${players.length * st.handWords}個 / 現在: ${w.length}個）`);
