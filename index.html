@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>単語組み合わせマルチゲーム</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      max-width: 600px;
+      margin: 0 auto;
+      padding: 16px;
+      background-color: #f8fafc;
+      color: #1e293b;
+    }
+    h1, h2, h3 { text-align: center; margin-top: 0; }
+    .card-panel {
+      background: white;
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+      margin-bottom: 16px;
+    }
+    input[type="text"], button {
+      font-size: 16px;
+      padding: 12px;
+      border-radius: 8px;
+      border: 1px solid #cbd5e1;
+      box-sizing: border-box;
+    }
+    input[type="text"] { width: 100%; }
+    button {
+      background-color: #2563eb;
+      color: white;
+      border: none;
+      font-weight: bold;
+      cursor: pointer;
+      width: 100%;
+      margin-top: 8px;
+    }
+    button:disabled { background-color: #94a3b8; }
+    .flex-gap { display: flex; gap: 8px; }
+    .word-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .card {
+      background: #f1f5f9;
+      border: 2px solid #cbd5e1;
+      border-radius: 8px;
+      padding: 8px 14px;
+      font-weight: bold;
+      cursor: pointer;
+      user-select: none;
+    }
+    .card.selected { background: #2563eb; color: white; border-color: #1d4ed8; }
+    .display-area {
+      min-height: 60px;
+      border: 2px dashed #94a3b8;
+      border-radius: 8px;
+      padding: 10px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      background: #fafafa;
+    }
+    .player-board {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 12px;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>🎲 ワードメイキング・マルチ</h1>
+
+  <!-- 1. ログイン & ルーム参加 -->
+  <div id="login-sec" class="card-panel">
+    <h2>ルームに入る</h2>
+    <input type="text" id="player-name" placeholder="あなたの名前（例：たろう）" style="margin-bottom: 8px;">
+    <input type="text" id="room-id" placeholder="ルームID（例：room123）">
+    <button onclick="joinRoom()">参加する</button>
+  </div>
+
+  <!-- 2. ロビー & 単語登録 -->
+  <div id="lobby-sec" class="card-panel" style="display:none;">
+    <h2>1. 単語カードの投稿</h2>
+    <p>全員で単語を出し合って山札を作ります。</p>
+    <div class="flex-gap">
+      <input type="text" id="word-input" placeholder="単語（例：爆発する、猫、究極の）">
+      <button onclick="addWord()" style="width: 100px; margin-top:0;">追加</button>
+    </div>
+    <p>みんなが投函したカード数: <strong id="total-words">0</strong> 枚</p>
+    
+    <div style="margin-top: 20px;">
+      <h3>参加プレイヤー</h3>
+      <div id="player-list"></div>
+    </div>
+    
+    <button onclick="startGame()" style="background-color: #16a34a; margin-top: 20px;">ゲームを開始（全員に配布）</button>
+  </div>
+
+  <!-- 3. ゲーム画面 -->
+  <div id="game-sec" class="card-panel" style="display:none;">
+    <h2>2. 手札でフレーズを作成</h2>
+    
+    <h3>あなたの手札</h3>
+    <div class="word-list" id="hand-list"></div>
+
+    <h3 style="margin-top: 20px;">完成フレーズ（披露用）</h3>
+    <div class="display-area" id="my-phrase"></div>
+    <button onclick="clearPhrase()" style="background-color: #dc2626; margin-top: 8px;">選択リセット</button>
+    <button onclick="submitPhrase()" style="background-color: #2563eb;">このフレーズを披露する</button>
+
+    <hr style="margin: 24px 0; border: none; border-top: 1px solid #e2e8f0;">
+
+    <h2>みんなの発表</h2>
+    <div id="board-list"></div>
+  </div>
+
+  <!-- Firebase SDK -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+    import { getFirestore, doc, setDoc, onSnapshot, updateDoc, arrayUnion } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+    // 先ほど作成したFirebaseプロジェクト (wa-seihekihaiku) の設定キー
+    const firebaseConfig = {
+      projectId: "wa-seihekihaiku",
+      authDomain: "wa-seihekihaiku.firebaseapp.com",
+      storageBucket: "wa-seihekihaiku.firebasestorage.app"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    let roomId = "";
+    let myName = "";
+    let roomRef = null;
+    let myHand = [];
+    let selectedIndices = [];
+
+    window.joinRoom = async function() {
+      myName = document.getElementById('player-name').value.trim();
+      roomId = document.getElementById('room-id').value.trim();
+      if (!myName || !roomId) return alert('名前とルームIDを入力してください');
+
+      roomRef = doc(db, "rooms", roomId);
+
+      await setDoc(roomRef, {
+        players: arrayUnion(myName),
+        status: "lobby",
+        words: [],
+        hands: {},
+        phrases: {}
+      }, { merge: true });
+
+      document.getElementById('login-sec').style.display = 'none';
+      document.getElementById('lobby-sec').style.display = 'block';
+
+      onSnapshot(roomRef, (snapshot) => {
+        const data = snapshot.data();
+        if (!data) return;
+
+        document.getElementById('total-words').innerText = data.words ? data.words.length : 0;
+        document.getElementById('player-list').innerHTML = data.players ? data.players.map(p => `<div>・ ${p}</div>`).join('') : '';
+
+        if (data.status === 'playing') {
+          document.getElementById('lobby-sec').style.display = 'none';
+          document.getElementById('game-sec').style.display = 'block';
+
+          if (data.hands && data.hands[myName]) {
+            myHand = data.hands[myName];
+            renderHand();
+          } else if (data.words && data.words.length > 0 && myHand.length === 0) {
+            const shuffled = [...data.words].sort(() => Math.random() - 0.5);
+            myHand = shuffled.slice(0, Math.min(6, shuffled.length));
+            renderHand();
+          }
+          renderBoards(data.phrases || {});
+        }
+      });
+    };
+
+    window.addWord = async function() {
+      const input = document.getElementById('word-input');
+      const word = input.value.trim();
+      if (!word) return;
+      await updateDoc(roomRef, { words: arrayUnion(word) });
+      input.value = '';
+    };
+
+    window.startGame = async function() {
+      await updateDoc(roomRef, { status: 'playing' });
+    };
+
+    function renderHand() {
+      const list = document.getElementById('hand-list');
+      list.innerHTML = myHand.map((w, idx) => {
+        const sel = selectedIndices.includes(idx) ? 'selected' : '';
+        return `<div class="card ${sel}" onclick="toggleCard(${idx})">${w}</div>`;
+      }).join('');
+
+      const phrase = document.getElementById('my-phrase');
+      phrase.innerHTML = selectedIndices.map(idx => `<div class="card selected">${myHand[idx]}</div>`).join('');
+    }
+
+    window.toggleCard = function(idx) {
+      const pos = selectedIndices.indexOf(idx);
+      if (pos === -1) selectedIndices.push(idx);
+      else selectedIndices.splice(pos, 1);
+      renderHand();
+    };
+
+    window.clearPhrase = function() {
+      selectedIndices = [];
+      renderHand();
+    };
+
+    window.submitPhrase = async function() {
+      const phraseText = selectedIndices.map(idx => myHand[idx]).join(' ');
+      if (!phraseText) return alert('カードを選んでください');
+      
+      const updateData = {};
+      updateData[`phrases.${myName}`] = phraseText;
+      await updateDoc(roomRef, updateData);
+    };
+
+    function renderBoards(phrases) {
+      const container = document.getElementById('board-list');
+      container.innerHTML = Object.entries(phrases).map(([player, phrase]) => `
+        <div class="player-board">
+          <strong>${player} の発表:</strong>
+          <div style="font-size: 18px; margin-top: 4px; color: #1e3a8a;">${phrase}</div>
+        </div>
+      `).join('');
+    }
+  </script>
+</body>
+</html>
