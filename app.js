@@ -79,7 +79,6 @@ window.joinRoom = async function() {
       const players = currentData.players || [];
       const spectators = currentData.spectators || [];
       
-      // 自分の現在の状態を同期
       if (spectators.includes(myName)) isSpectator = true;
       if (players.includes(myName)) isSpectator = false;
 
@@ -136,11 +135,9 @@ window.joinRoom = async function() {
   } catch (e) { alert('接続エラー: ' + e.message); }
 };
 
-// 参戦 ⇔ 見学の動的切り替え
 window.toggleRole = async function() {
   if (!roomRef) return;
   if (isSpectator) {
-    // 見学者からプレイヤーへ
     await updateDoc(roomRef, {
       spectators: arrayRemove(myName),
       players: arrayUnion(myName)
@@ -148,7 +145,6 @@ window.toggleRole = async function() {
     isSpectator = false;
     alert("プレイヤーとして参加しました！");
   } else {
-    // プレイヤーから見学者へ
     await updateDoc(roomRef, {
       players: arrayRemove(myName),
       spectators: arrayUnion(myName)
@@ -347,19 +343,31 @@ window.nextRound = async function() {
   const players = currentData.players || [], hostIndex = currentData.hostIndex || 0;
   const newScores = { ...scores };
 
+  let taeWinners = [];
+
   Object.keys(votes).forEach(voter => {
     Object.keys(votes[voter] || {}).forEach(target => {
-      const opt = evalOptionsMaster[votes[voter][target]];
-      if (opt) newScores[target] = (newScores[target] || 0) + opt.pts;
+      const k = votes[voter][target];
+      if (k === 'tae' && !taeWinners.includes(target)) {
+        taeWinners.push(target);
+      }
+      const opt = evalOptionsMaster[k];
+      const pts = (k === 'tae') ? 10 : (opt ? opt.pts : 0);
+      newScores[target] = (newScores[target] || 0) + pts;
     });
   });
+
+  let alertMessage = '次の節に進みます！';
+  if (taeWinners.length > 0) {
+    alertMessage = `🪭 妙なりが出ました！今節の最高功労者: ${taeWinners.join(', ')} さん！\n` + alertMessage;
+  }
 
   await updateDoc(roomRef, {
     status: "lobby", hostIndex: hostIndex + 1, roundCount: (currentData.roundCount || 1) + 1,
     scores: newScores, history: [...(currentData.history || []), { round: currentData.roundCount || 1, phrases, phraseDetails: currentData.phraseDetails || {}, votes, host: players[hostIndex % (players.length || 1)] || '' }],
     words5: [], words7: [], hands5: {}, hands7: {}, phrases: {}, phraseDetails: {}, votes: {}
   });
-  alert('次の節に進みます！');
+  alert(alertMessage);
 };
 
 window.exportText = function() { expText(currentData); };
