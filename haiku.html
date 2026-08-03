@@ -241,7 +241,6 @@
 
     <button onclick="nextRound()" style="background-color: #0284c7; margin-top: 24px;">🔄 つぎの一句を詠む（スコア引継ぎ）</button>
   </div>
-
   <!-- Firebase SDK -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
@@ -586,4 +585,21 @@
       }).join('');
 
       const resArea = document.getElementById('result-area');
-  
+      const resList = document.getElementById('round-results');
+      if (Object.keys(votes).length > 0) {
+        resArea.style.display = 'block';
+        const voteCounts = {};
+        Object.values(votes).forEach(target => {
+          voteCounts[target] = (voteCounts[target] || 0) + 1;
+        });
+
+        resList.innerHTML = Object.entries(voteCounts).map(([p, c]) => `
+          <div><strong>${p}</strong>: +${c} 誉 (累計: ${currentData.scores?.[p] || 0} 誉)</div>
+        `).join('');
+      } else {
+        resArea.style.display = 'none';
+      }
+    }
+  </script>
+</body>
+</html>
