@@ -320,7 +320,7 @@
       <h3 style="color:#166534; margin-bottom:8px;">🪭 撰の果て</h3>
       <div id="round-results"></div>
 
-      <!-- 評価アイコンの意味解説（ドロップダウン/アコーディオン） -->
+      <!-- 評価アイコンの意味解説 -->
       <div class="eval-guide-box">
         <div class="eval-guide-header" onclick="toggleEvalGuide()">
           <span>📖 評価アイコンの解説</span>
@@ -383,7 +383,7 @@
     const hostOptionKeys = ['okashi', 'aware', 'wabisabi', 'ayashi', 'kuruoshi', 'wabishi', 'yugen', 'tae'];
     const childOptionKeys = ['okashi', 'aware', 'wabisabi'];
 
-        // 21人分に対応したカラーパレット
+    // 21人分に対応したカラーパレット
     const colorPalette = [
       { bg: '#dbeafe', text: '#1e40af', border: '#bfdbfe' }, // 1. ライトブルー
       { bg: '#fef3c7', text: '#92400e', border: '#fde68a' }, // 2. イエロー
@@ -407,7 +407,6 @@
       { bg: '#ecfeff', text: '#0e7490', border: '#67e8f9' }, // 20. アクア
       { bg: '#fdf4ff', text: '#701a75', border: '#f5d0fe' }  // 21. マゼンタ
     ];
-
 
     function getAuthorStyle(authorName) {
       if (!currentData || !currentData.players) return colorPalette[0];
@@ -818,23 +817,21 @@
         return `
           <div class="player-board">
             <div class="board-header">
-              <strong>${player} の一句:</strong>
+              <strong>${player} の一句: ${isSelf ? '<span style="font-size:12px; color:#94a3b8;">（あなた）</span>' : ''}</strong>
               <div>
-                ${!isSelf ? `
-                  <div class="vote-select-group">
-                    <select id="vote-select-${player}" class="vote-select" ${(!isHost && myVoteList.length >= 1) ? 'disabled' : ''}>
-                      ${availableKeys.map(k => `<option value="${k}">${evalOptionsMaster[k].label}</option>`).join('')}
-                    </select>
-                    <button class="vote-submit-btn" onclick="submitVote('${player}')" ${(!isHost && myVoteList.length >= 1) ? 'disabled' : ''}>
-                      進上
-                    </button>
+                <div class="vote-select-group">
+                  <select id="vote-select-${player}" class="vote-select" ${(!isHost && myVoteList.length >= 1) ? 'disabled' : ''}>
+                    ${availableKeys.map(k => `<option value="${k}">${evalOptionsMaster[k].label}</option>`).join('')}
+                  </select>
+                  <button class="vote-submit-btn" onclick="submitVote('${player}')" ${(!isHost && myVoteList.length >= 1) ? 'disabled' : ''}>
+                    進上
+                  </button>
+                </div>
+                ${myVotesForThisPlayer.length > 0 ? `
+                  <div style="font-size:11px; color:#64748b; margin-top:4px; text-align:right;">
+                    評価済: ${myVotesForThisPlayer.map(v => evalOptionsMaster[v.type]?.icon || '').join(' ')}
                   </div>
-                  ${myVotesForThisPlayer.length > 0 ? `
-                    <div style="font-size:11px; color:#64748b; margin-top:4px; text-align:right;">
-                      評価済: ${myVotesForThisPlayer.map(v => evalOptionsMaster[v.type]?.icon || '').join(' ')}
-                    </div>
-                  ` : ''}
-                ` : '<span style="font-size:12px; color:#94a3b8;">手前が作</span>'}
+                ` : ''}
               </div>
             </div>
             ${phraseDisplayHtml}
