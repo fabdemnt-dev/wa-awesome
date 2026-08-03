@@ -55,7 +55,6 @@ window.joinRoom = async function() {
   try {
     roomRef = doc(db, "rooms", "haiku_" + roomId);
     
-    // 見学者はプレイヤーリスト（親ローテーション対象）には含めないか、見学者として登録
     const updateData = {
       status: "lobby", hostIndex: 0, roundCount: 1, history: [],
       words5: [], words7: [], hands5: {}, hands7: {}, phrases: {}, phraseDetails: {}, votes: {}, scores: {},
@@ -78,11 +77,21 @@ window.joinRoom = async function() {
       if (!currentData) return;
 
       const players = currentData.players || [];
+      const spectators = currentData.spectators || [];
+      
+      // 自分の現在の状態を同期
+      if (spectators.includes(myName)) isSpectator = true;
+      if (players.includes(myName)) isSpectator = false;
+
       const currentHost = players[(currentData.hostIndex || 0) % (players.length || 1)] || '未設定';
       const hostText = `👑 今節の選者（親）: <strong>${currentHost}</strong> ${currentHost === myName ? '（あなた）' : ''}`;
       
       document.getElementById('host-info-lobby').innerHTML = hostText;
       document.getElementById('host-info-game').innerHTML = hostText;
+
+      const roleBtnText = isSpectator ? "⚔️ プレイヤーとして途中参戦する" : "👀 見学モードに切り替える";
+      if (document.getElementById('role-toggle-btn-lobby')) document.getElementById('role-toggle-btn-lobby').innerText = roleBtnText;
+      if (document.getElementById('role-toggle-btn-game')) document.getElementById('role-toggle-btn-game').innerText = roleBtnText;
 
       const st = currentData.settings || { in5: 5, in7: 3, hand5: 5, hand7: 3 };
       if (document.getElementById('set-in-5')) document.getElementById('set-in-5').value = st.in5;
@@ -95,8 +104,6 @@ window.joinRoom = async function() {
       document.getElementById('total-words-7').innerText = currentData.words7?.length || 0;
 
       const scores = currentData.scores || {};
-      const specList = currentData.spectators || [];
-      
       let playerListHtml = players.map((p, idx) => `
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
           <span>・ ${p} ${idx === (currentData.hostIndex % players.length) ? '<span class="role-badge">選者（親）</span>' : ''}</span>
@@ -107,8 +114,8 @@ window.joinRoom = async function() {
         </div>
       `).join('');
 
-      if (specList.length > 0) {
-        playerListHtml += `<div style="font-size:12px; color:#64748b; margin-top:8px;">👀 見学者: ${specList.join(', ')}</div>`;
+      if (spectators.length > 0) {
+        playerListHtml += `<div style="font-size:12px; color:#64748b; margin-top:8px;">👀 見学者: ${spectators.join(', ')}</div>`;
       }
 
       document.getElementById('player-list').innerHTML = playerListHtml;
@@ -129,13 +136,34 @@ window.joinRoom = async function() {
   } catch (e) { alert('接続エラー: ' + e.message); }
 };
 
+// 参戦 ⇔ 見学の動的切り替え
+window.toggleRole = async function() {
+  if (!roomRef) return;
+  if (isSpectator) {
+    // 見学者からプレイヤーへ
+    await updateDoc(roomRef, {
+      spectators: arrayRemove(myName),
+      players: arrayUnion(myName)
+    });
+    isSpectator = false;
+    alert("プレイヤーとして参加しました！");
+  } else {
+    // プレイヤーから見学者へ
+    await updateDoc(roomRef, {
+      players: arrayRemove(myName),
+      spectators: arrayUnion(myName)
+    });
+    isSpectator = true;
+    alert("見学モードに切り替えました！");
+  }
+};
+
 function renderInputFields(c5, c7) {
-  // 見学者の場合は素材入力欄を出さないか、制御可能
   ['5', '7'].forEach(type => {
     const container = document.getElementById(`inputs-${type}-container`);
     if (!container) return;
     if (isSpectator) {
-      container.innerHTML = '<div style="font-size:13px; color:#94a3b8;">※見学モードのため素材入力はありません</div>';
+      container.innerHTML = '<div style="font-size:13px; color:#94a3b8; padding:8px 0;">※見学モードのため素材入力はありません</div>';
       return;
     }
     const count = type === '5' ? c5 : c7;
