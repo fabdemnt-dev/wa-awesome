@@ -43,11 +43,9 @@ window.joinRoom = async function() {
       const players = currentData.players || [];
       const spectators = currentData.spectators || [];
 
-      // 自分の役割状態を同期
       if (spectators.includes(myName)) isSpectator = true;
       if (players.includes(myName)) isSpectator = false;
 
-      // ボタンの表示更新
       const roleBtnText = isSpectator ? "⚔️ プレイヤーとして途中参戦する" : "👀 見学モードに切り替える";
       if (document.getElementById('role-toggle-btn-lobby')) document.getElementById('role-toggle-btn-lobby').innerText = roleBtnText;
       if (document.getElementById('role-toggle-btn-game')) document.getElementById('role-toggle-btn-game').innerText = roleBtnText;
@@ -72,7 +70,6 @@ window.joinRoom = async function() {
   } catch (e) { alert('接続エラー: ' + e.message); }
 };
 
-// 参戦 ⇔ 見学の動的切り替え
 window.toggleRole = async function() {
   if (!roomRef) return;
   if (isSpectator) {
@@ -170,3 +167,14 @@ function renderBoards() {
     </div>
   `).join('');
 }
+
+// 次のポエム作成へ移動する処理
+window.nextGame = async function() {
+  if (!roomRef) return;
+  await updateDoc(roomRef, {
+    status: "lobby",
+    words: [],
+    poems: {}
+  });
+  alert('次のポエム作成に進みます！');
+};
