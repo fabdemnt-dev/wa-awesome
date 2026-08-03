@@ -94,7 +94,7 @@ window.toggleRole = async function() {
 
 window.addWords = async function() {
   if (isSpectator) return alert('見学モードでは素材投稿はできません');
-  const inputs = document.querySelectorAll('.poem-input');
+  const inputs = document.querySelectorAll('#word-inputs input');
   const newWords = [];
   inputs.forEach(inp => {
     const val = inp.value.trim();
