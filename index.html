@@ -38,7 +38,7 @@
       width: 100%;
       margin-top: 8px;
     }
-    button:disabled { background-color: #94a3b8; }
+    button:disabled { background-color: #94a3b8; cursor: not-allowed; }
     .flex-gap { display: flex; gap: 8px; }
     .word-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
     .card {
@@ -68,6 +68,24 @@
       border-radius: 8px;
       padding: 12px;
       margin-bottom: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .vote-btn {
+      width: auto;
+      margin-top: 0;
+      padding: 6px 12px;
+      font-size: 14px;
+      background-color: #f59e0b;
+    }
+    .score-badge {
+      background: #e0f2fe;
+      color: #0369a1;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: bold;
     }
   </style>
 </head>
@@ -94,14 +112,14 @@
     <p>みんなが投函したカード数: <strong id="total-words">0</strong> 枚</p>
     
     <div style="margin-top: 20px;">
-      <h3>参加プレイヤー</h3>
+      <h3>参加プレイヤーと現在の累計スコア</h3>
       <div id="player-list"></div>
     </div>
     
     <button onclick="startGame()" style="background-color: #16a34a; margin-top: 20px;">ゲームを開始（全員に配布）</button>
   </div>
 
-  <!-- 3. ゲーム画面 -->
+  <!-- 3. ゲーム画面（作成 & 発表 & 投票） -->
   <div id="game-sec" class="card-panel" style="display:none;">
     <h2>2. 手札でフレーズを作成</h2>
     
@@ -110,16 +128,24 @@
 
     <h3 style="margin-top: 20px;">完成フレーズ（披露用）</h3>
     <div class="display-area" id="my-phrase"></div>
-    <button onclick="clearPhrase()" style="background-color: #dc2626; margin-top: 8px;">選択リセット</button>
-    <button onclick="submitPhrase()" style="background-color: #2563eb;">このフレーズを披露する</button>
+    <div class="flex-gap">
+      <button onclick="clearPhrase()" style="background-color: #dc2626; margin-top: 8px;">選択リセット</button>
+      <button onclick="submitPhrase()" style="background-color: #2563eb; margin-top: 8px;">フレーズを披露する</button>
+    </div>
 
     <hr style="margin: 24px 0; border: none; border-top: 1px solid #e2e8f0;">
 
-    <h2>みんなの発表</h2>
+    <h2>みんなの発表 & 投票</h2>
+    <p style="text-align:center; font-size:14px; color:#64748b;">一番イケてる作品に投票しよう！（1人1票）</p>
     <div id="board-list"></div>
 
-    <!-- もう一度遊ぶボタンを追加 -->
-    <button onclick="resetGame()" style="background-color: #0284c7; margin-top: 24px;">🔄 次のゲームを始める（ロビーに戻る）</button>
+    <!-- ランキング・結果表示領域 -->
+    <div id="result-area" style="display:none; margin-top:20px; background:#f0fdf4; border:1px solid #bbf7d0; padding:12px; border-radius:8px;">
+      <h3 style="color:#166534; margin-bottom:8px;">🏆 今回の投票結果</h3>
+      <div id="round-results"></div>
+    </div>
+
+    <button onclick="nextRound()" style="background-color: #0284c7; margin-top: 24px;">🔄 次のゲームへ（スコアは引き継ぐ）</button>
   </div>
 
   <!-- Firebase SDK -->
@@ -127,7 +153,6 @@
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
     import { getFirestore, doc, setDoc, onSnapshot, updateDoc, arrayUnion } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-    // 正しいFirebase設定
     const firebaseConfig = {
       apiKey: "AIzaSyBtb74uz6clsoc9uA_AkDHi7DdepEWn2dw",
       authDomain: "wa-awesome.firebaseapp.com",
@@ -146,6 +171,7 @@
     let roomRef = null;
     let myHand = [];
     let selectedIndices = [];
+    let currentData = null;
 
     window.joinRoom = async function() {
       myName = document.getElementById('player-name').value.trim();
@@ -160,37 +186,46 @@
           status: "lobby",
           words: [],
           hands: {},
-          phrases: {}
+          phrases: {},
+          votes: {},
+          scores: {}
         }, { merge: true });
 
         document.getElementById('login-sec').style.display = 'none';
         document.getElementById('lobby-sec').style.display = 'block';
 
         onSnapshot(roomRef, (snapshot) => {
-          const data = snapshot.data();
-          if (!data) return;
+          currentData = snapshot.data();
+          if (!currentData) return;
 
-          document.getElementById('total-words').innerText = data.words ? data.words.length : 0;
-          document.getElementById('player-list').innerHTML = data.players ? data.players.map(p => `<div>・ ${p}</div>`).join('') : '';
+          document.getElementById('total-words').innerText = currentData.words ? currentData.words.length : 0;
+          
+          const scores = currentData.scores || {};
+          document.getElementById('player-list').innerHTML = currentData.players ? currentData.players.map(p => 
+            `<div style="display:flex; justify-between; margin-bottom:4px;">
+              <span>・ ${p}</span>
+              <span class="score-badge">${scores[p] || 0} pt</span>
+            </div>`
+          ).join('') : '';
 
-          if (data.status === 'lobby') {
+          if (currentData.status === 'lobby') {
             document.getElementById('game-sec').style.display = 'none';
             document.getElementById('lobby-sec').style.display = 'block';
             myHand = [];
             selectedIndices = [];
-          } else if (data.status === 'playing') {
+          } else if (currentData.status === 'playing') {
             document.getElementById('lobby-sec').style.display = 'none';
             document.getElementById('game-sec').style.display = 'block';
 
-            if (data.hands && data.hands[myName]) {
-              myHand = data.hands[myName];
+            if (currentData.hands && currentData.hands[myName]) {
+              myHand = currentData.hands[myName];
               renderHand();
-            } else if (data.words && data.words.length > 0 && myHand.length === 0) {
-              const shuffled = [...data.words].sort(() => Math.random() - 0.5);
+            } else if (currentData.words && currentData.words.length > 0 && myHand.length === 0) {
+              const shuffled = [...currentData.words].sort(() => Math.random() - 0.5);
               myHand = shuffled.slice(0, Math.min(6, shuffled.length));
               renderHand();
             }
-            renderBoards(data.phrases || {});
+            renderBoards();
           }
         });
       } catch (e) {
@@ -211,12 +246,13 @@
       await updateDoc(roomRef, { status: 'playing' });
     };
 
-    window.resetGame = async function() {
+    window.nextRound = async function() {
       await updateDoc(roomRef, {
         status: 'lobby',
         words: [],
         hands: {},
-        phrases: {}
+        phrases: {},
+        votes: {}
       });
     };
 
@@ -252,14 +288,65 @@
       await updateDoc(roomRef, updateData);
     };
 
-    function renderBoards(phrases) {
+    window.voteFor = async function(targetPlayer) {
+      if (!currentData) return;
+      const votes = currentData.votes || {};
+      if (votes[myName]) return alert('投票は1人1回までです');
+
+      const updateData = {};
+      updateData[`votes.${myName}`] = targetPlayer;
+
+      const currentScores = currentData.scores || {};
+      const newScore = (currentScores[targetPlayer] || 0) + 1;
+      updateData[`scores.${targetPlayer}`] = newScore;
+
+      await updateDoc(roomRef, updateData);
+    };
+
+    function renderBoards() {
+      if (!currentData) return;
+      const phrases = currentData.phrases || {};
+      const votes = currentData.votes || {};
+      const myVoted = votes[myName];
+
       const container = document.getElementById('board-list');
-      container.innerHTML = Object.entries(phrases).map(([player, phrase]) => `
-        <div class="player-board">
-          <strong>${player} の発表:</strong>
-          <div style="font-size: 18px; margin-top: 4px; color: #1e3a8a;">${phrase}</div>
-        </div>
-      `).join('');
+      container.innerHTML = Object.entries(phrases).map(([player, phrase]) => {
+        const isSelf = player === myName;
+        const votedThis = Object.values(votes).filter(v => v === player).length;
+
+        return `
+          <div class="player-board">
+            <div>
+              <strong>${player} の発表:</strong>
+              <div style="font-size: 18px; margin-top: 4px; color: #1e3a8a;">${phrase}</div>
+            </div>
+            <div>
+              ${!isSelf ? `
+                <button class="vote-btn" onclick="voteFor('${player}')" ${myVoted ? 'disabled' : ''}>
+                  ${myVoted === player ? '投票済み' : '👍 投票'}
+                </button>
+              ` : '<span style="font-size:12px; color:#94a3b8;">自分の作品</span>'}
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      // 結果表示の更新
+      const resArea = document.getElementById('result-area');
+      const resList = document.getElementById('round-results');
+      if (Object.keys(votes).length > 0) {
+        resArea.style.display = 'block';
+        const voteCounts = {};
+        Object.values(votes).forEach(target => {
+          voteCounts[target] = (voteCounts[target] || 0) + 1;
+        });
+
+        resList.innerHTML = Object.entries(voteCounts).map(([p, c]) => `
+          <div><strong>${p}</strong>: +${c}票 (累計: ${currentData.scores?.[p] || 0}pt)</div>
+        `).join('');
+      } else {
+        resArea.style.display = 'none';
+      }
     }
   </script>
 </body>
