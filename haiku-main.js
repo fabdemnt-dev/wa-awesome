@@ -1,7 +1,7 @@
 import { db } from "./firebase-config.js";
 import { doc, setDoc, onSnapshot, updateDoc, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-import { evalOptionsMaster, hostOptionKeys, childOptionKeys, renderResults } from "./eval.js";
-import { exportText as expText, exportCSV as expCSV } from "./export.js";
+import { evalOptionsMaster, hostOptionKeys, childOptionKeys, renderResults } from "./haiku-eval.js";
+import { exportText as expText, exportCSV as expCSV } from "./haiku-export.js";
 
 let roomId = "";
 let myName = "";
