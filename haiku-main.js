@@ -10,7 +10,7 @@ const evalOptionsMaster = {
   kuruoshi: { icon: "🍶", label: "🍶 狂おし", pts: 1 },
   wabishi:  { icon: "🍃", label: "🍃 わびし", pts: 1 },
   yugen:    { icon: "🌙", label: "🌙 幽玄", pts: 1 },
-  tae:       { icon: "🪭", label: "🪭 妙なり", pts: 2 }
+  tae:       { icon: "🪭", label: "🪭 妙なり", pts: 10 }
 };
 const hostOptionKeys = [
   "okashi",
