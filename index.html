@@ -152,7 +152,7 @@
   <!-- Firebase SDK -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-    import { getFirestore, doc, setDoc, onSnapshot, updateDoc, arrayUnion } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+    import { getFirestore, doc, setDoc, onSnapshot, updateDoc, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyBtb74uz6clsoc9uA_AkDHi7DdepEWn2dw",
@@ -203,9 +203,12 @@
           
           const scores = currentData.scores || {};
           document.getElementById('player-list').innerHTML = currentData.players ? currentData.players.map(p => 
-            `<div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+            `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
               <span>・ ${p}</span>
-              <span class="score-badge">${scores[p] || 0} pt</span>
+              <div>
+                <span class="score-badge" style="margin-right:8px;">${scores[p] || 0} pt</span>
+                <button onclick="removePlayer('${p}')" style="width:auto; margin:0; padding:4px 8px; font-size:12px; background-color:#ef4444;">削除</button>
+              </div>
             </div>`
           ).join('') : '';
 
@@ -229,6 +232,13 @@
         console.error(e);
         alert('接続エラーが発生しました: ' + e.message);
       }
+    };
+
+    window.removePlayer = async function(targetPlayer) {
+      if (!confirm(`${targetPlayer} さんをメンバー一覧から削除しますか？`)) return;
+      await updateDoc(roomRef, {
+        players: arrayRemove(targetPlayer)
+      });
     };
 
     window.addWords = async function() {
@@ -383,3 +393,10 @@
   </script>
 </body>
 </html>
+```eof
+
+### 変更点
+- **削除ボタンの追加**: ロビーのプレイヤー一覧で各名前の横に赤い「削除」ボタンを表示しました。
+- **プレイヤー除去処理**: ボタンを押すと確認ダイアログが出たのち、部屋の参加者リストから該当プレイヤーを除外します。
+
+GitHubの `index.html` に上書き保存して、1〜2分置いたあとにお試しください！
