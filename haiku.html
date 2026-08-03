@@ -150,5 +150,12 @@
   </div>
 
   <script type="module" src="haiku-main.js"></script>
+
+<script style="display:block;">
+window.onerror = function(msg, url, line) {
+  alert("【画面エラー検出】\n" + msg + "\n\nファイル: " + url.split('/').pop() + "\n行数: " + line);
+};
+</script>
+
 </body>
 </html>
