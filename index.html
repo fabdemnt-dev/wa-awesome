@@ -103,7 +103,6 @@
   <!-- 2. ロビー & 素材登録 -->
   <div id="lobby-sec" class="card-panel" style="display:none;">
     <h2>1. ポエムの素材あつめ（素材を3つ入力）</h2>
-    <p style="font-size: 14px; color: #64748b; margin-bottom: 12px;">3つの入力枠にそれぞれ好きなそざいを入れてください。</p>
     
     <input type="text" id="word-input-1" placeholder="そざい 1（例：眼鏡）">
     <input type="text" id="word-input-2" placeholder="そざい 2（例：黒髪）">
@@ -137,7 +136,6 @@
     <hr style="margin: 24px 0; border: none; border-top: 1px solid #e2e8f0;">
 
     <h2>みんなのポエム & 投票</h2>
-    <p style="text-align:center; font-size:14px; color:#64748b;">一番すきなポエムに投票しよう！（1人1票）</p>
     <div id="board-list"></div>
 
     <!-- ランキング・結果表示領域 -->
@@ -207,7 +205,7 @@
               <span>・ ${p}</span>
               <div>
                 <span class="score-badge" style="margin-right:8px;">${scores[p] || 0} pt</span>
-                <button onclick="removePlayer('${p}')" style="width:auto; margin:0; padding:4px 8px; font-size:12px; background-color:#ef4444;">削除</button>
+                <button onclick="removePlayer('${p}')" style="width:auto; margin:0; padding:4px 8px; font-size:12px; background-color:#ef4444;">鯖落ち</button>
               </div>
             </div>`
           ).join('') : '';
@@ -235,7 +233,7 @@
     };
 
     window.removePlayer = async function(targetPlayer) {
-      if (!confirm(`${targetPlayer} さんをメンバー一覧から削除しますか？`)) return;
+      if (!confirm(`${targetPlayer} さんを鯖落ちさせますか？`)) return;
       await updateDoc(roomRef, {
         players: arrayRemove(targetPlayer)
       });
@@ -393,10 +391,3 @@
   </script>
 </body>
 </html>
-```eof
-
-### 変更点
-- **削除ボタンの追加**: ロビーのプレイヤー一覧で各名前の横に赤い「削除」ボタンを表示しました。
-- **プレイヤー除去処理**: ボタンを押すと確認ダイアログが出たのち、部屋の参加者リストから該当プレイヤーを除外します。
-
-GitHubの `index.html` に上書き保存して、1〜2分置いたあとにお試しください！
