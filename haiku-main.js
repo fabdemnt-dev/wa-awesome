@@ -358,8 +358,6 @@ window.nextRound = async function() {
   const newScores = { ...scores };
 
   let taeWinners = [];
-
-  // 大人数時にも「妙なり」が必ずトップになる点数を動的計算（人数 * 2、最低でも10点）
   const taePoints = Math.max(10, players.length * 2);
 
   Object.keys(votes).forEach(voter => {
@@ -389,3 +387,11 @@ window.nextRound = async function() {
 
 window.exportText = function() { expText(currentData); };
 window.exportCSV = function() { expCSV(currentData, roomId); };
+
+// DOM読み込み完了時に直接ボタンにクリックイベントを登録
+document.addEventListener('DOMContentLoaded', () => {
+  const joinBtn = document.getElementById('join-btn');
+  if (joinBtn) {
+    joinBtn.addEventListener('click', window.joinRoom);
+  }
+});
