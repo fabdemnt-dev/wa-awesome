@@ -1,0 +1,221 @@
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 16px;
+  background-color: #f8fafc;
+  color: #1e293b;
+}
+h1, h2, h3 { text-align: center; margin-top: 0; }
+.card-panel {
+  background: white;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+  margin-bottom: 16px;
+}
+input[type="text"], input[type="number"], select, button {
+  font-size: 15px;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  box-sizing: border-box;
+}
+input[type="text"] { width: 100%; margin-bottom: 8px; }
+button {
+  background-color: #2563eb;
+  color: white;
+  border: none;
+  font-weight: bold;
+  cursor: pointer;
+  width: 100%;
+  margin-top: 8px;
+}
+button:disabled { background-color: #94a3b8; cursor: not-allowed; }
+
+.section-title {
+  font-size: 14px;
+  font-weight: bold;
+  color: #475569;
+  margin: 12px 0 6px 0;
+  border-left: 4px solid #2563eb;
+  padding-left: 8px;
+}
+
+.word-list { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.card {
+  background: #f1f5f9;
+  border: 2px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-weight: bold;
+  cursor: pointer;
+  user-select: none;
+}
+.card.selected { background: #2563eb; color: white; border-color: #1d4ed8; }
+.card.card-5 { border-color: #93c5fd; }
+.card.card-7 { border-color: #fde047; }
+
+.display-area {
+  min-height: 60px;
+  border: 2px dashed #94a3b8;
+  border-radius: 8px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: #fafafa;
+}
+.display-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: #64748b;
+}
+.swap-btn {
+  width: auto;
+  margin-top: 0;
+  padding: 4px 10px;
+  font-size: 12px;
+  background-color: #0284c7;
+  border-radius: 6px;
+  align-self: flex-start;
+}
+
+.player-board {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.board-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.vote-select-group {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.vote-select {
+  background: white;
+  font-size: 13px;
+  padding: 6px 8px;
+}
+.vote-submit-btn {
+  width: auto;
+  margin-top: 0;
+  padding: 6px 12px;
+  font-size: 13px;
+  background-color: #f59e0b;
+  white-space: nowrap;
+}
+
+.score-badge {
+  background: #e0f2fe;
+  color: #0369a1;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: bold;
+}
+.role-badge {
+  background: #fef3c7;
+  color: #b45309;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: bold;
+  border: 1px solid #fde047;
+}
+
+.setting-box {
+  background: #f1f5f9;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+}
+.setting-header {
+  padding: 12px;
+  font-weight: bold;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #e2e8f0;
+  user-select: none;
+}
+.setting-content { padding: 12px; }
+.setting-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.setting-item:last-child { margin-bottom: 0; }
+.setting-item input { width: 60px; margin-bottom: 0; text-align: center; }
+
+.word-tag {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 15px;
+  font-weight: bold;
+  margin: 2px 1px;
+  border: 1px solid transparent;
+}
+.author-label {
+  font-size: 10px;
+  display: block;
+  opacity: 0.85;
+  font-weight: normal;
+}
+.host-banner {
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  color: #92400e;
+  padding: 8px 12px;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  text-align: center;
+  font-weight: bold;
+  font-size: 14px;
+}
+.eval-guide-box {
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  margin-top: 12px;
+  font-size: 13px;
+  overflow: hidden;
+}
+.eval-guide-header {
+  padding: 8px 12px;
+  background: #e2e8f0;
+  font-weight: bold;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  user-select: none;
+  color: #334155;
+}
+.eval-guide-content {
+  padding: 10px 12px;
+  line-height: 1.6;
+}
+.export-group {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+.export-btn-text { background-color: #8b5cf6; }
+.export-btn-csv { background-color: #10b981; }
