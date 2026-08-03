@@ -3,6 +3,7 @@ import { doc, setDoc, onSnapshot, updateDoc, arrayUnion, arrayRemove } from "htt
 import { evalOptionsMaster, hostOptionKeys, childOptionKeys, renderResults } from "./haiku-eval.js";
 import { exportText as expText, exportCSV as expCSV } from "./haiku-export.js";
 
+// 変数を先頭で確実に宣言
 let roomId = "";
 let myName = "";
 let isSpectator = false;
@@ -44,12 +45,14 @@ window.toggleEvalGuide = function() {
   }
 };
 
-// joinGame を joinRoom に修正しました
 window.joinRoom = async function() {
-  myName = document.getElementById('player-name')?.value.trim();
-  roomId = document.getElementById('room-id')?.value.trim();
-  const specCheck = document.getElementById('spectator-check');
-  isSpectator = specCheck ? specCheck.checked : false;
+  const nameEl = document.getElementById('player-name');
+  const roomEl = document.getElementById('room-id');
+  const specEl = document.getElementById('spectator-check');
+
+  myName = nameEl ? nameEl.value.trim() : "";
+  roomId = roomEl ? roomEl.value.trim() : "";
+  isSpectator = specEl ? specEl.checked : false;
 
   if (!myName || !roomId) {
     alert('名前とルームIDを入力してください');
@@ -73,8 +76,10 @@ window.joinRoom = async function() {
 
     await setDoc(roomRef, updateData, { merge: true });
 
-    document.getElementById('login-sec').style.display = 'none';
-    document.getElementById('lobby-sec').style.display = 'block';
+    const loginSec = document.getElementById('login-sec');
+    const lobbySec = document.getElementById('lobby-sec');
+    if (loginSec) loginSec.style.display = 'none';
+    if (lobbySec) lobbySec.style.display = 'block';
 
     onSnapshot(roomRef, (snapshot) => {
       currentData = snapshot.data();
@@ -124,12 +129,12 @@ window.joinRoom = async function() {
       if (document.getElementById('player-list')) document.getElementById('player-list').innerHTML = playerListHtml;
 
       if (currentData.status === 'lobby') {
-        document.getElementById('game-sec').style.display = 'none';
-        document.getElementById('lobby-sec').style.display = 'block';
+        if (document.getElementById('game-sec')) document.getElementById('game-sec').style.display = 'none';
+        if (document.getElementById('lobby-sec')) document.getElementById('lobby-sec').style.display = 'block';
         myHand5 = []; myHand7 = []; selectedHand = [null, null, null];
       } else if (currentData.status === 'playing') {
-        document.getElementById('lobby-sec').style.display = 'none';
-        document.getElementById('game-sec').style.display = 'block';
+        if (document.getElementById('lobby-sec')) document.getElementById('lobby-sec').style.display = 'none';
+        if (document.getElementById('game-sec')) document.getElementById('game-sec').style.display = 'block';
         if (currentData.hands5?.[myName]) myHand5 = currentData.hands5[myName];
         if (currentData.hands7?.[myName]) myHand7 = currentData.hands7[myName];
         renderHand();
@@ -211,7 +216,8 @@ window.addWords = async function() {
 
   await updateDoc(roomRef, { words5: arrayUnion(...new5), words7: arrayUnion(...new7) });
   renderInputFields(st.in5, st.in7);
-  document.getElementById('add-word-btn').innerText = "✅ 追加完了！";
+  const addBtn = document.getElementById('add-word-btn');
+  if (addBtn) addBtn.innerText = "✅ 追加完了！";
 };
 
 window.removePlayer = async function(pName) {
