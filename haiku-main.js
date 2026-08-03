@@ -12,8 +12,22 @@ const evalOptionsMaster = {
   yugen:    { icon: "🌙", label: "🌙 幽玄", pts: 1 },
   tae:       { icon: "🪭", label: "🪭 妙なり", pts: 2 }
 };
-const hostOptionKeys = ['tae', 'okashi', 'aware', 'aware_2', 'funny'];
-const childOptionKeys = ['okashi', 'aware', 'aware_2', 'funny'];
+const hostOptionKeys = [
+  "okashi",
+  "aware",
+  "wabisabi",
+  "ayashi",
+  "kuruoshi",
+  "wabishi",
+  "yugen",
+  "tae"
+];
+
+const childOptionKeys = [
+  "okashi",
+  "aware",
+  "wabisabi"
+];
 
 let roomId = "";
 let myName = "";
