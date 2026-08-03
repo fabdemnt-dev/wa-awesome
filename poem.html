@@ -7,613 +7,737 @@
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: #f8fafc;
+      color: #0f172a;
       max-width: 600px;
       margin: 0 auto;
       padding: 16px;
-      background-color: #f8fafc;
-      color: #1e293b;
     }
-    h1, h2, h3 { text-align: center; margin-top: 0; }
-    .card-panel {
+    .card-box {
       background: white;
+      padding: 16px;
       border-radius: 12px;
-      padding: 20px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
       margin-bottom: 16px;
     }
-    input[type="text"], input[type="number"], select, button {
-      font-size: 15px;
-      padding: 10px;
-      border-radius: 8px;
-      border: 1px solid #cbd5e1;
-      box-sizing: border-box;
+    h1, h2, h3 {
+      margin-top: 0;
+      color: #1e293b;
     }
-    input[type="text"] { width: 100%; margin-bottom: 8px; }
+    input[type="text"], input[type="number"] {
+      width: 100%;
+      padding: 10px;
+      margin: 6px 0 12px;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      box-sizing: border-box;
+      font-size: 16px;
+    }
     button {
-      background-color: #2563eb;
+      width: 100%;
+      padding: 12px;
+      background-color: #3b82f6;
       color: white;
       border: none;
+      border-radius: 6px;
       font-weight: bold;
+      font-size: 16px;
       cursor: pointer;
-      width: 100%;
       margin-top: 8px;
     }
-    button:disabled { background-color: #94a3b8; cursor: not-allowed; }
-    
-    .section-title {
-      font-size: 14px;
-      font-weight: bold;
+    button:disabled {
+      background-color: #94a3b8;
+    }
+    .btn-secondary { background-color: #64748b; }
+    .btn-success { background-color: #22c55e; }
+    .btn-purple { background-color: #a855f7; }
+    .btn-outline {
+      background-color: transparent;
       color: #475569;
-      margin: 12px 0 6px 0;
-      border-left: 4px solid #2563eb;
-      padding-left: 8px;
+      border: 1px solid #cbd5e1;
     }
-
-    .word-list { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
-    .card {
-      background: #f1f5f9;
-      border: 2px solid #cbd5e1;
-      border-radius: 8px;
-      padding: 8px 14px;
-      font-weight: bold;
-      cursor: pointer;
-      user-select: none;
-    }
-    .card.selected { background: #2563eb; color: white; border-color: #1d4ed8; }
-    
-    .display-area {
-      min-height: 80px;
-      border: 2px dashed #94a3b8;
-      border-radius: 8px;
-      padding: 12px;
+    .hand-container {
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
-      background: #fafafa;
-      align-items: center;
+      margin-bottom: 16px;
     }
-
+    .card {
+      padding: 8px 12px;
+      background: #f1f5f9;
+      border: 2px solid #cbd5e1;
+      border-radius: 8px;
+      cursor: pointer;
+      user-select: none;
+      font-weight: bold;
+    }
+    .card.selected {
+      background: #dbeafe;
+      border-color: #3b82f6;
+      color: #1d4ed8;
+    }
     .player-board {
       background: #f8fafc;
-      border: 1px solid #e2e8f0;
-      border-radius: 8px;
       padding: 12px;
+      border-radius: 8px;
+      border: 1px solid #e2e8f0;
       margin-bottom: 12px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
     }
-    .board-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .setting-box {
-      background: #f1f5f9;
-      border-radius: 8px;
-      margin-bottom: 16px;
-      overflow: hidden;
-      border: 1px solid #e2e8f0;
-    }
-    .setting-header {
-      padding: 12px;
-      font-weight: bold;
-      cursor: pointer;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      background: #e2e8f0;
-      user-select: none;
-    }
-    .setting-content { padding: 12px; }
-    .setting-item {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 8px;
-    }
-    .setting-item:last-child { margin-bottom: 0; }
-    .setting-item input { width: 60px; margin-bottom: 0; text-align: center; }
-
     .word-tag {
       display: inline-block;
       padding: 4px 8px;
+      margin: 2px;
       border-radius: 6px;
-      font-size: 15px;
       font-weight: bold;
-      margin: 2px 1px;
+      font-size: 14px;
       border: 1px solid transparent;
     }
     .author-label {
       font-size: 10px;
-      display: block;
-      opacity: 0.85;
-      font-weight: normal;
+      opacity: 0.75;
+      margin-left: 2px;
     }
-    .export-group {
+    .setting-header {
       display: flex;
-      gap: 8px;
-      margin-top: 12px;
+      justify-content: space-between;
+      align-items: center;
+      cursor: pointer;
     }
-    .export-btn-text { background-color: #8b5cf6; }
-    .export-btn-csv { background-color: #10b981; }
+    .toggle-box {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #f1f5f9;
+      padding: 10px 14px;
+      border-radius: 8px;
+      margin: 10px 0;
+      border: 1px solid #cbd5e1;
+    }
+    .toggle-box label {
+      font-weight: bold;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    .spectator-badge {
+      display: inline-block;
+      background: #e2e8f0;
+      color: #475569;
+      font-size: 12px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      margin-left: 6px;
+    }
   </style>
 </head>
 <body>
-
-  <h1>わ〜鯖せーへきポエム</h1>
-
-  <!-- 1. ログイン & ルーム参加 -->
-  <div id="login-sec" class="card-panel">
-    <h2>ルームに入る</h2>
-    <input type="text" id="player-name" placeholder="あなたの名前">
-    <input type="text" id="room-id" placeholder="ルームID（例：123）">
-    <button onclick="joinRoom()">参加する</button>
+  <div id="login-screen" class="card-box">
+    <h1>わ〜鯖せーへきポエム</h1>
+    <p>名前に「さん」は自動でつきません。手入力してください。</p>
+    <label>プレイヤー名</label>
+    <input type="text" id="my-name-input" placeholder="例: ひなたさん">
+    <label>ルームID</label>
+    <input type="text" id="room-id-input" value="poem-room">
+    <button onclick="joinRoom()">入室する</button>
   </div>
-  <!-- 2. ロビー & 素材登録 -->
-  <div id="lobby-sec" class="card-panel" style="display:none;">
-    <h2>1. ポエムの素材あつめ</h2>
 
-    <div class="setting-box">
+  <div id="game-screen" style="display: none;">
+    <div class="card-box" style="display:flex; justify-content:space-between; align-items:center;">
+      <div>
+        <small>部屋名: <span id="display-room-id"></span></small><br>
+        <strong>プレイヤー: <span id="display-my-name"></span></strong>
+        <span id="spectator-indicator" class="spectator-badge" style="display:none;">👀 見学中</span>
+      </div>
+      <button class="btn-outline" style="width:auto; padding:6px 12px; margin:0; font-size:12px;" onclick="location.reload()">退出</button>
+    </div>
+
+    <!-- ロビー画面 -->
+    <div id="lobby-view" class="card-box" style="display: none;">
+      <h2>第 <span id="round-num">1</span> 回 ロビー</h2>
+
+      <!-- 見学切替トグル -->
+      <div class="toggle-box">
+        <label for="spectator-toggle">👀 この回は見学（離席）する</label>
+        <input type="checkbox" id="spectator-toggle" onchange="toggleSpectator(this.checked)">
+      </div>
+
+      <div style="margin-bottom: 16px;">
+        <strong>参加メンバー:</strong>
+        <div id="player-list" style="margin-top: 6px;"></div>
+      </div>
+
+      <!-- プレイヤーのみ表示する単語入力フォーム -->
+      <div id="words-input-section">
+        <h3>素材の単語を入力</h3>
+        <p style="font-size:12px; color:#64748b;">指定された数の単語を入力して「追加」を押してください。</p>
+        <div id="inputs-words-container"></div>
+        <button id="add-word-btn" class="btn-success" onclick="addWords()">単語を追加して準備完了！</button>
+      </div>
+
+      <!-- 見学者用の案内メッセージ -->
+      <div id="spectator-input-notice" style="display:none; background:#f1f5f9; padding:12px; border-radius:8px; text-align:center; color:#64748b; font-weight:bold; margin-bottom:16px;">
+        👀 現在「見学モード」です。素材入力はスキップされます。
+      </div>
+
+      <hr style="margin: 20px 0; border: 0; border-top: 1px solid #e2e8f0;">
+
+      <p>現在の集まった素材数: <strong id="current-words-count">0</strong> 個</p>
+      <button id="start-game-btn" onclick="startGame()">ゲームを開始する！</button>
+
+      <hr style="margin: 20px 0; border: 0; border-top: 1px solid #e2e8f0;">
+
+      <!-- ホスト向け設定アコーディオン -->
       <div class="setting-header" onclick="toggleSettings()">
-        <span>⚙️ 設定（1人あたり）</span>
-        <span id="setting-toggle-icon">▼</span>
+        <strong>⚙️ ゲーム設定（枚数調整）</strong>
+        <span id="setting-arrow">▼</span>
       </div>
-      <div class="setting-content" id="setting-content" style="display: none;">
-        <div class="setting-item">
-          <label>入力する単語の数:</label>
-          <input type="number" id="set-in-words" value="3" min="1" max="15" onchange="updateSettings()">
-        </div>
-        <div class="setting-item">
-          <label>配る単語の枚数:</label>
-          <input type="number" id="set-hand-words" value="3" min="1" max="20" onchange="updateSettings()">
-        </div>
+      <div id="setting-body" style="display: none; margin-top: 12px;">
+        <label>1人が入力する単語数</label>
+        <input type="number" id="set-in-words" value="3" min="1">
+        <label>1人に配る手札枚数</label>
+        <input type="number" id="set-hand-words" value="3" min="1">
+        <button class="btn-secondary" onclick="updateSettings()">設定を更新</button>
       </div>
     </div>
 
-    <div class="section-title">ポエムの素材（単語）</div>
-    <div id="inputs-words-container"></div>
-    
-    <button id="add-word-btn" onclick="addWords()">そざいを追加</button>
-    <p style="margin-top: 12px; text-align:center;">
-      あつまったそざい：<strong id="total-words">0</strong> 個
-    </p>
-    
-    <div style="margin-top: 20px;">
-      <h3>参加メンバー</h3>
-      <div id="player-list"></div>
-    </div>
-    
-    <button onclick="startGame()" style="background-color: #16a34a; margin-top: 20px;">ポエムづくりを開始</button>
+    <!-- プレイ画面 -->
+    <div id="playing-view" class="card-box" style="display: none;">
+      <h2>ポエム制作中...</h2>
 
-    <!-- 履歴出力領域（ロビー） -->
-    <div style="margin-top: 20px; border-top: 1px solid #e2e8f0; padding-top: 12px;">
-      <h3 style="font-size: 14px; margin-bottom: 4px;">📜 これまでのゲーム履歴出力</h3>
-      <div class="export-group">
-        <button class="export-btn-text" onclick="exportText()">📋 コピー (Discord用)</button>
-        <button class="export-btn-csv" onclick="exportCSV()">📥 CSV保存</button>
+      <!-- プレイヤー用操作画面 -->
+      <div id="player-playing-section">
+        <h3>あなたの手札</h3>
+        <div id="hand-list" class="hand-container"></div>
+
+        <h3>組み合わされたポエム</h3>
+        <div id="selected-words-display" class="hand-container" style="min-height: 40px; background: #f8fafc; padding: 8px; border-radius: 8px; border: 1px dashed #cbd5e1;"></div>
+
+        <div style="display: flex; gap: 8px; margin-top: 8px;">
+          <button class="btn-secondary" onclick="clearPhrase()">やり直す</button>
+          <button class="btn-purple" onclick="submitPhrase()">これで決定・提出！</button>
+        </div>
+      </div>
+
+      <!-- 見学者用メッセージ -->
+      <div id="spectator-playing-notice" style="display:none; background:#f1f5f9; padding:16px; border-radius:8px; text-align:center; color:#64748b; font-weight:bold; margin-bottom:16px;">
+        👀 現在「見学モード」です。プレイヤーの提出をお待ちください。
+      </div>
+
+      <hr style="margin: 20px 0; border: 0; border-top: 1px solid #e2e8f0;">
+
+      <h3>みんなのポエムボード</h3>
+      <div id="board-list"></div>
+
+      <button id="next-round-btn" class="btn-success" style="margin-top: 16px;" onclick="nextRound()">つぎのポエムを紡ぐ（ロビーへ）</button>
+    </div>
+
+    <!-- 履歴出力エリア -->
+    <div class="card-box">
+      <h3>📜 過去の履歴出力</h3>
+      <div style="display: flex; gap: 8px;">
+        <button class="btn-secondary" onclick="exportText()">Discord用にコピー</button>
+        <button class="btn-secondary" onclick="exportCSV()">CSVファイルを保存</button>
       </div>
     </div>
   </div>
-
-  <!-- 3. ゲーム画面（作成 & 発表） -->
-  <div id="game-sec" class="card-panel" style="display:none;">
-    <h2>2. ポエムを紡ぐ</h2>
-
-    <div class="section-title">あなたの手札（単語カード）</div>
-    <div class="word-list" id="hand-list"></div>
-
-    <h3 style="margin-top: 20px;">完成したポエム</h3>
-    <div class="display-area" id="selected-words-display"></div>
-
-    <div style="display: flex; gap: 8px;">
-      <button onclick="clearPhrase()" style="background-color: #dc2626; margin-top: 12px;">やりなおす</button>
-      <button onclick="submitPhrase()" style="background-color: #2563eb; margin-top: 12px;">ポエムを披露する</button>
-    </div>
-
-    <hr style="margin: 24px 0; border: none; border-top: 1px solid #e2e8f0;">
-
-    <h2>みんなのポエム</h2>
-    <div id="board-list"></div>
-
-    <!-- 履歴出力領域（ゲーム画面） -->
-    <div class="export-group">
-      <button class="export-btn-text" onclick="exportText()">📋 コピー (Discord用)</button>
-      <button class="export-btn-csv" onclick="exportCSV()">📥 CSV保存</button>
-    </div>
-
-    <button onclick="nextRound()" style="background-color: #0284c7; margin-top: 24px;">🔄 つぎのポエムを紡ぐ（新しい回へ）</button>
-  </div>
-  <!-- Firebase SDK -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-    import { getFirestore, doc, setDoc, onSnapshot, updateDoc, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+    import { 
+      getFirestore, doc, setDoc, getDoc, onSnapshot, updateDoc, arrayUnion 
+    } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
+    // -------------------------------------------------------------
+    // 【Firebase設定】ご自身のFirebase設定情報に書き換えてください
+    // -------------------------------------------------------------
     const firebaseConfig = {
-      apiKey: "AIzaSyBtb74uz6clsoc9uA_AkDHi7DdepEWn2dw",
-      authDomain: "wa-awesome.firebaseapp.com",
-      projectId: "wa-awesome",
-      storageBucket: "wa-awesome.firebasestorage.app",
-      messagingSenderId: "1074804319870",
-      appId: "1:1074804319870:web:923f0ec866812f98ae5a2f",
-      measurementId: "G-DH30YVYB2X"
+      apiKey: "YOUR_API_KEY",
+      authDomain: "YOUR_AUTH_DOMAIN",
+      projectId: "YOUR_PROJECT_ID",
+      storageBucket: "YOUR_STORAGE_BUCKET",
+      messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+      appId: "YOUR_APP_ID"
     };
 
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
 
-    let roomId = "";
+    // グローバル状態
     let myName = "";
+    let roomId = "";
     let roomRef = null;
+    let roomData = null;
+    let isSpectator = false;
+    let mySelectedCards = [];
 
-    let myHand = [];
-    let selectedHand = [];
-    let currentData = null;
+    // 入室処理
+    window.joinRoom = async function() {
+      const nameInput = document.getElementById("my-name-input").value.trim();
+      const roomInput = document.getElementById("room-id-input").value.trim();
 
-    const colorPalette = [
-      { bg: '#dbeafe', text: '#1e40af', border: '#bfdbfe' },
-      { bg: '#fef3c7', text: '#92400e', border: '#fde68a' },
-      { bg: '#dcfce7', text: '#166534', border: '#bbf7d0' },
-      { bg: '#fce7f3', text: '#9d174d', border: '#fbcfe8' },
-      { bg: '#e0e7ff', text: '#3730a3', border: '#c7d2fe' },
-      { bg: '#ffedd5', text: '#9a3412', border: '#fed7aa' },
-      { bg: '#f3e8ff', text: '#6b21a8', border: '#e9d5ff' },
-      { bg: '#ccfbf1', text: '#115e59', border: '#99f6e4' },
-      { bg: '#ffe4e6', text: '#9f1239', border: '#fecdd3' },
-      { bg: '#ecfdf5', text: '#065f46', border: '#a7f3d0' },
-      { bg: '#fef9c3', text: '#854d0e', border: '#fef08a' },
-      { bg: '#e0f2fe', text: '#075985', border: '#bae6fd' },
-      { bg: '#fae8ff', text: '#86198f', border: '#f5d0fe' },
-      { bg: '#ffedd5', text: '#c2410c', border: '#ff3d00' },
-      { bg: '#f5f5f4', text: '#292524', border: '#d6d3d1' },
-      { bg: '#d1fae5', text: '#047857', border: '#6ee7b7' },
-      { bg: '#ede9fe', text: '#5b21b6', border: '#ddd6fe' },
-      { bg: '#cffafe', text: '#155e75', border: '#a5f3fc' },
-      { bg: '#fef2f2', text: '#991b1b', border: '#fecaca' },
-      { bg: '#ecfeff', text: '#0e7490', border: '#67e8f9' },
-      { bg: '#fdf4ff', text: '#701a75', border: '#f5d0fe' }
-    ];
+      if (!nameInput || !roomInput) {
+        alert("名前とルームIDを入力してください");
+        return;
+      }
 
-    function getAuthorStyle(authorName) {
-      if (!currentData || !currentData.players) return colorPalette[0];
-      const idx = currentData.players.indexOf(authorName);
-      if (idx === -1) return colorPalette[0];
-      return colorPalette[idx % colorPalette.length];
+      myName = nameInput;
+      roomId = roomInput;
+      roomRef = doc(db, "poem_rooms", roomId);
+
+      document.getElementById("display-my-name").innerText = myName;
+      document.getElementById("display-room-id").innerText = roomId;
+
+      document.getElementById("login-screen").style.display = "none";
+      document.getElementById("game-screen").style.display = "block";
+
+      // リアルタイムリスナー開始
+      onSnapshot(roomRef, (snapshot) => {
+        if (!snapshot.exists()) {
+          // 初期データ作成
+          const initialData = {
+            status: "lobby",
+            round: 1,
+            settings: { inWords: 3, handWords: 3 },
+            players: {},
+            pool: [],
+            hands: {},
+            phrases: {},
+            phraseDetails: {},
+            history: []
+          };
+          setDoc(roomRef, initialData);
+        } else {
+          roomData = snapshot.data();
+          renderApp();
+        }
+      });
+    };
+
+    // 見学トグルの切り替え
+    window.toggleSpectator = async function(checked) {
+      isSpectator = checked;
+      const indicator = document.getElementById("spectator-indicator");
+      if (indicator) indicator.style.display = isSpectator ? "inline-block" : "none";
+
+      if (!roomData) return;
+
+      const currentPlayers = roomData.players || {};
+      const myData = currentPlayers[myName] || { status: "joined" };
+      
+      myData.isSpectator = isSpectator;
+
+      await updateDoc(roomRef, {
+        [`players.${myName}`]: myData
+      });
+    };
+
+    // 設定パネルの折りたたみ表示
+    window.toggleSettings = function() {
+      const body = document.getElementById("setting-body");
+      const arrow = document.getElementById("setting-arrow");
+      if (body.style.display === "none") {
+        body.style.display = "block";
+        arrow.innerText = "▲";
+      } else {
+        body.style.display = "none";
+        arrow.innerText = "▼";
+      }
+    };
+
+    // 設定更新
+    window.updateSettings = async function() {
+      const inWords = parseInt(document.getElementById("set-in-words").value) || 3;
+      const handWords = parseInt(document.getElementById("set-hand-words").value) || 3;
+
+      await updateDoc(roomRef, {
+        "settings.inWords": inWords,
+        "settings.handWords": handWords
+      });
+      alert("設定を更新しました");
+    };
+
+    // アプリ状態のレンダリング
+    function renderApp() {
+      if (!roomData) return;
+
+      const round = roomData.round || 1;
+      document.getElementById("round-num").innerText = round;
+
+      // 自分の最新の見学状態を同期
+      if (roomData.players && roomData.players[myName]) {
+        isSpectator = !!roomData.players[myName].isSpectator;
+        document.getElementById("spectator-toggle").checked = isSpectator;
+        document.getElementById("spectator-indicator").style.display = isSpectator ? "inline-block" : "none";
+      }
+
+      if (roomData.status === "lobby") {
+        document.getElementById("lobby-view").style.display = "block";
+        document.getElementById("playing-view").style.display = "none";
+        renderLobby();
+      } else {
+        document.getElementById("lobby-view").style.display = "none";
+        document.getElementById("playing-view").style.display = "block";
+        renderPlaying();
+      }
     }
 
-    window.toggleSettings = function() {
-      const content = document.getElementById('setting-content');
-      const icon = document.getElementById('setting-toggle-icon');
-      if (content.style.display === 'none') {
-        content.style.display = 'block';
-        icon.innerText = '▲';
+    // ロビー画面の表示更新
+    function renderLobby() {
+      const players = roomData.players || {};
+      const playerListEl = document.getElementById("player-list");
+      playerListEl.innerHTML = "";
+
+      let activePlayerCount = 0;
+
+      Object.keys(players).forEach(pName => {
+        const pData = players[pName];
+        const isSpec = pData.isSpectator;
+        if (!isSpec) activePlayerCount++;
+
+        const div = document.createElement("div");
+        div.style.margin = "4px 0";
+        div.innerHTML = `・${pName} ${isSpec ? '<span class="spectator-badge">👀 見学</span>' : (pData.ready ? '✅ 準備完了' : '⏳ 入力中...')}`;
+        playerListEl.appendChild(div);
+      });
+
+      // 自分が見学かプレイヤーかで画面切り替え
+      const wordsInputSection = document.getElementById("words-input-section");
+      const spectatorNotice = document.getElementById("spectator-input-notice");
+
+      if (isSpectator) {
+        wordsInputSection.style.display = "none";
+        spectatorNotice.style.display = "block";
       } else {
-        content.style.display = 'none';
-        icon.innerText = '▼';
-      }
-    };
+        wordsInputSection.style.display = "block";
+        spectatorNotice.style.display = "none";
 
-    window.joinRoom = async function() {
-      myName = document.getElementById('player-name').value.trim();
-      roomId = document.getElementById('room-id').value.trim();
-      if (!myName || !roomId) return alert('名前とルームIDを入力してください');
-
-      try {
-        roomRef = doc(db, "rooms", "poem_" + roomId);
-
-        await setDoc(roomRef, {
-          players: arrayUnion(myName),
-          status: "lobby",
-          roundCount: 1,
-          history: [],
-          words: [],
-          hands: {},
-          phrases: {},
-          phraseDetails: {},
-          settings: { inWords: 3, handWords: 3 }
-        }, { merge: true });
-
-        document.getElementById('login-sec').style.display = 'none';
-        document.getElementById('lobby-sec').style.display = 'block';
-
-        onSnapshot(roomRef, (snapshot) => {
-          currentData = snapshot.data();
-          if (!currentData) return;
-
-          const players = currentData.players || [];
-          const st = currentData.settings || { inWords: 3, handWords: 3 };
-          
-          document.getElementById('set-in-words').value = st.inWords;
-          document.getElementById('set-hand-words').value = st.handWords;
-          
-          renderInputFields(st.inWords);
-
-          document.getElementById('total-words').innerText = currentData.words ? currentData.words.length : 0;
-          
-          document.getElementById('player-list').innerHTML = players.map(p => `
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-              <span>・ ${p}</span>
-              <button onclick="removePlayer('${p}')" style="width:auto; margin:0; padding:4px 8px; font-size:12px; background-color:#ef4444;">鯖落ち</button>
-            </div>
-          `).join('');
-
-          if (currentData.status === 'lobby') {
-            document.getElementById('game-sec').style.display = 'none';
-            document.getElementById('lobby-sec').style.display = 'block';
-            
-            myHand = [];
-            selectedHand = [];
-            
-            const btn = document.getElementById('add-word-btn');
-            if (btn) {
-              btn.innerText = "そざいを追加";
-              btn.disabled = false;
-            }
-          } else if (currentData.status === 'playing') {
-            document.getElementById('lobby-sec').style.display = 'none';
-            document.getElementById('game-sec').style.display = 'block';
-
-            if (currentData.hands && currentData.hands[myName]) myHand = currentData.hands[myName];
-            renderHand();
-            renderBoards();
+        // 入力欄の生成（設定数に応じた数）
+        const inWordsCount = (roomData.settings && roomData.settings.inWords) || 3;
+        const container = document.getElementById("inputs-words-container");
+        if (container.children.length !== inWordsCount) {
+          container.innerHTML = "";
+          for (let i = 0; i < inWordsCount; i++) {
+            const input = document.createElement("input");
+            input.type = "text";
+            input.placeholder = `単語 ${i + 1}`;
+            input.className = "word-input-field";
+            container.appendChild(input);
           }
-        });
-      } catch (e) {
-        console.error(e);
-        alert('接続エラーが発生しました: ' + e.message);
-      }
-    };
-    function renderInputFields(cWords) {
-      const container = document.getElementById('inputs-words-container');
-      if (container.children.length !== cWords) {
-        container.innerHTML = '';
-        for (let i = 1; i <= cWords; i++) {
-          const inp = document.createElement('input');
-          inp.type = 'text';
-          inp.id = `word-input-${i}`;
-          inp.placeholder = `ポエムの単語 ${i}`;
-          container.appendChild(inp);
         }
       }
+
+      // 素材プール数表示
+      const pool = roomData.pool || [];
+      document.getElementById("current-words-count").innerText = pool.length;
     }
-
-    window.updateSettings = async function() {
-      const inWords = parseInt(document.getElementById('set-in-words').value) || 3;
-      const handWords = parseInt(document.getElementById('set-hand-words').value) || 3;
-
-      await updateDoc(roomRef, {
-        settings: { inWords, handWords }
-      });
-    };
-
-    window.removePlayer = async function(targetPlayer) {
-      if (!confirm(`${targetPlayer} さんを鯖落ちさせますか？`)) return;
-      await updateDoc(roomRef, { players: arrayRemove(targetPlayer) });
-    };
-
+    // 単語追加処理
     window.addWords = async function() {
-      const st = currentData.settings || { inWords: 3 };
+      const inputs = document.querySelectorAll(".word-input-field");
       const newWords = [];
-
-      for (let i = 1; i <= st.inWords; i++) {
-        const inp = document.getElementById(`word-input-${i}`);
-        const val = inp ? inp.value.trim() : '';
-        if (!val) return alert('単語をすべて入力してください');
-        newWords.push({ word: val, author: myName });
-      }
-
-      await updateDoc(roomRef, { 
-        words: arrayUnion(...newWords)
+      inputs.forEach(ip => {
+        const val = ip.value.trim();
+        if (val) newWords.push({ word: val, author: myName });
       });
 
-      for (let i = 1; i <= st.inWords; i++) {
-        const inp = document.getElementById(`word-input-${i}`);
-        if (inp) inp.value = '';
+      const inWordsCount = (roomData.settings && roomData.settings.inWords) || 3;
+      if (newWords.length < inWordsCount) {
+        alert(`単語を ${inWordsCount} 個すべて入力してください`);
+        return;
       }
 
-      const btn = document.getElementById('add-word-btn');
-      btn.innerText = "追加完了！";
-      btn.disabled = true;
-    };
-
-    window.startGame = async function() {
-      if (!currentData) return;
-      const w = [...(currentData.words || [])];
-      const players = currentData.players || [];
-      const st = currentData.settings || { handWords: 3 };
-
-      if (w.length < players.length * st.handWords) {
-        return alert(`素材が足りません！（必要: ${players.length * st.handWords}個 / 現在: ${w.length}個）`);
-      }
-
-      const shuf = w.sort(() => Math.random() - 0.5);
-      const newHands = {};
-
-      players.forEach((p, idx) => {
-        newHands[p] = shuf.slice(idx * st.handWords, (idx + 1) * st.handWords);
-      });
-
-      await updateDoc(roomRef, { 
-        status: 'playing',
-        hands: newHands
-      });
-    };
-
-    window.nextRound = async function() {
-      if (!currentData) return;
-      const currentRound = currentData.roundCount || 1;
-
-      // 現在のポエムを履歴として保存
-      const currentPhrases = currentData.phrases || {};
-      const currentDetails = currentData.phraseDetails || {};
-
-      const roundRecord = {
-        round: currentRound,
-        phrases: currentPhrases,
-        phraseDetails: currentDetails
-      };
+      const currentPool = roomData.pool || [];
+      const updatedPool = [...currentPool, ...newWords];
 
       await updateDoc(roomRef, {
-        status: 'lobby',
-        roundCount: currentRound + 1,
-        history: arrayUnion(roundRecord),
-        words: [],
-        hands: {},
+        pool: updatedPool,
+        [`players.${myName}.ready`]: true
+      });
+
+      inputs.forEach(ip => ip.value = "");
+      alert("単語を追加しました！");
+    };
+
+    // ゲーム開始（山札シャッフル・手札配布）
+    window.startGame = async function() {
+      const pool = roomData.pool || [];
+      const players = roomData.players || {};
+      const activePlayers = Object.keys(players).filter(p => !players[p].isSpectator);
+
+      if (activePlayers.length === 0) {
+        alert("プレイするメンバーが最低1人は必要です（見学のみでは開始できません）");
+        return;
+      }
+
+      const handWordsCount = (roomData.settings && roomData.settings.handWords) || 3;
+      const requiredWords = activePlayers.length * handWordsCount;
+
+      if (pool.length < requiredWords) {
+        alert(`素材が足りません！必要数: ${requiredWords} 個（現在のプール: ${pool.length} 個）`);
+        return;
+      }
+
+      // シャッフル
+      const shuffled = [...pool].sort(() => Math.random() - 0.5);
+      const hands = {};
+
+      activePlayers.forEach(pName => {
+        hands[pName] = shuffled.splice(0, handWordsCount);
+      });
+
+      await updateDoc(roomRef, {
+        status: "playing",
+        hands: hands,
         phrases: {},
         phraseDetails: {}
       });
     };
 
-    function renderHand() {
-      const list = document.getElementById('hand-list');
-      list.innerHTML = myHand.map((item, idx) => {
-        const isSel = selectedHand.some(s => s.idx === idx);
-        return `<div class="card ${isSel ? 'selected' : ''}" onclick="selectCard(${idx})">${item.word}</div>`;
-      }).join('');
+    // プレイ画面の描画
+    function renderPlaying() {
+      const handListEl = document.getElementById("hand-list");
+      const playerPlayingSection = document.getElementById("player-playing-section");
+      const spectatorPlayingNotice = document.getElementById("spectator-playing-notice");
 
-      const display = document.getElementById('selected-words-display');
-      display.innerHTML = selectedHand.map((item, pos) => {
-        return `<div class="card selected" onclick="removeSlot(${pos})">${item.word}</div>`;
-      }).join('');
-    }
-
-    window.selectCard = function(idx) {
-      const existingPos = selectedHand.findIndex(s => s.idx === idx);
-      if (existingPos !== -1) {
-        selectedHand.splice(existingPos, 1);
+      if (isSpectator) {
+        playerPlayingSection.style.display = "none";
+        spectatorPlayingNotice.style.display = "block";
       } else {
-        selectedHand.push({ idx, ...myHand[idx] });
+        playerPlayingSection.style.display = "block";
+        spectatorPlayingNotice.style.display = "none";
+
+        // 手札表示
+        const myHand = (roomData.hands && roomData.hands[myName]) || [];
+        handListEl.innerHTML = "";
+
+        myHand.forEach((item, index) => {
+          const card = document.createElement("div");
+          card.className = `card ${mySelectedCards.includes(index) ? 'selected' : ''}`;
+          card.innerText = item.word;
+          card.onclick = () => selectCard(index, item);
+          handListEl.appendChild(card);
+        });
+
+        renderSelectedWords();
       }
-      renderHand();
-    };
 
-    window.removeSlot = function(pos) {
-      selectedHand.splice(pos, 1);
-      renderHand();
-    };
+      // ポエムボード表示
+      renderBoard();
+    }
 
+    // カード選択
+    function selectCard(index, item) {
+      if (mySelectedCards.includes(index)) {
+        mySelectedCards = mySelectedCards.filter(i => i !== index);
+      } else {
+        mySelectedCards.push(index);
+      }
+      renderPlaying();
+    }
+
+    // 選択された言葉の組み合わせ表示
+    function renderSelectedWords() {
+      const displayEl = document.getElementById("selected-words-display");
+      displayEl.innerHTML = "";
+      const myHand = (roomData.hands && roomData.hands[myName]) || [];
+
+      mySelectedCards.forEach(idx => {
+        const item = myHand[idx];
+        if (item) {
+          const tag = document.createElement("span");
+          tag.className = "word-tag";
+          tag.style.background = "#e0f2fe";
+          tag.innerText = item.word;
+          displayEl.appendChild(tag);
+        }
+      });
+    }
+
+    // やり直し
     window.clearPhrase = function() {
-      selectedHand = [];
-      renderHand();
+      mySelectedCards = [];
+      renderPlaying();
     };
 
+    // 提出
     window.submitPhrase = async function() {
-      if (selectedHand.length === 0) return alert('単語を1つ以上選んでください！');
-
-      const phraseText = selectedHand.map(s => s.word).join(' ');
-      const detail = selectedHand.map(s => ({ word: s.word, author: s.author }));
-      
-      const updateData = {};
-      updateData[`phrases.${myName}`] = phraseText;
-      updateData[`phraseDetails.${myName}`] = detail;
-      await updateDoc(roomRef, updateData);
-    };
-
-    function renderBoards() {
-      if (!currentData) return;
-      const phrases = currentData.phrases || {};
-      const phraseDetails = currentData.phraseDetails || {};
-
-      const container = document.getElementById('board-list');
-      container.innerHTML = Object.entries(phrases).map(([player, phrase]) => {
-        const isSelf = player === myName;
-        const details = phraseDetails[player] || [];
-
-        return `
-          <div class="player-board">
-            <div class="board-header">
-              <strong>${player} のポエム: ${isSelf ? '<span style="font-size:12px; color:#94a3b8;">（あなた）</span>' : ''}</strong>
-            </div>
-            <div style="margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center;">
-              ${details.map(item => {
-                const st = getAuthorStyle(item.author);
-                return `
-                  <span class="word-tag" style="background-color: ${st.bg}; color: ${st.text}; border-color: ${st.border};">
-                    ${item.word}
-                    <span class="author-label">（${item.author}）</span>
-                  </span>
-                `;
-              }).join('')}
-            </div>
-          </div>
-        `;
-      }).join('');
-    }
-
-    // 履歴データ全件を取得（終了した回 + 進行中の回）
-    function getAllRoundData() {
-      if (!currentData) return [];
-      const historyList = [...(currentData.history || [])];
-
-      if (currentData.phrases && Object.keys(currentData.phrases).length > 0) {
-        historyList.push({
-          round: currentData.roundCount || (historyList.length + 1),
-          phrases: currentData.phrases || {},
-          phraseDetails: currentData.phraseDetails || {}
-        });
+      if (mySelectedCards.length === 0) {
+        alert("言葉を1つ以上選択してください");
+        return;
       }
-      return historyList;
-    }
 
-    // テキスト形式でクリップボードにコピー（Discord等へペースト用）
-    window.exportText = function() {
-      const allRounds = getAllRoundData();
-      if (allRounds.length === 0) return alert('出力できる履歴がありません');
+      const myHand = (roomData.hands && roomData.hands[myName]) || [];
+      const chosenItems = mySelectedCards.map(idx => myHand[idx]);
+      const fullText = chosenItems.map(i => i.word).join(" ");
 
-      let txt = `=== わ〜鯖せーへきポエム 履歴ログ ===\n\n`;
-
-      allRounds.forEach(rd => {
-        txt += `【第${rd.round}回】\n`;
-        Object.entries(rd.phrases || {}).forEach(([p, phrase]) => {
-          const details = rd.phraseDetails?.[p] || [];
-          txt += `■ ${p} のポエム:\n  「${phrase}」\n`;
-          if (details.length > 0) {
-            const authors = details.map(d => `${d.word}[${d.author}]`).join(' / ');
-            txt += `  （素材内訳: ${authors}）\n`;
-          }
-          txt += `\n`;
-        });
-        txt += `-----------------------------------\n`;
+      await updateDoc(roomRef, {
+        [`phrases.${myName}`]: fullText,
+        [`phraseDetails.${myName}`]: chosenItems
       });
 
-      navigator.clipboard.writeText(txt).then(() => {
-        alert('クリップボードにコピーしました！Discordやメモ帳にそのまま貼り付けられます。');
+      alert("ポエムを提出しました！");
+    };
+
+    // みんなのポエムボード描画
+    function renderBoard() {
+      const boardEl = document.getElementById("board-list");
+      boardEl.innerHTML = "";
+      const phrases = roomData.phrases || {};
+      const phraseDetails = roomData.phraseDetails || {};
+
+      Object.keys(phrases).forEach(pName => {
+        const card = document.createElement("div");
+        card.className = "player-board";
+
+        const title = document.createElement("strong");
+        title.innerText = `${pName} の作品:`;
+        card.appendChild(title);
+
+        const poemBox = document.createElement("div");
+        poemBox.style.marginTop = "8px";
+
+        const details = phraseDetails[pName] || [];
+        if (details.length > 0) {
+          details.forEach(item => {
+            const tag = document.createElement("span");
+            tag.className = "word-tag";
+            tag.style.background = "#f1f5f9";
+            tag.innerHTML = `${item.word} <span class="author-label">(${item.author})</span>`;
+            poemBox.appendChild(tag);
+          });
+        } else {
+          poemBox.innerText = phrases[pName];
+        }
+
+        card.appendChild(poemBox);
+        boardEl.appendChild(card);
+      });
+    }
+
+    // 次のラウンドへ（履歴保存とリセット）
+    window.nextRound = async function() {
+      const phrases = roomData.phrases || {};
+      const phraseDetails = roomData.phraseDetails || {};
+      const currentRound = roomData.round || 1;
+
+      // 履歴に保存するレコードを作成
+      const historyRecord = {
+        round: currentRound,
+        phrases: phrases,
+        phraseDetails: phraseDetails,
+        timestamp: new Date().toISOString()
+      };
+
+      const updatedHistory = [...(roomData.history || []), historyRecord];
+
+      // プレイヤーの準備状態リセット（見学フラグは保持）
+      const updatedPlayers = {};
+      Object.keys(roomData.players || {}).forEach(pName => {
+        updatedPlayers[pName] = {
+          ready: false,
+          isSpectator: !!roomData.players[pName].isSpectator
+        };
+      });
+
+      mySelectedCards = [];
+
+      await updateDoc(roomRef, {
+        status: "lobby",
+        round: currentRound + 1,
+        pool: [],
+        hands: {},
+        phrases: {},
+        phraseDetails: {},
+        players: updatedPlayers,
+        history: updatedHistory
+      });
+    };
+
+    // --- 履歴出力機能 ---
+
+    // Discord用テキスト生成
+    window.exportText = function() {
+      if (!roomData) return;
+      const history = roomData.history || [];
+      const currentPhrases = roomData.phrases || {};
+      const currentDetails = roomData.phraseDetails || {};
+      const currentRound = roomData.round || 1;
+
+      let text = `【わ〜鯖せーへきポエム 履歴一覧】\n\n`;
+
+      // 過去ラウンド
+      history.forEach(h => {
+        text += `━━━ 第 ${h.round} 回 ━━━\n`;
+        Object.keys(h.phrases || {}).forEach(pName => {
+          const details = (h.phraseDetails && h.phraseDetails[pName]) || [];
+          if (details.length > 0) {
+            const wordsStr = details.map(d => `${d.word}(${d.author})`).join(" ");
+            text += `・${pName}: ${wordsStr}\n`;
+          } else {
+            text += `・${pName}: ${h.phrases[pName]}\n`;
+          }
+        });
+        text += `\n`;
+      });
+
+      // 進行中ラウンド（未保存分）
+      if (Object.keys(currentPhrases).length > 0) {
+        text += `━━━ 第 ${currentRound} 回（最新） ━━━\n`;
+        Object.keys(currentPhrases).forEach(pName => {
+          const details = currentDetails[pName] || [];
+          if (details.length > 0) {
+            const wordsStr = details.map(d => `${d.word}(${d.author})`).join(" ");
+            text += `・${pName}: ${wordsStr}\n`;
+          } else {
+            text += `・${pName}: ${currentPhrases[pName]}\n`;
+          }
+        });
+      }
+
+      navigator.clipboard.writeText(text).then(() => {
+        alert("Discord用テキストをクリップボードにコピーしました！");
       }).catch(err => {
         console.error(err);
-        alert('コピーに失敗しました');
+        alert("コピーに失敗しました");
       });
     };
 
-    // CSVファイルのダウンロード
+    // CSVダウンロード
     window.exportCSV = function() {
-      const allRounds = getAllRoundData();
-      if (allRounds.length === 0) return alert('出力できる履歴がありません');
+      if (!roomData) return;
+      const history = roomData.history || [];
+      const currentPhrases = roomData.phrases || {};
+      const currentDetails = roomData.phraseDetails || {};
+      const currentRound = roomData.round || 1;
 
-      let csvContent = "\uFEFF"; // Excel用文字化け防止BOM
-      csvContent += "回,作者,完成ポエム,使用した素材と作者の内訳\n";
+      let csv = "\uFEFF回数,プレイヤー名,完成ポエム,構成要素(単語と提供者)\n";
 
-      allRounds.forEach(rd => {
-        Object.entries(rd.phrases || {}).forEach(([p, phrase]) => {
-          const details = rd.phraseDetails?.[p] || [];
-          const detailStr = details.map(d => `${d.word}(${d.author})`).join(' ');
+      const processRow = (roundNum, pName, fullText, details) => {
+        const safeText = `"${(fullText || "").replace(/"/g, '""')}"`;
+        const wordsStr = details.length > 0
+          ? `"${details.map(d => `${d.word}(${d.author})`).join(" ")}"`
+          : safeText;
+        return `${roundNum},"${pName}",${safeText},${wordsStr}\n`;
+      };
 
-          const cleanPhrase = `"${phrase.replace(/"/g, '""')}"`;
-          const cleanDetail = `"${detailStr.replace(/"/g, '""')}"`;
-
-          csvContent += `${rd.round},${p},${cleanPhrase},${cleanDetail}\n`;
+      history.forEach(h => {
+        Object.keys(h.phrases || {}).forEach(pName => {
+          const details = (h.phraseDetails && h.phraseDetails[pName]) || [];
+          csv += processRow(h.round, pName, h.phrases[pName], details);
         });
       });
 
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      if (Object.keys(currentPhrases).length > 0) {
+        Object.keys(currentPhrases).forEach(pName => {
+          const details = currentDetails[pName] || [];
+          csv += processRow(currentRound, pName, currentPhrases[pName], details);
+        });
+      }
+
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.setAttribute("href", url);
-      link.setAttribute("download", `poem_history_${roomId}.csv`);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `poem_history_${roomId}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
     };
   </script>
 </body>
