@@ -3,11 +3,14 @@ import { doc, setDoc, onSnapshot, updateDoc, arrayUnion, arrayRemove } from "htt
 
 // 評価マスタ定義（外部ファイル依存を解除）
 const evalOptionsMaster = {
-  tae: { label: "妙なり (🪭)", icon: "🪭", pts: 0 },
-  okashi: { label: "いとおかし (🌸)", icon: "🌸", pts: 3 },
-  aware: { label: "もののあはれ (🍁)", icon: "🍁", pts: 2 },
-  aware_2: { label: "天晴れ (⚔️)", icon: "⚔️", pts: 2 },
-  funny: { label: "をかし (🍡)", icon: "🍡", pts: 1 }
+  okashi:   { icon: "🌸", label: "🌸 いとおかし", pts: 1 },
+  aware:    { icon: "🌾", label: "🌾 もののあはれ", pts: 1 },
+  wabisabi: { icon: "❄️", label: "❄️ わびさび", pts: 1 },
+  ayashi:   { icon: "🌀", label: "🌀 あやし", pts: 1 },
+  kuruoshi: { icon: "🍶", label: "🍶 狂おし", pts: 1 },
+  wabishi:  { icon: "🍃", label: "🍃 わびし", pts: 1 },
+  yugen:    { icon: "🌙", label: "🌙 幽玄", pts: 1 },
+  tae:       { icon: "🪭", label: "🪭 妙なり", pts: 2 }
 };
 const hostOptionKeys = ['tae', 'okashi', 'aware', 'aware_2', 'funny'];
 const childOptionKeys = ['okashi', 'aware', 'aware_2', 'funny'];
