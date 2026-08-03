@@ -44,13 +44,17 @@ window.toggleEvalGuide = function() {
   }
 };
 
+// ルーム参加メイン関数
 window.joinRoom = async function() {
-  myName = document.getElementById('player-name').value.trim();
-  roomId = document.getElementById('room-id').value.trim();
+  myName = document.getElementById('player-name')?.value.trim();
+  roomId = document.getElementById('room-id')?.value.trim();
   const specCheck = document.getElementById('spectator-check');
   isSpectator = specCheck ? specCheck.checked : false;
 
-  if (!myName || !roomId) return alert('名前とルームIDを入力してください');
+  if (!myName || !roomId) {
+    alert('名前とルームIDを入力してください');
+    return;
+  }
 
   try {
     roomRef = doc(db, "rooms", "haiku_" + roomId);
@@ -85,8 +89,8 @@ window.joinRoom = async function() {
       const currentHost = players[(currentData.hostIndex || 0) % (players.length || 1)] || '未設定';
       const hostText = `👑 今節の選者（親）: <strong>${currentHost}</strong> ${currentHost === myName ? '（あなた）' : ''}`;
       
-      document.getElementById('host-info-lobby').innerHTML = hostText;
-      document.getElementById('host-info-game').innerHTML = hostText;
+      if (document.getElementById('host-info-lobby')) document.getElementById('host-info-lobby').innerHTML = hostText;
+      if (document.getElementById('host-info-game')) document.getElementById('host-info-game').innerHTML = hostText;
 
       const roleBtnText = isSpectator ? "⚔️ プレイヤーとして途中参戦する" : "👀 見学モードに切り替える";
       if (document.getElementById('role-toggle-btn-lobby')) document.getElementById('role-toggle-btn-lobby').innerText = roleBtnText;
@@ -99,8 +103,8 @@ window.joinRoom = async function() {
       if (document.getElementById('set-hand-7')) document.getElementById('set-hand-7').value = st.hand7;
 
       renderInputFields(st.in5, st.in7);
-      document.getElementById('total-words-5').innerText = currentData.words5?.length || 0;
-      document.getElementById('total-words-7').innerText = currentData.words7?.length || 0;
+      if (document.getElementById('total-words-5')) document.getElementById('total-words-5').innerText = currentData.words5?.length || 0;
+      if (document.getElementById('total-words-7')) document.getElementById('total-words-7').innerText = currentData.words7?.length || 0;
 
       const scores = currentData.scores || {};
       let playerListHtml = players.map((p, idx) => `
@@ -117,7 +121,7 @@ window.joinRoom = async function() {
         playerListHtml += `<div style="font-size:12px; color:#64748b; margin-top:8px;">👀 見学者: ${spectators.join(', ')}</div>`;
       }
 
-      document.getElementById('player-list').innerHTML = playerListHtml;
+      if (document.getElementById('player-list')) document.getElementById('player-list').innerHTML = playerListHtml;
 
       if (currentData.status === 'lobby') {
         document.getElementById('game-sec').style.display = 'none';
@@ -132,7 +136,9 @@ window.joinRoom = async function() {
         renderBoards();
       }
     });
-  } catch (e) { alert('接続エラー: ' + e.message); }
+  } catch (e) {
+    alert('接続エラーが発生しました: ' + e.message);
+  }
 };
 
 window.toggleRole = async function() {
@@ -233,27 +239,30 @@ window.startGame = async function() {
 
 function renderHand() {
   const h5List = document.getElementById('hand-5-list');
-  const h7List = document.getElementById('hand-7-list');
-  if (isSpectator) {
-    if (h5List) h5List.innerHTML = '<div style="font-size:13px; color:#94a3b8;">※見学モード中</div>';
-    if (h7List) h7List.innerHTML = '<div style="font-size:13px; color:#94a3b8;">※見学モード中</div>';
-    return;
-  }
-
   if (h5List) {
-    h5List.innerHTML = myHand5.map((item, idx) => `
-      <div class="card card-5 ${selectedHand.includes(item) ? 'selected' : ''}" onclick="selectCard(5, ${idx})">${item.text}</div>
-    `).join('');
-  }
-  if (h7List) {
-    h7List.innerHTML = myHand7.map((item, idx) => `
-      <div class="card card-7 ${selectedHand[1] === item ? 'selected' : ''}" onclick="selectCard(7, ${idx})">${item.text}</div>
-    `).join('');
+    if (isSpectator) {
+      h5List.innerHTML = '<div style="font-size:13px; color:#94a3b8;">※見学モード中</div>';
+    } else {
+      h5List.innerHTML = myHand5.map((item, idx) => `
+        <div class="card card-5 ${selectedHand.includes(item) ? 'selected' : ''}" onclick="selectCard(5, ${idx})">${item.text}</div>
+      `).join('');
+    }
   }
 
-  document.getElementById('phrase-1').innerText = selectedHand[0]?.text || '（選択してください）';
-  document.getElementById('phrase-2').innerText = selectedHand[1]?.text || '（選択してください）';
-  document.getElementById('phrase-3').innerText = selectedHand[2]?.text || '（選択してください）';
+  const h7List = document.getElementById('hand-7-list');
+  if (h7List) {
+    if (isSpectator) {
+      h7List.innerHTML = '<div style="font-size:13px; color:#94a3b8;">※見学モード中</div>';
+    } else {
+      h7List.innerHTML = myHand7.map((item, idx) => `
+        <div class="card card-7 ${selectedHand[1] === item ? 'selected' : ''}" onclick="selectCard(7, ${idx})">${item.text}</div>
+      `).join('');
+    }
+  }
+
+  if (document.getElementById('phrase-1')) document.getElementById('phrase-1').innerText = selectedHand[0]?.text || '（選択してください）';
+  if (document.getElementById('phrase-2')) document.getElementById('phrase-2').innerText = selectedHand[1]?.text || '（選択してください）';
+  if (document.getElementById('phrase-3')) document.getElementById('phrase-3').innerText = selectedHand[2]?.text || '（選択してください）';
 }
 
 window.selectCard = function(type, idx) {
