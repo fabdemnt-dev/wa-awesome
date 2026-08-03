@@ -4,718 +4,144 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>わ〜鯖せーへきはぃく</title>
-  <style>
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      max-width: 600px;
-      margin: 0 auto;
-      padding: 16px;
-      background-color: #f8fafc;
-      color: #1e293b;
-    }
-    h1, h2, h3 { text-align: center; margin-top: 0; }
-    .card-panel {
-      background: white;
-      border-radius: 12px;
-      padding: 20px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.05);
-      margin-bottom: 16px;
-    }
-    input[type="text"], input[type="number"], select, button {
-      font-size: 15px;
-      padding: 10px;
-      border-radius: 8px;
-      border: 1px solid #cbd5e1;
-      box-sizing: border-box;
-    }
-    input[type="text"] { width: 100%; margin-bottom: 8px; }
-    button {
-      background-color: #2563eb;
-      color: white;
-      border: none;
-      font-weight: bold;
-      cursor: pointer;
-      width: 100%;
-      margin-top: 8px;
-    }
-    button:disabled { background-color: #94a3b8; cursor: not-allowed; }
-    
-    .section-title {
-      font-size: 14px;
-      font-weight: bold;
-      color: #475569;
-      margin: 12px 0 6px 0;
-      border-left: 4px solid #2563eb;
-      padding-left: 8px;
-    }
-
-    .word-list { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
-    .card {
-      background: #f1f5f9;
-      border: 2px solid #cbd5e1;
-      border-radius: 8px;
-      padding: 8px 14px;
-      font-weight: bold;
-      cursor: pointer;
-      user-select: none;
-    }
-    .card.selected { background: #2563eb; color: white; border-color: #1d4ed8; }
-    .card.card-5 { border-color: #93c5fd; }
-    .card.card-7 { border-color: #fde047; }
-    
-    .display-area {
-      min-height: 60px;
-      border: 2px dashed #94a3b8;
-      border-radius: 8px;
-      padding: 10px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      background: #fafafa;
-    }
-    .display-line {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 14px;
-      color: #64748b;
-    }
-    .swap-btn {
-      width: auto;
-      margin-top: 0;
-      padding: 4px 10px;
-      font-size: 12px;
-      background-color: #0284c7;
-      border-radius: 6px;
-      align-self: flex-start;
-    }
-
-    .player-board {
-      background: #f8fafc;
-      border: 1px solid #e2e8f0;
-      border-radius: 8px;
-      padding: 12px;
-      margin-bottom: 12px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-    .board-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 8px;
-    }
-    .vote-select-group {
-      display: flex;
-      gap: 6px;
-      align-items: center;
-    }
-    .vote-select {
-      background: white;
-      font-size: 13px;
-      padding: 6px 8px;
-    }
-    .vote-submit-btn {
-      width: auto;
-      margin-top: 0;
-      padding: 6px 12px;
-      font-size: 13px;
-      background-color: #f59e0b;
-      white-space: nowrap;
-    }
-
-    .score-badge {
-      background: #e0f2fe;
-      color: #0369a1;
-      padding: 2px 8px;
-      border-radius: 12px;
-      font-size: 14px;
-      font-weight: bold;
-    }
-    .role-badge {
-      background: #fef3c7;
-      color: #b45309;
-      padding: 2px 8px;
-      border-radius: 12px;
-      font-size: 12px;
-      font-weight: bold;
-      border: 1px solid #fde047;
-    }
-
-    .setting-box {
-      background: #f1f5f9;
-      border-radius: 8px;
-      margin-bottom: 16px;
-      overflow: hidden;
-      border: 1px solid #e2e8f0;
-    }
-    .setting-header {
-      padding: 12px;
-      font-weight: bold;
-      cursor: pointer;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      background: #e2e8f0;
-      user-select: none;
-    }
-    .setting-content { padding: 12px; }
-    .setting-item {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 8px;
-    }
-    .setting-item:last-child { margin-bottom: 0; }
-    .setting-item input { width: 60px; margin-bottom: 0; text-align: center; }
-
-    .word-tag {
-      display: inline-block;
-      padding: 4px 8px;
-      border-radius: 6px;
-      font-size: 15px;
-      font-weight: bold;
-      margin: 2px 1px;
-      border: 1px solid transparent;
-    }
-    .author-label {
-      font-size: 10px;
-      display: block;
-      opacity: 0.85;
-      font-weight: normal;
-    }
-    .host-banner {
-      background: #fffbeb;
-      border: 1px solid #fcd34d;
-      color: #92400e;
-      padding: 8px 12px;
-      border-radius: 8px;
-      margin-bottom: 12px;
-      text-align: center;
-      font-weight: bold;
-      font-size: 14px;
-    }
-    .eval-guide-box {
-      background: #f8fafc;
-      border: 1px solid #cbd5e1;
-      border-radius: 8px;
-      margin-top: 12px;
-      font-size: 13px;
-      overflow: hidden;
-    }
-    .eval-guide-header {
-      padding: 8px 12px;
-      background: #e2e8f0;
-      font-weight: bold;
-      cursor: pointer;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      user-select: none;
-      color: #334155;
-    }
-    .eval-guide-content {
-      padding: 10px 12px;
-      line-height: 1.6;
-    }
-    .export-group {
-      display: flex;
-      gap: 8px;
-      margin-top: 12px;
-    }
-    .export-btn-text { background-color: #8b5cf6; }
-    .export-btn-csv { background-color: #10b981; }
-  </style>
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    window.updateSettings = async function() {
-      const in5 = parseInt(document.getElementById('set-in-5').value) || 5;
-      const in7 = parseInt(document.getElementById('set-in-7').value) || 3;
-      const hand5 = parseInt(document.getElementById('set-hand-5').value) || 5;
-      const hand7 = parseInt(document.getElementById('set-hand-7').value) || 3;
 
-      if (!roomRef) return;
-      await updateDoc(roomRef, {
-        settings: { in5, in7, hand5, hand7 }
-      });
-    };
+  <h1>わ〜鯖せーへきはぃく</h1>
 
-    window.addWords = async function() {
-      if (!currentData) return;
-      const st = currentData.settings || { in5: 5, in7: 3 };
-      
-      const new5 = [];
-      for (let i = 1; i <= st.in5; i++) {
-        const val = document.getElementById(`word-5-input-${i}`)?.value.trim();
-        if (val) new5.push({ text: val, author: myName });
-      }
+  <!-- 1. ログイン & ルーム参加 -->
+  <div id="login-sec" class="card-panel">
+    <h2>ルームに入る</h2>
+    <input type="text" id="player-name" placeholder="あなたの名前">
+    <input type="text" id="room-id" placeholder="ルームID（例：123）">
+    <button onclick="joinRoom()">参加する</button>
+  </div>
 
-      const new7 = [];
-      for (let i = 1; i <= st.in7; i++) {
-        const val = document.getElementById(`word-7-input-${i}`)?.value.trim();
-        if (val) new7.push({ text: val, author: myName });
-      }
+  <!-- 2. ロビー & 素材登録 -->
+  <div id="lobby-sec" class="card-panel" style="display:none;">
+    <h2>1. はぃくの素材あつめ</h2>
+    
+    <div id="host-info-lobby" class="host-banner"></div>
 
-      if (new5.length < st.in5 || new7.length < st.in7) {
-        return alert(`五音を ${st.in5} 個、七音を ${st.in7} 個すべて入力してください`);
-      }
-
-      try {
-        await updateDoc(roomRef, {
-          words5: arrayUnion(...new5),
-          words7: arrayUnion(...new7)
-        });
-
-        for (let i = 1; i <= st.in5; i++) {
-          const el = document.getElementById(`word-5-input-${i}`);
-          if (el) el.value = '';
-        }
-        for (let i = 1; i <= st.in7; i++) {
-          const el = document.getElementById(`word-7-input-${i}`);
-          if (el) el.value = '';
-        }
-
-        const btn = document.getElementById('add-word-btn');
-        if (btn) {
-          btn.innerText = "✅ 追加完了！";
-          btn.disabled = true;
-        }
-      } catch (e) {
-        console.error(e);
-        alert('追加に失敗しました');
-      }
-    };
-
-    window.removePlayer = async function(pName) {
-      if (!confirm(`${pName} さんを部屋から退出させますか？`)) return;
-      try {
-        await updateDoc(roomRef, {
-          players: arrayRemove(pName)
-        });
-      } catch (e) {
-        console.error(e);
-        alert('退出処理に失敗しました');
-      }
-    };
-
-    window.startGame = async function() {
-      if (!currentData) return;
-      const players = currentData.players || [];
-      const st = currentData.settings || { hand5: 5, hand7: 3 };
-
-      const req5 = players.length * st.hand5;
-      const req7 = players.length * st.hand7;
-
-      const w5 = currentData.words5 || [];
-      const w7 = currentData.words7 || [];
-
-      if (w5.length < req5 || w7.length < req7) {
-        return alert(`素材が足りません！\n必要数: 五音 ${req5} 個 / 七音 ${req7} 個`);
-      }
-
-      const shuffled5 = [...w5].sort(() => Math.random() - 0.5);
-      const shuffled7 = [...w7].sort(() => Math.random() - 0.5);
-
-      const hands5 = {};
-      const hands7 = {};
-
-      players.forEach(p => {
-        hands5[p] = shuffled5.splice(0, st.hand5);
-        hands7[p] = shuffled7.splice(0, st.hand7);
-      });
-
-      await updateDoc(roomRef, {
-        status: "playing",
-        hands5: hands5,
-        hands7: hands7,
-        phrases: {},
-        phraseDetails: {},
-        votes: {}
-      });
-    };
-
-    function renderHand() {
-      const container5 = document.getElementById('hand-5-list');
-      const container7 = document.getElementById('hand-7-list');
-
-      container5.innerHTML = myHand5.map((item, idx) => `
-        <div class="card card-5 ${selectedHand.includes(item) ? 'selected' : ''}" onclick="selectCard(5, ${idx})">
-          ${item.text}
+    <div class="setting-box">
+      <div class="setting-header" onclick="toggleSettings()">
+        <span>⚙️ 設定（1人あたり）</span>
+        <span id="setting-toggle-icon">▼</span>
+      </div>
+      <div class="setting-content" id="setting-content" style="display: none;">
+        <div class="setting-item">
+          <label>入力する5音の数:</label>
+          <input type="number" id="set-in-5" value="5" min="1" max="10" onchange="updateSettings()">
         </div>
-      `).join('');
-
-      container7.innerHTML = myHand7.map((item, idx) => `
-        <div class="card card-7 ${selectedHand[1] === item ? 'selected' : ''}" onclick="selectCard(7, ${idx})">
-          ${item.text}
+        <div class="setting-item">
+          <label>入力する7音の数:</label>
+          <input type="number" id="set-in-7" value="3" min="1" max="10" onchange="updateSettings()">
         </div>
-      `).join('');
-
-      renderDisplayArea();
-    }
-
-    window.selectCard = function(type, idx) {
-      if (type === 5) {
-        const item = myHand5[idx];
-        if (selectedHand[0] === item) {
-          selectedHand[0] = null;
-        } else if (selectedHand[2] === item) {
-          selectedHand[2] = null;
-        } else if (!selectedHand[0]) {
-          selectedHand[0] = item;
-        } else if (!selectedHand[2]) {
-          selectedHand[2] = item;
-        }
-      } else if (type === 7) {
-        const item = myHand7[idx];
-        if (selectedHand[1] === item) {
-          selectedHand[1] = null;
-        } else {
-          selectedHand[1] = item;
-        }
-      }
-      renderHand();
-    };
-
-    function renderDisplayArea() {
-      const p1 = document.getElementById('phrase-1');
-      const p2 = document.getElementById('phrase-2');
-      const p3 = document.getElementById('phrase-3');
-
-      p1.innerText = selectedHand[0] ? selectedHand[0].text : '（選択してください）';
-      p2.innerText = selectedHand[1] ? selectedHand[1].text : '（選択してください）';
-      p3.innerText = selectedHand[2] ? selectedHand[2].text : '（選択してください）';
-    }
-
-    window.swap5Cards = function() {
-      const temp = selectedHand[0];
-      selectedHand[0] = selectedHand[2];
-      selectedHand[2] = temp;
-      renderHand();
-    };
-
-    window.clearPhrase = function() {
-      selectedHand = [null, null, null];
-      renderHand();
-    };
-
-    window.submitPhrase = async function() {
-      if (!selectedHand[0] || !selectedHand[1] || !selectedHand[2]) {
-        return alert('初句・二句・結句をすべて選択してください');
-      }
-
-      const fullPhrase = `${selectedHand[0].text} ${selectedHand[1].text} ${selectedHand[2].text}`;
-      const details = [selectedHand[0], selectedHand[1], selectedHand[2]];
-
-      await updateDoc(roomRef, {
-        [`phrases.${myName}`]: fullPhrase,
-        [`phraseDetails.${myName}`]: details
-      });
-
-      alert('一句披露しました！');
-    };
-    function renderBoards() {
-      const boardList = document.getElementById('board-list');
-      if (!boardList || !currentData) return;
-
-      const phrases = currentData.phrases || {};
-      const phraseDetails = currentData.phraseDetails || {};
-      const votes = currentData.votes || {};
-      const players = currentData.players || [];
-      const hostIndex = currentData.hostIndex || 0;
-      const currentHost = players[hostIndex % (players.length || 1)];
-
-      const isHost = (myName === currentHost);
-      const availableKeys = isHost ? hostOptionKeys : childOptionKeys;
-
-      boardList.innerHTML = Object.keys(phrases).map(pName => {
-        const pText = phrases[pName];
-        const pDet = phraseDetails[pName] || [];
-
-        // 個別タグ表示（作者ごとに色付け）
-        let phraseHtml = '';
-        if (pDet.length === 3) {
-          phraseHtml = pDet.map(d => {
-            const style = getAuthorStyle(d.author);
-            return `<span class="word-tag" style="background:${style.bg}; color:${style.text}; border-color:${style.border};">
-              ${d.text}<span class="author-label">(${d.author})</span>
-            </span>`;
-          }).join(' ');
-        } else {
-          phraseHtml = `<strong>${pText}</strong>`;
-        }
-
-        // 評価ドロップダウンとボタン
-        const currentVote = votes[myName] ? votes[myName][pName] : '';
-        const optionsHtml = availableKeys.map(k => {
-          const opt = evalOptionsMaster[k];
-          return `<option value="${k}" ${currentVote === k ? 'selected' : ''}>${opt.label}</option>`;
-        }).join('');
-
-        // 評価結果アイコン表示
-        let evalBadgesHtml = '';
-        Object.keys(votes).forEach(voter => {
-          const voterVotes = votes[voter] || {};
-          if (voterVotes[pName]) {
-            const key = voterVotes[pName];
-            const opt = evalOptionsMaster[key];
-            if (opt) {
-              const isVoterHost = (voter === currentHost);
-              evalBadgesHtml += `<span style="font-size:12px; background:#f1f5f9; padding:2px 6px; border-radius:10px; margin-right:4px; border:1px solid #cbd5e1;">
-                ${opt.icon} ${voter}${isVoterHost ? '(選者)' : ''}
-              </span>`;
-            }
-          }
-        });
-
-        return `
-          <div class="player-board">
-            <div class="board-header">
-              <strong>${pName} の句</strong>
-            </div>
-            <div>${phraseHtml}</div>
-            <div style="margin-top:6px;">${evalBadgesHtml}</div>
-            
-            ${pName !== myName ? `
-              <div class="vote-select-group" style="margin-top:8px;">
-                <select class="vote-select" id="vote-select-${pName}">
-                  <option value="">-- 評価を選択 --</option>
-                  ${optionsHtml}
-                </select>
-                <button class="vote-submit-btn" onclick="submitVote('${pName}')">評価を贈る</button>
-              </div>
-            ` : ''}
-          </div>
-        `;
-      }).join('');
-
-      renderResults();
-    }
-
-    window.submitVote = async function(targetPlayer) {
-      const sel = document.getElementById(`vote-select-${targetPlayer}`);
-      if (!sel) return;
-      const evalKey = sel.value;
-
-      if (!evalKey) return alert('評価を選択してください');
-
-      try {
-        await updateDoc(roomRef, {
-          [`votes.${myName}.${targetPlayer}`]: evalKey
-        });
-        alert(`${targetPlayer} さんの句に評価を贈りました！`);
-      } catch (e) {
-        console.error(e);
-        alert('評価の送信に失敗しました');
-      }
-    };
-
-    function renderResults() {
-      const resArea = document.getElementById('result-area');
-      const roundRes = document.getElementById('round-results');
-      if (!resArea || !roundRes || !currentData) return;
-
-      const votes = currentData.votes || {};
-      const phrases = currentData.phrases || {};
-      
-      if (Object.keys(phrases).length === 0) {
-        resArea.style.display = 'none';
-        return;
-      }
-
-      resArea.style.display = 'block';
-
-      // 集計処理
-      const playerPts = {};
-      Object.keys(phrases).forEach(p => playerPts[p] = 0);
-
-      Object.keys(votes).forEach(voter => {
-        const voterVotes = votes[voter] || {};
-        Object.keys(voterVotes).forEach(target => {
-          const k = voterVotes[target];
-          const opt = evalOptionsMaster[k];
-          if (opt && playerPts[target] !== undefined) {
-            playerPts[target] += opt.pts;
-          }
-        });
-      });
-
-      roundRes.innerHTML = Object.keys(playerPts).map(p => `
-        <div style="display:flex; justify-content:space-between; margin-bottom:4px; font-size:14px;">
-          <span>・ ${p} の句</span>
-          <strong>獲得誉: +${playerPts[p]}</strong>
+        <hr style="margin:8px 0; border:none; border-top:1px solid #cbd5e1;">
+        <div class="setting-item">
+          <label>配る5音の枚数:</label>
+          <input type="number" id="set-hand-5" value="5" min="1" max="10" onchange="updateSettings()">
         </div>
-      `).join('');
-    }
-    window.nextRound = async function() {
-      if (!currentData) return;
+        <div class="setting-item">
+          <label>配る7音の枚数:</label>
+          <input type="number" id="set-hand-7" value="3" min="1" max="10" onchange="updateSettings()">
+        </div>
+      </div>
+    </div>
 
-      const votes = currentData.votes || {};
-      const phrases = currentData.phrases || {};
-      const scores = currentData.scores || {};
-      const players = currentData.players || [];
-      const hostIndex = currentData.hostIndex || 0;
-      const history = currentData.history || [];
-      const roundCount = currentData.roundCount || 1;
+    <div class="section-title">五音の言葉（初句・結句用）</div>
+    <div id="inputs-5-container"></div>
 
-      // ラウンドごとのスコア加算
-      const newScores = { ...scores };
-      Object.keys(phrases).forEach(p => {
-        if (!newScores[p]) newScores[p] = 0;
-      });
+    <div class="section-title">七音の言葉（二句用）</div>
+    <div id="inputs-7-container"></div>
+    
+    <button id="add-word-btn" onclick="addWords()">そざいを追加</button>
+    <p style="margin-top: 12px; text-align:center;">
+      あつまったそざい：<br>
+      五音 <strong id="total-words-5">0</strong> 個 ／ 七音 <strong id="total-words-7">0</strong> 個
+    </p>
+    
+    <div style="margin-top: 20px;">
+      <h3>参加メンバーと現在のスコア</h3>
+      <div id="player-list"></div>
+    </div>
+    
+    <button onclick="startGame()" style="background-color: #16a34a; margin-top: 20px;">はぃくづくりを開始</button>
 
-      Object.keys(votes).forEach(voter => {
-        const voterVotes = votes[voter] || {};
-        Object.keys(voterVotes).forEach(target => {
-          const k = voterVotes[target];
-          const opt = evalOptionsMaster[k];
-          if (opt) {
-            newScores[target] = (newScores[target] || 0) + opt.pts;
-          }
-        });
-      });
+    <!-- 履歴出力領域（ロビー） -->
+    <div style="margin-top: 20px; border-top: 1px solid #e2e8f0; padding-top: 12px;">
+      <h3 style="font-size: 14px; margin-bottom: 4px;">📜 これまでのゲーム履歴出力</h3>
+      <div class="export-group">
+        <button class="export-btn-text" onclick="exportText()">📋 コピー (Discord用)</button>
+        <button class="export-btn-csv" onclick="exportCSV()">📥 CSV保存</button>
+      </div>
+    </div>
+  </div>
 
-      // 履歴レコード追加
-      const roundHistory = {
-        round: roundCount,
-        phrases: phrases,
-        phraseDetails: currentData.phraseDetails || {},
-        votes: votes,
-        host: players[hostIndex % (players.length || 1)] || ''
-      };
+  <!-- 3. ゲーム画面（作成 & 発表 & 投票） -->
+  <div id="game-sec" class="card-panel" style="display:none;">
+    <h2>2. はぃくを詠む</h2>
+    
+    <div id="host-info-game" class="host-banner"></div>
 
-      try {
-        await updateDoc(roomRef, {
-          status: "lobby",
-          hostIndex: hostIndex + 1,
-          roundCount: roundCount + 1,
-          scores: newScores,
-          history: [...history, roundHistory],
-          words5: [],
-          words7: [],
-          hands5: {},
-          hands7: {},
-          phrases: {},
-          phraseDetails: {},
-          votes: {}
-        });
+    <div class="section-title">あなたの手札（五音カード）</div>
+    <div class="word-list" id="hand-5-list"></div>
 
-        alert('次の節に進みます！親が交代しました。');
-      } catch (e) {
-        console.error(e);
-        alert('次ラウンドへの遷移に失敗しました');
-      }
-    };
+    <div class="section-title">あなたの手札（七音カード）</div>
+    <div class="word-list" id="hand-7-list"></div>
 
-    // --- 履歴出力機能 ---
+    <h3 style="margin-top: 20px;">詠んだはぃく（五・七・五）</h3>
+    <div class="display-area">
+      <div class="display-line"><span>初句(五):</span> <div id="phrase-1"></div></div>
+      <button class="swap-btn" onclick="swap5Cards()">⇄ 五音（初句・結句）を入れ替える</button>
+      <div class="display-line"><span>二句(七):</span> <div id="phrase-2"></div></div>
+      <div class="display-line"><span>結句(五):</span> <div id="phrase-3"></div></div>
+    </div>
 
-    window.exportText = function() {
-      if (!currentData) return;
-      const history = currentData.history || [];
-      const currentPhrases = currentData.phrases || {};
-      const currentDetails = currentData.phraseDetails || {};
-      const currentVotes = currentData.votes || {};
-      const currentRound = currentData.roundCount || 1;
+    <div style="display: flex; gap: 8px;">
+      <button onclick="clearPhrase()" style="background-color: #dc2626; margin-top: 12px;">やりなおす</button>
+      <button onclick="submitPhrase()" style="background-color: #2563eb; margin-top: 12px;">一句披露する</button>
+    </div>
 
-      let text = `【わ〜鯖せーへきはぃく 履歴一覧】\n\n`;
+    <hr style="margin: 24px 0; border: none; border-top: 1px solid #e2e8f0;">
 
-      const formatRoundText = (rNum, rHost, rPhrases, rDetails, rVotes) => {
-        let block = `━━━ 第 ${rNum} 節 (選者: ${rHost}) ━━━\n`;
-        Object.keys(rPhrases).forEach(pName => {
-          const details = rDetails[pName] || [];
-          let phraseStr = rPhrases[pName];
-          if (details.length === 3) {
-            phraseStr = details.map(d => `${d.text}(${d.author})`).join(" ");
-          }
+    <h2>みんなのはぃく & 評価</h2>
+    <div id="board-list"></div>
 
-          let evalStr = "";
-          Object.keys(rVotes).forEach(voter => {
-            const vKey = rVotes[voter] ? rVotes[voter][pName] : null;
-            if (vKey && evalOptionsMaster[vKey]) {
-              evalStr += ` [${evalOptionsMaster[vKey].icon}${voter}]`;
-            }
-          });
+    <!-- ランキング・結果表示領域 -->
+    <div id="result-area" style="display:none; margin-top:20px; background:#f0fdf4; border:1px solid #bbf7d0; padding:12px; border-radius:8px;">
+      <h3 style="color:#166534; margin-bottom:8px;">🪭 撰の果て</h3>
+      <div id="round-results"></div>
 
-          block += `・${pName}: ${phraseStr}${evalStr}\n`;
-        });
-        return block + `\n`;
-      };
+      <!-- 評価アイコンの意味解説 -->
+      <div class="eval-guide-box">
+        <div class="eval-guide-header" onclick="toggleEvalGuide()">
+          <span>📖 評価アイコンの解説</span>
+          <span id="eval-guide-toggle-icon">▼</span>
+        </div>
+        <div class="eval-guide-content" id="eval-guide-content" style="display:none;">
+          <div>🌸 <strong>いとおかし</strong>: 面白い、センスが良い (+1誉)</div>
+          <div>🌾 <strong>もののあはれ</strong>: エモい、心に響く (+1誉)</div>
+          <div>❄️ <strong>わびさび</strong>: 地味だけど味がある (+1誉)</div>
+          <div>🌀 <strong>あやし</strong>: カオス、不思議 (+1誉)</div>
+          <div>🍶 <strong>狂おし</strong>: 癖が強い、突飛 (+1誉)</div>
+          <div>🍃 <strong>わびし</strong>: シュール、哀愁 (+1誉)</div>
+          <div>🌙 <strong>幽玄</strong>: 奥深い、雰囲気がある (+1誉)</div>
+          <div>🪭 <strong>妙なり</strong>: 極上、大絶賛 (<strong>+2誉</strong>)</div>
+        </div>
+      </div>
+    </div>
 
-      // 過去のラウンド
-      history.forEach(h => {
-        text += formatRoundText(h.round, h.host, h.phrases || {}, h.phraseDetails || {}, h.votes || {});
-      });
+    <!-- 履歴出力領域（ゲーム画面） -->
+    <div class="export-group">
+      <button class="export-btn-text" onclick="exportText()">📋 コピー (Discord用)</button>
+      <button class="export-btn-csv" onclick="exportCSV()">📥 CSV保存</button>
+    </div>
 
-      // 現在進行中のラウンド（未集計分）
-      if (Object.keys(currentPhrases).length > 0) {
-        const players = currentData.players || [];
-        const hostIndex = currentData.hostIndex || 0;
-        const curHost = players[hostIndex % (players.length || 1)] || '';
-        text += formatRoundText(currentRound, curHost, currentPhrases, currentDetails, currentVotes);
-      }
+    <button onclick="nextRound()" style="background-color: #0284c7; margin-top: 24px;">🔄 つぎの一句を詠む（親を交代）</button>
+  </div>
 
-      navigator.clipboard.writeText(text).then(() => {
-        alert("Discord用テキストをクリップボードにコピーしました！");
-      }).catch(err => {
-        console.error(err);
-        alert("コピーに失敗しました");
-      });
-    };
-
-    window.exportCSV = function() {
-      if (!currentData) return;
-      const history = currentData.history || [];
-      const currentPhrases = currentData.phrases || {};
-      const currentDetails = currentData.phraseDetails || {};
-      const currentVotes = currentData.votes || {};
-      const currentRound = currentData.roundCount || 1;
-
-      let csv = "\uFEFF第何節,選者(親),詠み手,完成はぃく,構成要素(素材と作者),獲得評価\n";
-
-      const processRow = (rNum, rHost, pName, fullText, details, rVotes) => {
-        const safeText = `"${(fullText || "").replace(/"/g, '""')}"`;
-        const wordsStr = details.length === 3
-          ? `"${details.map(d => `${d.text}(${d.author})`).join(" ")}"`
-          : safeText;
-
-        let evalList = [];
-        Object.keys(rVotes).forEach(voter => {
-          const vKey = rVotes[voter] ? rVotes[voter][pName] : null;
-          if (vKey && evalOptionsMaster[vKey]) {
-            evalList.push(`${evalOptionsMaster[vKey].label}(${voter})`);
-          }
-        });
-        const evalStr = `"${evalList.join(" / ")}"`;
-
-        return `${rNum},"${rHost}","${pName}",${safeText},${wordsStr},${evalStr}\n`;
-      };
-
-      history.forEach(h => {
-        const rPhrases = h.phrases || {};
-        const rDetails = h.phraseDetails || {};
-        const rVotes = h.votes || {};
-        Object.keys(rPhrases).forEach(pName => {
-          csv += processRow(h.round, h.host, pName, rPhrases[pName], rDetails[pName] || [], rVotes);
-        });
-      });
-
-      if (Object.keys(currentPhrases).length > 0) {
-        const players = currentData.players || [];
-        const hostIndex = currentData.hostIndex || 0;
-        const curHost = players[hostIndex % (players.length || 1)] || '';
-        Object.keys(currentPhrases).forEach(pName => {
-          csv += processRow(currentRound, curHost, pName, currentPhrases[pName], currentDetails[pName] || [], currentVotes);
-        });
-      }
-
-      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `haiku_history_${roomId}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
-    };
-  </script>
+  <script type="module" src="app.js"></script>
 </body>
 </html>
