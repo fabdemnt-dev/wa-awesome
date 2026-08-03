@@ -1,5 +1,6 @@
 import { db } from "./firebase-config.js";
 import { doc, setDoc, onSnapshot, updateDoc, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { exportPoemText, exportPoemCSV } from "./poem-export.js";
 
 let roomId = "";
 let myName = "";
@@ -168,7 +169,6 @@ function renderBoards() {
   `).join('');
 }
 
-// 次のポエム作成へ移動する処理
 window.nextGame = async function() {
   if (!roomRef) return;
   await updateDoc(roomRef, {
@@ -178,3 +178,6 @@ window.nextGame = async function() {
   });
   alert('次のポエム作成に進みます！');
 };
+
+window.exportText = function() { exportPoemText(currentData); };
+window.exportCSV = function() { exportPoemCSV(currentData, roomId); };
