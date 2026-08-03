@@ -100,17 +100,17 @@
     <button onclick="joinRoom()">参加する</button>
   </div>
 
-  <!-- 2. ロビー & 性癖登録 -->
+  <!-- 2. ロビー & 素材登録 -->
   <div id="lobby-sec" class="card-panel" style="display:none;">
-    <h2>1. ポエムの素材あつめ（性癖を3つ入力）</h2>
-    <p style="font-size: 14px; color: #64748b; margin-bottom: 12px;">3つの入力枠にそれぞれ好きなせーへきを入れてください。</p>
+    <h2>1. ポエムの素材あつめ（素材を3つ入力）</h2>
+    <p style="font-size: 14px; color: #64748b; margin-bottom: 12px;">3つの入力枠にそれぞれ好きなそざいを入れてください。</p>
     
-    <input type="text" id="word-input-1" placeholder="せーへき 1（例：眼鏡）">
-    <input type="text" id="word-input-2" placeholder="せーへき 2（例：黒髪）">
-    <input type="text" id="word-input-3" placeholder="せーへき 3（例：束縛）">
+    <input type="text" id="word-input-1" placeholder="そざい 1（例：眼鏡）">
+    <input type="text" id="word-input-2" placeholder="そざい 2（例：黒髪）">
+    <input type="text" id="word-input-3" placeholder="そざい 3（例：束縛）">
     
-    <button id="add-word-btn" onclick="addWords()">3つのせーへきを追加</button>
-    <p style="margin-top: 12px;">あつまったせーへき: <strong id="total-words">0</strong> 個</p>
+    <button id="add-word-btn" onclick="addWords()">3つのそざいを追加</button>
+    <p style="margin-top: 12px;">あつまったそざい: <strong id="total-words">0</strong> 個</p>
     
     <div style="margin-top: 20px;">
       <h3>参加メンバーと現在のスコア</h3>
@@ -221,10 +221,6 @@
             if (currentData.hands && currentData.hands[myName]) {
               myHand = currentData.hands[myName];
               renderHand();
-            } else if (currentData.words && currentData.words.length > 0 && myHand.length === 0) {
-              const shuffled = [...currentData.words].sort(() => Math.random() - 0.5);
-              myHand = shuffled.slice(0, 3);
-              renderHand();
             }
             renderBoards();
           }
@@ -240,7 +236,7 @@
       const w2 = document.getElementById('word-input-2').value.trim();
       const w3 = document.getElementById('word-input-3').value.trim();
 
-      if (!w1 || !w2 || !w3) return alert('3つすべての枠にせーへきを入力してください！');
+      if (!w1 || !w2 || !w3) return alert('3つすべての枠にそざいを入力してください！');
 
       await updateDoc(roomRef, { 
         words: arrayUnion(w1, w2, w3) 
@@ -256,12 +252,27 @@
     };
 
     window.startGame = async function() {
-      await updateDoc(roomRef, { status: 'playing' });
+      if (!currentData || !currentData.words) return;
+
+      const words = [...currentData.words];
+      const players = currentData.players || [];
+      const shuffled = words.sort(() => Math.random() - 0.5);
+
+      const newHands = {};
+      players.forEach((player, index) => {
+        const start = index * 3;
+        newHands[player] = shuffled.slice(start, start + 3);
+      });
+
+      await updateDoc(roomRef, { 
+        status: 'playing',
+        hands: newHands 
+      });
     };
 
     window.nextRound = async function() {
       const btn = document.getElementById('add-word-btn');
-      btn.innerText = "3つのせーへきを追加";
+      btn.innerText = "3つのそざいを追加";
       btn.disabled = false;
 
       for (let i = 1; i <= 3; i++) {
