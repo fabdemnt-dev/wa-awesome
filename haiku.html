@@ -16,13 +16,15 @@
     <input type="text" id="player-name" placeholder="あなたの名前">
     <input type="text" id="room-id" placeholder="ルームID（例：123）">
     <label style="display:flex; align-items:center; gap:6px; margin: 8px 0; font-size:14px; cursor:pointer;">
-      <input type="checkbox" id="spectator-check"> 👀 見学モード（観戦のみ）
+      <input type="checkbox" id="spectator-check"> 👀 最初は見学モード（観戦のみ）で入る
     </label>
     <button onclick="joinRoom()">参加する</button>
   </div>
 
   <!-- 2. ロビー & 素材登録 -->
   <div id="lobby-sec" class="card-panel" style="display:none;">
+    <button id="role-toggle-btn-lobby" onclick="toggleRole()" style="background-color: #64748b; margin-bottom: 12px;">👀 見学モードに切り替える</button>
+
     <h2>1. はぃくの素材あつめ</h2>
     
     <div id="host-info-lobby" class="host-banner"></div>
@@ -84,6 +86,8 @@
 
   <!-- 3. ゲーム画面（作成 & 発表 & 投票） -->
   <div id="game-sec" class="card-panel" style="display:none;">
+    <button id="role-toggle-btn-game" onclick="toggleRole()" style="background-color: #64748b; margin-bottom: 12px;">👀 見学モードに切り替える</button>
+
     <h2>2. はぃくを詠む</h2>
     
     <div id="host-info-game" class="host-banner"></div>
