@@ -196,6 +196,29 @@
       font-weight: bold;
       font-size: 14px;
     }
+    .eval-guide-box {
+      background: #f8fafc;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      margin-top: 12px;
+      font-size: 13px;
+      overflow: hidden;
+    }
+    .eval-guide-header {
+      padding: 8px 12px;
+      background: #e2e8f0;
+      font-weight: bold;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      user-select: none;
+      color: #334155;
+    }
+    .eval-guide-content {
+      padding: 10px 12px;
+      line-height: 1.6;
+    }
   </style>
 </head>
 <body>
@@ -296,6 +319,24 @@
     <div id="result-area" style="display:none; margin-top:20px; background:#f0fdf4; border:1px solid #bbf7d0; padding:12px; border-radius:8px;">
       <h3 style="color:#166534; margin-bottom:8px;">🪭 撰の果て</h3>
       <div id="round-results"></div>
+
+      <!-- 評価アイコンの意味解説（ドロップダウン/アコーディオン） -->
+      <div class="eval-guide-box">
+        <div class="eval-guide-header" onclick="toggleEvalGuide()">
+          <span>📖 評価アイコンの解説</span>
+          <span id="eval-guide-toggle-icon">▼</span>
+        </div>
+        <div class="eval-guide-content" id="eval-guide-content" style="display:none;">
+          <div>🌸 <strong>いとおかし</strong>: 面白い、センスが良い (+1誉)</div>
+          <div>🌾 <strong>もののあはれ</strong>: エモい、心に響く (+1誉)</div>
+          <div>❄️ <strong>わびさび</strong>: 地味だけど味がある (+1誉)</div>
+          <div>🌀 <strong>あやし</strong>: カオス、不思議 (+1誉)</div>
+          <div>🍶 <strong>狂おし</strong>: 癖が強い、突飛 (+1誉)</div>
+          <div>🍃 <strong>わびし</strong>: シュール、哀愁 (+1誉)</div>
+          <div>🌙 <strong>幽玄</strong>: 奥深い、雰囲気がある (+1誉)</div>
+          <div>🪭 <strong>妙なり</strong>: 極上、大絶賛 (<strong>+2誉</strong>)</div>
+        </div>
+      </div>
     </div>
 
     <button onclick="nextRound()" style="background-color: #0284c7; margin-top: 24px;">🔄 つぎの一句を詠む（親を交代）</button>
@@ -327,19 +368,18 @@
     let selectedHand = [null, null, null];
     let currentData = null;
 
-    // 全評価の定義（ラベル、獲得ポイント）
+    // 全評価の定義（アイコン、ラベル、獲得ポイント）
     const evalOptionsMaster = {
-      okashi: { label: "🌸 いとおかし", pts: 1 },
-      aware:  { label: "🌾 もののあはれ", pts: 1 },
-      wabisabi:{ label: "❄️ わびさび", pts: 1 },
-      ayashi: { label: "🌀 あやし", pts: 1 },
-      kuruoshi:{ label: "🍶 狂おし", pts: 1 },
-      wabishi:{ label: "🍃 わびし", pts: 1 },
-      yugen:  { label: "🌙 幽玄", pts: 1 },
-      tae:    { label: "🪭 妙なり (+2誉)", pts: 2 }
+      okashi: { icon: "🌸", label: "🌸 いとおかし", pts: 1 },
+      aware:  { icon: "🌾", label: "🌾 もののあはれ", pts: 1 },
+      wabisabi:{ icon: "❄️", label: "❄️ わびさび", pts: 1 },
+      ayashi: { icon: "🌀", label: "🌀 あやし", pts: 1 },
+      kuruoshi:{ icon: "🍶", label: "🍶 狂おし", pts: 1 },
+      wabishi:{ icon: "🍃", label: "🍃 わびし", pts: 1 },
+      yugen:  { icon: "🌙", label: "🌙 幽玄", pts: 1 },
+      tae:    { icon: "🪭", label: "🪭 妙なり (+2誉)", pts: 2 }
     };
 
-    // 親（全種）と子（3種）の選択肢キー
     const hostOptionKeys = ['okashi', 'aware', 'wabisabi', 'ayashi', 'kuruoshi', 'wabishi', 'yugen', 'tae'];
     const childOptionKeys = ['okashi', 'aware', 'wabisabi'];
 
@@ -362,6 +402,18 @@
     window.toggleSettings = function() {
       const content = document.getElementById('setting-content');
       const icon = document.getElementById('setting-toggle-icon');
+      if (content.style.display === 'none') {
+        content.style.display = 'block';
+        icon.innerText = '▲';
+      } else {
+        content.style.display = 'none';
+        icon.innerText = '▼';
+      }
+    };
+
+    window.toggleEvalGuide = function() {
+      const content = document.getElementById('eval-guide-content');
+      const icon = document.getElementById('eval-guide-toggle-icon');
       if (content.style.display === 'none') {
         content.style.display = 'block';
         icon.innerText = '▲';
@@ -462,7 +514,6 @@
         alert('接続エラーが発生しました: ' + e.message);
       }
     };
-
     function renderInputFields(c5, c7) {
       const c5Container = document.getElementById('inputs-5-container');
       const c7Container = document.getElementById('inputs-7-container');
@@ -763,7 +814,7 @@
                   </div>
                   ${myVotesForThisPlayer.length > 0 ? `
                     <div style="font-size:11px; color:#64748b; margin-top:4px; text-align:right;">
-                      評価済: ${myVotesForThisPlayer.map(v => evalOptionsMaster[v.type]?.label || '').join(', ')}
+                      評価済: ${myVotesForThisPlayer.map(v => evalOptionsMaster[v.type]?.icon || '').join(' ')}
                     </div>
                   ` : ''}
                 ` : '<span style="font-size:12px; color:#94a3b8;">手前が作</span>'}
@@ -794,18 +845,18 @@
         });
 
         resList.innerHTML = Object.entries(playerCounts).map(([p, data]) => {
-          const detailStr = Object.entries(data.details).map(([k, count]) => {
-            const label = evalOptionsMaster[k]?.label || k;
-            return `${label}: ${count}`;
-          }).join(' ／ ');
+          // アイコンを獲得した個数分だけ並べて表示（例: 🌸🌸 🪭）
+          const iconStr = Object.entries(data.details).map(([k, count]) => {
+            const icon = evalOptionsMaster[k]?.icon || k;
+            return icon.repeat(count);
+          }).join(' ');
 
           return `
             <div style="margin-bottom:8px;">
               <strong>${p}</strong>: +${data.pts} 誉 
+              <span style="font-size:16px; margin-left:6px; letter-spacing:2px;">${iconStr}</span>
               <br>
-              <span style="font-size:12px; color:#475569;">（${detailStr}）</span>
-              <br>
-              <span style="font-size:13px; color:#166534; font-weight:bold;">累計: ${currentData.scores?.[p] || 0} 誉</span>
+              <span style="font-size:12px; color:#166534; font-weight:bold;">累計: ${currentData.scores?.[p] || 0} 誉</span>
             </div>
           `;
         }).join('');
