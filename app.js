@@ -1,7 +1,7 @@
 import { db } from "./firebase-config.js";
 import { doc, setDoc, onSnapshot, updateDoc, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { evalOptionsMaster, hostOptionKeys, childOptionKeys, renderResults } from "./eval.js";
-import { exportText, exportCSV } from "./export.js";
+import { exportText as expText, exportCSV as expCSV } from "./export.js";
 
 let roomId = "";
 let myName = "";
@@ -25,21 +25,21 @@ function getAuthorStyle(authorName) {
   return idx === -1 ? colorPalette[0] : colorPalette[idx % colorPalette.length];
 }
 
-window.toggleSettings = () => {
+window.toggleSettings = function() {
   const c = document.getElementById('setting-content');
   const i = document.getElementById('setting-toggle-icon');
   c.style.display = c.style.display === 'none' ? 'block' : 'none';
   i.innerText = c.style.display === 'none' ? '▼' : '▲';
 };
 
-window.toggleEvalGuide = () => {
+window.toggleEvalGuide = function() {
   const c = document.getElementById('eval-guide-content');
   const i = document.getElementById('eval-guide-toggle-icon');
   c.style.display = c.style.display === 'none' ? 'block' : 'none';
   i.innerText = c.style.display === 'none' ? '▼' : '▲';
 };
 
-window.joinRoom = async () => {
+window.joinRoom = async function() {
   myName = document.getElementById('player-name').value.trim();
   roomId = document.getElementById('room-id').value.trim();
   if (!myName || !roomId) return alert('名前とルームIDを入力してください');
@@ -67,10 +67,10 @@ window.joinRoom = async () => {
       document.getElementById('host-info-game').innerHTML = hostText;
 
       const st = currentData.settings || { in5: 5, in7: 3, hand5: 5, hand7: 3 };
-      ['in-5', 'in-7', 'hand-5', 'hand-7'].forEach(key => {
-        const field = key.replace('-', '');
-        document.getElementById(`set-${key}`).value = st[field];
-      });
+      if (document.getElementById('set-in-5')) document.getElementById('set-in-5').value = st.in5;
+      if (document.getElementById('set-in-7')) document.getElementById('set-in-7').value = st.in7;
+      if (document.getElementById('set-hand-5')) document.getElementById('set-hand-5').value = st.hand5;
+      if (document.getElementById('set-hand-7')) document.getElementById('set-hand-7').value = st.hand7;
 
       renderInputFields(st.in5, st.in7);
       document.getElementById('total-words-5').innerText = currentData.words5?.length || 0;
@@ -106,6 +106,7 @@ window.joinRoom = async () => {
 function renderInputFields(c5, c7) {
   ['5', '7'].forEach(type => {
     const container = document.getElementById(`inputs-${type}-container`);
+    if (!container) return;
     const count = type === '5' ? c5 : c7;
     if (container.children.length !== count) {
       container.innerHTML = '';
@@ -119,7 +120,7 @@ function renderInputFields(c5, c7) {
   });
 }
 
-window.updateSettings = async () => {
+window.updateSettings = async function() {
   if (!roomRef) return;
   await updateDoc(roomRef, {
     settings: {
@@ -131,7 +132,7 @@ window.updateSettings = async () => {
   });
 };
 
-window.addWords = async () => {
+window.addWords = async function() {
   if (!currentData) return;
   const st = currentData.settings || { in5: 5, in7: 3 };
   const getWords = (type, count) => {
@@ -152,13 +153,13 @@ window.addWords = async () => {
   document.getElementById('add-word-btn').innerText = "✅ 追加完了！";
 };
 
-window.removePlayer = async (pName) => {
+window.removePlayer = async function(pName) {
   if (confirm(`${pName} さんを退出させますか？`)) {
     await updateDoc(roomRef, { players: arrayRemove(pName) });
   }
 };
 
-window.startGame = async () => {
+window.startGame = async function() {
   const players = currentData?.players || [];
   const st = currentData?.settings || { hand5: 5, hand7: 3 };
   const w5 = currentData?.words5 || [], w7 = currentData?.words7 || [];
@@ -188,7 +189,7 @@ function renderHand() {
   document.getElementById('phrase-3').innerText = selectedHand[2]?.text || '（選択してください）';
 }
 
-window.selectCard = (type, idx) => {
+window.selectCard = function(type, idx) {
   if (type === 5) {
     const item = myHand5[idx];
     if (selectedHand[0] === item) selectedHand[0] = null;
@@ -201,10 +202,10 @@ window.selectCard = (type, idx) => {
   renderHand();
 };
 
-window.swap5Cards = () => { [selectedHand[0], selectedHand[2]] = [selectedHand[2], selectedHand[0]]; renderHand(); };
-window.clearPhrase = () => { selectedHand = [null, null, null]; renderHand(); };
+window.swap5Cards = function() { [selectedHand[0], selectedHand[2]] = [selectedHand[2], selectedHand[0]]; renderHand(); };
+window.clearPhrase = function() { selectedHand = [null, null, null]; renderHand(); };
 
-window.submitPhrase = async () => {
+window.submitPhrase = async function() {
   if (!selectedHand[0] || !selectedHand[1] || !selectedHand[2]) return alert('すべて選択してください');
   await updateDoc(roomRef, {
     [`phrases.${myName}`]: `${selectedHand[0].text} ${selectedHand[1].text} ${selectedHand[2].text}`,
@@ -260,14 +261,14 @@ function renderBoards() {
   renderResults(currentData);
 }
 
-window.submitVote = async (targetPlayer) => {
+window.submitVote = async function(targetPlayer) {
   const evalKey = document.getElementById(`vote-select-${targetPlayer}`)?.value;
   if (!evalKey) return alert('評価を選択してください');
   await updateDoc(roomRef, { [`votes.${myName}.${targetPlayer}`]: evalKey });
   alert('評価を贈りました！');
 };
 
-window.nextRound = async () => {
+window.nextRound = async function() {
   if (!currentData) return;
   const votes = currentData.votes || {}, phrases = currentData.phrases || {}, scores = currentData.scores || {};
   const players = currentData.players || [], hostIndex = currentData.hostIndex || 0;
@@ -288,5 +289,5 @@ window.nextRound = async () => {
   alert('次の節に進みます！');
 };
 
-window.exportText = () => exportText(currentData);
-window.exportCSV = () => exportCSV(currentData, roomId);
+window.exportText = function() { expText(currentData); };
+window.exportCSV = function() { expCSV(currentData, roomId); };
