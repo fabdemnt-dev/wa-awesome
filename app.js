@@ -5,6 +5,7 @@ import { exportText as expText, exportCSV as expCSV } from "./export.js";
 
 let roomId = "";
 let myName = "";
+let isSpectator = false;
 let roomRef = null;
 let myHand5 = [];
 let myHand7 = [];
@@ -28,29 +29,46 @@ function getAuthorStyle(authorName) {
 window.toggleSettings = function() {
   const c = document.getElementById('setting-content');
   const i = document.getElementById('setting-toggle-icon');
-  c.style.display = c.style.display === 'none' ? 'block' : 'none';
-  i.innerText = c.style.display === 'none' ? '▼' : '▲';
+  if (c) {
+    c.style.display = c.style.display === 'none' ? 'block' : 'none';
+    if (i) i.innerText = c.style.display === 'none' ? '▼' : '▲';
+  }
 };
 
 window.toggleEvalGuide = function() {
   const c = document.getElementById('eval-guide-content');
   const i = document.getElementById('eval-guide-toggle-icon');
-  c.style.display = c.style.display === 'none' ? 'block' : 'none';
-  i.innerText = c.style.display === 'none' ? '▼' : '▲';
+  if (c) {
+    c.style.display = c.style.display === 'none' ? 'block' : 'none';
+    if (i) i.innerText = c.style.display === 'none' ? '▼' : '▲';
+  }
 };
 
 window.joinRoom = async function() {
   myName = document.getElementById('player-name').value.trim();
   roomId = document.getElementById('room-id').value.trim();
+  const specCheck = document.getElementById('spectator-check');
+  isSpectator = specCheck ? specCheck.checked : false;
+
   if (!myName || !roomId) return alert('名前とルームIDを入力してください');
 
   try {
     roomRef = doc(db, "rooms", "haiku_" + roomId);
-    await setDoc(roomRef, {
-      players: arrayUnion(myName), status: "lobby", hostIndex: 0, roundCount: 1, history: [],
+    
+    // 見学者はプレイヤーリスト（親ローテーション対象）には含めないか、見学者として登録
+    const updateData = {
+      status: "lobby", hostIndex: 0, roundCount: 1, history: [],
       words5: [], words7: [], hands5: {}, hands7: {}, phrases: {}, phraseDetails: {}, votes: {}, scores: {},
       settings: { in5: 5, in7: 3, hand5: 5, hand7: 3 }
-    }, { merge: true });
+    };
+
+    if (isSpectator) {
+      updateData.spectators = arrayUnion(myName);
+    } else {
+      updateData.players = arrayUnion(myName);
+    }
+
+    await setDoc(roomRef, updateData, { merge: true });
 
     document.getElementById('login-sec').style.display = 'none';
     document.getElementById('lobby-sec').style.display = 'block';
@@ -77,7 +95,9 @@ window.joinRoom = async function() {
       document.getElementById('total-words-7').innerText = currentData.words7?.length || 0;
 
       const scores = currentData.scores || {};
-      document.getElementById('player-list').innerHTML = players.map((p, idx) => `
+      const specList = currentData.spectators || [];
+      
+      let playerListHtml = players.map((p, idx) => `
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
           <span>・ ${p} ${idx === (currentData.hostIndex % players.length) ? '<span class="role-badge">選者（親）</span>' : ''}</span>
           <div>
@@ -86,6 +106,12 @@ window.joinRoom = async function() {
           </div>
         </div>
       `).join('');
+
+      if (specList.length > 0) {
+        playerListHtml += `<div style="font-size:12px; color:#64748b; margin-top:8px;">👀 見学者: ${specList.join(', ')}</div>`;
+      }
+
+      document.getElementById('player-list').innerHTML = playerListHtml;
 
       if (currentData.status === 'lobby') {
         document.getElementById('game-sec').style.display = 'none';
@@ -104,9 +130,14 @@ window.joinRoom = async function() {
 };
 
 function renderInputFields(c5, c7) {
+  // 見学者の場合は素材入力欄を出さないか、制御可能
   ['5', '7'].forEach(type => {
     const container = document.getElementById(`inputs-${type}-container`);
     if (!container) return;
+    if (isSpectator) {
+      container.innerHTML = '<div style="font-size:13px; color:#94a3b8;">※見学モードのため素材入力はありません</div>';
+      return;
+    }
     const count = type === '5' ? c5 : c7;
     if (container.children.length !== count) {
       container.innerHTML = '';
@@ -133,7 +164,7 @@ window.updateSettings = async function() {
 };
 
 window.addWords = async function() {
-  if (!currentData) return;
+  if (!currentData || isSpectator) return;
   const st = currentData.settings || { in5: 5, in7: 3 };
   const getWords = (type, count) => {
     const arr = [];
@@ -155,7 +186,7 @@ window.addWords = async function() {
 
 window.removePlayer = async function(pName) {
   if (confirm(`${pName} さんを退出させますか？`)) {
-    await updateDoc(roomRef, { players: arrayRemove(pName) });
+    await updateDoc(roomRef, { players: arrayRemove(pName), spectators: arrayRemove(pName) });
   }
 };
 
@@ -177,12 +208,24 @@ window.startGame = async function() {
 };
 
 function renderHand() {
-  document.getElementById('hand-5-list').innerHTML = myHand5.map((item, idx) => `
-    <div class="card card-5 ${selectedHand.includes(item) ? 'selected' : ''}" onclick="selectCard(5, ${idx})">${item.text}</div>
-  `).join('');
-  document.getElementById('hand-7-list').innerHTML = myHand7.map((item, idx) => `
-    <div class="card card-7 ${selectedHand[1] === item ? 'selected' : ''}" onclick="selectCard(7, ${idx})">${item.text}</div>
-  `).join('');
+  const h5List = document.getElementById('hand-5-list');
+  const h7List = document.getElementById('hand-7-list');
+  if (isSpectator) {
+    if (h5List) h5List.innerHTML = '<div style="font-size:13px; color:#94a3b8;">※見学モード中</div>';
+    if (h7List) h7List.innerHTML = '<div style="font-size:13px; color:#94a3b8;">※見学モード中</div>';
+    return;
+  }
+
+  if (h5List) {
+    h5List.innerHTML = myHand5.map((item, idx) => `
+      <div class="card card-5 ${selectedHand.includes(item) ? 'selected' : ''}" onclick="selectCard(5, ${idx})">${item.text}</div>
+    `).join('');
+  }
+  if (h7List) {
+    h7List.innerHTML = myHand7.map((item, idx) => `
+      <div class="card card-7 ${selectedHand[1] === item ? 'selected' : ''}" onclick="selectCard(7, ${idx})">${item.text}</div>
+    `).join('');
+  }
 
   document.getElementById('phrase-1').innerText = selectedHand[0]?.text || '（選択してください）';
   document.getElementById('phrase-2').innerText = selectedHand[1]?.text || '（選択してください）';
@@ -190,6 +233,7 @@ function renderHand() {
 }
 
 window.selectCard = function(type, idx) {
+  if (isSpectator) return;
   if (type === 5) {
     const item = myHand5[idx];
     if (selectedHand[0] === item) selectedHand[0] = null;
@@ -202,10 +246,11 @@ window.selectCard = function(type, idx) {
   renderHand();
 };
 
-window.swap5Cards = function() { [selectedHand[0], selectedHand[2]] = [selectedHand[2], selectedHand[0]]; renderHand(); };
-window.clearPhrase = function() { selectedHand = [null, null, null]; renderHand(); };
+window.swap5Cards = function() { if (!isSpectator) { [selectedHand[0], selectedHand[2]] = [selectedHand[2], selectedHand[0]]; renderHand(); } };
+window.clearPhrase = function() { if (!isSpectator) { selectedHand = [null, null, null]; renderHand(); } };
 
 window.submitPhrase = async function() {
+  if (isSpectator) return alert('見学モードでは句の投稿はできません');
   if (!selectedHand[0] || !selectedHand[1] || !selectedHand[2]) return alert('すべて選択してください');
   await updateDoc(roomRef, {
     [`phrases.${myName}`]: `${selectedHand[0].text} ${selectedHand[1].text} ${selectedHand[2].text}`,
