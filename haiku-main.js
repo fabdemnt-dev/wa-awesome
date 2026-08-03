@@ -1,4 +1,4 @@
-import db from "./firebase-config.js";
+import { db } from "./firebase-config.js";
 import { doc, setDoc, onSnapshot, updateDoc, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { evalOptionsMaster, hostOptionKeys, childOptionKeys, renderResults } from "./haiku-eval.js";
 import { exportText as expText, exportCSV as expCSV } from "./haiku-export.js";
@@ -359,6 +359,9 @@ window.nextRound = async function() {
 
   let taeWinners = [];
 
+  // 大人数時にも「妙なり」が必ずトップになる点数を動的計算（人数 * 2、最低でも10点）
+  const taePoints = Math.max(10, players.length * 2);
+
   Object.keys(votes).forEach(voter => {
     Object.keys(votes[voter] || {}).forEach(target => {
       const k = votes[voter][target];
@@ -366,14 +369,14 @@ window.nextRound = async function() {
         taeWinners.push(target);
       }
       const opt = evalOptionsMaster[k];
-      const pts = (k === 'tae') ? 10 : (opt ? opt.pts : 0);
+      const pts = (k === 'tae') ? taePoints : (opt ? opt.pts : 0);
       newScores[target] = (newScores[target] || 0) + pts;
     });
   });
 
   let alertMessage = '次の節に進みます！';
   if (taeWinners.length > 0) {
-    alertMessage = `🪭 妙なりが出ました！今節の最高功労者: ${taeWinners.join(', ')} さん！\n` + alertMessage;
+    alertMessage = `🪭 妙なりが出ました！今節の最高功労者: ${taeWinners.join(', ')} さん！(+${taePoints}誉)\n` + alertMessage;
   }
 
   await updateDoc(roomRef, {
