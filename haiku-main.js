@@ -338,7 +338,6 @@ function renderBoards() {
     Object.keys(votes).forEach(voter => {
       const vData = votes[voter]?.[pName];
       if (vData) {
-        // 配列（親の場合）または単一の文字列（子の場合）に対応
         const keys = Array.isArray(vData) ? vData : [vData];
         keys.forEach(k => {
           if (evalOptionsMaster[k]) {
@@ -348,7 +347,6 @@ function renderBoards() {
       }
     });
 
-    // 子ですでに投票済みかどうかをチェック
     const hasAlreadyVotedAsChild = !isHost && votes[myName]?.[pName] != null;
 
     return `
@@ -383,7 +381,6 @@ window.submitVote = async function(targetPlayer) {
   const isHost = (myName === currentHost);
 
   if (isHost) {
-    // 親の場合は複数評価を許可（配列に追加）
     const currentVotes = currentData.votes?.[myName]?.[targetPlayer] || [];
     const currentVotesArr = Array.isArray(currentVotes) ? currentVotes : [currentVotes];
     const newVotesArr = [...currentVotesArr, evalKey];
@@ -391,7 +388,6 @@ window.submitVote = async function(targetPlayer) {
     await updateDoc(roomRef, { [`votes.${myName}.${targetPlayer}`]: newVotesArr });
     alert('評価を追加で贈りました！');
   } else {
-    // 子の場合は1回のみ
     const existingVote = currentData.votes?.[myName]?.[targetPlayer];
     if (existingVote) {
       return alert('この句にはすでに評価を送信しています（子は1度だけ送信できます）');
@@ -463,7 +459,7 @@ window.exportCSV = function() {
   const history = currentData.history || [];
   let csv = `節,選者,風流名,句\n`;
   history.forEach(h => {
-    Object.keys(h.phrases || {}).format?.forEach?.(p => {}) || Object.keys(h.phrases || {}).forEach(p => {
+    Object.keys(h.phrases || {}).forEach(p => {
       csv += `${h.round},"${h.host}","${p}","${h.phrases[p]}"\n`;
     });
   });
