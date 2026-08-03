@@ -230,12 +230,12 @@
 
     <hr style="margin: 24px 0; border: none; border-top: 1px solid #e2e8f0;">
 
-    <h2>みんなのはぃく & 投票</h2>
+    <h2>みんなのはぃく & 評価</h2>
     <div id="board-list"></div>
 
     <!-- ランキング・結果表示領域 -->
     <div id="result-area" style="display:none; margin-top:20px; background:#f0fdf4; border:1px solid #bbf7d0; padding:12px; border-radius:8px;">
-      <h3 style="color:#166534; margin-bottom:8px;">🏆 今回の投票結果</h3>
+      <h3 style="color:#166534; margin-bottom:8px;">🪭 撰の果て</h3>
       <div id="round-results"></div>
     </div>
 
@@ -266,7 +266,6 @@
 
     let myHand5 = [];
     let myHand7 = [];
-    // [0]: 初句(五), [1]: 二句(七), [2]: 結句(五)
     let selectedHand = [null, null, null];
     let currentData = null;
 
@@ -326,7 +325,7 @@
             `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
               <span>・ ${p}</span>
               <div>
-                <span class="score-badge" style="margin-right:8px;">${scores[p] || 0} pt</span>
+                <span class="score-badge" style="margin-right:8px;">${scores[p] || 0} 誉</span>
                 <button onclick="removePlayer('${p}')" style="width:auto; margin:0; padding:4px 8px; font-size:12px; background-color:#ef4444;">鯖落ち</button>
               </div>
             </div>`
@@ -547,7 +546,7 @@
     window.voteFor = async function(targetPlayer) {
       if (!currentData) return;
       const votes = currentData.votes || {};
-      if (votes[myName]) return alert('投票は1人1回までです');
+      if (votes[myName]) return alert('評価は1人1回までです');
 
       const updateData = {};
       updateData[`votes.${myName}`] = targetPlayer;
@@ -578,12 +577,13 @@
             <div>
               ${!isSelf ? `
                 <button class="vote-btn" onclick="voteFor('${player}')" ${myVoted ? 'disabled' : ''}>
-                  ${myVoted === player ? '投票済み' : '👍 投票'}
+                  ${myVoted === player ? '納め済み' : '🌸 いとおかし'}
                 </button>
-              ` : '<span style="font-size:12px; color:#94a3b8;">自分の作品</span>'}
+              ` : '<span style="font-size:12px; color:#94a3b8;">手前が作</span>'}
             </div>
           </div>
         `;
       }).join('');
 
-      const resArea 
+      const resArea = document.getElementById('result-area');
+  
