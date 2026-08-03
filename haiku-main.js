@@ -10,7 +10,7 @@ const evalOptionsMaster = {
   kuruoshi: { icon: "🍶", label: "🍶 狂おし", pts: 1 },
   wabishi:  { icon: "🍃", label: "🍃 わびし", pts: 1 },
   yugen:    { icon: "🌙", label: "🌙 幽玄", pts: 1 },
-  tae:       { icon: "🪭", label: "🪭 妙なり", pts: 10 }
+  tae:      { icon: "🪭", label: "🪭 妙なり", pts: 10 }
 };
 const hostOptionKeys = [
   "okashi",
@@ -436,6 +436,7 @@ window.nextRound = async function() {
   alert(alertMessage);
 };
 
+// --- 拡張版：御印（評価）データも含めて出力するテキスト保存 ---
 window.exportText = function() {
   if (!currentData) return;
   const history = currentData.history || [];
@@ -443,7 +444,26 @@ window.exportText = function() {
   history.forEach(h => {
     txt += `--- 第${h.round}節 (選者: ${h.host}) ---\n`;
     Object.keys(h.phrases || {}).forEach(p => {
-      txt += `${p}: ${h.phrases[p]}\n`;
+      txt += `[句] ${p}: ${h.phrases[p]}\n`;
+      
+      // 誰からどんな御印が贈られたかをまとめる
+      let voteStrs = [];
+      Object.keys(h.votes || {}).forEach(voter => {
+        const vData = h.votes[voter]?.[p];
+        if (vData) {
+          const keys = Array.isArray(vData) ? vData : [vData];
+          keys.forEach(k => {
+            if (evalOptionsMaster[k]) {
+              voteStrs.push(`${voter}：${evalOptionsMaster[k].label}`);
+            }
+          });
+        }
+      });
+      if (voteStrs.length > 0) {
+        txt += `   └ 御印 → ${voteStrs.join(', ')}\n`;
+      } else {
+        txt += `   └ 御印 → なし\n`;
+      }
     });
     txt += `\n`;
   });
@@ -454,13 +474,32 @@ window.exportText = function() {
   a.click();
 };
 
+// --- 拡張版：御印（評価）データも含めて出力するCSV保存 ---
 window.exportCSV = function() {
   if (!currentData) return;
   const history = currentData.history || [];
-  let csv = `節,選者,風流名,句\n`;
+  let csv = `節,選者,風流名,句,贈られた御印\n`;
   history.forEach(h => {
     Object.keys(h.phrases || {}).forEach(p => {
-      csv += `${h.round},"${h.host}","${p}","${h.phrases[p]}"\n`;
+      const phraseText = h.phrases[p] || '';
+      
+      // この句に贈られたすべての御印を集約
+      let voteLabels = [];
+      Object.keys(h.votes || {}).forEach(voter => {
+        const vData = h.votes[voter]?.[p];
+        if (vData) {
+          const keys = Array.isArray(vData) ? vData : [vData];
+          keys.forEach(k => {
+            if (evalOptionsMaster[k]) {
+              // CSVのセル内改行やカンマを避けるためラベルのみ、またはシンプルな形式に
+              voteLabels.push(`${voter}(${evalOptionsMaster[k].label.replace(/[🌸🌾❄️🌀🍶🍃🌙🪭]/g, '').trim()})`);
+            }
+          });
+        }
+      });
+      const votesStr = voteLabels.join(' / ');
+
+      csv += `${h.round},"${h.host}","${p}","${phraseText}","${votesStr}"\n`;
     });
   });
   const blob = new Blob([csv], { type: 'text/csv' });
