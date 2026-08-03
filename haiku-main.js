@@ -1,7 +1,32 @@
-import { db } from "./firebase-config.js";
-import { doc, setDoc, onSnapshot, updateDoc, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-import { evalOptionsMaster, hostOptionKeys, childOptionKeys, renderResults } from "./haiku-eval.js";
-import { exportText as expText, exportCSV as expCSV } from "./haiku-export.js";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+import { getFirestore, doc, setDoc, onSnapshot, updateDoc, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+// ポエム側と同じFirebase設定（firebase-config.jsを使わずに直接記述）
+const firebaseConfig = {
+  apiKey: "AIzaSy...", // ※お使いのFirebase Consoleで確認できるAPIキー（firebase-config.jsからコピー）
+  authDomain: "wa-awesome.firebaseapp.com",
+  projectId: "wa-awesome",
+  storageBucket: "wa-awesome.appspot.com",
+  messagingSenderId: "...",
+  appId: "..."
+};
+
+// firebase-config.js の内容をそのまま使いたい場合は、1行目を以下に戻すことも可能です
+// import { db } from "./firebase-config.js";
+
+// 評価・エクスポート用定数
+const evalOptionsMaster = {
+  tae: { label: "妙なり (🪭)", icon: "🪭", pts: 0 },
+  okashi: { label: "いとおかし (🌸)", icon: "🌸", pts: 3 },
+  aware: { label: "もののあはれ (🍁)", icon: "🍁", pts: 2 },
+  aware_2: { label: "天晴れ (⚔️)", icon: "⚔️", pts: 2 },
+  funny: { label: "をかし (🍡)", icon: "🍡", pts: 1 }
+};
+const hostOptionKeys = ['tae', 'okashi', 'aware', 'aware_2', 'funny'];
+const childOptionKeys = ['okashi', 'aware', 'aware_2', 'funny'];
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
 
 let roomId = "";
 let myName = "";
@@ -340,8 +365,6 @@ function renderBoards() {
       </div>
     `;
   }).join('');
-
-  renderResults(currentData);
 }
 
 window.submitVote = async function(targetPlayer) {
@@ -385,15 +408,11 @@ window.nextRound = async function() {
   alert(alertMessage);
 };
 
-window.exportText = function() { expText(currentData); };
-window.exportCSV = function() { expCSV(currentData, roomId); };
-
-// スクリプト読み込み時にボタンイベントをバインド
+// ボタンのイベントバインド処理
 function bindJoinButton() {
   const btn = document.getElementById('join-btn');
   if (btn) {
-    btn.removeEventListener('click', window.joinRoom);
-    btn.addEventListener('click', window.joinRoom);
+    btn.onclick = window.joinRoom;
   } else {
     setTimeout(bindJoinButton, 100);
   }
