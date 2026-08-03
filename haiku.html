@@ -383,14 +383,31 @@
     const hostOptionKeys = ['okashi', 'aware', 'wabisabi', 'ayashi', 'kuruoshi', 'wabishi', 'yugen', 'tae'];
     const childOptionKeys = ['okashi', 'aware', 'wabisabi'];
 
+        // 21人分に対応したカラーパレット
     const colorPalette = [
-      { bg: '#dbeafe', text: '#1e40af', border: '#bfdbfe' },
-      { bg: '#fef3c7', text: '#92400e', border: '#fde68a' },
-      { bg: '#dcfce7', text: '#166534', border: '#bbf7d0' },
-      { bg: '#fce7f3', text: '#9d174d', border: '#fbcfe8' },
-      { bg: '#e0e7ff', text: '#3730a3', border: '#c7d2fe' },
-      { bg: '#ffedd5', text: '#9a3412', border: '#fed7aa' }
+      { bg: '#dbeafe', text: '#1e40af', border: '#bfdbfe' }, // 1. ライトブルー
+      { bg: '#fef3c7', text: '#92400e', border: '#fde68a' }, // 2. イエロー
+      { bg: '#dcfce7', text: '#166534', border: '#bbf7d0' }, // 3. グリーン
+      { bg: '#fce7f3', text: '#9d174d', border: '#fbcfe8' }, // 4. ピンク
+      { bg: '#e0e7ff', text: '#3730a3', border: '#c7d2fe' }, // 5. インディゴ
+      { bg: '#ffedd5', text: '#9a3412', border: '#fed7aa' }, // 6. オレンジ
+      { bg: '#f3e8ff', text: '#6b21a8', border: '#e9d5ff' }, // 7. パープル
+      { bg: '#ccfbf1', text: '#115e59', border: '#99f6e4' }, // 8. ティール
+      { bg: '#ffe4e6', text: '#9f1239', border: '#fecdd3' }, // 9. ローズ
+      { bg: '#ecfdf5', text: '#065f46', border: '#a7f3d0' }, // 10. エメラルド
+      { bg: '#fef9c3', text: '#854d0e', border: '#fef08a' }, // 11. ライムイエロー
+      { bg: '#e0f2fe', text: '#075985', border: '#bae6fd' }, // 12. スカイブルー
+      { bg: '#fae8ff', text: '#86198f', border: '#f5d0fe' }, // 13. フューシャ
+      { bg: '#ffedd5', text: '#c2410c', border: '#ff3d00' }, // 14. ディープオレンジ
+      { bg: '#f5f5f4', text: '#292524', border: '#d6d3d1' }, // 15. ストーン
+      { bg: '#d1fae5', text: '#047857', border: '#6ee7b7' }, // 16. ミント
+      { bg: '#ede9fe', text: '#5b21b6', border: '#ddd6fe' }, // 17. バイオレット
+      { bg: '#cffafe', text: '#155e75', border: '#a5f3fc' }, // 18. シアン
+      { bg: '#fef2f2', text: '#991b1b', border: '#fecaca' }, // 19. レッド
+      { bg: '#ecfeff', text: '#0e7490', border: '#67e8f9' }, // 20. アクア
+      { bg: '#fdf4ff', text: '#701a75', border: '#f5d0fe' }  // 21. マゼンタ
     ];
+
 
     function getAuthorStyle(authorName) {
       if (!currentData || !currentData.players) return colorPalette[0];
