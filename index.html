@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>わ〜鯖せーへきはぃく</title>
+  <title>わ〜鯖せーへきポエム</title>
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -91,7 +91,7 @@
 </head>
 <body>
 
-  <h1>わ〜鯖せーへきはぃく</h1>
+  <h1>わ〜鯖せーへきポエム</h1>
 
   <!-- 1. ログイン & ルーム参加 -->
   <div id="login-sec" class="card-panel">
@@ -103,40 +103,40 @@
 
   <!-- 2. ロビー & 単語登録 -->
   <div id="lobby-sec" class="card-panel" style="display:none;">
-    <h2>1. 単語カードの投稿</h2>
-    <p>全員で単語を出し合って山札を作ります。</p>
+    <h2>1. ポエムの素材あつめ</h2>
+    <p>みんなで単語を出し合って山札を作ります。</p>
     <div class="flex-gap">
-      <input type="text" id="word-input" placeholder="単語（例：爆発する、猫）">
+      <input type="text" id="word-input" placeholder="ことば（例：好き、ねこ、爆発する）">
       <button onclick="addWord()" style="width: 100px; margin-top:0;">追加</button>
     </div>
-    <p>みんなが投函したカード数: <strong id="total-words">0</strong> 枚</p>
+    <p>あつまったことば: <strong id="total-words">0</strong> 個</p>
     
     <div style="margin-top: 20px;">
-      <h3>参加プレイヤーと現在の累計スコア</h3>
+      <h3>参加メンバーと現在のスコア</h3>
       <div id="player-list"></div>
     </div>
     
-    <button onclick="startGame()" style="background-color: #16a34a; margin-top: 20px;">ゲームを開始（全員に配布）</button>
+    <button onclick="startGame()" style="background-color: #16a34a; margin-top: 20px;">ポエムづくりを開始（カード配布）</button>
   </div>
 
   <!-- 3. ゲーム画面（作成 & 発表 & 投票） -->
   <div id="game-sec" class="card-panel" style="display:none;">
-    <h2>2. 手札でフレーズを作成</h2>
+    <h2>2. ポエムをつくる</h2>
     
     <h3>あなたの手札</h3>
     <div class="word-list" id="hand-list"></div>
 
-    <h3 style="margin-top: 20px;">完成フレーズ（披露用）</h3>
+    <h3 style="margin-top: 20px;">完成したポエム（披露用）</h3>
     <div class="display-area" id="my-phrase"></div>
     <div class="flex-gap">
-      <button onclick="clearPhrase()" style="background-color: #dc2626; margin-top: 8px;">選択リセット</button>
-      <button onclick="submitPhrase()" style="background-color: #2563eb; margin-top: 8px;">フレーズを披露する</button>
+      <button onclick="clearPhrase()" style="background-color: #dc2626; margin-top: 8px;">やりなおす</button>
+      <button onclick="submitPhrase()" style="background-color: #2563eb; margin-top: 8px;">ポエムを披露する</button>
     </div>
 
     <hr style="margin: 24px 0; border: none; border-top: 1px solid #e2e8f0;">
 
-    <h2>みんなの発表 & 投票</h2>
-    <p style="text-align:center; font-size:14px; color:#64748b;">一番イケてる作品に投票しよう！（1人1票）</p>
+    <h2>みんなのポエム & 投票</h2>
+    <p style="text-align:center; font-size:14px; color:#64748b;">一番すきなポエムに投票しよう！（1人1票）</p>
     <div id="board-list"></div>
 
     <!-- ランキング・結果表示領域 -->
@@ -145,7 +145,7 @@
       <div id="round-results"></div>
     </div>
 
-    <button onclick="nextRound()" style="background-color: #0284c7; margin-top: 24px;">🔄 次のゲームへ（スコアは引き継ぐ）</button>
+    <button onclick="nextRound()" style="background-color: #0284c7; margin-top: 24px;">🔄 つぎのポエムをつくる（スコア引継ぎ）</button>
   </div>
 
   <!-- Firebase SDK -->
@@ -202,7 +202,7 @@
           
           const scores = currentData.scores || {};
           document.getElementById('player-list').innerHTML = currentData.players ? currentData.players.map(p => 
-            `<div style="display:flex; justify-between; margin-bottom:4px;">
+            `<div style="display:flex; justify-content:space-between; margin-bottom:4px;">
               <span>・ ${p}</span>
               <span class="score-badge">${scores[p] || 0} pt</span>
             </div>`
@@ -312,12 +312,11 @@
       const container = document.getElementById('board-list');
       container.innerHTML = Object.entries(phrases).map(([player, phrase]) => {
         const isSelf = player === myName;
-        const votedThis = Object.values(votes).filter(v => v === player).length;
 
         return `
           <div class="player-board">
             <div>
-              <strong>${player} の発表:</strong>
+              <strong>${player} のポエム:</strong>
               <div style="font-size: 18px; margin-top: 4px; color: #1e3a8a;">${phrase}</div>
             </div>
             <div>
@@ -331,7 +330,6 @@
         `;
       }).join('');
 
-      // 結果表示の更新
       const resArea = document.getElementById('result-area');
       const resList = document.getElementById('round-results');
       if (Object.keys(votes).length > 0) {
