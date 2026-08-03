@@ -1,7 +1,16 @@
 import { db } from "./firebase-config.js";
 import { doc, setDoc, onSnapshot, updateDoc, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-import { evalOptionsMaster, hostOptionKeys, childOptionKeys, renderResults } from "./haiku-eval.js";
-import { exportText as expText, exportCSV as expCSV } from "./haiku-export.js";
+
+// 評価マスタ定義（外部ファイル依存を解除）
+const evalOptionsMaster = {
+  tae: { label: "妙なり (🪭)", icon: "🪭", pts: 0 },
+  okashi: { label: "いとおかし (🌸)", icon: "🌸", pts: 3 },
+  aware: { label: "もののあはれ (🍁)", icon: "🍁", pts: 2 },
+  aware_2: { label: "天晴れ (⚔️)", icon: "⚔️", pts: 2 },
+  funny: { label: "をかし (🍡)", icon: "🍡", pts: 1 }
+};
+const hostOptionKeys = ['tae', 'okashi', 'aware', 'aware_2', 'funny'];
+const childOptionKeys = ['okashi', 'aware', 'aware_2', 'funny'];
 
 let roomId = "";
 let myName = "";
@@ -332,8 +341,6 @@ function renderBoards() {
       </div>
     `;
   }).join('');
-
-  renderResults(currentData);
 }
 
 window.submitVote = async function(targetPlayer) {
@@ -377,5 +384,36 @@ window.nextRound = async function() {
   alert(alertMessage);
 };
 
-window.exportText = function() { expText(currentData); };
-window.exportCSV = function() { expCSV(currentData, roomId); };
+window.exportText = function() {
+  if (!currentData) return;
+  const history = currentData.history || [];
+  let txt = `【わ〜鯖句会 記録】\n\n`;
+  history.forEach(h => {
+    txt += `--- 第${h.round}節 (選者: ${h.host}) ---\n`;
+    Object.keys(h.phrases || {}).forEach(p => {
+      txt += `${p}: ${h.phrases[p]}\n`;
+    });
+    txt += `\n`;
+  });
+  const blob = new Blob([txt], { type: 'text/plain' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `haiku_${roomId}.txt`;
+  a.click();
+};
+
+window.exportCSV = function() {
+  if (!currentData) return;
+  const history = currentData.history || [];
+  let csv = `節,選者,風流名,句\n`;
+  history.forEach(h => {
+    Object.keys(h.phrases || {}).forEach(p => {
+      csv += `${h.round},"${h.host}","${p}","${h.phrases[p]}"\n`;
+    });
+  });
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `haiku_${roomId}.csv`;
+  a.click();
+};
