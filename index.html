@@ -103,27 +103,27 @@
 
   <!-- 2. ロビー & 単語登録 -->
   <div id="lobby-sec" class="card-panel" style="display:none;">
-    <h2>1. ポエムの素材あつめ</h2>
-    <p>みんなで単語を出し合って山札を作ります。</p>
+    <h2>1. ポエムの素材あつめ（1人3つ）</h2>
+    <p>一人3つずつ言葉を入力してください（<span id="my-word-count">0</span>/3）</p>
     <div class="flex-gap">
       <input type="text" id="word-input" placeholder="ことば（例：好き、ねこ、爆発する）">
-      <button onclick="addWord()" style="width: 100px; margin-top:0;">追加</button>
+      <button id="add-word-btn" onclick="addWord()" style="width: 100px; margin-top:0;">追加</button>
     </div>
-    <p>あつまったことば: <strong id="total-words">0</strong> 個</p>
+    <p style="margin-top: 12px;">あつまったことば: <strong id="total-words">0</strong> 個</p>
     
     <div style="margin-top: 20px;">
       <h3>参加メンバーと現在のスコア</h3>
       <div id="player-list"></div>
     </div>
     
-    <button onclick="startGame()" style="background-color: #16a34a; margin-top: 20px;">ポエムづくりを開始（カード配布）</button>
+    <button onclick="startGame()" style="background-color: #16a34a; margin-top: 20px;">ポエムづくりを開始（手札3枚を配布）</button>
   </div>
 
   <!-- 3. ゲーム画面（作成 & 発表 & 投票） -->
   <div id="game-sec" class="card-panel" style="display:none;">
     <h2>2. ポエムをつくる</h2>
     
-    <h3>あなたの手札</h3>
+    <h3>あなたの手札（3枚）</h3>
     <div class="word-list" id="hand-list"></div>
 
     <h3 style="margin-top: 20px;">完成したポエム（披露用）</h3>
@@ -172,6 +172,7 @@
     let myHand = [];
     let selectedIndices = [];
     let currentData = null;
+    let mySubmittedWordsCount = 0;
 
     window.joinRoom = async function() {
       myName = document.getElementById('player-name').value.trim();
@@ -222,7 +223,7 @@
               renderHand();
             } else if (currentData.words && currentData.words.length > 0 && myHand.length === 0) {
               const shuffled = [...currentData.words].sort(() => Math.random() - 0.5);
-              myHand = shuffled.slice(0, Math.min(6, shuffled.length));
+              myHand = shuffled.slice(0, 3);
               renderHand();
             }
             renderBoards();
@@ -235,11 +236,24 @@
     };
 
     window.addWord = async function() {
+      if (mySubmittedWordsCount >= 3) return;
+
       const input = document.getElementById('word-input');
       const word = input.value.trim();
       if (!word) return;
+
       await updateDoc(roomRef, { words: arrayUnion(word) });
       input.value = '';
+      
+      mySubmittedWordsCount++;
+      document.getElementById('my-word-count').innerText = mySubmittedWordsCount;
+
+      if (mySubmittedWordsCount >= 3) {
+        const btn = document.getElementById('add-word-btn');
+        btn.innerText = "完了";
+        btn.disabled = true;
+        input.disabled = true;
+      }
     };
 
     window.startGame = async function() {
@@ -247,6 +261,14 @@
     };
 
     window.nextRound = async function() {
+      mySubmittedWordsCount = 0;
+      document.getElementById('my-word-count').innerText = "0";
+      const btn = document.getElementById('add-word-btn');
+      btn.innerText = "追加";
+      btn.disabled = false;
+      const input = document.getElementById('word-input');
+      input.disabled = false;
+
       await updateDoc(roomRef, {
         status: 'lobby',
         words: [],
