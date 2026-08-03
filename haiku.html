@@ -237,6 +237,8 @@
     <div id="result-area" style="display:none; margin-top:20px; background:#f0fdf4; border:1px solid #bbf7d0; padding:12px; border-radius:8px;">
       <h3 style="color:#166534; margin-bottom:8px;">🪭 撰の果て</h3>
       <div id="round-results"></div>
+      <hr style="margin:12px 0; border:none; border-top:1px solid #bbf7d0;">
+      <div id="author-reveal-area"></div>
     </div>
 
     <button onclick="nextRound()" style="background-color: #0284c7; margin-top: 24px;">🔄 つぎの一句を詠む（スコア引継ぎ）</button>
@@ -296,6 +298,7 @@
           hands5: {},
           hands7: {},
           phrases: {},
+          phraseDetails: {},
           votes: {},
           scores: {},
           settings: { in5: 5, in7: 3, hand5: 5, hand7: 3 }
@@ -334,7 +337,6 @@
             document.getElementById('game-sec').style.display = 'none';
             document.getElementById('lobby-sec').style.display = 'block';
             
-            // ロビーに戻った際に手札と選択・追加ボタンの表示を完全リセット
             myHand5 = [];
             myHand7 = [];
             selectedHand = [null, null, null];
@@ -411,13 +413,13 @@
         const inp = document.getElementById(`word-5-input-${i}`);
         const val = inp ? inp.value.trim() : '';
         if (!val) return alert('五音の素材をすべて入力してください');
-        new5.push(val);
+        new5.push({ word: val, author: myName });
       }
       for (let i = 1; i <= st.in7; i++) {
         const inp = document.getElementById(`word-7-input-${i}`);
         const val = inp ? inp.value.trim() : '';
         if (!val) return alert('七音の素材をすべて入力してください');
-        new7.push(val);
+        new7.push({ word: val, author: myName });
       }
 
       await updateDoc(roomRef, { 
@@ -425,7 +427,6 @@
         words7: arrayUnion(...new7)
       });
 
-      // 送信完了後に入力フォームをクリア
       for (let i = 1; i <= st.in5; i++) {
         const inp = document.getElementById(`word-5-input-${i}`);
         if (inp) inp.value = '';
@@ -472,7 +473,6 @@
     };
 
     window.nextRound = async function() {
-      // データベース上の前回の言葉・作品・投票をすべて削除してリセット
       await updateDoc(roomRef, {
         status: 'lobby',
         words5: [],
@@ -480,6 +480,7 @@
         hands5: {},
         hands7: {},
         phrases: {},
+        phraseDetails: {},
         votes: {}
       });
     };
@@ -488,14 +489,14 @@
       const list5 = document.getElementById('hand-5-list');
       const list7 = document.getElementById('hand-7-list');
 
-      list5.innerHTML = myHand5.map((w, idx) => {
-        const isSel = selectedHand.some(item => item && item.type === 5 && item.idx === idx);
-        return `<div class="card card-5 ${isSel ? 'selected' : ''}" onclick="selectCard(5, ${idx})">${w}</div>`;
+      list5.innerHTML = myHand5.map((item, idx) => {
+        const isSel = selectedHand.some(s => s && s.type === 5 && s.idx === idx);
+        return `<div class="card card-5 ${isSel ? 'selected' : ''}" onclick="selectCard(5, ${idx})">${item.word}</div>`;
       }).join('');
 
-      list7.innerHTML = myHand7.map((w, idx) => {
-        const isSel = selectedHand.some(item => item && item.type === 7 && item.idx === idx);
-        return `<div class="card card-7 ${isSel ? 'selected' : ''}" onclick="selectCard(7, ${idx})">${w}</div>`;
+      list7.innerHTML = myHand7.map((item, idx) => {
+        const isSel = selectedHand.some(s => s && s.type === 7 && s.idx === idx);
+        return `<div class="card card-7 ${isSel ? 'selected' : ''}" onclick="selectCard(7, ${idx})">${item.word}</div>`;
       }).join('');
 
       document.getElementById('phrase-1').innerHTML = selectedHand[0] ? `<div class="card card-5 selected" onclick="removeSlot(0)">${selectedHand[0].word}</div>` : '';
@@ -504,9 +505,9 @@
     }
 
     window.selectCard = function(type, idx) {
-      const word = type === 5 ? myHand5[idx] : myHand7[idx];
+      const item = type === 5 ? myHand5[idx] : myHand7[idx];
       
-      const existingPos = selectedHand.findIndex(item => item && item.type === type && item.idx === idx);
+      const existingPos = selectedHand.findIndex(s => s && s.type === type && s.idx === idx);
       if (existingPos !== -1) {
         selectedHand[existingPos] = null;
         renderHand();
@@ -515,15 +516,15 @@
 
       if (type === 5) {
         if (!selectedHand[0]) {
-          selectedHand[0] = { type, idx, word };
+          selectedHand[0] = { type, idx, ...item };
         } else if (!selectedHand[2]) {
-          selectedHand[2] = { type, idx, word };
+          selectedHand[2] = { type, idx, ...item };
         } else {
           alert('五音の枠（初句・結句）はどちらも埋まっています');
         }
       } else if (type === 7) {
         if (!selectedHand[1]) {
-          selectedHand[1] = { type, idx, word };
+          selectedHand[1] = { type, idx, ...item };
         } else {
           alert('七音の枠（二句）はすでに埋まっています');
         }
@@ -553,9 +554,15 @@
         return alert('初句(五音)・二句(七音)・結句(五音)をすべてそろえてください！');
       }
       const phraseText = `${selectedHand[0].word} ${selectedHand[1].word} ${selectedHand[2].word}`;
+      const detail = [
+        { word: selectedHand[0].word, author: selectedHand[0].author },
+        { word: selectedHand[1].word, author: selectedHand[1].author },
+        { word: selectedHand[2].word, author: selectedHand[2].author }
+      ];
       
       const updateData = {};
       updateData[`phrases.${myName}`] = phraseText;
+      updateData[`phraseDetails.${myName}`] = detail;
       await updateDoc(roomRef, updateData);
     };
 
@@ -577,6 +584,7 @@
     function renderBoards() {
       if (!currentData) return;
       const phrases = currentData.phrases || {};
+      const phraseDetails = currentData.phraseDetails || {};
       const votes = currentData.votes || {};
       const myVoted = votes[myName];
 
@@ -603,6 +611,8 @@
 
       const resArea = document.getElementById('result-area');
       const resList = document.getElementById('round-results');
+      const revealArea = document.getElementById('author-reveal-area');
+
       if (Object.keys(votes).length > 0) {
         resArea.style.display = 'block';
         const voteCounts = {};
@@ -613,6 +623,14 @@
         resList.innerHTML = Object.entries(voteCounts).map(([p, c]) => `
           <div><strong>${p}</strong>: +${c} 誉 (累計: ${currentData.scores?.[p] || 0} 誉)</div>
         `).join('');
+
+        // 撰の果て（結果画面）でのみ作者内訳を表示
+        revealArea.innerHTML = '<h4 style="margin:8px 0 6px 0; color:#15803d;">📜 素材の出処</h4>' +
+          Object.entries(phraseDetails).map(([player, details]) => {
+            if (!details || details.length < 3) return '';
+            const line = `${details[0].word}（${details[0].author}） / ${details[1].word}（${details[1].author}） / ${details[2].word}（${details[2].author}）`;
+            return `<div style="font-size:13px; margin-bottom:6px; color:#1e293b;"><strong>${player}の一句</strong>:<br>「${line}」</div>`;
+          }).join('');
       } else {
         resArea.style.display = 'none';
       }
