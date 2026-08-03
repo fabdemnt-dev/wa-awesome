@@ -357,13 +357,13 @@ function renderBoards() {
         ${pName !== myName ? `
           <div class="vote-select-group" style="margin-top:8px;">
             ${hasAlreadyVotedAsChild ? `
-              <span style="font-size:13px; color:#10b981; font-weight:bold;">✅ 手向け送信済み (${evalOptionsMaster[votes[myName][pName]]?.label || ''})</span>
+              <span style="font-size:13px; color:#10b981; font-weight:bold;">✅ 御印送信済み (${evalOptionsMaster[votes[myName][pName]]?.label || ''})</span>
             ` : `
               <select class="vote-select" id="vote-select-${pName}">
-                <option value="">-- 手向けを選択 --</option>
+                <option value="">-- 御印を選択 --</option>
                 ${availableKeys.map(k => `<option value="${k}">${evalOptionsMaster[k].label}</option>`).join('')}
               </select>
-              <button class="vote-submit-btn" onclick="submitVote('${pName}')">手向けを贈る</button>
+              <button class="vote-submit-btn" onclick="submitVote('${pName}')">御印を贈る</button>
             `}
           </div>
         ` : ''}
@@ -374,7 +374,7 @@ function renderBoards() {
 
 window.submitVote = async function(targetPlayer) {
   const evalKey = document.getElementById(`vote-select-${targetPlayer}`)?.value;
-  if (!evalKey) return alert('手向けを選択してください');
+  if (!evalKey) return alert('御印を選択してください');
 
   const players = currentData.players || [];
   const currentHost = players[(currentData.hostIndex || 0) % (players.length || 1)];
@@ -386,15 +386,15 @@ window.submitVote = async function(targetPlayer) {
     const newVotesArr = [...currentVotesArr, evalKey];
 
     await updateDoc(roomRef, { [`votes.${myName}.${targetPlayer}`]: newVotesArr });
-    alert('手向けを追加で贈りました！');
+    alert('御印を追加で贈りました！');
   } else {
     const existingVote = currentData.votes?.[myName]?.[targetPlayer];
     if (existingVote) {
-      return alert('この句にはすでに手向けを送信しています（子は1度だけ送信できます）');
+      return alert('この句にはすでに御印を送信しています（子は1度だけ送信できます）');
     }
 
     await updateDoc(roomRef, { [`votes.${myName}.${targetPlayer}`]: evalKey });
-    alert('手向けを贈りました！');
+    alert('御印を贈りました！');
   }
 };
 
