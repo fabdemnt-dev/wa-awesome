@@ -28,7 +28,7 @@
       border: 1px solid #cbd5e1;
       box-sizing: border-box;
     }
-    input[type="text"] { width: 100%; }
+    input[type="text"] { width: 100%; margin-bottom: 8px; }
     button {
       background-color: #2563eb;
       color: white;
@@ -39,7 +39,6 @@
       margin-top: 8px;
     }
     button:disabled { background-color: #94a3b8; cursor: not-allowed; }
-    .flex-gap { display: flex; gap: 8px; }
     .word-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
     .card {
       background: #f1f5f9;
@@ -96,20 +95,22 @@
   <!-- 1. ログイン & ルーム参加 -->
   <div id="login-sec" class="card-panel">
     <h2>ルームに入る</h2>
-    <input type="text" id="player-name" placeholder="あなたの名前" style="margin-bottom: 8px;">
+    <input type="text" id="player-name" placeholder="あなたの名前">
     <input type="text" id="room-id" placeholder="ルームID（例：123）">
     <button onclick="joinRoom()">参加する</button>
   </div>
 
-  <!-- 2. ロビー & 単語登録 -->
+  <!-- 2. ロビー & 性癖登録 -->
   <div id="lobby-sec" class="card-panel" style="display:none;">
-    <h2>1. ポエムの素材あつめ（1人3つ）</h2>
-    <p>一人3つずつ言葉を入力してください（<span id="my-word-count">0</span>/3）</p>
-    <div class="flex-gap">
-      <input type="text" id="word-input" placeholder="ことば（例：好き、ねこ、爆発する）">
-      <button id="add-word-btn" onclick="addWord()" style="width: 100px; margin-top:0;">追加</button>
-    </div>
-    <p style="margin-top: 12px;">あつまったことば: <strong id="total-words">0</strong> 個</p>
+    <h2>1. ポエムの素材あつめ（性癖を3つ入力）</h2>
+    <p style="font-size: 14px; color: #64748b; margin-bottom: 12px;">3つの入力枠にそれぞれ好きなせーへきを入れてください。</p>
+    
+    <input type="text" id="word-input-1" placeholder="せーへき 1（例：眼鏡）">
+    <input type="text" id="word-input-2" placeholder="せーへき 2（例：黒髪）">
+    <input type="text" id="word-input-3" placeholder="せーへき 3（例：束縛）">
+    
+    <button id="add-word-btn" onclick="addWords()">3つのせーへきを追加</button>
+    <p style="margin-top: 12px;">あつまったせーへき: <strong id="total-words">0</strong> 個</p>
     
     <div style="margin-top: 20px;">
       <h3>参加メンバーと現在のスコア</h3>
@@ -128,7 +129,7 @@
 
     <h3 style="margin-top: 20px;">完成したポエム（披露用）</h3>
     <div class="display-area" id="my-phrase"></div>
-    <div class="flex-gap">
+    <div style="display: flex; gap: 8px;">
       <button onclick="clearPhrase()" style="background-color: #dc2626; margin-top: 8px;">やりなおす</button>
       <button onclick="submitPhrase()" style="background-color: #2563eb; margin-top: 8px;">ポエムを披露する</button>
     </div>
@@ -172,7 +173,6 @@
     let myHand = [];
     let selectedIndices = [];
     let currentData = null;
-    let mySubmittedWordsCount = 0;
 
     window.joinRoom = async function() {
       myName = document.getElementById('player-name').value.trim();
@@ -235,25 +235,24 @@
       }
     };
 
-    window.addWord = async function() {
-      if (mySubmittedWordsCount >= 3) return;
+    window.addWords = async function() {
+      const w1 = document.getElementById('word-input-1').value.trim();
+      const w2 = document.getElementById('word-input-2').value.trim();
+      const w3 = document.getElementById('word-input-3').value.trim();
 
-      const input = document.getElementById('word-input');
-      const word = input.value.trim();
-      if (!word) return;
+      if (!w1 || !w2 || !w3) return alert('3つすべての枠にせーへきを入力してください！');
 
-      await updateDoc(roomRef, { words: arrayUnion(word) });
-      input.value = '';
-      
-      mySubmittedWordsCount++;
-      document.getElementById('my-word-count').innerText = mySubmittedWordsCount;
+      await updateDoc(roomRef, { 
+        words: arrayUnion(w1, w2, w3) 
+      });
 
-      if (mySubmittedWordsCount >= 3) {
-        const btn = document.getElementById('add-word-btn');
-        btn.innerText = "完了";
-        btn.disabled = true;
-        input.disabled = true;
-      }
+      const btn = document.getElementById('add-word-btn');
+      btn.innerText = "追加完了！";
+      btn.disabled = true;
+
+      document.getElementById('word-input-1').disabled = true;
+      document.getElementById('word-input-2').disabled = true;
+      document.getElementById('word-input-3').disabled = true;
     };
 
     window.startGame = async function() {
@@ -261,13 +260,15 @@
     };
 
     window.nextRound = async function() {
-      mySubmittedWordsCount = 0;
-      document.getElementById('my-word-count').innerText = "0";
       const btn = document.getElementById('add-word-btn');
-      btn.innerText = "追加";
+      btn.innerText = "3つのせーへきを追加";
       btn.disabled = false;
-      const input = document.getElementById('word-input');
-      input.disabled = false;
+
+      for (let i = 1; i <= 3; i++) {
+        const inp = document.getElementById(`word-input-${i}`);
+        inp.value = '';
+        inp.disabled = false;
+      }
 
       await updateDoc(roomRef, {
         status: 'lobby',
