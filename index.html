@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>単語組み合わせマルチゲーム</title>
+  <title>わ〜鯖せーへきはぃく</title>
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -73,7 +73,7 @@
 </head>
 <body>
 
-  <h1>🎲 ワードメイキング・マルチ</h1>
+  <h1>わ〜鯖せーへきはぃく</h1>
 
   <!-- 1. ログイン & ルーム参加 -->
   <div id="login-sec" class="card-panel">
@@ -124,11 +124,14 @@
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
     import { getFirestore, doc, setDoc, onSnapshot, updateDoc, arrayUnion } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-    // 先ほど作成したFirebaseプロジェクト (wa-seihekihaiku) の設定キー
+    // Firebase設定
     const firebaseConfig = {
-      projectId: "wa-seihekihaiku",
+      apiKey: "AIzaSyDummyKeyForOpenFirestoreQuery",
       authDomain: "wa-seihekihaiku.firebaseapp.com",
-      storageBucket: "wa-seihekihaiku.firebasestorage.app"
+      projectId: "wa-seihekihaiku",
+      storageBucket: "wa-seihekihaiku.firebasestorage.app",
+      messagingSenderId: "1234567890",
+      appId: "1:1234567890:web:abcdef123456"
     };
 
     const app = initializeApp(firebaseConfig);
@@ -145,41 +148,46 @@
       roomId = document.getElementById('room-id').value.trim();
       if (!myName || !roomId) return alert('名前とルームIDを入力してください');
 
-      roomRef = doc(db, "rooms", roomId);
+      try {
+        roomRef = doc(db, "rooms", roomId);
 
-      await setDoc(roomRef, {
-        players: arrayUnion(myName),
-        status: "lobby",
-        words: [],
-        hands: {},
-        phrases: {}
-      }, { merge: true });
+        await setDoc(roomRef, {
+          players: arrayUnion(myName),
+          status: "lobby",
+          words: [],
+          hands: {},
+          phrases: {}
+        }, { merge: true });
 
-      document.getElementById('login-sec').style.display = 'none';
-      document.getElementById('lobby-sec').style.display = 'block';
+        document.getElementById('login-sec').style.display = 'none';
+        document.getElementById('lobby-sec').style.display = 'block';
 
-      onSnapshot(roomRef, (snapshot) => {
-        const data = snapshot.data();
-        if (!data) return;
+        onSnapshot(roomRef, (snapshot) => {
+          const data = snapshot.data();
+          if (!data) return;
 
-        document.getElementById('total-words').innerText = data.words ? data.words.length : 0;
-        document.getElementById('player-list').innerHTML = data.players ? data.players.map(p => `<div>・ ${p}</div>`).join('') : '';
+          document.getElementById('total-words').innerText = data.words ? data.words.length : 0;
+          document.getElementById('player-list').innerHTML = data.players ? data.players.map(p => `<div>・ ${p}</div>`).join('') : '';
 
-        if (data.status === 'playing') {
-          document.getElementById('lobby-sec').style.display = 'none';
-          document.getElementById('game-sec').style.display = 'block';
+          if (data.status === 'playing') {
+            document.getElementById('lobby-sec').style.display = 'none';
+            document.getElementById('game-sec').style.display = 'block';
 
-          if (data.hands && data.hands[myName]) {
-            myHand = data.hands[myName];
-            renderHand();
-          } else if (data.words && data.words.length > 0 && myHand.length === 0) {
-            const shuffled = [...data.words].sort(() => Math.random() - 0.5);
-            myHand = shuffled.slice(0, Math.min(6, shuffled.length));
-            renderHand();
+            if (data.hands && data.hands[myName]) {
+              myHand = data.hands[myName];
+              renderHand();
+            } else if (data.words && data.words.length > 0 && myHand.length === 0) {
+              const shuffled = [...data.words].sort(() => Math.random() - 0.5);
+              myHand = shuffled.slice(0, Math.min(6, shuffled.length));
+              renderHand();
+            }
+            renderBoards(data.phrases || {});
           }
-          renderBoards(data.phrases || {});
-        }
-      });
+        });
+      } catch (e) {
+        console.error(e);
+        alert('接続エラーが発生しました: ' + e.message);
+      }
     };
 
     window.addWord = async function() {
