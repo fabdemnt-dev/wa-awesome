@@ -88,9 +88,23 @@
     }
     .setting-box {
       background: #f1f5f9;
-      padding: 12px;
       border-radius: 8px;
       margin-bottom: 16px;
+      overflow: hidden;
+      border: 1px solid #e2e8f0;
+    }
+    .setting-header {
+      padding: 12px;
+      font-weight: bold;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #e2e8f0;
+      user-select: none;
+    }
+    .setting-content {
+      padding: 12px;
     }
     .setting-item {
       display: flex;
@@ -116,16 +130,22 @@
 
   <!-- 2. ロビー & 素材登録 -->
   <div id="lobby-sec" class="card-panel" style="display:none;">
-    <h2>1. ゲーム設定 & ポエムの素材あつめ</h2>
+    <h2>1. ポエムの素材あつめ</h2>
     
     <div class="setting-box">
-      <div class="setting-item">
-        <label>入力するそざいの数（1人あたり）:</label>
-        <input type="number" id="setting-words-count" value="3" min="1" max="5" onchange="updateSettings()">
+      <div class="setting-header" onclick="toggleSettings()">
+        <span>⚙️ 設定</span>
+        <span id="setting-toggle-icon">▼</span>
       </div>
-      <div class="setting-item">
-        <label>配る手札の枚数（1人あたり）:</label>
-        <input type="number" id="setting-hand-count" value="3" min="1" max="10" onchange="updateSettings()">
+      <div class="setting-content" id="setting-content" style="display: none;">
+        <div class="setting-item">
+          <label>入力するそざいの数（1人あたり）:</label>
+          <input type="number" id="setting-words-count" value="3" min="1" max="5" onchange="updateSettings()">
+        </div>
+        <div class="setting-item">
+          <label>配る手札の枚数（1人あたり）:</label>
+          <input type="number" id="setting-hand-count" value="3" min="1" max="10" onchange="updateSettings()">
+        </div>
       </div>
     </div>
 
@@ -194,6 +214,18 @@
     let myHand = [];
     let selectedIndices = [];
     let currentData = null;
+
+    window.toggleSettings = function() {
+      const content = document.getElementById('setting-content');
+      const icon = document.getElementById('setting-toggle-icon');
+      if (content.style.display === 'none') {
+        content.style.display = 'block';
+        icon.innerText = '▲';
+      } else {
+        content.style.display = 'none';
+        icon.innerText = '▼';
+      }
+    };
 
     window.joinRoom = async function() {
       myName = document.getElementById('player-name').value.trim();
