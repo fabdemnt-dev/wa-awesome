@@ -44,7 +44,7 @@ window.toggleEvalGuide = function() {
   }
 };
 
-// html側の onclick="joinRoom()" と名前を完全に一致させています
+// joinGame を joinRoom に修正しました
 window.joinRoom = async function() {
   myName = document.getElementById('player-name')?.value.trim();
   roomId = document.getElementById('room-id')?.value.trim();
