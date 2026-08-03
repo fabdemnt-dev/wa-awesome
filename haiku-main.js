@@ -417,3 +417,6 @@ window.exportCSV = function() {
   a.download = `haiku_${roomId}.csv`;
   a.click();
 };
+
+document.getElementById("join-btn")
+  ?.addEventListener("click", window.joinRoom);
