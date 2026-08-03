@@ -324,7 +324,8 @@ function renderBoards() {
   const votes = currentData.votes || {};
   const players = currentData.players || [];
   const currentHost = players[(currentData.hostIndex || 0) % (players.length || 1)];
-  const availableKeys = myName === currentHost ? hostOptionKeys : childOptionKeys;
+  const isHost = (myName === currentHost);
+  const availableKeys = isHost ? hostOptionKeys : childOptionKeys;
 
   boardList.innerHTML = Object.keys(phrases).map(pName => {
     const pDet = phraseDetails[pName] || [];
@@ -335,11 +336,20 @@ function renderBoards() {
 
     let evalBadgesHtml = '';
     Object.keys(votes).forEach(voter => {
-      const k = votes[voter]?.[pName];
-      if (k && evalOptionsMaster[k]) {
-        evalBadgesHtml += `<span style="font-size:12px; background:#f1f5f9; padding:2px 6px; border-radius:10px; margin-right:4px; border:1px solid #cbd5e1;">${evalOptionsMaster[k].icon} ${voter}</span>`;
+      const vData = votes[voter]?.[pName];
+      if (vData) {
+        // 配列（親の場合）または単一の文字列（子の場合）に対応
+        const keys = Array.isArray(vData) ? vData : [vData];
+        keys.forEach(k => {
+          if (evalOptionsMaster[k]) {
+            evalBadgesHtml += `<span style="font-size:12px; background:#f1f5f9; padding:2px 6px; border-radius:10px; margin-right:4px; border:1px solid #cbd5e1;">${evalOptionsMaster[k].icon} ${voter}</span>`;
+          }
+        });
       }
     });
+
+    // 子ですでに投票済みかどうかをチェック
+    const hasAlreadyVotedAsChild = !isHost && votes[myName]?.[pName] != null;
 
     return `
       <div class="player-board">
@@ -348,11 +358,15 @@ function renderBoards() {
         <div style="margin-top:6px;">${evalBadgesHtml}</div>
         ${pName !== myName ? `
           <div class="vote-select-group" style="margin-top:8px;">
-            <select class="vote-select" id="vote-select-${pName}">
-              <option value="">-- 評価を選択 --</option>
-              ${availableKeys.map(k => `<option value="${k}">${evalOptionsMaster[k].label}</option>`).join('')}
-            </select>
-            <button class="vote-submit-btn" onclick="submitVote('${pName}')">評価を贈る</button>
+            ${hasAlreadyVotedAsChild ? `
+              <span style="font-size:13px; color:#10b981; font-weight:bold;">✅ 評価送信済み (${evalOptionsMaster[votes[myName][pName]]?.label || ''})</span>
+            ` : `
+              <select class="vote-select" id="vote-select-${pName}">
+                <option value="">-- 評価を選択 --</option>
+                ${availableKeys.map(k => `<option value="${k}">${evalOptionsMaster[k].label}</option>`).join('')}
+              </select>
+              <button class="vote-submit-btn" onclick="submitVote('${pName}')">評価を贈る</button>
+            `}
           </div>
         ` : ''}
       </div>
@@ -363,8 +377,29 @@ function renderBoards() {
 window.submitVote = async function(targetPlayer) {
   const evalKey = document.getElementById(`vote-select-${targetPlayer}`)?.value;
   if (!evalKey) return alert('評価を選択してください');
-  await updateDoc(roomRef, { [`votes.${myName}.${targetPlayer}`]: evalKey });
-  alert('評価を贈りました！');
+
+  const players = currentData.players || [];
+  const currentHost = players[(currentData.hostIndex || 0) % (players.length || 1)];
+  const isHost = (myName === currentHost);
+
+  if (isHost) {
+    // 親の場合は複数評価を許可（配列に追加）
+    const currentVotes = currentData.votes?.[myName]?.[targetPlayer] || [];
+    const currentVotesArr = Array.isArray(currentVotes) ? currentVotes : [currentVotes];
+    const newVotesArr = [...currentVotesArr, evalKey];
+
+    await updateDoc(roomRef, { [`votes.${myName}.${targetPlayer}`]: newVotesArr });
+    alert('評価を追加で贈りました！');
+  } else {
+    // 子の場合は1回のみ
+    const existingVote = currentData.votes?.[myName]?.[targetPlayer];
+    if (existingVote) {
+      return alert('この句にはすでに評価を送信しています（子は1度だけ送信できます）');
+    }
+
+    await updateDoc(roomRef, { [`votes.${myName}.${targetPlayer}`]: evalKey });
+    alert('評価を贈りました！');
+  }
 };
 
 window.nextRound = async function() {
@@ -378,13 +413,17 @@ window.nextRound = async function() {
 
   Object.keys(votes).forEach(voter => {
     Object.keys(votes[voter] || {}).forEach(target => {
-      const k = votes[voter][target];
-      if (k === 'tae' && !taeWinners.includes(target)) {
-        taeWinners.push(target);
-      }
-      const opt = evalOptionsMaster[k];
-      const pts = (k === 'tae') ? taePoints : (opt ? opt.pts : 0);
-      newScores[target] = (newScores[target] || 0) + pts;
+      const vData = votes[voter][target];
+      const keys = Array.isArray(vData) ? vData : [vData];
+
+      keys.forEach(k => {
+        if (k === 'tae' && !taeWinners.includes(target)) {
+          taeWinners.push(target);
+        }
+        const opt = evalOptionsMaster[k];
+        const pts = (k === 'tae') ? taePoints : (opt ? opt.pts : 0);
+        newScores[target] = (newScores[target] || 0) + pts;
+      });
     });
   });
 
@@ -424,7 +463,7 @@ window.exportCSV = function() {
   const history = currentData.history || [];
   let csv = `節,選者,風流名,句\n`;
   history.forEach(h => {
-    Object.keys(h.phrases || {}).forEach(p => {
+    Object.keys(h.phrases || {}).format?.forEach?.(p => {}) || Object.keys(h.phrases || {}).forEach(p => {
       csv += `${h.round},"${h.host}","${p}","${h.phrases[p]}"\n`;
     });
   });
