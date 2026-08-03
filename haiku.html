@@ -219,6 +219,13 @@
       padding: 10px 12px;
       line-height: 1.6;
     }
+    .export-group {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .export-btn-text { background-color: #8b5cf6; }
+    .export-btn-csv { background-color: #10b981; }
   </style>
 </head>
 <body>
@@ -232,7 +239,6 @@
     <input type="text" id="room-id" placeholder="ルームID（例：123）">
     <button onclick="joinRoom()">参加する</button>
   </div>
-
   <!-- 2. ロビー & 素材登録 -->
   <div id="lobby-sec" class="card-panel" style="display:none;">
     <h2>1. はぃくの素材あつめ</h2>
@@ -283,6 +289,15 @@
     </div>
     
     <button onclick="startGame()" style="background-color: #16a34a; margin-top: 20px;">はぃくづくりを開始</button>
+
+    <!-- 履歴出力領域（ロビー） -->
+    <div style="margin-top: 20px; border-top: 1px solid #e2e8f0; padding-top: 12px;">
+      <h3 style="font-size: 14px; margin-bottom: 4px;">📜 これまでのゲーム履歴出力</h3>
+      <div class="export-group">
+        <button class="export-btn-text" onclick="exportText()">📋 コピー (Discord用)</button>
+        <button class="export-btn-csv" onclick="exportCSV()">📥 CSV保存</button>
+      </div>
+    </div>
   </div>
 
   <!-- 3. ゲーム画面（作成 & 発表 & 投票） -->
@@ -339,6 +354,12 @@
       </div>
     </div>
 
+    <!-- 履歴出力領域（ゲーム画面） -->
+    <div class="export-group">
+      <button class="export-btn-text" onclick="exportText()">📋 コピー (Discord用)</button>
+      <button class="export-btn-csv" onclick="exportCSV()">📥 CSV保存</button>
+    </div>
+
     <button onclick="nextRound()" style="background-color: #0284c7; margin-top: 24px;">🔄 つぎの一句を詠む（親を交代）</button>
   </div>
   <!-- Firebase SDK -->
@@ -368,7 +389,6 @@
     let selectedHand = [null, null, null];
     let currentData = null;
 
-    // 全評価の定義（アイコン、ラベル、獲得ポイント）
     const evalOptionsMaster = {
       okashi: { icon: "🌸", label: "🌸 いとおかし", pts: 1 },
       aware:  { icon: "🌾", label: "🌾 もののあはれ", pts: 1 },
@@ -383,29 +403,28 @@
     const hostOptionKeys = ['okashi', 'aware', 'wabisabi', 'ayashi', 'kuruoshi', 'wabishi', 'yugen', 'tae'];
     const childOptionKeys = ['okashi', 'aware', 'wabisabi'];
 
-    // 21人分に対応したカラーパレット
     const colorPalette = [
-      { bg: '#dbeafe', text: '#1e40af', border: '#bfdbfe' }, // 1. ライトブルー
-      { bg: '#fef3c7', text: '#92400e', border: '#fde68a' }, // 2. イエロー
-      { bg: '#dcfce7', text: '#166534', border: '#bbf7d0' }, // 3. グリーン
-      { bg: '#fce7f3', text: '#9d174d', border: '#fbcfe8' }, // 4. ピンク
-      { bg: '#e0e7ff', text: '#3730a3', border: '#c7d2fe' }, // 5. インディゴ
-      { bg: '#ffedd5', text: '#9a3412', border: '#fed7aa' }, // 6. オレンジ
-      { bg: '#f3e8ff', text: '#6b21a8', border: '#e9d5ff' }, // 7. パープル
-      { bg: '#ccfbf1', text: '#115e59', border: '#99f6e4' }, // 8. ティール
-      { bg: '#ffe4e6', text: '#9f1239', border: '#fecdd3' }, // 9. ローズ
-      { bg: '#ecfdf5', text: '#065f46', border: '#a7f3d0' }, // 10. エメラルド
-      { bg: '#fef9c3', text: '#854d0e', border: '#fef08a' }, // 11. ライムイエロー
-      { bg: '#e0f2fe', text: '#075985', border: '#bae6fd' }, // 12. スカイブルー
-      { bg: '#fae8ff', text: '#86198f', border: '#f5d0fe' }, // 13. フューシャ
-      { bg: '#ffedd5', text: '#c2410c', border: '#ff3d00' }, // 14. ディープオレンジ
-      { bg: '#f5f5f4', text: '#292524', border: '#d6d3d1' }, // 15. ストーン
-      { bg: '#d1fae5', text: '#047857', border: '#6ee7b7' }, // 16. ミント
-      { bg: '#ede9fe', text: '#5b21b6', border: '#ddd6fe' }, // 17. バイオレット
-      { bg: '#cffafe', text: '#155e75', border: '#a5f3fc' }, // 18. シアン
-      { bg: '#fef2f2', text: '#991b1b', border: '#fecaca' }, // 19. レッド
-      { bg: '#ecfeff', text: '#0e7490', border: '#67e8f9' }, // 20. アクア
-      { bg: '#fdf4ff', text: '#701a75', border: '#f5d0fe' }  // 21. マゼンタ
+      { bg: '#dbeafe', text: '#1e40af', border: '#bfdbfe' },
+      { bg: '#fef3c7', text: '#92400e', border: '#fde68a' },
+      { bg: '#dcfce7', text: '#166534', border: '#bbf7d0' },
+      { bg: '#fce7f3', text: '#9d174d', border: '#fbcfe8' },
+      { bg: '#e0e7ff', text: '#3730a3', border: '#c7d2fe' },
+      { bg: '#ffedd5', text: '#9a3412', border: '#fed7aa' },
+      { bg: '#f3e8ff', text: '#6b21a8', border: '#e9d5ff' },
+      { bg: '#ccfbf1', text: '#115e59', border: '#99f6e4' },
+      { bg: '#ffe4e6', text: '#9f1239', border: '#fecdd3' },
+      { bg: '#ecfdf5', text: '#065f46', border: '#a7f3d0' },
+      { bg: '#fef9c3', text: '#854d0e', border: '#fef08a' },
+      { bg: '#e0f2fe', text: '#075985', border: '#bae6fd' },
+      { bg: '#fae8ff', text: '#86198f', border: '#f5d0fe' },
+      { bg: '#ffedd5', text: '#c2410c', border: '#ff3d00' },
+      { bg: '#f5f5f4', text: '#292524', border: '#d6d3d1' },
+      { bg: '#d1fae5', text: '#047857', border: '#6ee7b7' },
+      { bg: '#ede9fe', text: '#5b21b6', border: '#ddd6fe' },
+      { bg: '#cffafe', text: '#155e75', border: '#a5f3fc' },
+      { bg: '#fef2f2', text: '#991b1b', border: '#fecaca' },
+      { bg: '#ecfeff', text: '#0e7490', border: '#67e8f9' },
+      { bg: '#fdf4ff', text: '#701a75', border: '#f5d0fe' }
     ];
 
     function getAuthorStyle(authorName) {
@@ -451,6 +470,8 @@
           players: arrayUnion(myName),
           status: "lobby",
           hostIndex: 0,
+          roundCount: 1,
+          history: [],
           words5: [],
           words7: [],
           hands5: {},
@@ -645,10 +666,25 @@
       const players = currentData.players || [];
       const currentHostIdx = currentData.hostIndex || 0;
       const nextHostIdx = (currentHostIdx + 1) % players.length;
+      const currentRound = currentData.roundCount || 1;
+
+      // 現在のラウンドの結果を履歴に追加保存する
+      const currentPhrases = currentData.phrases || {};
+      const currentDetails = currentData.phraseDetails || {};
+      const currentVotes = currentData.votes || {};
+
+      const roundRecord = {
+        round: currentRound,
+        phrases: currentPhrases,
+        phraseDetails: currentDetails,
+        votes: currentVotes
+      };
 
       await updateDoc(roomRef, {
         status: 'lobby',
         hostIndex: nextHostIdx,
+        roundCount: currentRound + 1,
+        history: arrayUnion(roundRecord),
         words5: [],
         words7: [],
         hands5: {},
@@ -859,7 +895,6 @@
         });
 
         resList.innerHTML = Object.entries(playerCounts).map(([p, data]) => {
-          // アイコンを獲得した個数分だけ並べて表示（例: 🌸🌸 🪭）
           const iconStr = Object.entries(data.details).map(([k, count]) => {
             const icon = evalOptionsMaster[k]?.icon || k;
             return icon.repeat(count);
@@ -878,6 +913,117 @@
         resArea.style.display = 'none';
       }
     }
+
+    // 履歴データ全件を取得（終了した節 + 進行中の節）
+    function getAllRoundData() {
+      if (!currentData) return [];
+      const historyList = [...(currentData.history || [])];
+
+      // 現在進行中のラウンドで句が詠まれていれば含める
+      if (currentData.phrases && Object.keys(currentData.phrases).length > 0) {
+        historyList.push({
+          round: currentData.roundCount || (historyList.length + 1),
+          phrases: currentData.phrases || {},
+          phraseDetails: currentData.phraseDetails || {},
+          votes: currentData.votes || {}
+        });
+      }
+      return historyList;
+    }
+
+    // テキスト形式でクリップボードにコピー（Discord等へペースト用）
+    window.exportText = function() {
+      const allRounds = getAllRoundData();
+      if (allRounds.length === 0) return alert('出力できる履歴がありません');
+
+      let txt = `=== わ〜鯖せーへきはぃく 履歴ログ ===\n\n`;
+
+      allRounds.forEach(rd => {
+        txt += `【第${rd.round}節】\n`;
+        Object.entries(rd.phrases || {}).forEach(([p, phrase]) => {
+          const details = rd.phraseDetails?.[p];
+          txt += `■ ${p} の一句:\n  「${phrase}」\n`;
+          if (details && details.length === 3) {
+            txt += `  （素材作者: 初句[${details[0].author}] / 二句[${details[1].author}] / 結句[${details[2].author}]）\n`;
+          }
+          
+          // 獲得した評価の集計
+          const receivedVotes = [];
+          Object.values(rd.votes || {}).forEach(voteList => {
+            if (!Array.isArray(voteList)) return;
+            voteList.forEach(v => {
+              if (v.target === p) receivedVotes.push(v.type);
+            });
+          });
+
+          if (receivedVotes.length > 0) {
+            const icons = receivedVotes.map(k => evalOptionsMaster[k]?.icon || k).join(' ');
+            txt += `  評価: ${icons}\n`;
+          }
+          txt += `\n`;
+        });
+        txt += `-----------------------------------\n`;
+      });
+
+      if (currentData.scores) {
+        txt += `\n【最終スコア】\n`;
+        Object.entries(currentData.scores).forEach(([p, score]) => {
+          txt += `・${p}: ${score} 誉\n`;
+        });
+      }
+
+      navigator.clipboard.writeText(txt).then(() => {
+        alert('クリップボードにコピーしました！Discordやメモ帳にそのまま貼り付けられます。');
+      }).catch(err => {
+        console.error(err);
+        alert('コピーに失敗しました');
+      });
+    };
+
+    // CSVファイルのダウンロード
+    window.exportCSV = function() {
+      const allRounds = getAllRoundData();
+      if (allRounds.length === 0) return alert('出力できる履歴がありません');
+
+      let csvContent = "\uFEFF"; // Excel用文字化け防止BOM
+      csvContent += "節,詠み手,一句,初句の素材作者,二句の素材作者,結句の素材作者,獲得評価\n";
+
+      allRounds.forEach(rd => {
+        Object.entries(rd.phrases || {}).forEach(([p, phrase]) => {
+          const details = rd.phraseDetails?.[p] || [{}, {}, {}];
+          const author1 = details[0]?.author || '';
+          const author2 = details[1]?.author || '';
+          const author3 = details[2]?.author || '';
+
+          const receivedVotes = [];
+          Object.values(rd.votes || {}).forEach(voteList => {
+            if (!Array.isArray(voteList)) return;
+            voteList.forEach(v => {
+              if (v.target === p) {
+                receivedVotes.push(evalOptionsMaster[v.type]?.label || v.type);
+              }
+            });
+          });
+
+          const voteStr = receivedVotes.join(' / ');
+
+          // CSVのエスケープ処理
+          const cleanPhrase = `"${phrase.replace(/"/g, '""')}"`;
+          const cleanVotes = `"${voteStr.replace(/"/g, '""')}"`;
+
+          csvContent += `${rd.round},${p},${cleanPhrase},${author1},${author2},${author3},${cleanVotes}\n`;
+        });
+      });
+
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.setAttribute("href", url);
+      link.setAttribute("download", `haiku_history_${roomId}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    };
   </script>
 </body>
 </html>
