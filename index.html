@@ -117,6 +117,9 @@
 
     <h2>みんなの発表</h2>
     <div id="board-list"></div>
+
+    <!-- もう一度遊ぶボタンを追加 -->
+    <button onclick="resetGame()" style="background-color: #0284c7; margin-top: 24px;">🔄 次のゲームを始める（ロビーに戻る）</button>
   </div>
 
   <!-- Firebase SDK -->
@@ -170,7 +173,12 @@
           document.getElementById('total-words').innerText = data.words ? data.words.length : 0;
           document.getElementById('player-list').innerHTML = data.players ? data.players.map(p => `<div>・ ${p}</div>`).join('') : '';
 
-          if (data.status === 'playing') {
+          if (data.status === 'lobby') {
+            document.getElementById('game-sec').style.display = 'none';
+            document.getElementById('lobby-sec').style.display = 'block';
+            myHand = [];
+            selectedIndices = [];
+          } else if (data.status === 'playing') {
             document.getElementById('lobby-sec').style.display = 'none';
             document.getElementById('game-sec').style.display = 'block';
 
@@ -201,6 +209,15 @@
 
     window.startGame = async function() {
       await updateDoc(roomRef, { status: 'playing' });
+    };
+
+    window.resetGame = async function() {
+      await updateDoc(roomRef, {
+        status: 'lobby',
+        words: [],
+        hands: {},
+        phrases: {}
+      });
     };
 
     function renderHand() {
