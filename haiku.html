@@ -3,159 +3,134 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>わ〜鯖せーへきはぃく</title>
-  <link rel="stylesheet" href="haiku-style.css">
+  <title>わ〜鯖句会</title>
+  <link rel="stylesheet" href="./haiku-style.css">
+  <script type="module" src="./haiku-main.js"></script>
 </head>
 <body>
+  <div class="container">
+    <h1>🪭 わ〜鯖句会 🪭</h1>
 
-  <h1>わ〜鯖せーへきはぃく</h1>
+    <!-- 1. ログイン画面 -->
+    <div id="login-sec" class="card-sec">
+      <h2>参陣</h2>
+      <div class="form-group">
+        <label>お名前（風流名）</label>
+        <input type="text" id="player-name" placeholder="例：芭蕉">
+      </div>
+      <div class="form-group">
+        <label>部屋ID（ルームID）</label>
+        <input type="text" id="room-id" placeholder="例：haiku123">
+      </div>
+      <div class="form-group-checkbox">
+        <label><input type="checkbox" id="spectator-check"> 👀 最初は見学モードで入る</label>
+      </div>
+      <button id="join-btn" class="btn-primary">参加する</button>
+    </div>
 
-  <!-- 1. ログイン & ルーム参加 -->
-  <div id="login-sec" class="card-panel">
-    <h2>ルームに入る</h2>
-    <input type="text" id="player-name" placeholder="あなたの名前">
-    <input type="text" id="room-id" placeholder="ルームID（例：123）">
-    <label style="display:flex; align-items:center; gap:6px; margin: 8px 0; font-size:14px; cursor:pointer;">
-      <input type="checkbox" id="spectator-check"> 👀 最初は見学モード（観戦のみ）で入る
-    </label>
-    <button onclick="joinRoom()">参加する</button>
-  </div>
-
-  <!-- 2. ロビー & 素材登録 -->
-  <div id="lobby-sec" class="card-panel" style="display:none;">
-    <button id="role-toggle-btn-lobby" onclick="toggleRole()" style="background-color: #64748b; margin-bottom: 12px;">👀 見学モードに切り替える</button>
-
-    <h2>1. はぃくの素材あつめ</h2>
-    
-    <div id="host-info-lobby" class="host-banner"></div>
-
-    <div class="setting-box">
-      <div class="setting-header" onclick="toggleSettings()">
-        <span>⚙️ 設定（1人あたり）</span>
+    <!-- 2. ロビー画面 -->
+    <div id="lobby-sec" class="card-sec" style="display:none;">
+      <div id="host-info-lobby" class="info-banner"></div>
+      
+      <div class="collapsible-header" onclick="toggleSettings()">
+        <span>⚙️ ルーム設定</span>
         <span id="setting-toggle-icon">▼</span>
       </div>
-      <div class="setting-content" id="setting-content" style="display: none;">
-        <div class="setting-item">
-          <label>入力する5音の数:</label>
-          <input type="number" id="set-in-5" value="5" min="1" max="10" onchange="updateSettings()">
+      <div id="setting-content" class="collapsible-content" style="display:none;">
+        <div class="setting-grid">
+          <div>
+            <label>五音素材入力数:</label>
+            <input type="number" id="set-in-5" min="1" value="5">
+          </div>
+          <div>
+            <label>七音素材入力数:</label>
+            <input type="number" id="set-in-7" min="1" value="3">
+          </div>
+          <div>
+            <label>五音配分枚数:</label>
+            <input type="number" id="set-hand-5" min="1" value="5">
+          </div>
+          <div>
+            <label>七音配分枚数:</label>
+            <input type="number" id="set-hand-7" min="1" value="3">
+          </div>
         </div>
-        <div class="setting-item">
-          <label>入力する7音の数:</label>
-          <input type="number" id="set-in-7" value="3" min="1" max="10" onchange="updateSettings()">
-        </div>
-        <hr style="margin:8px 0; border:none; border-top:1px solid #cbd5e1;">
-        <div class="setting-item">
-          <label>配る5音の枚数:</label>
-          <input type="number" id="set-hand-5" value="5" min="1" max="10" onchange="updateSettings()">
-        </div>
-        <div class="setting-item">
-          <label>配る7音の枚数:</label>
-          <input type="number" id="set-hand-7" value="3" min="1" max="10" onchange="updateSettings()">
-        </div>
+        <button onclick="updateSettings()" class="btn-secondary" style="margin-top:10px;">設定を保存</button>
       </div>
-    </div>
 
-    <div class="section-title">五音の言葉（初句・結句用）</div>
-    <div id="inputs-5-container"></div>
+      <div style="margin-top:15px;">
+        <button id="role-toggle-btn-lobby" onclick="toggleRole()" class="btn-secondary">モード切替</button>
+      </div>
 
-    <div class="section-title">七音の言葉（二句用）</div>
-    <div id="inputs-7-container"></div>
-    
-    <button id="add-word-btn" onclick="addWords()">そざいを追加</button>
-    <p style="margin-top: 12px; text-align:center;">
-      あつまったそざい：<br>
-      五音 <strong id="total-words-5">0</strong> 個 ／ 七音 <strong id="total-words-7">0</strong> 個
-    </p>
-    
-    <div style="margin-top: 20px;">
-      <h3>参加メンバーと現在のスコア</h3>
+      <h3>参列者一覧</h3>
       <div id="player-list"></div>
-    </div>
-    
-    <button onclick="startGame()" style="background-color: #16a34a; margin-top: 20px;">はぃくづくりを開始</button>
 
-    <!-- 履歴出力領域（ロビー） -->
-    <div style="margin-top: 20px; border-top: 1px solid #e2e8f0; padding-top: 12px;">
-      <h3 style="font-size: 14px; margin-bottom: 4px;">📜 これまでのゲーム履歴出力</h3>
-      <div class="export-group">
-        <button class="export-btn-text" onclick="exportText()">📋 コピー (Discord用)</button>
-        <button class="export-btn-csv" onclick="exportCSV()">📥 CSV保存</button>
+      <hr>
+
+      <h3>素材の提出</h3>
+      <div id="inputs-5-container"></div>
+      <div id="inputs-7-container" style="margin-top:10px;"></div>
+      <button id="add-word-btn" onclick="addWords()" class="btn-primary" style="margin-top:10px;">素材を提出する</button>
+
+      <div style="margin-top:10px; font-size:14px; color:#64748b;">
+        集まった素材: 五音 <span id="total-words-5">0</span> 個 / 七音 <span id="total-words-7">0</span> 個
+      </div>
+
+      <button onclick="startGame()" class="btn-success" style="margin-top:20px; width:100%; font-size:18px; padding:12px;">句会を始める！</button>
+    </div>
+
+    <!-- 3. ゲーム画面 -->
+    <div id="game-sec" class="card-sec" style="display:none;">
+      <div id="host-info-game" class="info-banner"></div>
+      <button id="role-toggle-btn-game" onclick="toggleRole()" class="btn-secondary" style="margin-bottom:10px;">モード切替</button>
+
+      <h3>手札（素材）</h3>
+      <h4>五音</h4>
+      <div id="hand-5-list" class="card-list"></div>
+      <h4>七音</h4>
+      <div id="hand-7-list" class="card-list"></div>
+
+      <div class="phrase-builder">
+        <h3>作成中の句</h3>
+        <div class="phrase-display">
+          <span id="phrase-1">（選択してください）</span>
+          <span id="phrase-2">（選択してください）</span>
+          <span id="phrase-3">（選択してください）</span>
+        </div>
+        <div style="margin-top:10px;">
+          <button onclick="swap5Cards()" class="btn-secondary">五音の位置を入れ替える</button>
+          <button onclick="clearPhrase()" class="btn-secondary">やり直す</button>
+          <button onclick="submitPhrase()" class="btn-primary">一句披露する！</button>
+        </div>
+      </div>
+
+      <hr style="margin:20px 0;">
+
+      <div class="collapsible-header" onclick="toggleEvalGuide()">
+        <span>📜 評価基準・選者の心得</span>
+        <span id="eval-guide-toggle-icon">▼</span>
+      </div>
+      <div id="eval-guide-content" class="collapsible-content" style="display:none;">
+        <ul style="font-size:13px; line-height:1.6; padding-left:20px;">
+          <li><strong>妙なり (🪭)</strong>: 今節最高の一句（親のみ1評価限定）。一発優勝級の誉を獲得！</li>
+          <li><strong>いとおかし (🌸)</strong>: 風情・おかしみがある</li>
+          <li><strong>もののあはれ (🍁)</strong>: 味わい深い・しみじみとする</li>
+          <li><strong>天晴れ (⚔️)</strong>: 勢い・見事さがある</li>
+          <li><strong>をかし (🍡)</strong>: ユーモア・面白さがある</li>
+        </ul>
+      </div>
+
+      <h3>披露された句（評価掲示板）</h3>
+      <div id="board-list"></div>
+
+      <div id="results-sec" style="margin-top:20px;"></div>
+
+      <div style="margin-top:20px; display:flex; gap:10px;">
+        <button onclick="nextRound()" class="btn-success" style="flex:2;">次の節に進む</button>
+        <button onclick="exportText()" class="btn-secondary" style="flex:1;">テキスト保存</button>
+        <button onclick="exportCSV()" class="btn-secondary" style="flex:1;">CSV保存</button>
       </div>
     </div>
   </div>
-
-  <!-- 3. ゲーム画面（作成 & 発表 & 投票） -->
-  <div id="game-sec" class="card-panel" style="display:none;">
-    <button id="role-toggle-btn-game" onclick="toggleRole()" style="background-color: #64748b; margin-bottom: 12px;">👀 見学モードに切り替える</button>
-
-    <h2>2. はぃくを詠む</h2>
-    
-    <div id="host-info-game" class="host-banner"></div>
-
-    <div class="section-title">あなたの手札（五音カード）</div>
-    <div class="word-list" id="hand-5-list"></div>
-
-    <div class="section-title">あなたの手札（七音カード）</div>
-    <div class="word-list" id="hand-7-list"></div>
-
-    <h3 style="margin-top: 20px;">詠んだはぃく（五・七・五）</h3>
-    <div class="display-area">
-      <div class="display-line"><span>初句(五):</span> <div id="phrase-1"></div></div>
-      <button class="swap-btn" onclick="swap5Cards()">⇄ 五音（初句・結句）を入れ替える</button>
-      <div class="display-line"><span>二句(七):</span> <div id="phrase-2"></div></div>
-      <div class="display-line"><span>結句(五):</span> <div id="phrase-3"></div></div>
-    </div>
-
-    <div style="display: flex; gap: 8px;">
-      <button onclick="clearPhrase()" style="background-color: #dc2626; margin-top: 12px;">やりなおす</button>
-      <button onclick="submitPhrase()" style="background-color: #2563eb; margin-top: 12px;">一句披露する</button>
-    </div>
-
-    <hr style="margin: 24px 0; border: none; border-top: 1px solid #e2e8f0;">
-
-    <h2>みんなのはぃく & 評価</h2>
-    <div id="board-list"></div>
-
-    <!-- ランキング・結果表示領域 -->
-    <div id="result-area" style="display:none; margin-top:20px; background:#f0fdf4; border:1px solid #bbf7d0; padding:12px; border-radius:8px;">
-      <h3 style="color:#166534; margin-bottom:8px;">🪭 撰の果て</h3>
-      <div id="round-results"></div>
-
-      <!-- 評価アイコンの意味解説 -->
-      <div class="eval-guide-box">
-        <div class="eval-guide-header" onclick="toggleEvalGuide()">
-          <span>📖 評価アイコンの解説</span>
-          <span id="eval-guide-toggle-icon">▼</span>
-        </div>
-        <div class="eval-guide-content" id="eval-guide-content" style="display:none;">
-          <div>🌸 <strong>いとおかし</strong>: 面白い、センスが良い (+1誉)</div>
-          <div>🌾 <strong>もののあはれ</strong>: エモい、心に響く (+1誉)</div>
-          <div>❄️ <strong>わびさび</strong>: 地味だけど味がある (+1誉)</div>
-          <div>🌀 <strong>あやし</strong>: カオス、不思議 (+1誉)</div>
-          <div>🍶 <strong>狂おし</strong>: 癖が強い、突飛 (+1誉)</div>
-          <div>🍃 <strong>わびし</strong>: シュール、哀愁 (+1誉)</div>
-          <div>🌙 <strong>幽玄</strong>: 奥深い、雰囲気がある (+1誉)</div>
-          <div>🪭 <strong>妙なり</strong>: 極上、大絶賛 (<strong>+10誉・一発優勝！</strong>)</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 履歴出力領域（ゲーム画面） -->
-    <div class="export-group">
-      <button class="export-btn-text" onclick="exportText()">📋 コピー (Discord用)</button>
-      <button class="export-btn-csv" onclick="exportCSV()">📥 CSV保存</button>
-    </div>
-
-    <button onclick="nextRound()" style="background-color: #0284c7; margin-top: 24px;">🔄 つぎの一句を詠む（親を交代）</button>
-  </div>
-
-  <script type="module" src="haiku-main.js"></script>
-
-<script style="display:block;">
-window.onerror = function(msg, url, line) {
-  alert("【画面エラー検出】\n" + msg + "\n\nファイル: " + url.split('/').pop() + "\n行数: " + line);
-};
-</script>
-
 </body>
 </html>
