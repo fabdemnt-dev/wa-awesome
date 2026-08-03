@@ -333,9 +333,17 @@
           if (currentData.status === 'lobby') {
             document.getElementById('game-sec').style.display = 'none';
             document.getElementById('lobby-sec').style.display = 'block';
+            
+            // ロビーに戻った際に手札と選択・追加ボタンの表示を完全リセット
             myHand5 = [];
             myHand7 = [];
             selectedHand = [null, null, null];
+            
+            const btn = document.getElementById('add-word-btn');
+            if (btn) {
+              btn.innerText = "そざいを追加";
+              btn.disabled = false;
+            }
           } else if (currentData.status === 'playing') {
             document.getElementById('lobby-sec').style.display = 'none';
             document.getElementById('game-sec').style.display = 'block';
@@ -400,12 +408,14 @@
       const new5 = [], new7 = [];
 
       for (let i = 1; i <= st.in5; i++) {
-        const val = document.getElementById(`word-5-input-${i}`).value.trim();
+        const inp = document.getElementById(`word-5-input-${i}`);
+        const val = inp ? inp.value.trim() : '';
         if (!val) return alert('五音の素材をすべて入力してください');
         new5.push(val);
       }
       for (let i = 1; i <= st.in7; i++) {
-        const val = document.getElementById(`word-7-input-${i}`).value.trim();
+        const inp = document.getElementById(`word-7-input-${i}`);
+        const val = inp ? inp.value.trim() : '';
         if (!val) return alert('七音の素材をすべて入力してください');
         new7.push(val);
       }
@@ -414,6 +424,16 @@
         words5: arrayUnion(...new5),
         words7: arrayUnion(...new7)
       });
+
+      // 送信完了後に入力フォームをクリア
+      for (let i = 1; i <= st.in5; i++) {
+        const inp = document.getElementById(`word-5-input-${i}`);
+        if (inp) inp.value = '';
+      }
+      for (let i = 1; i <= st.in7; i++) {
+        const inp = document.getElementById(`word-7-input-${i}`);
+        if (inp) inp.value = '';
+      }
 
       const btn = document.getElementById('add-word-btn');
       btn.innerText = "追加完了！";
@@ -452,10 +472,7 @@
     };
 
     window.nextRound = async function() {
-      const btn = document.getElementById('add-word-btn');
-      btn.innerText = `そざいを追加`;
-      btn.disabled = false;
-
+      // データベース上の前回の言葉・作品・投票をすべて削除してリセット
       await updateDoc(roomRef, {
         status: 'lobby',
         words5: [],
