@@ -1,32 +1,7 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-import { getFirestore, doc, setDoc, onSnapshot, updateDoc, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-
-// ポエム側と同じFirebase設定（firebase-config.jsを使わずに直接記述）
-const firebaseConfig = {
-  apiKey: "AIzaSy...", // ※お使いのFirebase Consoleで確認できるAPIキー（firebase-config.jsからコピー）
-  authDomain: "wa-awesome.firebaseapp.com",
-  projectId: "wa-awesome",
-  storageBucket: "wa-awesome.appspot.com",
-  messagingSenderId: "...",
-  appId: "..."
-};
-
-// firebase-config.js の内容をそのまま使いたい場合は、1行目を以下に戻すことも可能です
-// import { db } from "./firebase-config.js";
-
-// 評価・エクスポート用定数
-const evalOptionsMaster = {
-  tae: { label: "妙なり (🪭)", icon: "🪭", pts: 0 },
-  okashi: { label: "いとおかし (🌸)", icon: "🌸", pts: 3 },
-  aware: { label: "もののあはれ (🍁)", icon: "🍁", pts: 2 },
-  aware_2: { label: "天晴れ (⚔️)", icon: "⚔️", pts: 2 },
-  funny: { label: "をかし (🍡)", icon: "🍡", pts: 1 }
-};
-const hostOptionKeys = ['tae', 'okashi', 'aware', 'aware_2', 'funny'];
-const childOptionKeys = ['okashi', 'aware', 'aware_2', 'funny'];
-
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
+import { db } from "./firebase-config.js";
+import { doc, setDoc, onSnapshot, updateDoc, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { evalOptionsMaster, hostOptionKeys, childOptionKeys, renderResults } from "./haiku-eval.js";
+import { exportText as expText, exportCSV as expCSV } from "./haiku-export.js";
 
 let roomId = "";
 let myName = "";
@@ -70,18 +45,12 @@ window.toggleEvalGuide = function() {
 };
 
 window.joinRoom = async function() {
-  const nameEl = document.getElementById('player-name');
-  const roomEl = document.getElementById('room-id');
-  const specEl = document.getElementById('spectator-check');
+  myName = document.getElementById('player-name')?.value.trim() || "";
+  roomId = document.getElementById('room-id')?.value.trim() || "";
+  const specCheck = document.getElementById('spectator-check');
+  isSpectator = specCheck ? specCheck.checked : false;
 
-  myName = nameEl ? nameEl.value.trim() : "";
-  roomId = roomEl ? roomEl.value.trim() : "";
-  isSpectator = specEl ? specEl.checked : false;
-
-  if (!myName || !roomId) {
-    alert('名前とルームIDを入力してください');
-    return;
-  }
+  if (!myName || !roomId) return alert('名前とルームIDを入力してください');
 
   try {
     roomRef = doc(db, "rooms", "haiku_" + roomId);
@@ -100,10 +69,8 @@ window.joinRoom = async function() {
 
     await setDoc(roomRef, updateData, { merge: true });
 
-    const loginSec = document.getElementById('login-sec');
-    const lobbySec = document.getElementById('lobby-sec');
-    if (loginSec) loginSec.style.display = 'none';
-    if (lobbySec) lobbySec.style.display = 'block';
+    document.getElementById('login-sec').style.display = 'none';
+    document.getElementById('lobby-sec').style.display = 'block';
 
     onSnapshot(roomRef, (snapshot) => {
       currentData = snapshot.data();
@@ -365,6 +332,8 @@ function renderBoards() {
       </div>
     `;
   }).join('');
+
+  renderResults(currentData);
 }
 
 window.submitVote = async function(targetPlayer) {
@@ -408,18 +377,5 @@ window.nextRound = async function() {
   alert(alertMessage);
 };
 
-// ボタンのイベントバインド処理
-function bindJoinButton() {
-  const btn = document.getElementById('join-btn');
-  if (btn) {
-    btn.onclick = window.joinRoom;
-  } else {
-    setTimeout(bindJoinButton, 100);
-  }
-}
-
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', bindJoinButton);
-} else {
-  bindJoinButton();
-}
+window.exportText = function() { expText(currentData); };
+window.exportCSV = function() { expCSV(currentData, roomId); };
