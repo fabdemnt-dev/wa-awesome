@@ -141,6 +141,23 @@
     }
     .setting-item:last-child { margin-bottom: 0; }
     .setting-item input { width: 60px; margin-bottom: 0; text-align: center; }
+
+    /* 作者別色分けタグ用スタイル */
+    .word-tag {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 6px;
+      font-size: 15px;
+      font-weight: bold;
+      margin: 2px 1px;
+      border: 1px solid transparent;
+    }
+    .author-label {
+      font-size: 10px;
+      display: block;
+      opacity: 0.85;
+      font-weight: normal;
+    }
   </style>
 </head>
 <body>
@@ -237,8 +254,6 @@
     <div id="result-area" style="display:none; margin-top:20px; background:#f0fdf4; border:1px solid #bbf7d0; padding:12px; border-radius:8px;">
       <h3 style="color:#166534; margin-bottom:8px;">🪭 撰の果て</h3>
       <div id="round-results"></div>
-      <hr style="margin:12px 0; border:none; border-top:1px solid #bbf7d0;">
-      <div id="author-reveal-area"></div>
     </div>
 
     <button onclick="nextRound()" style="background-color: #0284c7; margin-top: 24px;">🔄 つぎの一句を詠む（スコア引継ぎ）</button>
@@ -269,6 +284,23 @@
     let myHand7 = [];
     let selectedHand = [null, null, null];
     let currentData = null;
+
+    // 作者ごとの色バリエーション定義
+    const colorPalette = [
+      { bg: '#dbeafe', text: '#1e40af', border: '#bfdbfe' }, // 青系
+      { bg: '#fef3c7', text: '#92400e', border: '#fde68a' }, // 黄系
+      { bg: '#dcfce7', text: '#166534', border: '#bbf7d0' }, // 緑系
+      { bg: '#fce7f3', text: '#9d174d', border: '#fbcfe8' }, // ピンク系
+      { bg: '#e0e7ff', text: '#3730a3', border: '#c7d2fe' }, // 紫系
+      { bg: '#ffedd5', text: '#9a3412', border: '#fed7aa' }  // オレンジ系
+    ];
+
+    function getAuthorStyle(authorName) {
+      if (!currentData || !currentData.players) return colorPalette[0];
+      const idx = currentData.players.indexOf(authorName);
+      if (idx === -1) return colorPalette[0];
+      return colorPalette[idx % colorPalette.length];
+    }
 
     window.toggleSettings = function() {
       const content = document.getElementById('setting-content');
@@ -587,16 +619,37 @@
       const phraseDetails = currentData.phraseDetails || {};
       const votes = currentData.votes || {};
       const myVoted = votes[myName];
+      const isResultRevealed = Object.keys(votes).length > 0;
 
       const container = document.getElementById('board-list');
       container.innerHTML = Object.entries(phrases).map(([player, phrase]) => {
         const isSelf = player === myName;
+        const details = phraseDetails[player];
+
+        let phraseDisplayHtml = `<div style="font-size: 18px; margin-top: 4px; color: #1e3a8a;">${phrase}</div>`;
+
+        // 投票完了後（撰の果てが出ている時）のみ、色分けタグで作者を表示
+        if (isResultRevealed && details && details.length === 3) {
+          phraseDisplayHtml = `
+            <div style="margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center;">
+              ${details.map(item => {
+                const st = getAuthorStyle(item.author);
+                return `
+                  <span class="word-tag" style="background-color: ${st.bg}; color: ${st.text}; border-color: ${st.border};">
+                    ${item.word}
+                    <span class="author-label">（${item.author}）</span>
+                  </span>
+                `;
+              }).join('')}
+            </div>
+          `;
+        }
 
         return `
           <div class="player-board">
             <div>
               <strong>${player} の一句:</strong>
-              <div style="font-size: 18px; margin-top: 4px; color: #1e3a8a;">${phrase}</div>
+              ${phraseDisplayHtml}
             </div>
             <div>
               ${!isSelf ? `
@@ -611,9 +664,8 @@
 
       const resArea = document.getElementById('result-area');
       const resList = document.getElementById('round-results');
-      const revealArea = document.getElementById('author-reveal-area');
 
-      if (Object.keys(votes).length > 0) {
+      if (isResultRevealed) {
         resArea.style.display = 'block';
         const voteCounts = {};
         Object.values(votes).forEach(target => {
@@ -623,14 +675,6 @@
         resList.innerHTML = Object.entries(voteCounts).map(([p, c]) => `
           <div><strong>${p}</strong>: +${c} 誉 (累計: ${currentData.scores?.[p] || 0} 誉)</div>
         `).join('');
-
-        // 撰の果て（結果画面）でのみ作者内訳を表示
-        revealArea.innerHTML = '<h4 style="margin:8px 0 6px 0; color:#15803d;">📜 素材の出処</h4>' +
-          Object.entries(phraseDetails).map(([player, details]) => {
-            if (!details || details.length < 3) return '';
-            const line = `${details[0].word}（${details[0].author}） / ${details[1].word}（${details[1].author}） / ${details[2].word}（${details[2].author}）`;
-            return `<div style="font-size:13px; margin-bottom:6px; color:#1e293b;"><strong>${player}の一句</strong>:<br>「${line}」</div>`;
-          }).join('');
       } else {
         resArea.style.display = 'none';
       }
