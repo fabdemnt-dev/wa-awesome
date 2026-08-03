@@ -39,7 +39,17 @@
       margin-top: 8px;
     }
     button:disabled { background-color: #94a3b8; cursor: not-allowed; }
-    .word-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    
+    .section-title {
+      font-size: 14px;
+      font-weight: bold;
+      color: #475569;
+      margin: 12px 0 6px 0;
+      border-left: 4px solid #2563eb;
+      padding-left: 8px;
+    }
+
+    .word-list { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
     .card {
       background: #f1f5f9;
       border: 2px solid #cbd5e1;
@@ -50,17 +60,27 @@
       user-select: none;
     }
     .card.selected { background: #2563eb; color: white; border-color: #1d4ed8; }
+    .card.card-5 { border-color: #93c5fd; }
+    .card.card-7 { border-color: #fde047; }
+    
     .display-area {
       min-height: 60px;
       border: 2px dashed #94a3b8;
       border-radius: 8px;
       padding: 10px;
       display: flex;
-      flex-wrap: wrap;
+      flex-direction: column;
       gap: 8px;
-      align-items: center;
       background: #fafafa;
     }
+    .display-line {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      color: #64748b;
+    }
+
     .player-board {
       background: #f8fafc;
       border: 1px solid #e2e8f0;
@@ -103,9 +123,7 @@
       background: #e2e8f0;
       user-select: none;
     }
-    .setting-content {
-      padding: 12px;
-    }
+    .setting-content { padding: 12px; }
     .setting-item {
       display: flex;
       justify-content: space-between;
@@ -113,7 +131,7 @@
       margin-bottom: 8px;
     }
     .setting-item:last-child { margin-bottom: 0; }
-    .setting-item input { width: 70px; margin-bottom: 0; text-align: center; }
+    .setting-item input { width: 60px; margin-bottom: 0; text-align: center; }
   </style>
 </head>
 <body>
@@ -134,25 +152,41 @@
     
     <div class="setting-box">
       <div class="setting-header" onclick="toggleSettings()">
-        <span>⚙️ 設定</span>
+        <span>⚙️ 設定（1人あたり）</span>
         <span id="setting-toggle-icon">▼</span>
       </div>
       <div class="setting-content" id="setting-content" style="display: none;">
         <div class="setting-item">
-          <label>入力するそざいの数（1人あたり）:</label>
-          <input type="number" id="setting-words-count" value="3" min="1" max="5" onchange="updateSettings()">
+          <label>入力する5音の数:</label>
+          <input type="number" id="set-in-5" value="2" min="1" max="10" onchange="updateSettings()">
         </div>
         <div class="setting-item">
-          <label>配る手札の枚数（1人あたり）:</label>
-          <input type="number" id="setting-hand-count" value="6" min="3" max="10" onchange="updateSettings()">
+          <label>入力する7音の数:</label>
+          <input type="number" id="set-in-7" value="1" min="1" max="10" onchange="updateSettings()">
+        </div>
+        <hr style="margin:8px 0; border:none; border-top:1px solid #cbd5e1;">
+        <div class="setting-item">
+          <label>配る5音の枚数:</label>
+          <input type="number" id="set-hand-5" value="5" min="1" max="10" onchange="updateSettings()">
+        </div>
+        <div class="setting-item">
+          <label>配る7音の枚数:</label>
+          <input type="number" id="set-hand-7" value="3" min="1" max="10" onchange="updateSettings()">
         </div>
       </div>
     </div>
 
-    <div id="inputs-container"></div>
+    <div class="section-title">五音の言葉（かみのく・しもつく用）</div>
+    <div id="inputs-5-container"></div>
+
+    <div class="section-title">七音の言葉（なかのく用）</div>
+    <div id="inputs-7-container"></div>
     
     <button id="add-word-btn" onclick="addWords()">そざいを追加</button>
-    <p style="margin-top: 12px;">あつまったそざい: <strong id="total-words">0</strong> 個</p>
+    <p style="margin-top: 12px; text-align:center;">
+      あつまったそざい：<br>
+      五音 <strong id="total-words-5">0</strong> 個 ／ 七音 <strong id="total-words-7">0</strong> 個
+    </p>
     
     <div style="margin-top: 20px;">
       <h3>参加メンバーと現在のスコア</h3>
@@ -166,14 +200,22 @@
   <div id="game-sec" class="card-panel" style="display:none;">
     <h2>2. はぃくを詠む</h2>
     
-    <h3>あなたの手札</h3>
-    <div class="word-list" id="hand-list"></div>
+    <div class="section-title">あなたの手札（五音カード）</div>
+    <div class="word-list" id="hand-5-list"></div>
+
+    <div class="section-title">あなたの手札（七音カード）</div>
+    <div class="word-list" id="hand-7-list"></div>
 
     <h3 style="margin-top: 20px;">詠んだはぃく（五・七・五）</h3>
-    <div class="display-area" id="my-phrase"></div>
+    <div class="display-area">
+      <div class="display-line"><span>初句(五):</span> <div id="phrase-1"></div></div>
+      <div class="display-line"><span>二句(七):</span> <div id="phrase-2"></div></div>
+      <div class="display-line"><span>結句(五):</span> <div id="phrase-3"></div></div>
+    </div>
+
     <div style="display: flex; gap: 8px;">
-      <button onclick="clearPhrase()" style="background-color: #dc2626; margin-top: 8px;">やりなおす</button>
-      <button onclick="submitPhrase()" style="background-color: #2563eb; margin-top: 8px;">一句披露する</button>
+      <button onclick="clearPhrase()" style="background-color: #dc2626; margin-top: 12px;">やりなおす</button>
+      <button onclick="submitPhrase()" style="background-color: #2563eb; margin-top: 12px;">一句披露する</button>
     </div>
 
     <hr style="margin: 24px 0; border: none; border-top: 1px solid #e2e8f0;">
@@ -211,8 +253,10 @@
     let roomId = "";
     let myName = "";
     let roomRef = null;
-    let myHand = [];
-    let selectedIndices = [];
+
+    let myHand5 = [];
+    let myHand7 = [];
+    let selectedHand = []; // 配列 [cardObj, cardObj, cardObj]
     let currentData = null;
 
     window.toggleSettings = function() {
@@ -238,12 +282,14 @@
         await setDoc(roomRef, {
           players: arrayUnion(myName),
           status: "lobby",
-          words: [],
-          hands: {},
+          words5: [],
+          words7: [],
+          hands5: {},
+          hands7: {},
           phrases: {},
           votes: {},
           scores: {},
-          settings: { wordsPerPlayer: 3, handSize: 6 }
+          settings: { in5: 2, in7: 1, hand5: 5, hand7: 3 }
         }, { merge: true });
 
         document.getElementById('login-sec').style.display = 'none';
@@ -253,13 +299,16 @@
           currentData = snapshot.data();
           if (!currentData) return;
 
-          const settings = currentData.settings || { wordsPerPlayer: 3, handSize: 6 };
-          document.getElementById('setting-words-count').value = settings.wordsPerPlayer;
-          document.getElementById('setting-hand-count').value = settings.handSize;
+          const st = currentData.settings || { in5: 2, in7: 1, hand5: 5, hand7: 3 };
+          document.getElementById('set-in-5').value = st.in5;
+          document.getElementById('set-in-7').value = st.in7;
+          document.getElementById('set-hand-5').value = st.hand5;
+          document.getElementById('set-hand-7').value = st.hand7;
           
-          renderInputFields(settings.wordsPerPlayer);
+          renderInputFields(st.in5, st.in7);
 
-          document.getElementById('total-words').innerText = currentData.words ? currentData.words.length : 0;
+          document.getElementById('total-words-5').innerText = currentData.words5 ? currentData.words5.length : 0;
+          document.getElementById('total-words-7').innerText = currentData.words7 ? currentData.words7.length : 0;
           
           const scores = currentData.scores || {};
           document.getElementById('player-list').innerHTML = currentData.players ? currentData.players.map(p => 
@@ -275,16 +324,16 @@
           if (currentData.status === 'lobby') {
             document.getElementById('game-sec').style.display = 'none';
             document.getElementById('lobby-sec').style.display = 'block';
-            myHand = [];
-            selectedIndices = [];
+            myHand5 = [];
+            myHand7 = [];
+            selectedHand = [];
           } else if (currentData.status === 'playing') {
             document.getElementById('lobby-sec').style.display = 'none';
             document.getElementById('game-sec').style.display = 'block';
 
-            if (currentData.hands && currentData.hands[myName]) {
-              myHand = currentData.hands[myName];
-              renderHand();
-            }
+            if (currentData.hands5 && currentData.hands5[myName]) myHand5 = currentData.hands5[myName];
+            if (currentData.hands7 && currentData.hands7[myName]) myHand7 = currentData.hands7[myName];
+            renderHand();
             renderBoards();
           }
         });
@@ -294,138 +343,174 @@
       }
     };
 
-    function renderInputFields(count) {
-      const container = document.getElementById('inputs-container');
-      if (container.children.length === count) return;
+    function renderInputFields(c5, c7) {
+      const c5Container = document.getElementById('inputs-5-container');
+      const c7Container = document.getElementById('inputs-7-container');
       
-      container.innerHTML = '';
-      for (let i = 1; i <= count; i++) {
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.id = `word-input-${i}`;
-        input.placeholder = `そざい ${i}`;
-        container.appendChild(input);
+      if (c5Container.children.length !== c5) {
+        c5Container.innerHTML = '';
+        for (let i = 1; i <= c5; i++) {
+          const inp = document.createElement('input');
+          inp.type = 'text';
+          inp.id = `word-5-input-${i}`;
+          inp.placeholder = `五音の素材 ${i}`;
+          c5Container.appendChild(inp);
+        }
       }
-      document.getElementById('add-word-btn').innerText = `${count}つのそざいを追加`;
+
+      if (c7Container.children.length !== c7) {
+        c7Container.innerHTML = '';
+        for (let i = 1; i <= c7; i++) {
+          const inp = document.createElement('input');
+          inp.type = 'text';
+          inp.id = `word-7-input-${i}`;
+          inp.placeholder = `七音の素材 ${i}`;
+          c7Container.appendChild(inp);
+        }
+      }
     }
 
     window.updateSettings = async function() {
-      const wordsCount = parseInt(document.getElementById('setting-words-count').value) || 3;
-      const handCount = parseInt(document.getElementById('setting-hand-count').value) || 6;
+      const in5 = parseInt(document.getElementById('set-in-5').value) || 2;
+      const in7 = parseInt(document.getElementById('set-in-7').value) || 1;
+      const hand5 = parseInt(document.getElementById('set-hand-5').value) || 5;
+      const hand7 = parseInt(document.getElementById('set-hand-7').value) || 3;
 
       await updateDoc(roomRef, {
-        settings: { wordsPerPlayer: wordsCount, handSize: handCount }
+        settings: { in5, in7, hand5, hand7 }
       });
     };
 
     window.removePlayer = async function(targetPlayer) {
       if (!confirm(`${targetPlayer} さんを鯖落ちさせますか？`)) return;
-      await updateDoc(roomRef, {
-        players: arrayRemove(targetPlayer)
-      });
+      await updateDoc(roomRef, { players: arrayRemove(targetPlayer) });
     };
 
     window.addWords = async function() {
-      const settings = currentData.settings || { wordsPerPlayer: 3 };
-      const count = settings.wordsPerPlayer;
-      const newWords = [];
+      const st = currentData.settings || { in5: 2, in7: 1 };
+      const new5 = [], new7 = [];
 
-      for (let i = 1; i <= count; i++) {
-        const val = document.getElementById(`word-input-${i}`).value.trim();
-        if (!val) return alert(`${count}つすべての枠にそざいを入力してください！`);
-        newWords.push(val);
+      for (let i = 1; i <= st.in5; i++) {
+        const val = document.getElementById(`word-5-input-${i}`).value.trim();
+        if (!val) return alert('五音の素材をすべて入力してください');
+        new5.push(val);
+      }
+      for (let i = 1; i <= st.in7; i++) {
+        const val = document.getElementById(`word-7-input-${i}`).value.trim();
+        if (!val) return alert('七音の素材をすべて入力してください');
+        new7.push(val);
       }
 
       await updateDoc(roomRef, { 
-        words: arrayUnion(...newWords) 
+        words5: arrayUnion(...new5),
+        words7: arrayUnion(...new7)
       });
 
       const btn = document.getElementById('add-word-btn');
       btn.innerText = "追加完了！";
       btn.disabled = true;
-
-      for (let i = 1; i <= count; i++) {
-        document.getElementById(`word-input-${i}`).disabled = true;
-      }
     };
 
     window.startGame = async function() {
-      if (!currentData || !currentData.words) return;
-
-      const words = [...currentData.words];
+      if (!currentData) return;
+      const w5 = [...(currentData.words5 || [])];
+      const w7 = [...(currentData.words7 || [])];
       const players = currentData.players || [];
-      const settings = currentData.settings || { handSize: 6 };
-      const handSize = settings.handSize;
+      const st = currentData.settings || { hand5: 5, hand7: 3 };
 
-      if (words.length < players.length * handSize) {
-        return alert(`そざいの数が足りません！（必要な数: ${players.length * handSize}個 / 現在: ${words.length}個）`);
+      if (w5.length < players.length * st.hand5) {
+        return alert(`五音の素材が足りません！（必要: ${players.length * st.hand5}個 / 現在: ${w5.length}個）`);
+      }
+      if (w7.length < players.length * st.hand7) {
+        return alert(`七音の素材が足りません！（必要: ${players.length * st.hand7}個 / 現在: ${w7.length}個）`);
       }
 
-      const shuffled = words.sort(() => Math.random() - 0.5);
-      const newHands = {};
+      const shuf5 = w5.sort(() => Math.random() - 0.5);
+      const shuf7 = w7.sort(() => Math.random() - 0.5);
 
-      players.forEach((player, index) => {
-        const start = index * handSize;
-        newHands[player] = shuffled.slice(start, start + handSize);
+      const newHands5 = {}, newHands7 = {};
+
+      players.forEach((p, idx) => {
+        newHands5[p] = shuf5.slice(idx * st.hand5, (idx + 1) * st.hand5);
+        newHands7[p] = shuf7.slice(idx * st.hand7, (idx + 1) * st.hand7);
       });
 
       await updateDoc(roomRef, { 
         status: 'playing',
-        hands: newHands 
+        hands5: newHands5,
+        hands7: newHands7
       });
     };
 
     window.nextRound = async function() {
-      const settings = currentData.settings || { wordsPerPlayer: 3 };
-      const count = settings.wordsPerPlayer;
-
       const btn = document.getElementById('add-word-btn');
-      btn.innerText = `${count}つのそざいを追加`;
+      btn.innerText = `そざいを追加`;
       btn.disabled = false;
-
-      for (let i = 1; i <= count; i++) {
-        const inp = document.getElementById(`word-input-${i}`);
-        if (inp) {
-          inp.value = '';
-          inp.disabled = false;
-        }
-      }
 
       await updateDoc(roomRef, {
         status: 'lobby',
-        words: [],
-        hands: {},
+        words5: [],
+        words7: [],
+        hands5: {},
+        hands7: {},
         phrases: {},
         votes: {}
       });
     };
 
     function renderHand() {
-      const list = document.getElementById('hand-list');
-      list.innerHTML = myHand.map((w, idx) => {
-        const sel = selectedIndices.includes(idx) ? 'selected' : '';
-        return `<div class="card ${sel}" onclick="toggleCard(${idx})">${w}</div>`;
+      const list5 = document.getElementById('hand-5-list');
+      const list7 = document.getElementById('hand-7-list');
+
+      list5.innerHTML = myHand5.map((w, idx) => {
+        const isSel = selectedHand.some(item => item.type === 5 && item.idx === idx);
+        return `<div class="card card-5 ${isSel ? 'selected' : ''}" onclick="selectCard(5, ${idx})">${w}</div>`;
       }).join('');
 
-      const phrase = document.getElementById('my-phrase');
-      phrase.innerHTML = selectedIndices.map(idx => `<div class="card selected">${myHand[idx]}</div>`).join('');
+      list7.innerHTML = myHand7.map((w, idx) => {
+        const isSel = selectedHand.some(item => item.type === 7 && item.idx === idx);
+        return `<div class="card card-7 ${isSel ? 'selected' : ''}" onclick="selectCard(7, ${idx})">${w}</div>`;
+      }).join('');
+
+      document.getElementById('phrase-1').innerHTML = selectedHand[0] ? `<div class="card card-5 selected">${selectedHand[0].word}</div>` : '';
+      document.getElementById('phrase-2').innerHTML = selectedHand[1] ? `<div class="card card-7 selected">${selectedHand[1].word}</div>` : '';
+      document.getElementById('phrase-3').innerHTML = selectedHand[2] ? `<div class="card card-5 selected">${selectedHand[2].word}</div>` : '';
     }
 
-    window.toggleCard = function(idx) {
-      const pos = selectedIndices.indexOf(idx);
-      if (pos === -1) selectedIndices.push(idx);
-      else selectedIndices.splice(pos, 1);
+    window.selectCard = function(type, idx) {
+      const word = type === 5 ? myHand5[idx] : myHand7[idx];
+      
+      // 既に選ばれているか
+      const selPos = selectedHand.findIndex(item => item.type === type && item.idx === idx);
+      if (selPos !== -1) {
+        selectedHand.splice(selPos, 1);
+        renderHand();
+        return;
+      }
+
+      // 枠の空き状況に合わせて配置
+      if (!selectedHand[0] && type === 5) {
+        selectedHand[0] = { type, idx, word };
+      } else if (!selectedHand[1] && type === 7) {
+        selectedHand[1] = { type, idx, word };
+      } else if (!selectedHand[2] && type === 5) {
+        selectedHand[2] = { type, idx, word };
+      } else {
+        alert('その枠（初句/二句/結句）は埋まっているか、音の構成が合いません。やり直すボタンを押すかカードを外してください。');
+      }
       renderHand();
     };
 
     window.clearPhrase = function() {
-      selectedIndices = [];
+      selectedHand = [];
       renderHand();
     };
 
     window.submitPhrase = async function() {
-      const phraseText = selectedIndices.map(idx => myHand[idx]).join(' ');
-      if (!phraseText) return alert('カードを選んでください');
+      if (!selectedHand[0] || !selectedHand[1] || !selectedHand[2]) {
+        return alert('初句(五音)・二句(七音)・結句(五音)をすべてそろえてください！');
+      }
+      const phraseText = `${selectedHand[0].word} ${selectedHand[1].word} ${selectedHand[2].word}`;
       
       const updateData = {};
       updateData[`phrases.${myName}`] = phraseText;
