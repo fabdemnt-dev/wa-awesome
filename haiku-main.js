@@ -337,14 +337,15 @@ function renderBoards() {
       return `<span class="word-tag" style="background:${s.bg}; color:${s.text}; border-color:${s.border};">${d.text}<span class="author-label">(${d.author})</span></span>`;
     }).join(' ') : `<strong>${phrases[pName]}</strong>`;
 
-    let evalBadgesHtml = '';
+   let evalBadgesHtml = '';
     Object.keys(votes).forEach(voter => {
       const vData = votes[voter]?.[pName];
       if (vData) {
         const keys = Array.isArray(vData) ? vData : [vData];
         keys.forEach(k => {
           if (evalOptionsMaster[k]) {
-            evalBadgesHtml += `<span style="font-size:12px; background:#f1f5f9; padding:2px 6px; border-radius:10px; margin-right:4px; border:1px solid #cbd5e1;">${evalOptionsMaster[k].icon} ${voter}</span>`;
+            // ▼ voter を外し、アイコン（または評価のラベル）のみにする
+            evalBadgesHtml += `<span style="font-size:12px; background:#f1f5f9; padding:2px 6px; border-radius:10px; margin-right:4px; border:1px solid #cbd5e1;">${evalOptionsMaster[k].icon}</span>`;
           }
         });
       }
