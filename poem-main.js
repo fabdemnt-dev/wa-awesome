@@ -414,11 +414,12 @@ function renderBoards() {
     
     const userColor = getColorFromName(pName);
 
-    const handsHtml = hands.map(h => {
+        const handsHtml = hands.map(h => {
+      // プレイヤーのカラーを取得し、薄めの背景色と枠線を作る
       const authorColor = getColorFromName(h.author);
       return `
-        <div style="display: inline-block; background: #e2e8f0; padding: 4px 8px; margin: 2px; border-radius: 4px; font-size: 13px;">
-          ${h.text} <span style="font-size: 10px; color: ${authorColor}; font-weight: bold;">(${h.author})</span>
+        <div style="display: inline-block; background-color: ${authorColor}22; border: 1px solid ${authorColor}66; color: #1e293b; padding: 4px 8px; margin: 2px; border-radius: 4px; font-size: 13px;">
+          ${h.text} <span style="font-size: 10px; color: #64748b; font-weight: bold;">(${h.author})</span>
         </div>
       `;
     }).join('');
