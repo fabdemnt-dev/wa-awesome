@@ -8,28 +8,30 @@ let isSpectator = false;
 let roomRef = null;
 let currentData = null;
 
-// サンプルとしてプレースホルダーに表示するフレーズのプール
+// 選択中の手札のインデックスを管理するセット（「使った」状態のもの）
+let selectedHandIndices = new Set();
+
 const SAMPLE_PHRASES = [
-  "終電",
-  "ひざ",
-  "エドワード・エルリック",
-  "サイコパス",
+  "終電間際のホームの匂い",
+  "冷めかけたブラックコーヒー",
+  "透明な嘘と夕焼け",
+  "夜風にほどけた髪の毛",
   "置き忘れたままの優しさ",
-  "画面越し",
-  "壊れかけ",
-  "人魚の鱗",
-  "カリスマ",
-  "深夜三時のボボンガリンガ",
-  "月",
-  "帰り道",
-  "溶けかけ",
-  "黒縁メガネ",
-  "合言葉",
-  "踏切の音",
-  "枯れたひまわり",
-  "ハチワレ",
-  "ちいかわ",
-  "ローレライ"
+  "画面越しの青い光",
+  "壊れかけのオルゴール",
+  "忘れたふりをした約束",
+  "潮風が染み込んだスニーカー",
+  "深夜三時の独り言",
+  "輪郭のぼやけた月",
+  "いつかの帰り道",
+  "溶けかけのアイスクリーム",
+  "ありふれた奇跡の欠片",
+  "秘密基地の合言葉",
+  "遠くで鳴る踏切の音",
+  "季節外れのひまわり",
+  "誰にも言えない秘密",
+  "ガラス玉の宇宙",
+  "終わらないロールプレイ"
 ];
 
 window.joinRoom = async function() {
@@ -99,6 +101,7 @@ window.joinRoom = async function() {
       if (currentData.status === 'lobby') {
         document.getElementById('game-sec').style.display = 'none';
         document.getElementById('lobby-sec').style.display = 'block';
+        selectedHandIndices.clear(); // ロビーに戻ったら選択状態をリセット
         const textarea = document.getElementById('poem-input-area');
         if (textarea) {
           textarea.value = '';
@@ -132,15 +135,12 @@ function renderInputFields(count) {
 
   if (container.children.length !== count) {
     container.innerHTML = '';
-    
-    // サンプルリストからランダムに並び替え
     const shuffledSamples = [...SAMPLE_PHRASES].sort(() => Math.random() - 0.5);
 
     for (let i = 1; i <= count; i++) {
       const inp = document.createElement('input');
       inp.type = 'text';
       inp.className = 'poem-input';
-      
       const sampleText = shuffledSamples[(i - 1) % shuffledSamples.length];
       inp.placeholder = `例: ${sampleText}`;
 
@@ -218,6 +218,7 @@ window.startGame = async function() {
     newHands[p] = shuffledWords.splice(0, handCount);
   });
 
+  selectedHandIndices.clear();
   await updateDoc(roomRef, { 
     status: "playing", 
     hands: newHands, 
@@ -248,9 +249,20 @@ function renderHand() {
     return;
   }
 
-  handList.innerHTML = myHands.map((item, idx) => `
-    <div class="card" onclick="insertWord(${idx})">${item.text}</div>
-  `).join('');
+  // 手札を描画。選択されているものは色を変え、クリックで「挿入＆選択状態の切り替え」を行う
+  handList.innerHTML = myHands.map((item, idx) => {
+    const isSelected = selectedHandIndices.has(idx);
+    // 選択されている時は色が変わる（例: 青系の背景に白文字、または枠線を変える）
+    const bgStyle = isSelected 
+      ? 'background-color: #2563eb; color: #fff; border-color: #1d4ed8;' 
+      : 'background-color: #fff; color: #0f172a; border-color: #cbd5e1;';
+
+    return `
+      <div class="card" onclick="onCardClick(${idx})" style="cursor: pointer; padding: 8px 12px; margin-bottom: 6px; border-radius: 6px; border: 1px solid; transition: all 0.2s; ${bgStyle}">
+        ${item.text} ${isSelected ? '✓' : ''}
+      </div>
+    `;
+  }).join('');
 }
 
 function setupAutoResize() {
@@ -266,13 +278,15 @@ function resizeTextarea() {
   this.style.height = (this.scrollHeight) + 'px';
 }
 
-window.insertWord = function(idx) {
+// 手札カードをクリックしたときの処理（テキスト挿入 ＆ 色（選択状態）の切り替え）
+window.onCardClick = function(idx) {
   if (isSpectator) return;
   const myHands = currentData.hands?.[myName] || [];
   const item = myHands[idx];
   const textarea = document.getElementById('poem-input-area');
   if (!textarea || !item) return;
 
+  // 1. まずテキストエリアに文字を挿入する従来の動きを維持
   const wordText = item.text;
   const start = textarea.selectionStart;
   const end = textarea.selectionEnd;
@@ -283,6 +297,16 @@ window.insertWord = function(idx) {
   
   resizeTextarea.call(textarea);
   textarea.focus();
+
+  // 2. カードの選択状態（色）をトグル（ON/OFF）する
+  if (selectedHandIndices.has(idx)) {
+    selectedHandIndices.delete(idx);
+  } else {
+    selectedHandIndices.add(idx);
+  }
+
+  // 手札リストの見た目を再描画して色を反映させる
+  renderHand();
 };
 
 window.clearPoem = function() {
@@ -293,6 +317,9 @@ window.clearPoem = function() {
     textarea.style.height = 'auto';
     textarea.focus();
   }
+  // 選択状態もリセット
+  selectedHandIndices.clear();
+  renderHand();
 };
 
 window.submitPoem = async function() {
@@ -303,12 +330,19 @@ window.submitPoem = async function() {
   const poemText = textarea.value.trim();
   if (!poemText) return alert('ポエムを入力してください');
 
+  // タップして「選択状態（色が変わっている）」になっている手札だけを「使用した手札」として保存する
   const myHands = currentData.hands?.[myName] || [];
+  const usedHands = [];
+  selectedHandIndices.forEach(idx => {
+    if (myHands[idx]) {
+      usedHands.push(myHands[idx]);
+    }
+  });
 
   await updateDoc(roomRef, {
     [`poems.${myName}`]: {
       text: poemText,
-      hands: myHands,
+      hands: usedHands, // 選択（色変更）した手札のみが入る
       revealed: false,
       likes: 0,
       emos: 0
@@ -379,7 +413,7 @@ function renderBoards() {
         
         <div style="margin-top: 8px;">
           <div style="font-size: 12px; color: #64748b; margin-bottom: 4px;">📌 使用した手札（元素材の作者）:</div>
-          <div>${handsHtml}</div>
+          <div>${handsHtml.length > 0 ? handsHtml : '<span style="font-size: 12px; color: #94a3b8;">なし</span>'}</div>
         </div>
 
         <div style="margin-top: 12px;">
@@ -399,13 +433,13 @@ function renderBoards() {
             👍 いいね (${likes})
           </button>
           <button onclick="addReaction('${pName}', 'emo')" style="background-color: #8b5cf6; width: auto; padding: 6px 12px; font-size: 14px;">
-            💖 エモい (${emos})
+            ♥ エモい (${emos})
           </button>
         </div>
       </div>
     `;
   }).join('');
-}
+};
 
 window.nextGame = async function() {
   if (!roomRef) return;
