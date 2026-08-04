@@ -399,7 +399,7 @@ function renderBoards() {
             👍 いいね (${likes})
           </button>
           <button onclick="addReaction('${pName}', 'emo')" style="background-color: #8b5cf6; width: auto; padding: 6px 12px; font-size: 14px;">
-            ♥ エモい (${emos})
+            💖 エモい (${emos})
           </button>
         </div>
       </div>
