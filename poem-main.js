@@ -22,7 +22,9 @@ window.joinRoom = async function() {
     const updateData = {
       status: "lobby",
       words: [],
-      poems: {}
+      hands: {},
+      poems: {},
+      settings: { handCount: 5 }
     };
 
     if (isSpectator) {
@@ -46,11 +48,17 @@ window.joinRoom = async function() {
       if (spectators.includes(myName)) isSpectator = true;
       if (players.includes(myName)) isSpectator = false;
 
+      // 手札枚数の設定値を反映
+      const st = currentData.settings || { handCount: 5 };
+      if (document.getElementById('set-hand-count')) {
+        document.getElementById('set-hand-count').value = st.handCount;
+      }
+
       const roleBtnText = isSpectator ? "⚔️ プレイヤーとして途中参戦する" : "👀 見学モードに切り替える";
       if (document.getElementById('role-toggle-btn-lobby')) document.getElementById('role-toggle-btn-lobby').innerText = roleBtnText;
       if (document.getElementById('role-toggle-btn-game')) document.getElementById('role-toggle-btn-game').innerText = roleBtnText;
 
-      // ▼ プレイヤーリストに「鯖落ち」ボタンを付与（俳句版の仕様を移植）
+      // プレイヤーリストと「鯖落ち」ボタンの描画
       let playerListHtml = players.map(p => `
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
           <span>・ ${p} ${p === myName ? '（あなた）' : ''}</span>
@@ -97,7 +105,7 @@ window.toggleRole = async function() {
   }
 };
 
-// ▼ 任意のプレイヤーをルームから退出（鯖落ち）させる関数
+// 任意のプレイヤーをルームから退出（鯖落ち）させる関数
 window.removePlayer = async function(pName) {
   if (confirm(`${pName} さんを退出させますか？`)) {
     await updateDoc(roomRef, { 
@@ -123,8 +131,33 @@ window.addWords = async function() {
   alert('素材を追加しました！');
 };
 
+// ゲーム開始時にランダムに手札を配る処理
 window.startGame = async function() {
-  await updateDoc(roomRef, { status: "playing" });
+  if (!currentData) return;
+  const players = currentData.players || [];
+  const words = currentData.words || [];
+  
+  const handCountInput = document.getElementById('set-hand-count');
+  const handCount = handCountInput ? parseInt(handCountInput.value) || 5 : 5;
+
+  await updateDoc(roomRef, { "settings.handCount": handCount });
+
+  if (words.length < players.length * handCount) {
+    return alert(`素材の数が足りません！\n現在 ${words.length}個 ですが、(プレイヤー ${players.length}人 × 手札 ${handCount}枚 = ${players.length * handCount}個) 必要です。`);
+  }
+
+  const shuffledWords = [...words].sort(() => Math.random() - 0.5);
+  const newHands = {};
+
+  players.forEach(p => {
+    newHands[p] = shuffledWords.splice(0, handCount);
+  });
+
+  await updateDoc(roomRef, { 
+    status: "playing", 
+    hands: newHands, 
+    poems: {} 
+  });
 };
 
 function renderHand() {
@@ -143,15 +176,23 @@ function renderHand() {
 
   if (textarea) textarea.disabled = false;
 
-  const words = currentData.words || [];
-  handList.innerHTML = words.map((item, idx) => `
+  const myHands = currentData.hands?.[myName] || [];
+  
+  if (myHands.length === 0) {
+    handList.innerHTML = '<div style="font-size:13px; color:#94a3b8;">手札がありません</div>';
+    return;
+  }
+
+  handList.innerHTML = myHands.map((item, idx) => `
     <div class="card" onclick="insertWord(${idx})">${item.text}</div>
   `).join('');
 }
 
+// 手札をクリックした際、テキストエリアのカーソル位置に言葉を挿入する
 window.insertWord = function(idx) {
   if (isSpectator) return;
-  const item = currentData.words[idx];
+  const myHands = currentData.hands?.[myName] || [];
+  const item = myHands[idx];
   const textarea = document.getElementById('poem-input-area');
   if (!textarea || !item) return;
 
@@ -206,6 +247,7 @@ window.nextGame = async function() {
   await updateDoc(roomRef, {
     status: "lobby",
     words: [],
+    hands: {},
     poems: {}
   });
   alert('次のポエム作成に進みます！');
