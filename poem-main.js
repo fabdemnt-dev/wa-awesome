@@ -272,10 +272,41 @@ window.submitPoem = async function() {
   const poemText = textarea.value.trim();
   if (!poemText) return alert('ポエムを入力してください');
 
+  // 自分の手札データを取得して、作品と一緒に保存する（誰の素材かも紐付ける）
+  const myHands = currentData.hands?.[myName] || [];
+
   await updateDoc(roomRef, {
-    [`poems.${myName}`]: poemText
+    [`poems.${myName}`]: {
+      text: poemText,
+      hands: myHands,  // 選んだ手札（author情報を含んでいる）
+      revealed: false, // 最初は作品が隠れている状態
+      likes: 0,        // いいね数
+      emos: 0          // エモい数
+    }
   });
   alert('ポエムを投稿しました！');
+};
+
+// タップして作品をめくる（表示する）関数
+window.revealPoem = async function(pName) {
+  if (!roomRef) return;
+  await updateDoc(roomRef, {
+    [`poems.${pName}.revealed`]: true
+  });
+};
+
+// いいね・エモいを何回でも押せるようにカウントアップする関数
+window.addReaction = async function(pName, type) {
+  if (!roomRef || !currentData) return;
+  const poems = currentData.poems || {};
+  const target = poems[pName];
+  if (!target) return;
+
+  const currentCount = (type === 'like' ? target.likes : target.emos) || 0;
+
+  await updateDoc(roomRef, {
+    [`poems.${pName}.${type === 'like' ? 'likes' : 'emos'}`]: currentCount + 1
+  });
 };
 
 function renderBoards() {
@@ -283,12 +314,72 @@ function renderBoards() {
   if (!boardList || !currentData) return;
 
   const poems = currentData.poems || {};
-  boardList.innerHTML = Object.keys(poems).map(pName => `
-    <div class="player-board">
-      <strong>${pName} の作品</strong>
-      <p style="margin-top:6px; font-size:15px; line-height:1.5; white-space: pre-wrap;">${poems[pName]}</p>
-    </div>
-  `).join('');
+  
+  if (Object.keys(poems).length === 0) {
+    boardList.innerHTML = '<div style="font-size:13px; color:#64748b;">まだ投稿された作品はありません。</div>';
+    return;
+  }
+
+  boardList.innerHTML = Object.keys(poems).map(pName => {
+    const poemData = poems[pName];
+
+    // 過去のデータ（テキストのみで保存されていた場合）の互換性対応
+    if (typeof poemData === 'string') {
+      return `
+        <div class="player-board" style="margin-bottom: 20px; padding: 16px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff;">
+          <strong>${pName} の作品</strong>
+          <div style="margin-top: 8px; padding: 12px; background: #f8fafc; border-left: 4px solid #4f46e5; border-radius: 4px;">
+            <p style="font-size: 15px; line-height: 1.5; white-space: pre-wrap; margin: 0;">${poemData}</p>
+          </div>
+        </div>
+      `;
+    }
+
+    const isRevealed = poemData.revealed;
+    const hands = poemData.hands || [];
+    const likes = poemData.likes || 0;
+    const emos = poemData.emos || 0;
+
+    // 1. 選んだ手札の一覧（誰の素材かを表示）
+    const handsHtml = hands.map(h => `
+      <div style="display: inline-block; background: #e2e8f0; padding: 4px 8px; margin: 2px; border-radius: 4px; font-size: 13px;">
+        ${h.text} <span style="font-size: 10px; color: #64748b;">(${h.author})</span>
+      </div>
+    `).join('');
+
+    return `
+      <div class="player-board" style="margin-bottom: 20px; padding: 16px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff;">
+        <strong>${pName} の作品</strong>
+        
+        <div style="margin-top: 8px;">
+          <div style="font-size: 12px; color: #64748b; margin-bottom: 4px;">📌 使用した手札（元素材の作者）:</div>
+          <div>${handsHtml}</div>
+        </div>
+
+        <div style="margin-top: 12px;">
+          ${!isRevealed ? `
+            <button onclick="revealPoem('${pName}')" style="background-color: #4f46e5; width: 100%; padding: 12px; font-size: 15px;">
+              🎁 タップして作品を開く
+            </button>
+          ` : `
+            <div style="margin-top: 8px; padding: 12px; background: #f8fafc; border-left: 4px solid #4f46e5; border-radius: 4px;">
+              <p style="font-size: 15px; line-height: 1.5; white-space: pre-wrap; margin: 0;">${poemData.text}</p>
+            </div>
+          `}
+        </div>
+
+        <!-- リアクションボタン（何回でも押せる） -->
+        <div style="display: flex; gap: 8px; margin-top: 12px; align-items: center;">
+          <button onclick="addReaction('${pName}', 'like')" style="background-color: #f43f5e; width: auto; padding: 6px 12px; font-size: 14px;">
+            👍 いいね (${likes})
+          </button>
+          <button onclick="addReaction('${pName}', 'emo')" style="background-color: #8b5cf6; width: auto; padding: 6px 12px; font-size: 14px;">
+            ♥ エモい (${emos})
+          </button>
+        </div>
+      </div>
+    `;
+  }).join('');
 }
 
 window.nextGame = async function() {
