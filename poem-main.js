@@ -12,11 +12,11 @@ let currentData = null;
 let selectedHandIndices = new Set();
 
 const SAMPLE_PHRASES = [
-  "終電",
+  "護法夜叉",
   "ひざ",
   "エドワード・エルリック",
   "サイコパス",
-  "置き忘れたままの優しさ",
+  "降魔大聖",
   "画面越し",
   "壊れかけ",
   "人魚の鱗",
