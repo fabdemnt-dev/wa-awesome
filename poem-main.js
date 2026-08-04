@@ -50,7 +50,14 @@ window.joinRoom = async function() {
       if (document.getElementById('role-toggle-btn-lobby')) document.getElementById('role-toggle-btn-lobby').innerText = roleBtnText;
       if (document.getElementById('role-toggle-btn-game')) document.getElementById('role-toggle-btn-game').innerText = roleBtnText;
 
-      let playerListHtml = players.map(p => `<div>・ ${p}</div>`).join('');
+      // ▼ プレイヤーリストに「鯖落ち」ボタンを付与（俳句版の仕様を移植）
+      let playerListHtml = players.map(p => `
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+          <span>・ ${p} ${p === myName ? '（あなた）' : ''}</span>
+          <button onclick="removePlayer('${p}')" style="width:auto; margin:0; padding:4px 8px; font-size:12px; background-color:#ef4444;">鯖落ち</button>
+        </div>
+      `).join('');
+
       if (spectators.length > 0) {
         playerListHtml += `<div style="font-size:12px; color:#64748b; margin-top:8px;">👀 見学者: ${spectators.join(', ')}</div>`;
       }
@@ -87,6 +94,16 @@ window.toggleRole = async function() {
     });
     isSpectator = true;
     alert("見学モードに切り替えました！");
+  }
+};
+
+// ▼ 任意のプレイヤーをルームから退出（鯖落ち）させる関数
+window.removePlayer = async function(pName) {
+  if (confirm(`${pName} さんを退出させますか？`)) {
+    await updateDoc(roomRef, { 
+      players: arrayRemove(pName), 
+      spectators: arrayRemove(pName) 
+    });
   }
 };
 
@@ -127,13 +144,11 @@ function renderHand() {
   if (textarea) textarea.disabled = false;
 
   const words = currentData.words || [];
-  // 手札をクリックしたときにテキストエリアに文字を追加する関数を呼び出す
   handList.innerHTML = words.map((item, idx) => `
     <div class="card" onclick="insertWord(${idx})">${item.text}</div>
   `).join('');
 }
 
-// 手札をクリックした際、テキストエリアに言葉を追加する
 window.insertWord = function(idx) {
   if (isSpectator) return;
   const item = currentData.words[idx];
@@ -145,9 +160,7 @@ window.insertWord = function(idx) {
   const end = textarea.selectionEnd;
   const text = textarea.value;
 
-  // カーソル位置（または選択範囲）に言葉を挿入する
   textarea.value = text.substring(0, start) + wordText + text.substring(end);
-  // カーソル位置を挿入した文字の末尾に移動
   textarea.selectionStart = textarea.selectionEnd = start + wordText.length;
   textarea.focus();
 };
