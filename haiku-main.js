@@ -391,9 +391,12 @@ window.submitVote = async function(targetPlayer) {
     await updateDoc(roomRef, { [`votes.${myName}.${targetPlayer}`]: newVotesArr });
     alert('御印を追加で贈りました！');
   } else {
-    const existingVote = currentData.votes?.[myName]?.[targetPlayer];
-    if (existingVote) {
-      return alert('この句にはすでに御印を送信しています（子は1度だけ送信できます）');
+    // 自分（子）がすでに他の句も含めて御印を贈っていないかチェック
+    const myVotes = currentData.votes?.[myName] || {};
+    const hasVotedAnywhere = Object.values(myVotes).some(vote => vote != null);
+
+    if (hasVotedAnywhere) {
+      return alert('御印は1節につき1つまでしか贈れません！');
     }
 
     await updateDoc(roomRef, { [`votes.${myName}.${targetPlayer}`]: evalKey });
