@@ -39,11 +39,14 @@ let selectedHand = [null, null, null];
 let currentData = null;
 
 const colorPalette = [
-  { bg: '#dbeafe', text: '#1e40af', border: '#bfdbfe' },
-  { bg: '#fef3c7', text: '#92400e', border: '#fde68a' },
-  { bg: '#dcfce7', text: '#166534', border: '#bbf7d0' },
-  { bg: '#fce7f3', text: '#9d174d', border: '#fbcfe8' },
-  { bg: '#e0e7ff', text: '#3730a3', border: '#c7d2fe' }
+  { bg: '#dbeafe', text: '#1e40af', border: '#bfdbfe' }, // 1: 青
+  { bg: '#fef3c7', text: '#92400e', border: '#fde68a' }, // 2: 黄
+  { bg: '#dcfce7', text: '#166534', border: '#bbf7d0' }, // 3: 緑
+  { bg: '#fce7f3', text: '#9d174d', border: '#fbcfe8' }, // 4: ピンク
+  { bg: '#e0e7ff', text: '#3730a3', border: '#c7d2fe' }, // 5: インディゴ
+  { bg: '#f3e8ff', text: '#6b21a8', border: '#e9d5ff' }, // 6: 紫
+  { bg: '#ffedd5', text: '#9a3412', border: '#fed7aa' }, // 7: オレンジ
+  { bg: '#cffafe', text: '#155e75', border: '#a5f3fc' }  // 8: シアン
 ];
 
 function getAuthorStyle(authorName) {
