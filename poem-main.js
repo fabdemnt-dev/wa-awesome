@@ -6,7 +6,6 @@ let roomId = "";
 let myName = "";
 let isSpectator = false;
 let roomRef = null;
-let selectedWords = [];
 let currentData = null;
 
 window.joinRoom = async function() {
@@ -60,7 +59,8 @@ window.joinRoom = async function() {
       if (currentData.status === 'lobby') {
         document.getElementById('game-sec').style.display = 'none';
         document.getElementById('lobby-sec').style.display = 'block';
-        selectedWords = [];
+        const textarea = document.getElementById('poem-input-area');
+        if (textarea) textarea.value = '';
       } else if (currentData.status === 'playing') {
         document.getElementById('lobby-sec').style.display = 'none';
         document.getElementById('game-sec').style.display = 'block';
@@ -112,46 +112,65 @@ window.startGame = async function() {
 
 function renderHand() {
   const handList = document.getElementById('hand-list');
+  const textarea = document.getElementById('poem-input-area');
   if (!handList || !currentData) return;
 
   if (isSpectator) {
     handList.innerHTML = '<div style="font-size:13px; color:#94a3b8;">※見学モード中</div>';
-    document.getElementById('poem-display').innerText = '（見学モード中）';
+    if (textarea) {
+      textarea.value = '（見学モード中）';
+      textarea.disabled = true;
+    }
     return;
   }
 
-  const words = currentData.words || [];
-  handList.innerHTML = words.map((item, idx) => `
-    <div class="card ${selectedWords.includes(item.text) ? 'selected' : ''}" onclick="selectWord(${idx})">${item.text}</div>
-  `).join('');
+  if (textarea) textarea.disabled = false;
 
-  document.getElementById('poem-display').innerText = selectedWords.join(' ') || '（選択した言葉がここに並びます）';
+  const words = currentData.words || [];
+  // 手札をクリックしたときにテキストエリアに文字を追加する関数を呼び出す
+  handList.innerHTML = words.map((item, idx) => `
+    <div class="card" onclick="insertWord(${idx})">${item.text}</div>
+  `).join('');
 }
 
-window.selectWord = function(idx) {
+// 手札をクリックした際、テキストエリアに言葉を追加する
+window.insertWord = function(idx) {
   if (isSpectator) return;
   const item = currentData.words[idx];
+  const textarea = document.getElementById('poem-input-area');
+  if (!textarea || !item) return;
+
   const wordText = item.text;
-  
-  if (selectedWords.includes(wordText)) {
-    selectedWords = selectedWords.filter(w => w !== wordText);
-  } else {
-    selectedWords.push(wordText);
-  }
-  renderHand();
+  const start = textarea.selectionStart;
+  const end = textarea.selectionEnd;
+  const text = textarea.value;
+
+  // カーソル位置（または選択範囲）に言葉を挿入する
+  textarea.value = text.substring(0, start) + wordText + text.substring(end);
+  // カーソル位置を挿入した文字の末尾に移動
+  textarea.selectionStart = textarea.selectionEnd = start + wordText.length;
+  textarea.focus();
 };
 
 window.clearPoem = function() {
   if (isSpectator) return;
-  selectedWords = [];
-  renderHand();
+  const textarea = document.getElementById('poem-input-area');
+  if (textarea) {
+    textarea.value = '';
+    textarea.focus();
+  }
 };
 
 window.submitPoem = async function() {
   if (isSpectator) return alert('見学モードではポエムの投稿はできません');
-  if (selectedWords.length === 0) return alert('言葉を選択してください');
+  const textarea = document.getElementById('poem-input-area');
+  if (!textarea) return;
+
+  const poemText = textarea.value.trim();
+  if (!poemText) return alert('ポエムを入力してください');
+
   await updateDoc(roomRef, {
-    [`poems.${myName}`]: selectedWords.join(' ')
+    [`poems.${myName}`]: poemText
   });
   alert('ポエムを投稿しました！');
 };
@@ -164,7 +183,7 @@ function renderBoards() {
   boardList.innerHTML = Object.keys(poems).map(pName => `
     <div class="player-board">
       <strong>${pName} の作品</strong>
-      <p style="margin-top:6px; font-size:15px; line-height:1.5;">${poems[pName]}</p>
+      <p style="margin-top:6px; font-size:15px; line-height:1.5; white-space: pre-wrap;">${poems[pName]}</p>
     </div>
   `).join('');
 }
