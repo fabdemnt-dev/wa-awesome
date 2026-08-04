@@ -382,6 +382,16 @@ function renderBoards() {
     return;
   }
 
+  // プレイヤー名から自動で固有の色を割り出す関数
+  function getColorFromName(str) {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      hash = str.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const colors = ['#4f46e5', '#e11d48', '#059669', '#d97706', '#7c3aed', '#0284c7', '#db2777', '#ca8a04'];
+    return colors[Math.abs(hash) % colors.length];
+  }
+
   boardList.innerHTML = Object.keys(poems).map(pName => {
     const poemData = poems[pName];
 
@@ -400,12 +410,18 @@ function renderBoards() {
     const hands = poemData.hands || [];
     const likes = poemData.likes || 0;
     const emos = poemData.emos || 0;
+    
+    // プレイヤー名に応じたカラーを自動取得
+    const userColor = getColorFromName(pName);
 
-    const handsHtml = hands.map(h => `
-      <div style="display: inline-block; background: #e2e8f0; padding: 4px 8px; margin: 2px; border-radius: 4px; font-size: 13px;">
-        ${h.text} <span style="font-size: 10px; color: #64748b;">(${h.author})</span>
-      </div>
-    `).join('');
+  　const handsHtml = hands.map(h => {
+      const authorColor = getColorFromName(h.author);
+      return `
+        <div style="display: inline-block; background: #e2e8f0; padding: 4px 8px; margin: 2px; border-radius: 4px; font-size: 13px;">
+          ${h.text} <span style="font-size: 10px; color: ${authorColor}; font-weight: bold;">(${h.author})</span>
+        </div>
+      `;
+    }).join('');
 
     return `
       <div class="player-board" style="margin-bottom: 20px; padding: 16px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff;">
@@ -422,24 +438,24 @@ function renderBoards() {
               🎁 タップして作品を開く
             </button>
           ` : `
-            <div style="margin-top: 8px; padding: 12px; background: #f8fafc; border-left: 4px solid #4f46e5; border-radius: 4px;">
+            <div style="margin-top: 8px; padding: 12px; background: #f8fafc; border-left: 4px solid ${userColor}; border-radius: 4px;">
               <p style="font-size: 15px; line-height: 1.5; white-space: pre-wrap; margin: 0;">${poemData.text}</p>
             </div>
           `}
         </div>
 
-        <div style="display: flex; gap: 8px; margin-top: 12px; align-items: center;">
-          <button onclick="addReaction('${pName}', 'like')" style="background: none; border: none; color: #334155; width: auto; padding: 6px 12px; font-size: 14px;">
+        <div style="display: flex; gap: 16px; margin-top: 12px; align-items: center;">
+          <button onclick="addReaction('${pName}', 'like')" style="background: none; border: none; color: #334155; width: auto; padding: 6px 8px; font-size: 14px; cursor: pointer;">
             👍 いいね (${likes})
           </button>
-          <button onclick="addReaction('${pName}', 'emo')" style="background: none; border: none; color: #334155; width: auto; padding: 6px 12px; font-size: 14px;">
+          <button onclick="addReaction('${pName}', 'emo')" style="background: none; border: none; color: #334155; width: auto; padding: 6px 8px; font-size: 14px; cursor: pointer;">
             💖 エモい (${emos})
           </button>
         </div>
       </div>
     `;
   }).join('');
-};
+}
 
 window.nextGame = async function() {
   if (!roomRef) return;
