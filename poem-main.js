@@ -8,6 +8,30 @@ let isSpectator = false;
 let roomRef = null;
 let currentData = null;
 
+// サンプルとしてプレースホルダーに表示するフレーズのプール
+const SAMPLE_PHRASES = [
+  "終電",
+  "ひざ",
+  "エドワード・エルリック",
+  "サイコパス",
+  "置き忘れたままの優しさ",
+  "画面越し",
+  "壊れかけ",
+  "人魚の鱗",
+  "カリスマ",
+  "深夜三時のボボンガリンガ",
+  "月",
+  "帰り道",
+  "溶けかけ",
+  "黒縁メガネ",
+  "合言葉",
+  "踏切の音",
+  "枯れたひまわり",
+  "ハチワレ",
+  "ちいかわ",
+  "ローレライ"
+];
+
 window.joinRoom = async function() {
   myName = document.getElementById('player-name').value.trim();
   roomId = document.getElementById('room-id').value.trim();
@@ -108,11 +132,18 @@ function renderInputFields(count) {
 
   if (container.children.length !== count) {
     container.innerHTML = '';
+    
+    // サンプルリストからランダムに並び替え
+    const shuffledSamples = [...SAMPLE_PHRASES].sort(() => Math.random() - 0.5);
+
     for (let i = 1; i <= count; i++) {
       const inp = document.createElement('input');
       inp.type = 'text';
       inp.className = 'poem-input';
-      inp.placeholder = `フレーズ ${i}`;
+      
+      const sampleText = shuffledSamples[(i - 1) % shuffledSamples.length];
+      inp.placeholder = `例: ${sampleText}`;
+
       inp.style.marginBottom = '6px';
       inp.style.display = 'block';
       inp.style.width = '100%';
@@ -272,22 +303,20 @@ window.submitPoem = async function() {
   const poemText = textarea.value.trim();
   if (!poemText) return alert('ポエムを入力してください');
 
-  // 自分の手札データを取得して、作品と一緒に保存する（誰の素材かも紐付ける）
   const myHands = currentData.hands?.[myName] || [];
 
   await updateDoc(roomRef, {
     [`poems.${myName}`]: {
       text: poemText,
-      hands: myHands,  // 選んだ手札（author情報を含んでいる）
-      revealed: false, // 最初は作品が隠れている状態
-      likes: 0,        // いいね数
-      emos: 0          // エモい数
+      hands: myHands,
+      revealed: false,
+      likes: 0,
+      emos: 0
     }
   });
   alert('ポエムを投稿しました！');
 };
 
-// タップして作品をめくる（表示する）関数
 window.revealPoem = async function(pName) {
   if (!roomRef) return;
   await updateDoc(roomRef, {
@@ -295,7 +324,6 @@ window.revealPoem = async function(pName) {
   });
 };
 
-// いいね・エモいを何回でも押せるようにカウントアップする関数
 window.addReaction = async function(pName, type) {
   if (!roomRef || !currentData) return;
   const poems = currentData.poems || {};
@@ -323,7 +351,6 @@ function renderBoards() {
   boardList.innerHTML = Object.keys(poems).map(pName => {
     const poemData = poems[pName];
 
-    // 過去のデータ（テキストのみで保存されていた場合）の互換性対応
     if (typeof poemData === 'string') {
       return `
         <div class="player-board" style="margin-bottom: 20px; padding: 16px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff;">
@@ -340,7 +367,6 @@ function renderBoards() {
     const likes = poemData.likes || 0;
     const emos = poemData.emos || 0;
 
-    // 1. 選んだ手札の一覧（誰の素材かを表示）
     const handsHtml = hands.map(h => `
       <div style="display: inline-block; background: #e2e8f0; padding: 4px 8px; margin: 2px; border-radius: 4px; font-size: 13px;">
         ${h.text} <span style="font-size: 10px; color: #64748b;">(${h.author})</span>
@@ -368,7 +394,6 @@ function renderBoards() {
           `}
         </div>
 
-        <!-- リアクションボタン（何回でも押せる） -->
         <div style="display: flex; gap: 8px; margin-top: 12px; align-items: center;">
           <button onclick="addReaction('${pName}', 'like')" style="background-color: #f43f5e; width: auto; padding: 6px 12px; font-size: 14px;">
             👍 いいね (${likes})
