@@ -48,17 +48,18 @@ window.joinRoom = async function() {
       if (spectators.includes(myName)) isSpectator = true;
       if (players.includes(myName)) isSpectator = false;
 
-      // 手札枚数の設定値を反映
       const st = currentData.settings || { handCount: 5 };
-      if (document.getElementById('set-hand-count')) {
-        document.getElementById('set-hand-count').value = st.handCount;
+      const handInput = document.getElementById('set-hand-count');
+      if (handInput && document.activeElement !== handInput) {
+        handInput.value = st.handCount;
       }
+
+      renderInputFields(st.handCount);
 
       const roleBtnText = isSpectator ? "⚔️ プレイヤーとして途中参戦する" : "👀 見学モードに切り替える";
       if (document.getElementById('role-toggle-btn-lobby')) document.getElementById('role-toggle-btn-lobby').innerText = roleBtnText;
       if (document.getElementById('role-toggle-btn-game')) document.getElementById('role-toggle-btn-game').innerText = roleBtnText;
 
-      // プレイヤーリストと「鯖落ち」ボタンの描画
       let playerListHtml = players.map(p => `
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
           <span>・ ${p} ${p === myName ? '（あなた）' : ''}</span>
@@ -75,16 +76,52 @@ window.joinRoom = async function() {
         document.getElementById('game-sec').style.display = 'none';
         document.getElementById('lobby-sec').style.display = 'block';
         const textarea = document.getElementById('poem-input-area');
-        if (textarea) textarea.value = '';
+        if (textarea) {
+          textarea.value = '';
+          textarea.style.height = 'auto';
+        }
       } else if (currentData.status === 'playing') {
         document.getElementById('lobby-sec').style.display = 'none';
         document.getElementById('game-sec').style.display = 'block';
         renderHand();
         renderBoards();
+        setupAutoResize();
       }
     });
   } catch (e) { alert('接続エラー: ' + e.message); }
 };
+
+window.updateHandCountSetting = async function() {
+  if (!roomRef) return;
+  const count = parseInt(document.getElementById('set-hand-count').value) || 5;
+  await updateDoc(roomRef, { "settings.handCount": count });
+};
+
+function renderInputFields(count) {
+  const container = document.getElementById('word-inputs');
+  if (!container) return;
+
+  if (isSpectator) {
+    container.innerHTML = '<div style="font-size:13px; color:#94a3b8; padding:8px 0;">※見学モードのため素材入力はありません</div>';
+    return;
+  }
+
+  if (container.children.length !== count) {
+    container.innerHTML = '';
+    for (let i = 1; i <= count; i++) {
+      const inp = document.createElement('input');
+      inp.type = 'text';
+      inp.className = 'poem-input';
+      inp.placeholder = `フレーズ ${i}`;
+      inp.style.marginBottom = '6px';
+      inp.style.display = 'block';
+      inp.style.width = '100%';
+      inp.style.padding = '8px';
+      inp.style.boxSizing = 'border-box';
+      container.appendChild(inp);
+    }
+  }
+}
 
 window.toggleRole = async function() {
   if (!roomRef) return;
@@ -105,7 +142,6 @@ window.toggleRole = async function() {
   }
 };
 
-// 任意のプレイヤーをルームから退出（鯖落ち）させる関数
 window.removePlayer = async function(pName) {
   if (confirm(`${pName} さんを退出させますか？`)) {
     await updateDoc(roomRef, { 
@@ -124,23 +160,21 @@ window.addWords = async function() {
     if (val) newWords.push({ text: val, author: myName });
   });
 
-  if (newWords.length === 0) return alert('素材を入力してください');
+  const st = currentData?.settings || { handCount: 5 };
+  if (newWords.length < st.handCount) return alert(`設定された手札の枚数（${st.handCount}個）分すべて入力してください`);
 
   await updateDoc(roomRef, { words: arrayUnion(...newWords) });
   inputs.forEach(inp => inp.value = '');
   alert('素材を追加しました！');
 };
 
-// ゲーム開始時にランダムに手札を配る処理
 window.startGame = async function() {
   if (!currentData) return;
   const players = currentData.players || [];
   const words = currentData.words || [];
   
-  const handCountInput = document.getElementById('set-hand-count');
-  const handCount = handCountInput ? parseInt(handCountInput.value) || 5 : 5;
-
-  await updateDoc(roomRef, { "settings.handCount": handCount });
+  const st = currentData.settings || { handCount: 5 };
+  const handCount = st.handCount;
 
   if (words.length < players.length * handCount) {
     return alert(`素材の数が足りません！\n現在 ${words.length}個 ですが、(プレイヤー ${players.length}人 × 手札 ${handCount}枚 = ${players.length * handCount}個) 必要です。`);
@@ -188,7 +222,19 @@ function renderHand() {
   `).join('');
 }
 
-// 手札をクリックした際、テキストエリアのカーソル位置に言葉を挿入する
+function setupAutoResize() {
+  const textarea = document.getElementById('poem-input-area');
+  if (!textarea) return;
+
+  textarea.removeEventListener('input', resizeTextarea);
+  textarea.addEventListener('input', resizeTextarea);
+}
+
+function resizeTextarea() {
+  this.style.height = 'auto';
+  this.style.height = (this.scrollHeight) + 'px';
+}
+
 window.insertWord = function(idx) {
   if (isSpectator) return;
   const myHands = currentData.hands?.[myName] || [];
@@ -203,6 +249,8 @@ window.insertWord = function(idx) {
 
   textarea.value = text.substring(0, start) + wordText + text.substring(end);
   textarea.selectionStart = textarea.selectionEnd = start + wordText.length;
+  
+  resizeTextarea.call(textarea);
   textarea.focus();
 };
 
@@ -211,6 +259,7 @@ window.clearPoem = function() {
   const textarea = document.getElementById('poem-input-area');
   if (textarea) {
     textarea.value = '';
+    textarea.style.height = 'auto';
     textarea.focus();
   }
 };
