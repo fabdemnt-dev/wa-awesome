@@ -249,13 +249,12 @@ function renderHand() {
     return;
   }
 
-  // 手札を描画。選択されているものは色を変え、クリックで「挿入＆選択状態の切り替え」を行う
+  // 選択されているときは「薄い青色の背景」にして、文字色は変えない（標準のまま）
   handList.innerHTML = myHands.map((item, idx) => {
     const isSelected = selectedHandIndices.has(idx);
-    // 選択されている時は色が変わる（例: 青系の背景に白文字、または枠線を変える）
     const bgStyle = isSelected 
-      ? 'background-color: #2563eb; color: #fff; border-color: #1d4ed8;' 
-      : 'background-color: #fff; color: #0f172a; border-color: #cbd5e1;';
+      ? 'background-color: #dbeafe; border-color: #3b82f6;' 
+      : 'background-color: #fff; border-color: #cbd5e1;';
 
     return `
       <div class="card" onclick="onCardClick(${idx})" style="cursor: pointer; padding: 8px 12px; margin-bottom: 6px; border-radius: 6px; border: 1px solid; transition: all 0.2s; ${bgStyle}">
@@ -382,7 +381,6 @@ function renderBoards() {
     return;
   }
 
-  // プレイヤー名から自動で固有の色を割り出す関数
   function getColorFromName(str) {
     let hash = 0;
     for (let i = 0; i < str.length; i++) {
@@ -392,7 +390,10 @@ function renderBoards() {
     return colors[Math.abs(hash) % colors.length];
   }
 
-  boardList.innerHTML = Object.keys(poems).map(pName => {
+  // いいねやエモいを押しても順番が勝手に変わらないよう、プレイヤー名のアルファベット・五十音順（または固定順）で並び替える
+  const sortedPlayerNames = Object.keys(poems).sort();
+
+  boardList.innerHTML = sortedPlayerNames.map(pName => {
     const poemData = poems[pName];
 
     if (typeof poemData === 'string') {
@@ -411,10 +412,9 @@ function renderBoards() {
     const likes = poemData.likes || 0;
     const emos = poemData.emos || 0;
     
-    // プレイヤー名に応じたカラーを自動取得
     const userColor = getColorFromName(pName);
 
-  　const handsHtml = hands.map(h => {
+    const handsHtml = hands.map(h => {
       const authorColor = getColorFromName(h.author);
       return `
         <div style="display: inline-block; background: #e2e8f0; padding: 4px 8px; margin: 2px; border-radius: 4px; font-size: 13px;">
