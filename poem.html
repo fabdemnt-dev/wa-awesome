@@ -44,7 +44,7 @@
     <button onclick="startGame()" style="background-color: #16a34a; margin-top: 20px;">ポエム作りを開始</button>
   </div>
 
-  <!-- 3. ゲーム画面 -->
+    <!-- 3. ゲーム画面 -->
   <div id="game-sec" class="card-panel" style="display:none;">
     <button id="role-toggle-btn-game" onclick="toggleRole()" style="background-color: #64748b; margin-bottom: 12px;">👀 見学モードに切り替える</button>
 
@@ -52,9 +52,10 @@
 
     <div class="section-title">集まった言葉（手札）</div>
     <div class="word-list" id="hand-list"></div>
+    <div style="font-size: 12px; color: #64748b; margin-top: 4px;">※手札をクリックすると、下の入力欄に言葉を挿入できます</div>
 
-    <h3 style="margin-top: 20px;">完成したポエム</h3>
-    <div id="poem-display" class="display-area">（選択した言葉がここに並びます）</div>
+    <h3 style="margin-top: 20px;">あなたのポエム（自由記述）</h3>
+    <textarea id="poem-input-area" rows="4" placeholder="手札の言葉を参考に、ここに自由に文章を入力してください..." style="width: 100%; padding: 8px; font-size: 15px; border: 1px solid #cbd5e1; border-radius: 4px; box-sizing: border-box; margin-top: 6px;"></textarea>
 
     <div style="display: flex; gap: 8px;">
       <button onclick="clearPoem()" style="background-color: #dc2626; margin-top: 12px;">リセット</button>
@@ -74,6 +75,9 @@
         <button onclick="exportCSV()" style="background-color: #059669;">📥 CSV保存</button>
       </div>
     </div>
+
+    <button onclick="nextGame()" style="background-color: #0284c7; margin-top: 24px;">🔄 新しいポエムを作る（ロビーへ戻る）</button>
+  </div>
 
     <button onclick="nextGame()" style="background-color: #0284c7; margin-top: 24px;">🔄 新しいポエムを作る（ロビーへ戻る）</button>
   </div>
