@@ -429,10 +429,10 @@ function renderBoards() {
         </div>
 
         <div style="display: flex; gap: 8px; margin-top: 12px; align-items: center;">
-          <button onclick="addReaction('${pName}', 'like')" style="width: auto; padding: 6px 12px; font-size: 14px;">
+          <button onclick="addReaction('${pName}', 'like')" style="background: none; border: none; color: #334155; width: auto; padding: 6px 12px; font-size: 14px;">
             👍 いいね (${likes})
           </button>
-          <button onclick="addReaction('${pName}', 'emo')" style="width: auto; padding: 6px 12px; font-size: 14px;">
+          <button onclick="addReaction('${pName}', 'emo')" style="background: none; border: none; color: #334155; width: auto; padding: 6px 12px; font-size: 14px;">
             💖 エモい (${emos})
           </button>
         </div>
