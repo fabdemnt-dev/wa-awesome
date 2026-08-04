@@ -40,7 +40,15 @@
       <h3>参加メンバー</h3>
       <div id="player-list"></div>
     </div>
-    
+
+    <div style="margin-top: 20px; padding: 12px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0;">
+      <h3 style="font-size: 14px; margin-bottom: 8px;">⚙️ ルーム設定（手札の枚数）</h3>
+      <label style="font-size: 13px; display: block; margin-bottom: 6px;">
+        1人あたりの手札枚数: 
+        <input type="number" id="set-hand-count" value="5" min="1" max="20" style="width: 60px; padding: 4px; margin-left: 8px;"> 枚
+      </label>
+    </div>
+
     <button onclick="startGame()" style="background-color: #16a34a; margin-top: 20px;">ポエム作りを開始</button>
   </div>
 
