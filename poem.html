@@ -27,28 +27,28 @@
 
     <h2>1. ポエムの素材あつめ</h2>
     
-    <p>好きな言葉やフレーズを入力して投稿してください。</p>
-    <div id="word-inputs">
-      <input type="text" class="poem-input" placeholder="フレーズ 1">
-      <input type="text" class="poem-input" placeholder="フレーズ 2">
-      <input type="text" class="poem-input" placeholder="フレーズ 3">
+    <!-- ⚙️ 設定欄（上部に配置） -->
+    <div style="margin: 12px 0; padding: 12px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0;">
+      <h3 style="font-size: 14px; margin-bottom: 8px;">⚙️ ルーム設定（手札の枚数）</h3>
+      <label style="font-size: 13px; display: block;">
+        1人あたりの手札枚数: 
+        <input type="number" id="set-hand-count" value="5" min="1" max="20" onchange="updateHandCountSetting()" style="width: 60px; padding: 4px; margin-left: 8px;"> 枚
+      </label>
+      <div style="font-size: 11px; color: #64748b; margin-top: 4px;">※設定した枚数に合わせて、入力必要な素材の数が自動で変わります。</div>
     </div>
+
+    <p>好きな言葉やフレーズを入力して投稿してください。</p>
     
-    <button id="add-word-btn" onclick="addWords()">素材を追加</button>
+    <!-- 設定枚数に合わせてJSで自動生成される入力欄 -->
+    <div id="word-inputs"></div>
+    
+    <button id="add-word-btn" onclick="addWords()" style="margin-top: 12px;">素材を追加</button>
     
     <div style="margin-top: 20px;">
       <h3>参加メンバー</h3>
       <div id="player-list"></div>
     </div>
-
-    <div style="margin-top: 20px; padding: 12px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0;">
-      <h3 style="font-size: 14px; margin-bottom: 8px;">⚙️ ルーム設定（手札の枚数）</h3>
-      <label style="font-size: 13px; display: block; margin-bottom: 6px;">
-        1人あたりの手札枚数: 
-        <input type="number" id="set-hand-count" value="5" min="1" max="20" style="width: 60px; padding: 4px; margin-left: 8px;"> 枚
-      </label>
-    </div>
-
+    
     <button onclick="startGame()" style="background-color: #16a34a; margin-top: 20px;">ポエム作りを開始</button>
   </div>
 
@@ -63,7 +63,8 @@
     <div style="font-size: 12px; color: #64748b; margin-top: 4px;">※手札をクリックすると、下の入力欄に言葉を挿入できます</div>
 
     <h3 style="margin-top: 20px;">あなたのポエム（自由記述）</h3>
-    <textarea id="poem-input-area" rows="4" placeholder="手札の言葉を参考に、ここに自由に文章を入力してください..." style="width: 100%; padding: 8px; font-size: 15px; border: 1px solid #cbd5e1; border-radius: 4px; box-sizing: border-box; margin-top: 6px;"></textarea>
+    <!-- rows="1" と resize: none, overflow: hidden で自動拡張に対応 -->
+    <textarea id="poem-input-area" rows="1" placeholder="手札の言葉を参考に、ここに自由に文章を入力してください..." style="width: 100%; padding: 8px; font-size: 15px; border: 1px solid #cbd5e1; border-radius: 4px; box-sizing: border-box; margin-top: 6px; resize: none; overflow: hidden; line-height: 1.5;"></textarea>
 
     <div style="display: flex; gap: 8px;">
       <button onclick="clearPoem()" style="background-color: #dc2626; margin-top: 12px;">リセット</button>
