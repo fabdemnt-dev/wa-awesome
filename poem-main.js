@@ -3,7 +3,7 @@ import './poem-state.js';
 import './poem-audio.js';
 import './poem-export.js';
 import './poem-render.js';
-import './poem-action.js'; // ここで window.joinRoom や各アクションが window に登録されます
+import './poem-action.js';
 
 // 参加ボタンのイベントリスナー登録
 document.getElementById("join-btn")
