@@ -35,7 +35,7 @@ let selectedHandIndices = new Set();
 const SAMPLE_PHRASES = [
   "岩王帝君",
   "ひざ",
-  "エドワード・エルリック",
+  "瑠璃色",
   "サイコパス",
   "降魔大聖", 
   "画面越し",
