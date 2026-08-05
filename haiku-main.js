@@ -260,7 +260,8 @@ window.startGame = async function() {
   const h5 = {}, h7 = {};
   players.forEach(p => { h5[p] = s5.splice(0, st.hand5); h7[p] = s7.splice(0, st.hand7); });
 
-  await updateDoc(roomRef, { status: "playing", hands5: h5, hands7: h7, phrases: {}, phraseDetails: {}, votes: {} });
+  // ▼ revealedPhrases をリセット対象に追加
+  await updateDoc(roomRef, { status: "playing", hands5: h5, hands7: h7, phrases: {}, phraseDetails: {}, votes: {}, revealedPhrases: {} });
 };
 
 function renderHand() {
@@ -318,6 +319,14 @@ window.submitPhrase = async function() {
   alert('一句披露しました！');
 };
 
+// ▼ タップされた句を全員の画面で開示するための関数を追加
+window.revealPhrase = async function(pName) {
+  if (!roomRef) return;
+  await updateDoc(roomRef, {
+    [`revealedPhrases.${pName}`]: true
+  });
+};
+
 function renderBoards() {
   const boardList = document.getElementById('board-list');
   if (!boardList || !currentData) return;
@@ -325,26 +334,40 @@ function renderBoards() {
   const phrases = currentData.phrases || {};
   const phraseDetails = currentData.phraseDetails || {};
   const votes = currentData.votes || {};
+  const revealedPhrases = currentData.revealedPhrases || {}; // 開示状態の取得
   const players = currentData.players || [];
   const currentHost = players[(currentData.hostIndex || 0) % (players.length || 1)];
   const isHost = (myName === currentHost);
   const availableKeys = isHost ? hostOptionKeys : childOptionKeys;
 
   boardList.innerHTML = Object.keys(phrases).map(pName => {
+    const isRevealed = revealedPhrases[pName]; // 開示されているかチェック
     const pDet = phraseDetails[pName] || [];
+
+    // ▼ まだ開示されていない場合は「句を披露する（タップ）」ボタンを表示する
+    if (!isRevealed) {
+      return `
+        <div class="player-board" style="text-align: center; padding: 20px;">
+          <button onclick="revealPhrase('${pName}')" style="font-size: 16px; padding: 10px 20px; background-color: #3b82f6; color: white; border: none; border-radius: 8px; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+            📜 ${pName} の句を披露する（タップ）
+          </button>
+        </div>
+      `;
+    }
+
+    // ▼ 開示済みの場合は通常の句ボードと投票欄を表示
     const phraseHtml = pDet.length === 3 ? pDet.map(d => {
       const s = getAuthorStyle(d.author);
       return `<span class="word-tag" style="background:${s.bg}; color:${s.text}; border-color:${s.border};">${d.text}<span class="author-label">(${d.author})</span></span>`;
     }).join(' ') : `<strong>${phrases[pName]}</strong>`;
 
-   let evalBadgesHtml = '';
+    let evalBadgesHtml = '';
     Object.keys(votes).forEach(voter => {
       const vData = votes[voter]?.[pName];
       if (vData) {
         const keys = Array.isArray(vData) ? vData : [vData];
         keys.forEach(k => {
           if (evalOptionsMaster[k]) {
-            // ▼ voter を外し、アイコン（または評価のラベル）のみにする
             evalBadgesHtml += `<span style="font-size:12px; background:#f1f5f9; padding:2px 6px; border-radius:10px; margin-right:4px; border:1px solid #cbd5e1;">${evalOptionsMaster[k].icon}</span>`;
           }
         });
@@ -392,7 +415,6 @@ window.submitVote = async function(targetPlayer) {
     await updateDoc(roomRef, { [`votes.${myName}.${targetPlayer}`]: newVotesArr });
     alert('御印を追加で贈りました！');
   } else {
-    // 自分（子）がすでに他の句も含めて御印を贈っていないかチェック
     const myVotes = currentData.votes?.[myName] || {};
     const hasVotedAnywhere = Object.values(myVotes).some(vote => vote != null);
 
@@ -435,15 +457,15 @@ window.nextRound = async function() {
     alertMessage = `🪭 妙なりが出ました！今節の最高功労者: ${taeWinners.join(', ')} さん！(+${taePoints}誉)\n` + alertMessage;
   }
 
+  // ▼ 次の節に進むときにも revealedPhrases をリセット対象に追加
   await updateDoc(roomRef, {
     status: "lobby", hostIndex: hostIndex + 1, roundCount: (currentData.roundCount || 1) + 1,
     scores: newScores, history: [...(currentData.history || []), { round: currentData.roundCount || 1, phrases, phraseDetails: currentData.phraseDetails || {}, votes, host: players[hostIndex % (players.length || 1)] || '' }],
-    words5: [], words7: [], hands5: {}, hands7: {}, phrases: {}, phraseDetails: {}, votes: {}
+    words5: [], words7: [], hands5: {}, hands7: {}, phrases: {}, phraseDetails: {}, votes: {}, revealedPhrases: {}
   });
   alert(alertMessage);
 };
 
-// --- 拡張版：御印（評価）データも含めて出力するテキスト保存 ---
 window.exportText = function() {
   if (!currentData) return;
   const history = currentData.history || [];
@@ -453,7 +475,6 @@ window.exportText = function() {
     Object.keys(h.phrases || {}).forEach(p => {
       txt += `[句] ${p}: ${h.phrases[p]}\n`;
       
-      // 誰からどんな御印が贈られたかをまとめる
       let voteStrs = [];
       Object.keys(h.votes || {}).forEach(voter => {
         const vData = h.votes[voter]?.[p];
@@ -481,7 +502,6 @@ window.exportText = function() {
   a.click();
 };
 
-// --- 拡張版：御印（評価）データも含めて出力するCSV保存 ---
 window.exportCSV = function() {
   if (!currentData) return;
   const history = currentData.history || [];
@@ -490,7 +510,6 @@ window.exportCSV = function() {
     Object.keys(h.phrases || {}).forEach(p => {
       const phraseText = h.phrases[p] || '';
       
-      // この句に贈られたすべての御印を集約
       let voteLabels = [];
       Object.keys(h.votes || {}).forEach(voter => {
         const vData = h.votes[voter]?.[p];
@@ -498,7 +517,6 @@ window.exportCSV = function() {
           const keys = Array.isArray(vData) ? vData : [vData];
           keys.forEach(k => {
             if (evalOptionsMaster[k]) {
-              // CSVのセル内改行やカンマを避けるためラベルのみ、またはシンプルな形式に
               voteLabels.push(`${voter}(${evalOptionsMaster[k].label.replace(/[🌸🌾❄️🌀🍶🍃🌙🪭]/g, '').trim()})`);
             }
           });
