@@ -532,5 +532,11 @@ window.nextGame = async function() {
   alert('作品を履歴に保存しました！次の作成に進みます。');
 };
 
-window.exportText = function() { exportPoemText(currentData); };
-window.exportCSV = function() { exportPoemCSV(currentData, roomId); };
+window.exportText = function() { 
+  const exportAll = document.getElementById('export-all-check')?.checked ?? true;
+  exportPoemText(currentData, exportAll); 
+};
+window.exportCSV = function() { 
+  const exportAll = document.getElementById('export-all-check')?.checked ?? true;
+  exportPoemCSV(currentData, roomId, exportAll); 
+};
