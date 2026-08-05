@@ -9,6 +9,7 @@ import './haiku-state.js';
 import './haiku-utils.js';
 
 // 3. 各機能モジュールの読み込み
+import './haiku-audio.js';  // 音声読み上げ機能
 import './haiku-export.js'; // 出力機能
 import './haiku-render.js'; // UI描画処理
 import './haiku-action.js'; // ゲーム進行・通信処理
