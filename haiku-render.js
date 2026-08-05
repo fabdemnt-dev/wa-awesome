@@ -72,6 +72,9 @@ export function renderHand() {
   if (document.getElementById('phrase-1')) document.getElementById('phrase-1').innerText = state.selectedHand[0]?.text || '（選択してください）';
   if (document.getElementById('phrase-2')) document.getElementById('phrase-2').innerText = state.selectedHand[1]?.text || '（選択してください）';
   if (document.getElementById('phrase-3')) document.getElementById('phrase-3').innerText = state.selectedHand[2]?.text || '（選択してください）';
+
+  // 画面を更新するついでに、今の選択状態をブラウザに一時保存する
+  sessionStorage.setItem('haikuSelectedHand', JSON.stringify(state.selectedHand));
 }
 
 export function renderBoards() {
