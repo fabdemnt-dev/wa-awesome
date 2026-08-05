@@ -322,7 +322,6 @@ window.submitPhrase = async function() {
     [`phrases.${myName}`]: `${selectedHand[0].text} ${selectedHand[1].text} ${selectedHand[2].text}`,
     [`phraseDetails.${myName}`]: selectedHand
   });
-  alert('一句披露しました！');
 };
 
 window.revealPhrase = async function(pName) {
