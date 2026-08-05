@@ -86,7 +86,7 @@ window.joinRoom = async function() {
     
     const updateData = {
       status: "lobby", hostIndex: 0, roundCount: 1, history: [],
-      words5: [], words7: [], hands5: {}, hands7: {}, phrases: {}, phraseDetails: {}, votes: {}, scores: {},
+      words5: [], words7: [], hands5: {}, hands7: {}, phrases: {}, phraseDetails: {}, votes: {}, scores: {}, selfPraise: {},
       settings: { in5: 5, in7: 3, hand5: 5, hand7: 3 }
     };
 
@@ -246,6 +246,17 @@ window.removePlayer = async function(pName) {
   }
 };
 
+// ▼ 自画自賛ボタンを押したときの処理を追加
+window.doSelfPraise = async function() {
+  if (!roomRef || isSpectator) return;
+  await updateDoc(roomRef, {
+    [`selfPraise.${pName === myName ? myName : ''}`]: true // 自分の名前で保存
+  });
+  // ※スッキリ書くため以下でもOKです
+  // await updateDoc(roomRef, { [`selfPraise.${myName}`]: true });
+  alert('自画自賛しました！');
+};
+
 window.startGame = async function() {
   const players = currentData?.players || [];
   const st = currentData?.settings || { hand5: 5, hand7: 3 };
@@ -260,8 +271,7 @@ window.startGame = async function() {
   const h5 = {}, h7 = {};
   players.forEach(p => { h5[p] = s5.splice(0, st.hand5); h7[p] = s7.splice(0, st.hand7); });
 
-  // ▼ revealedPhrases をリセット対象に追加
-  await updateDoc(roomRef, { status: "playing", hands5: h5, hands7: h7, phrases: {}, phraseDetails: {}, votes: {}, revealedPhrases: {} });
+  await updateDoc(roomRef, { status: "playing", hands5: h5, hands7: h7, phrases: {}, phraseDetails: {}, votes: {}, revealedPhrases: {}, selfPraise: {} });
 };
 
 function renderHand() {
@@ -319,7 +329,6 @@ window.submitPhrase = async function() {
   alert('一句披露しました！');
 };
 
-// ▼ タップされた句を全員の画面で開示するための関数を追加
 window.revealPhrase = async function(pName) {
   if (!roomRef) return;
   await updateDoc(roomRef, {
@@ -334,17 +343,17 @@ function renderBoards() {
   const phrases = currentData.phrases || {};
   const phraseDetails = currentData.phraseDetails || {};
   const votes = currentData.votes || {};
-  const revealedPhrases = currentData.revealedPhrases || {}; // 開示状態の取得
+  const revealedPhrases = currentData.revealedPhrases || {};
+  const selfPraiseData = currentData.selfPraise || {}; // 自画自賛データの取得
   const players = currentData.players || [];
   const currentHost = players[(currentData.hostIndex || 0) % (players.length || 1)];
   const isHost = (myName === currentHost);
   const availableKeys = isHost ? hostOptionKeys : childOptionKeys;
 
   boardList.innerHTML = Object.keys(phrases).map(pName => {
-    const isRevealed = revealedPhrases[pName]; // 開示されているかチェック
+    const isRevealed = revealedPhrases[pName];
     const pDet = phraseDetails[pName] || [];
 
-    // ▼ まだ開示されていない場合は「句を披露する（タップ）」ボタンを表示する
     if (!isRevealed) {
       return `
         <div class="player-board" style="text-align: center; padding: 20px;">
@@ -355,7 +364,6 @@ function renderBoards() {
       `;
     }
 
-    // ▼ 開示済みの場合は通常の句ボードと投票欄を表示
     const phraseHtml = pDet.length === 3 ? pDet.map(d => {
       const s = getAuthorStyle(d.author);
       return `<span class="word-tag" style="background:${s.bg}; color:${s.text}; border-color:${s.border};">${d.text}<span class="author-label">(${d.author})</span></span>`;
@@ -376,10 +384,24 @@ function renderBoards() {
 
     const hasAlreadyVotedAsChild = !isHost && votes[myName]?.[pName] != null;
 
+    // ▼ 自画自賛ボタンまたはスタンプの表示ロジック
+    const isSelfPraised = selfPraiseData[pName];
+    let selfPraiseHtml = '';
+    if (pName === myName) {
+      if (isSelfPraised) {
+        selfPraiseHtml = `<div style="margin-top:8px; text-align:center;"><span style="font-size:14px; background:#fef3c7; color:#d97706; padding:4px 12px; border-radius:15px; border:1px solid #f59e0b; font-weight:bold;">🪞 自画自賛 🪞</span></div>`;
+      } else {
+        selfPraiseHtml = `<div style="margin-top:8px; text-align:center;"><button onclick="doSelfPraise()" style="font-size:12px; padding:4px 10px; background:#f59e0b; color:white; border:none; border-radius:12px; cursor:pointer;">自画自賛する？</button></div>`;
+      }
+    } else if (isSelfPraised) {
+      selfPraiseHtml = `<div style="margin-top:8px; text-align:center;"><span style="font-size:14px; background:#fef3c7; color:#d97706; padding:4px 12px; border-radius:15px; border:1px solid #f59e0b; font-weight:bold;">🪞 自画自賛 🪞</span></div>`;
+    }
+
     return `
       <div class="player-board">
         <div class="board-header"><strong>${pName} の句</strong></div>
         <div>${phraseHtml}</div>
+        <div>${selfPraiseHtml}</div>
         <div style="margin-top:6px;">${evalBadgesHtml}</div>
         ${pName !== myName ? `
           <div class="vote-select-group" style="margin-top:8px;">
@@ -457,11 +479,10 @@ window.nextRound = async function() {
     alertMessage = `🪭 妙なりが出ました！今節の最高功労者: ${taeWinners.join(', ')} さん！(+${taePoints}誉)\n` + alertMessage;
   }
 
-  // ▼ 次の節に進むときにも revealedPhrases をリセット対象に追加
   await updateDoc(roomRef, {
     status: "lobby", hostIndex: hostIndex + 1, roundCount: (currentData.roundCount || 1) + 1,
     scores: newScores, history: [...(currentData.history || []), { round: currentData.roundCount || 1, phrases, phraseDetails: currentData.phraseDetails || {}, votes, host: players[hostIndex % (players.length || 1)] || '' }],
-    words5: [], words7: [], hands5: {}, hands7: {}, phrases: {}, phraseDetails: {}, votes: {}, revealedPhrases: {}
+    words5: [], words7: [], hands5: {}, hands7: {}, phrases: {}, phraseDetails: {}, votes: {}, revealedPhrases: {}, selfPraise: {}
   });
   alert(alertMessage);
 };
