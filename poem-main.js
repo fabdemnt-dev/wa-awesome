@@ -33,7 +33,7 @@ let currentData = null;
 let selectedHandIndices = new Set();
 
 const SAMPLE_PHRASES = [
-  "護法夜叉",
+  "岩王帝君",
   "ひざ",
   "エドワード・エルリック",
   "サイコパス",
@@ -43,9 +43,9 @@ const SAMPLE_PHRASES = [
   "人魚の鱗",
   "カリスマ",
   "深夜三時のボボンガリンガ", 
-  "月", 
+  "夜明け前", 
   "帰り道", 
-  "溶けかけ", 
+  "溶けそうな", 
   "黒縁メガネ", 
   "合言葉", 
   "踏切の音", 
