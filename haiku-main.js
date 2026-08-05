@@ -8,7 +8,7 @@ const evalOptionsMaster = {
   wabisabi: { icon: "❄️", label: "❄️ わびさび", pts: 1 },
   ayashi:   { icon: "🌀", label: "🌀 あやし", pts: 1 },
   kuruoshi: { icon: "🍶", label: "🍶 狂おし", pts: 1 },
-  wabishi:  { icon: "🍃", label: "🍃 わびし", pts: 1 },
+  medurashi: { icon: "✨", label: "✨ めづらし", pts: 1 },
   yugen:    { icon: "🌙", label: "🌙 幽玄", pts: 1 },
   tae:      { icon: "🪭", label: "🪭 妙なり", pts: 10 }
 };
@@ -18,7 +18,7 @@ const hostOptionKeys = [
   "wabisabi",
   "ayashi",
   "kuruoshi",
-  "wabishi",
+  "medurashi",
   "yugen",
   "tae"
 ];
