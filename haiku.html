@@ -128,11 +128,17 @@
 
       <div id="results-sec" style="margin-top:20px;"></div>
 
+      <!-- 履歴を含めるかどうかのチェックボックス -->
+      <label style="display:flex; align-items:center; gap:6px; margin-bottom: 12px; font-size:14px; cursor:pointer;">
+        <input type="checkbox" id="export-all-check" checked> 過去の履歴もすべて含めて出力する
+      </label>
+
       <div style="margin-top:20px; display:flex; gap:10px;">
         <button onclick="nextRound()" class="btn-success" style="flex:2;">次の節に進む</button>
         <button onclick="exportText()" style="flex:1; background-color: #5865F2;">📋 コピー (Discord用)</button>
         <button onclick="exportCSV()" style="flex:1; background-color: #059669;">📥 CSV保存</button>
       </div>
+
     </div>
   </div>
 </body>
