@@ -2,6 +2,27 @@ import { db } from "./firebase-config.js";
 import { doc, setDoc, onSnapshot, updateDoc, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { exportPoemText, exportPoemCSV } from "./poem-export.js";
 
+// 【修正】XSS対策：入力された文字を安全な形式に変換する関数を追加
+function escapeHTML(str) {
+  if (typeof str !== 'string') return '';
+  return str.replace(/[&'`"<>]/g, function(match) {
+    return {
+      '&': '&amp;',
+      "'": '&#x27;',
+      '`': '&#x60;',
+      '"': '&quot;',
+      '<': '&lt;',
+      '>': '&gt;',
+    }[match]
+  });
+}
+
+// 【修正】XSS対策：JSの引数用にシングルクォート等をエスケープする関数を追加
+function escapeJS(str) {
+  if (typeof str !== 'string') return '';
+  return str.replace(/'/g, "\\'").replace(/"/g, '\\"');
+}
+
 let roomId = "";
 let myName = "";
 let isSpectator = false;
@@ -12,26 +33,10 @@ let currentData = null;
 let selectedHandIndices = new Set();
 
 const SAMPLE_PHRASES = [
-  "護法夜叉",
-  "ひざ",
-  "エドワード・エルリック",
-  "サイコパス",
-  "降魔大聖",
-  "画面越し",
-  "壊れかけ",
-  "人魚の鱗",
-  "カリスマ",
-  "深夜三時のボボンガリンガ",
-  "月",
-  "帰り道",
-  "溶けかけ",
-  "黒縁メガネ",
-  "合言葉",
-  "踏切の音",
-  "枯れたひまわり",
-  "ハチワレ",
-  "ちいかわ",
-  "ローレライ"
+  "護法夜叉", "ひざ", "エドワード・エルリック", "サイコパス", "降魔大聖", 
+  "画面越し", "壊れかけ", "人魚の鱗", "カリスマ", "深夜三時のボボンガリンガ", 
+  "月", "帰り道", "溶けかけ", "黒縁メガネ", "合言葉", 
+  "踏切の音", "枯れたひまわり", "ハチワレ", "ちいかわ", "ローレライ"
 ];
 
 window.joinRoom = async function() {
@@ -86,15 +91,17 @@ window.joinRoom = async function() {
       if (document.getElementById('role-toggle-btn-lobby')) document.getElementById('role-toggle-btn-lobby').innerText = roleBtnText;
       if (document.getElementById('role-toggle-btn-game')) document.getElementById('role-toggle-btn-game').innerText = roleBtnText;
 
+      // 【修正】XSS対策：プレイヤー名をエスケープ処理
       let playerListHtml = players.map(p => `
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-          <span>・ ${p} ${p === myName ? '（あなた）' : ''}</span>
-          <button onclick="removePlayer('${p}')" style="width:auto; margin:0; padding:4px 8px; font-size:12px; background-color:#ef4444;">鯖落ち</button>
+          <span>・ ${escapeHTML(p)} ${p === myName ? '（あなた）' : ''}</span>
+          <button onclick="removePlayer('${escapeJS(p)}')" style="width:auto; margin:0; padding:4px 8px; font-size:12px; background-color:#ef4444;">鯖落ち</button>
         </div>
       `).join('');
 
       if (spectators.length > 0) {
-        playerListHtml += `<div style="font-size:12px; color:#64748b; margin-top:8px;">👀 見学者: ${spectators.join(', ')}</div>`;
+        // 【修正】XSS対策：見学者名もエスケープ処理
+        playerListHtml += `<div style="font-size:12px; color:#64748b; margin-top:8px;">👀 見学者: ${spectators.map(s => escapeHTML(s)).join(', ')}</div>`;
       }
       document.getElementById('player-list').innerHTML = playerListHtml;
 
@@ -186,9 +193,17 @@ window.addWords = async function() {
   if (isSpectator) return alert('見学モードでは素材投稿はできません');
   const inputs = document.querySelectorAll('#word-inputs input');
   const newWords = [];
+  
   inputs.forEach(inp => {
     const val = inp.value.trim();
-    if (val) newWords.push({ text: val, author: myName });
+    // 【修正】素材重複バグ対策：同じ単語でもFirebaseが別物として認識するように、ランダムなIDを追加
+    if (val) {
+      newWords.push({ 
+        text: val, 
+        author: myName, 
+        id: Date.now() + "_" + Math.random().toString(36).substring(2, 9) 
+      });
+    }
   });
 
   const st = currentData?.settings || { handCount: 5 };
@@ -201,6 +216,10 @@ window.addWords = async function() {
 
 window.startGame = async function() {
   if (!currentData) return;
+  
+  // 【修正】誤操作防止：本当にゲームを開始するか確認のポップアップを入れる
+  if (!confirm('全員の素材が集まりましたか？\nポエム作りを開始します。')) return;
+
   const players = currentData.players || [];
   const words = currentData.words || [];
   
@@ -249,7 +268,7 @@ function renderHand() {
     return;
   }
 
-  // 選択されているときは「薄い青色の背景」にして、文字色は変えない（標準のまま）
+  // 【修正】XSS対策：手札のテキストをエスケープ処理
   handList.innerHTML = myHands.map((item, idx) => {
     const isSelected = selectedHandIndices.has(idx);
     const bgStyle = isSelected 
@@ -258,7 +277,7 @@ function renderHand() {
 
     return `
       <div class="card" onclick="onCardClick(${idx})" style="cursor: pointer; padding: 8px 12px; margin-bottom: 6px; border-radius: 6px; border: 1px solid; transition: all 0.2s; ${bgStyle}">
-        ${item.text} ${isSelected ? '✓' : ''}
+        ${escapeHTML(item.text)} ${isSelected ? '✓' : ''}
       </div>
     `;
   }).join('');
@@ -277,7 +296,6 @@ function resizeTextarea() {
   this.style.height = (this.scrollHeight) + 'px';
 }
 
-// 手札カードをクリックしたときの処理（テキスト挿入 ＆ 色（選択状態）の切り替え）
 window.onCardClick = function(idx) {
   if (isSpectator) return;
   const myHands = currentData.hands?.[myName] || [];
@@ -285,7 +303,6 @@ window.onCardClick = function(idx) {
   const textarea = document.getElementById('poem-input-area');
   if (!textarea || !item) return;
 
-  // 1. まずテキストエリアに文字を挿入する従来の動きを維持
   const wordText = item.text;
   const start = textarea.selectionStart;
   const end = textarea.selectionEnd;
@@ -297,14 +314,12 @@ window.onCardClick = function(idx) {
   resizeTextarea.call(textarea);
   textarea.focus();
 
-  // 2. カードの選択状態（色）をトグル（ON/OFF）する
   if (selectedHandIndices.has(idx)) {
     selectedHandIndices.delete(idx);
   } else {
     selectedHandIndices.add(idx);
   }
 
-  // 手札リストの見た目を再描画して色を反映させる
   renderHand();
 };
 
@@ -316,7 +331,6 @@ window.clearPoem = function() {
     textarea.style.height = 'auto';
     textarea.focus();
   }
-  // 選択状態もリセット
   selectedHandIndices.clear();
   renderHand();
 };
@@ -329,7 +343,6 @@ window.submitPoem = async function() {
   const poemText = textarea.value.trim();
   if (!poemText) return alert('ポエムを入力してください');
 
-  // タップして「選択状態（色が変わっている）」になっている手札だけを「使用した手札」として保存する
   const myHands = currentData.hands?.[myName] || [];
   const usedHands = [];
   selectedHandIndices.forEach(idx => {
@@ -341,7 +354,7 @@ window.submitPoem = async function() {
   await updateDoc(roomRef, {
     [`poems.${myName}`]: {
       text: poemText,
-      hands: usedHands, // 選択（色変更）した手札のみが入る
+      hands: usedHands,
       revealed: false,
       likes: 0,
       emos: 0
@@ -390,18 +403,20 @@ function renderBoards() {
     return colors[Math.abs(hash) % colors.length];
   }
 
-  // いいねやエモいを押しても順番が勝手に変わらないよう、プレイヤー名のアルファベット・五十音順（または固定順）で並び替える
   const sortedPlayerNames = Object.keys(poems).sort();
 
   boardList.innerHTML = sortedPlayerNames.map(pName => {
     const poemData = poems[pName];
+    // 【修正】XSS対策：表示用の名前をエスケープ
+    const safePName = escapeHTML(pName);
+    const jsPName = escapeJS(pName);
 
     if (typeof poemData === 'string') {
       return `
         <div class="player-board" style="margin-bottom: 20px; padding: 16px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff;">
-          <strong>${pName} の作品</strong>
+          <strong>${safePName} の作品</strong>
           <div style="margin-top: 8px; padding: 12px; background: #f8fafc; border-left: 4px solid #4f46e5; border-radius: 4px;">
-            <p style="font-size: 15px; line-height: 1.5; white-space: pre-wrap; margin: 0;">${poemData}</p>
+            <p style="font-size: 15px; line-height: 1.5; white-space: pre-wrap; margin: 0;">${escapeHTML(poemData)}</p>
           </div>
         </div>
       `;
@@ -414,19 +429,20 @@ function renderBoards() {
     
     const userColor = getColorFromName(pName);
 
-        const handsHtml = hands.map(h => {
-      // プレイヤーのカラーを取得し、薄めの背景色と枠線を作る
+    // 【修正】XSS対策：使用した手札のテキストと作者名をエスケープ
+    const handsHtml = hands.map(h => {
       const authorColor = getColorFromName(h.author);
       return `
         <div style="display: inline-block; background-color: ${authorColor}22; border: 1px solid ${authorColor}66; color: #1e293b; padding: 4px 8px; margin: 2px; border-radius: 4px; font-size: 13px;">
-          ${h.text} <span style="font-size: 10px; color: #64748b; font-weight: bold;">(${h.author})</span>
+          ${escapeHTML(h.text)} <span style="font-size: 10px; color: #64748b; font-weight: bold;">(${escapeHTML(h.author)})</span>
         </div>
       `;
     }).join('');
 
+    // 【修正】XSS対策：ポエム本文をエスケープ
     return `
       <div class="player-board" style="margin-bottom: 20px; padding: 16px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff;">
-        <strong>${pName} の作品</strong>
+        <strong>${safePName} の作品</strong>
         
         <div style="margin-top: 8px;">
           <div style="font-size: 12px; color: #64748b; margin-bottom: 4px;">📌 使用した手札（元素材の作者）:</div>
@@ -435,21 +451,21 @@ function renderBoards() {
 
         <div style="margin-top: 12px;">
           ${!isRevealed ? `
-            <button onclick="revealPoem('${pName}')" style="background-color: #4f46e5; width: 100%; padding: 12px; font-size: 15px;">
+            <button onclick="revealPoem('${jsPName}')" style="background-color: #4f46e5; width: 100%; padding: 12px; font-size: 15px;">
               🎁 タップして作品を開く
             </button>
           ` : `
             <div style="margin-top: 8px; padding: 12px; background: #f8fafc; border-left: 4px solid ${userColor}; border-radius: 4px;">
-              <p style="font-size: 15px; line-height: 1.5; white-space: pre-wrap; margin: 0;">${poemData.text}</p>
+              <p style="font-size: 15px; line-height: 1.5; white-space: pre-wrap; margin: 0;">${escapeHTML(poemData.text)}</p>
             </div>
           `}
         </div>
 
         <div style="display: flex; gap: 16px; margin-top: 12px; align-items: center;">
-          <button onclick="addReaction('${pName}', 'like')" style="background: none; border: none; color: #334155; width: auto; padding: 6px 8px; font-size: 14px; cursor: pointer;">
+          <button onclick="addReaction('${jsPName}', 'like')" style="background: none; border: none; color: #334155; width: auto; padding: 6px 8px; font-size: 14px; cursor: pointer;">
             👍 いいね (${likes})
           </button>
-          <button onclick="addReaction('${pName}', 'emo')" style="background: none; border: none; color: #334155; width: auto; padding: 6px 8px; font-size: 14px; cursor: pointer;">
+          <button onclick="addReaction('${jsPName}', 'emo')" style="background: none; border: none; color: #334155; width: auto; padding: 6px 8px; font-size: 14px; cursor: pointer;">
             💖 エモい (${emos})
           </button>
         </div>
@@ -460,6 +476,9 @@ function renderBoards() {
 
 window.nextGame = async function() {
   if (!roomRef) return;
+  // 【修正】誤操作防止：間違えてリセットしないように確認ポップアップを入れる
+  if (!confirm('本当に新しいポエム作りに進みますか？\n（現在の作品はリセットされます）')) return;
+
   await updateDoc(roomRef, {
     status: "lobby",
     words: [],
