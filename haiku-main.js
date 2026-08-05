@@ -354,7 +354,7 @@ function renderBoards() {
     if (!isRevealed) {
       return `
         <div class="player-board" style="text-align: center; padding: 20px;">
-          <button onclick="revealPhrase('${pName}')" style="font-size: 16px; padding: 10px 20px; background-color: #34d399; color: white; border: none; border-radius: 8px; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+          <button onclick="revealPhrase('${pName}')" style="font-size: 16px; padding: 10px 20px; background-color: #3bab46; color: white; border: none; border-radius: 8px; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
             📜 ${pName} の句を披露する（タップ）
           </button>
         </div>
