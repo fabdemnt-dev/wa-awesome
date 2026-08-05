@@ -168,6 +168,17 @@ window.joinRoom = async function() {
         if (document.getElementById('game-sec')) document.getElementById('game-sec').style.display = 'none';
         if (document.getElementById('lobby-sec')) document.getElementById('lobby-sec').style.display = 'block';
         myHand5 = []; myHand7 = []; selectedHand = [null, null, null];
+
+        // 【修正】入力欄とボタンの表示をリセットする処理を追加
+        ['5', '7'].forEach(type => {
+          const container = document.getElementById(`inputs-${type}-container`);
+          if (container) {
+            container.querySelectorAll('input').forEach(inp => inp.value = '');
+          }
+        });
+        const addBtn = document.getElementById('add-word-btn');
+        if (addBtn) addBtn.innerText = '素材を提出する';
+
       } else if (currentData.status === 'playing') {
         if (document.getElementById('lobby-sec')) document.getElementById('lobby-sec').style.display = 'none';
         if (document.getElementById('game-sec')) document.getElementById('game-sec').style.display = 'block';
