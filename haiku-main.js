@@ -514,11 +514,10 @@ window.exportText = function() {
     });
     txt += `\n`;
   });
-  const blob = new Blob([txt], { type: 'text/plain' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `haiku_${roomId}.txt`;
-  a.click();
+
+  navigator.clipboard.writeText(txt).then(() => {
+    alert('Discord用のテキストをクリップボードにコピーしました！');
+  }).catch(e => alert('コピーに失敗しました: ' + e));
 };
 
 window.exportCSV = function() {
