@@ -4,10 +4,13 @@ import { evalOptionsMaster } from './haiku-utils.js';
 window.exportText = function() {
   if (!state.currentData) return;
   
-  // 過去の履歴データをコピー
-  const historyToExport = [...(state.currentData.history || [])];
+  // チェックボックスの状態を取得（見つからなければとりあえず全部出力）
+  const exportAll = document.getElementById('export-all-check')?.checked ?? true;
+  
+  // exportAllがtrueなら過去の履歴を含め、falseなら空にする
+  const historyToExport = exportAll ? [...(state.currentData.history || [])] : [];
 
-  // 現在進行中の節（句が1つでも提出されていれば）も出力用データに一時的に追加
+  // 現在進行中の節（句が1つでも提出されていれば）も出力用データに追加
   const currentPhrases = state.currentData.phrases || {};
   if (Object.keys(currentPhrases).length > 0) {
     const players = state.currentData.players || [];
@@ -18,6 +21,10 @@ window.exportText = function() {
       phrases: currentPhrases,
       votes: state.currentData.votes || {}
     });
+  }
+
+  if (historyToExport.length === 0) {
+    return alert('出力する記録がありません');
   }
 
   let txt = `【わ〜鯖句会 記録】\n\n`;
@@ -55,8 +62,8 @@ window.exportText = function() {
 window.exportCSV = function() {
   if (!state.currentData) return;
   
-  // 過去の履歴データをコピー
-  const historyToExport = [...(state.currentData.history || [])];
+  const exportAll = document.getElementById('export-all-check')?.checked ?? true;
+  const historyToExport = exportAll ? [...(state.currentData.history || [])] : [];
 
   // 現在進行中の節も追加
   const currentPhrases = state.currentData.phrases || {};
@@ -69,6 +76,10 @@ window.exportCSV = function() {
       phrases: currentPhrases,
       votes: state.currentData.votes || {}
     });
+  }
+
+  if (historyToExport.length === 0) {
+    return alert('出力する記録がありません');
   }
 
   let csv = `節,選者,風流名,句,贈られた御印\n`;
