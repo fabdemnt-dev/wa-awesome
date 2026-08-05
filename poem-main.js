@@ -52,7 +52,7 @@ const SAMPLE_PHRASES = [
   "枯れたひまわり", 
   "跡部景吾", 
   "ちいかわ", 
-  "やっほー"
+  "記憶喪失"
 ];
 
 window.joinRoom = async function() {
