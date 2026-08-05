@@ -1,10 +1,10 @@
-export function exportPoemText(currentData) {
+export function exportPoemText(currentData, exportAll = true) {
   if (!currentData) return;
 
-  // 過去の履歴データ
-  const historyToExport = [...(currentData.history || [])];
+  // exportAllがtrueなら過去の履歴を含め、falseなら空にする
+  const historyToExport = exportAll ? [...(currentData.history || [])] : [];
   
-  // 現在進行中のポエムも追加
+  // 現在進行中のポエムを追加
   const currentPoems = currentData.poems || {};
   if (Object.keys(currentPoems).length > 0) {
     historyToExport.push({
@@ -32,10 +32,11 @@ export function exportPoemText(currentData) {
   }).catch(e => alert('コピーに失敗しました: ' + e));
 }
 
-export function exportPoemCSV(currentData, roomId) {
+export function exportPoemCSV(currentData, roomId, exportAll = true) {
   if (!currentData) return;
 
-  const historyToExport = [...(currentData.history || [])];
+  // exportAllがtrueなら過去の履歴を含め、falseなら空にする
+  const historyToExport = exportAll ? [...(currentData.history || [])] : [];
   const currentPoems = currentData.poems || {};
 
   if (Object.keys(currentPoems).length > 0) {
