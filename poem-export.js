@@ -1,16 +1,30 @@
 export function exportPoemText(currentData) {
-  if (!currentData || !currentData.poems || Object.keys(currentData.poems).length === 0) {
+  if (!currentData) return;
+
+  // 過去の履歴データ
+  const historyToExport = [...(currentData.history || [])];
+  
+  // 現在進行中のポエムも追加
+  const currentPoems = currentData.poems || {};
+  if (Object.keys(currentPoems).length > 0) {
+    historyToExport.push({
+      round: currentData.roundCount || 1,
+      poems: currentPoems
+    });
+  }
+
+  if (historyToExport.length === 0) {
     return alert('出力するポエムがありません');
   }
 
   let text = `【わ〜鯖せーへきポエム 作品集】\n\n`;
-  Object.keys(currentData.poems).forEach(pName => {
-    // オブジェクト形式で保存されている場合は .text を取得する
-    const poemData = currentData.poems[pName];
-    const poemText = typeof poemData === 'object' ? poemData.text : poemData;
-    
-    text += `■ ${pName} の作品\n`;
-    text += `   「${poemText}」\n\n`;
+  historyToExport.forEach(h => {
+    text += `--- 第${h.round}幕 ---\n`;
+    Object.keys(h.poems || {}).forEach(pName => {
+      const poemData = h.poems[pName];
+      const poemText = typeof poemData === 'object' ? poemData.text : poemData;
+      text += `■ ${pName} の作品\n   「${poemText}」\n\n`;
+    });
   });
 
   navigator.clipboard.writeText(text).then(() => {
@@ -19,18 +33,34 @@ export function exportPoemText(currentData) {
 }
 
 export function exportPoemCSV(currentData, roomId) {
-  if (!currentData || !currentData.poems || Object.keys(currentData.poems).length === 0) {
+  if (!currentData) return;
+
+  const historyToExport = [...(currentData.history || [])];
+  const currentPoems = currentData.poems || {};
+
+  if (Object.keys(currentPoems).length > 0) {
+    historyToExport.push({
+      round: currentData.roundCount || 1,
+      poems: currentPoems
+    });
+  }
+
+  if (historyToExport.length === 0) {
     return alert('出力するポエムがありません');
   }
 
   let csvContent = "data:text/csv;charset=utf-8,\uFEFF";
-  csvContent += "作者,作品\n";
+  csvContent += "幕,作者,作品\n";
 
-  Object.keys(currentData.poems).forEach(pName => {
-    const poemData = currentData.poems[pName];
-    const poemText = typeof poemData === 'object' ? poemData.text : poemData;
-    
-    csvContent += `"${pName}","${poemText}"\n`;
+  historyToExport.forEach(h => {
+    Object.keys(h.poems || {}).forEach(pName => {
+      const poemData = h.poems[pName];
+      const poemText = typeof poemData === 'object' ? poemData.text : poemData;
+      // CSV内で改行やダブルクォーテーションが崩れないようエスケープ処理
+      const cleanText = poemText.replace(/"/g, '""');
+      
+      csvContent += `${h.round},"${pName}","${cleanText}"\n`;
+    });
   });
 
   const encodedUri = encodeURI(csvContent);
