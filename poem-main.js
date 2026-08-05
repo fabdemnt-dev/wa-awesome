@@ -5,12 +5,16 @@ import './poem-export.js';
 import './poem-render.js';
 import './poem-action.js';
 
-// 参加ボタンのイベントリスナー登録
-document.getElementById("join-btn")
-  ?.addEventListener("click", function() {
-    if (typeof window.joinRoom === 'function') {
-      window.joinRoom();
-    } else {
-      alert('joinRoom関数が読み込まれていません');
-    }
-  });
+// DOMが確実に読み込まれてからイベントリスナーを登録する
+document.addEventListener('DOMContentLoaded', () => {
+  const joinBtn = document.getElementById("join-btn");
+  if (joinBtn) {
+    joinBtn.addEventListener("click", function() {
+      if (typeof window.joinRoom === 'function') {
+        window.joinRoom();
+      } else {
+        alert('joinRoom関数が読み込まれていません');
+      }
+    });
+  }
+});
