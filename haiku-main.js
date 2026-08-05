@@ -246,7 +246,6 @@ window.removePlayer = async function(pName) {
   }
 };
 
-// ▼ 自画自賛ボタンを押したときの処理を追加
 window.doSelfPraise = async function() {
   if (!roomRef || isSpectator) return;
   await updateDoc(roomRef, {
@@ -341,7 +340,7 @@ function renderBoards() {
   const phraseDetails = currentData.phraseDetails || {};
   const votes = currentData.votes || {};
   const revealedPhrases = currentData.revealedPhrases || {};
-  const selfPraiseData = currentData.selfPraise || {}; // 自画自賛データの取得
+  const selfPraiseData = currentData.selfPraise || {}; // 自画自賛データの取得[span_1](start_span)[span_1](end_span)
   const players = currentData.players || [];
   const currentHost = players[(currentData.hostIndex || 0) % (players.length || 1)];
   const isHost = (myName === currentHost);
@@ -381,24 +380,26 @@ function renderBoards() {
 
     const hasAlreadyVotedAsChild = !isHost && votes[myName]?.[pName] != null;
 
-    // ▼ 自画自賛ボタンまたはスタンプの表示ロジック
+    // ▼ 自画自賛ボタンまたはスタンプの表示ロジック（右側に配置しやすいよう調整）[span_2](start_span)[span_2](end_span)
     const isSelfPraised = selfPraiseData[pName];
     let selfPraiseHtml = '';
     if (pName === myName) {
       if (isSelfPraised) {
-        selfPraiseHtml = `<div style="margin-top:8px; text-align:center;"><span style="font-size:14px; background:#fef3c7; color:#d97706; padding:4px 12px; border-radius:15px; border:1px solid #f59e0b; font-weight:bold;">🪞 自画自賛 🪞</span></div>`;
+        selfPraiseHtml = `<span style="font-size:13px; background:#fef3c7; color:#d97706; padding:2px 8px; border-radius:12px; border:1px solid #f59e0b; font-weight:bold;">🪞 自画自賛 🪞</span>`;
       } else {
-        selfPraiseHtml = `<div style="margin-top:8px; text-align:center;"><button onclick="doSelfPraise()" style="font-size:12px; padding:4px 10px; background:#f59e0b; color:white; border:none; border-radius:12px; cursor:pointer;">自画自賛する？</button></div>`;
+        selfPraiseHtml = `<button onclick="doSelfPraise()" style="font-size:11px; padding:3px 8px; background:#f59e0b; color:white; border:none; border-radius:10px; cursor:pointer;">自画自賛する</button>`;
       }
     } else if (isSelfPraised) {
-      selfPraiseHtml = `<div style="margin-top:8px; text-align:center;"><span style="font-size:14px; background:#fef3c7; color:#d97706; padding:4px 12px; border-radius:15px; border:1px solid #f59e0b; font-weight:bold;">🪞 自画自賛 🪞</span></div>`;
+      selfPraiseHtml = `<span style="font-size:13px; background:#fef3c7; color:#d97706; padding:2px 8px; border-radius:12px; border:1px solid #f59e0b; font-weight:bold;">🪞 自画自賛 🪞</span>`;
     }
 
     return `
       <div class="player-board">
-        <div class="board-header"><strong>${pName} の句</strong></div>
-        <div>${phraseHtml}</div>
-        <div>${selfPraiseHtml}</div>
+        <div class="board-header" style="display: flex; justify-content: space-between; align-items: center;">
+          <strong>${pName} の句</strong>
+          <div>${selfPraiseHtml}</div>
+        </div>
+        <div style="margin-top: 6px;">${phraseHtml}</div>
         <div style="margin-top:6px;">${evalBadgesHtml}</div>
         ${pName !== myName ? `
           <div class="vote-select-group" style="margin-top:8px;">
