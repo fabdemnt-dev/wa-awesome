@@ -1,3 +1,6 @@
+// ブラウザに一時保存されている手札があれば取得
+const savedHand = sessionStorage.getItem('haikuSelectedHand');
+
 const state = {
   roomId: "",
   myName: "",
@@ -6,7 +9,8 @@ const state = {
 
   myHand5: [],
   myHand7: [],
-  selectedHand: [null, null, null],
+  // 保存データがあればそれを復元、なければ空っぽにする
+  selectedHand: savedHand ? JSON.parse(savedHand) : [null, null, null],
 
   currentData: null,
 
