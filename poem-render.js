@@ -65,12 +65,10 @@ export function renderHand() {
 
   handList.innerHTML = myHands.map((item, idx) => {
     const isSelected = state.selectedHandIndices.has(idx);
-    const bgStyle = isSelected 
-      ? 'background-color: #dbeafe; border-color: #3b82f6;' 
-      : 'background-color: #fff; border-color: #cbd5e1;';
+    const selectedClass = isSelected ? 'selected' : '';
 
     return `
-      <div class="card" onclick="onCardClick(${idx})" style="cursor: pointer; padding: 8px 12px; margin-bottom: 6px; border-radius: 6px; border: 1px solid; transition: all 0.2s; ${bgStyle}">
+      <div class="card ${selectedClass}" onclick="onCardClick(${idx})">
         ${escapeHTML(item.text)} ${isSelected ? '✓' : ''}
       </div>
     `;
