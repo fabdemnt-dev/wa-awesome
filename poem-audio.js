@@ -11,3 +11,5 @@ export function speakPoem(text) {
 
   window.speechSynthesis.speak(utterance);
 }
+
+window.speakPoem = speakPoem;
