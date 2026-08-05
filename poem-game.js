@@ -1,0 +1,75 @@
+import { updateDoc, arrayUnion } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import state from './poem-state.js';
+
+window.addWords = async function() {
+  if (state.isSpectator) return alert('見学モードでは素材投稿はできません');
+  const inputs = document.querySelectorAll('#word-inputs input');
+  const newWords = [];
+  
+  inputs.forEach(inp => {
+    const val = inp.value.trim();
+    if (val) {
+      newWords.push({ 
+        text: val, 
+        author: state.myName, 
+        id: Date.now() + "_" + Math.random().toString(36).substring(2, 9) 
+      });
+    }
+  });
+
+  const st = state.currentData?.settings || { handCount: 5 };
+  if (newWords.length < st.handCount) return alert(`設定された手札の枚数（${st.handCount}個）分すべて入力してください`);
+
+  await updateDoc(state.roomRef, { words: arrayUnion(...newWords) });
+  inputs.forEach(inp => inp.value = '');
+  alert('素材を追加しました！');
+};
+
+window.startGame = async function() {
+  if (!state.currentData) return;
+  if (!confirm('全員の素材が集まりましたか？\nポエム作りを開始します。')) return;
+
+  const players = state.currentData.players || [];
+  const words = state.currentData.words || [];
+  const st = state.currentData.settings || { handCount: 5 };
+  const handCount = st.handCount;
+
+  if (words.length < players.length * handCount) {
+    return alert(`素材の数が足りません！\n現在 ${words.length}個 ですが、(プレイヤー ${players.length}人 × 手札 ${handCount}枚 = ${players.length * handCount}個) 必要です。`);
+  }
+
+  const shuffledWords = [...words].sort(() => Math.random() - 0.5);
+  const newHands = {};
+  players.forEach(p => { newHands[p] = shuffledWords.splice(0, handCount); });
+
+  state.selectedHandIndices.clear();
+  await updateDoc(state.roomRef, { 
+    status: "playing", 
+    hands: newHands, 
+    poems: {} 
+  });
+};
+
+
+window.nextGame = async function() {
+  if (!state.roomRef || !state.currentData) return;
+  if (!confirm('本当に新しいポエム作りに進みますか？\n（現在の作品は履歴に保存され、新しく作り直します）')) return;
+
+  const currentRoundHistory = {
+    round: state.currentData.roundCount || 1,
+    poems: state.currentData.poems || {}
+  };
+  const nextRoundNum = (state.currentData.roundCount || 1) + 1;
+
+  await updateDoc(state.roomRef, {
+    status: "lobby",
+    roundCount: nextRoundNum,
+    history: arrayUnion(currentRoundHistory),
+    words: [],
+    hands: {},
+    poems: {}
+  });
+  
+  alert('作品を履歴に保存しました！次の作成に進みます。');
+};
+

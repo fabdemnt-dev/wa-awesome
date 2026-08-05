@@ -3,6 +3,8 @@ import './poem-state.js';
 import './poem-audio.js';
 import './poem-export.js';
 import './poem-render.js';
+import './poem-room.js';
+import './poem-game.js';
 import './poem-action.js';
 
 // DOMが確実に読み込まれてからイベントリスナーを登録する
