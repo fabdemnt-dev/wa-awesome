@@ -415,7 +415,7 @@ function renderBoards() {
 
 window.submitVote = async function(targetPlayer) {
   const evalKey = document.getElementById(`vote-select-${targetPlayer}`)?.value;
-  if (!evalKey) return alert('御印を選択してください');[span_6](start_span)[span_6](end_span)
+  if (!evalKey) return alert('御印を選択してください');[span_0](start_span)[span_0](end_span)
 
   const players = currentData.players || [];
   const currentHost = players[(currentData.hostIndex || 0) % (players.length || 1)];
@@ -432,7 +432,7 @@ window.submitVote = async function(targetPlayer) {
     const hasVotedAnywhere = Object.values(myVotes).some(vote => vote != null);
 
     if (hasVotedAnywhere) {
-      return alert('御印は1節につき1つまでしか贈れません！');[span_7](start_span)[span_7](end_span)
+      return alert('御印は1節につき1つまでしか贈れません！');[span_1](start_span)[span_1](end_span)
     }
 
     await updateDoc(roomRef, { [`votes.${myName}.${targetPlayer}`]: evalKey });
