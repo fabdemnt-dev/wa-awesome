@@ -1,10 +1,7 @@
 export function exportPoemText(currentData, exportAll = true) {
   if (!currentData) return;
-
-  // exportAllがtrueなら過去の履歴を含め、falseなら空にする
   const historyToExport = exportAll ? [...(currentData.history || [])] : [];
   
-  // 現在進行中のポエムを追加
   const currentPoems = currentData.poems || {};
   if (Object.keys(currentPoems).length > 0) {
     historyToExport.push({
@@ -34,8 +31,6 @@ export function exportPoemText(currentData, exportAll = true) {
 
 export function exportPoemCSV(currentData, roomId, exportAll = true) {
   if (!currentData) return;
-
-  // exportAllがtrueなら過去の履歴を含め、falseなら空にする
   const historyToExport = exportAll ? [...(currentData.history || [])] : [];
   const currentPoems = currentData.poems || {};
 
@@ -57,9 +52,7 @@ export function exportPoemCSV(currentData, roomId, exportAll = true) {
     Object.keys(h.poems || {}).forEach(pName => {
       const poemData = h.poems[pName];
       const poemText = typeof poemData === 'object' ? poemData.text : poemData;
-      // CSV内で改行やダブルクォーテーションが崩れないようエスケープ処理
       const cleanText = poemText.replace(/"/g, '""');
-      
       csvContent += `${h.round},"${pName}","${cleanText}"\n`;
     });
   });
