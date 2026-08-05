@@ -87,7 +87,15 @@ if (!roomSnapshot.exists()) {
       if (handInput && document.activeElement !== handInput) {
         handInput.value = st.handCount;
       }
+const currentWords = (state.currentData.words || []).length;
+const requiredWords = players.length * st.handCount;
 
+const materialCount = document.getElementById('material-count');
+if (materialCount) {
+  materialCount.textContent =
+    `📦 集まった素材：${currentWords} / ${requiredWords}個` +
+    (requiredWords > 0 && currentWords >= requiredWords ? " ✅" : "");
+}
       renderInputFields(st.handCount, SAMPLE_PHRASES);
 
       const roleBtnText = state.isSpectator ? "⚔️ プレイヤーとして途中参戦する" : "👀 見学モードに切り替える";
