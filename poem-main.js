@@ -3,8 +3,14 @@ import './poem-state.js';
 import './poem-audio.js';
 import './poem-export.js';
 import './poem-render.js';
-import './poem-action.js';
+import './poem-action.js'; // ここで window.joinRoom や各アクションが window に登録されます
 
 // 参加ボタンのイベントリスナー登録
 document.getElementById("join-btn")
-  ?.addEventListener("click", window.joinRoom);
+  ?.addEventListener("click", function() {
+    if (typeof window.joinRoom === 'function') {
+      window.joinRoom();
+    } else {
+      alert('joinRoom関数が読み込まれていません');
+    }
+  });
