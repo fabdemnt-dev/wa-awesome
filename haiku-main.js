@@ -79,7 +79,7 @@ window.joinRoom = async function() {
   const specCheck = document.getElementById('spectator-check');
   isSpectator = specCheck ? specCheck.checked : false;
 
-  if (!myName || !roomId) return alert('名前とルームIDを入力してください');[span_0](start_span)[span_0](end_span)
+  if (!myName || !roomId) return alert('名前とルームIDを入力してください');
 
   try {
     roomRef = doc(db, "rooms", "haiku_" + roomId);
@@ -162,7 +162,7 @@ window.joinRoom = async function() {
       }
     });
   } catch (e) {
-    alert('接続エラーが発生しました: ' + e.message);[span_1](start_span)[span_1](end_span)
+    alert('接続エラーが発生しました: ' + e.message);
   }
 };
 
@@ -174,12 +174,14 @@ window.toggleRole = async function() {
       players: arrayUnion(myName)
     });
     isSpectator = false;
+    alert("プレイヤーとして参加しました！");
   } else {
     await updateDoc(roomRef, {
       players: arrayRemove(myName),
       spectators: arrayUnion(myName)
     });
     isSpectator = true;
+    alert("見学モードに切り替えました！");
   }
 };
 
@@ -230,7 +232,7 @@ window.addWords = async function() {
 
   const new5 = getWords('5', st.in5);
   const new7 = getWords('7', st.in7);
-  if (new5.length < st.in5 || new7.length < st.in7) return alert('全ての素材を入力してください');[span_2](start_span)[span_2](end_span)
+  if (new5.length < st.in5 || new7.length < st.in7) return alert('全ての素材を入力してください');
 
   await updateDoc(roomRef, { words5: arrayUnion(...new5), words7: arrayUnion(...new7) });
   renderInputFields(st.in5, st.in7);
@@ -244,11 +246,15 @@ window.removePlayer = async function(pName) {
   }
 };
 
+// ▼ 自画自賛ボタンを押したときの処理を追加
 window.doSelfPraise = async function() {
   if (!roomRef || isSpectator) return;
   await updateDoc(roomRef, {
-    [`selfPraise.${myName}`]: true
+    [`selfPraise.${pName === myName ? myName : ''}`]: true // 自分の名前で保存
   });
+  // ※スッキリ書くため以下でもOKです
+  // await updateDoc(roomRef, { [`selfPraise.${myName}`]: true });
+  alert('自画自賛しました！');
 };
 
 window.startGame = async function() {
@@ -257,7 +263,7 @@ window.startGame = async function() {
   const w5 = currentData?.words5 || [], w7 = currentData?.words7 || [];
 
   if (w5.length < players.length * st.hand5 || w7.length < players.length * st.hand7) {
-    return alert('素材が足りません！');[span_3](start_span)[span_3](end_span)
+    return alert('素材が足りません！');
   }
 
   const s5 = [...w5].sort(() => Math.random() - 0.5);
@@ -314,12 +320,13 @@ window.swap5Cards = function() { if (!isSpectator) { [selectedHand[0], selectedH
 window.clearPhrase = function() { if (!isSpectator) { selectedHand = [null, null, null]; renderHand(); } };
 
 window.submitPhrase = async function() {
-  if (isSpectator) return alert('見学モードでは句の投稿はできません');[span_4](start_span)[span_4](end_span)
-  if (!selectedHand[0] || !selectedHand[1] || !selectedHand[2]) return alert('すべて選択してください');[span_5](start_span)[span_5](end_span)
+  if (isSpectator) return alert('見学モードでは句の投稿はできません');
+  if (!selectedHand[0] || !selectedHand[1] || !selectedHand[2]) return alert('すべて選択してください');
   await updateDoc(roomRef, {
     [`phrases.${myName}`]: `${selectedHand[0].text} ${selectedHand[1].text} ${selectedHand[2].text}`,
     [`phraseDetails.${myName}`]: selectedHand
   });
+  alert('一句披露しました！');
 };
 
 window.revealPhrase = async function(pName) {
@@ -337,7 +344,7 @@ function renderBoards() {
   const phraseDetails = currentData.phraseDetails || {};
   const votes = currentData.votes || {};
   const revealedPhrases = currentData.revealedPhrases || {};
-  const selfPraiseData = currentData.selfPraise || {};
+  const selfPraiseData = currentData.selfPraise || {}; // 自画自賛データの取得
   const players = currentData.players || [];
   const currentHost = players[(currentData.hostIndex || 0) % (players.length || 1)];
   const isHost = (myName === currentHost);
@@ -377,6 +384,7 @@ function renderBoards() {
 
     const hasAlreadyVotedAsChild = !isHost && votes[myName]?.[pName] != null;
 
+    // ▼ 自画自賛ボタンまたはスタンプの表示ロジック
     const isSelfPraised = selfPraiseData[pName];
     let selfPraiseHtml = '';
     if (pName === myName) {
@@ -415,7 +423,7 @@ function renderBoards() {
 
 window.submitVote = async function(targetPlayer) {
   const evalKey = document.getElementById(`vote-select-${targetPlayer}`)?.value;
-  if (!evalKey) return alert('御印を選択してください');[span_0](start_span)[span_0](end_span)
+  if (!evalKey) return alert('御印を選択してください');
 
   const players = currentData.players || [];
   const currentHost = players[(currentData.hostIndex || 0) % (players.length || 1)];
@@ -427,241 +435,17 @@ window.submitVote = async function(targetPlayer) {
     const newVotesArr = [...currentVotesArr, evalKey];
 
     await updateDoc(roomRef, { [`votes.${myName}.${targetPlayer}`]: newVotesArr });
+    alert('御印を追加で贈りました！');
   } else {
     const myVotes = currentData.votes?.[myName] || {};
     const hasVotedAnywhere = Object.values(myVotes).some(vote => vote != null);
 
     if (hasVotedAnywhere) {
-      return alert('御印は1節につき1つまでしか贈れません！');[span_1](start_span)[span_1](end_span)
+      return alert('御印は1節につき1つまでしか贈れません！');
     }
 
     await updateDoc(roomRef, { [`votes.${myName}.${targetPlayer}`]: evalKey });
-  }
-};
-
-window.nextRound = async function() {
-  if (!currentData) return;
-  const votes = currentData.votes || {}, phrases = currentData.phrases || {}, scores = currentData.scores || {};
-  const players = currentData.players || [], hostIndex = currentData.hostIndex || 0;
-  const newScores = { ...scores };
-
-  let taeWinners = [];
-  const taePoints = Math.max(10, players.length * 2);
-
-  Object.keys(votes).forEach(voter => {
-    Object.keys(votes[voter] || {}).forEach(target => {
-      const vData = votes[voter][target];
-      const keys = Array.isArray(vData) ? vData : [vData];
-
-      keys.forEach(k => {
-        if (k === 'tae' && !taeWinners.includes(target)) {
-          taeWinners.push(target);
-        }
-        const opt = evalOptionsMaster[k];
-        const pts = (k === 'tae') ? taePoints : (opt ? opt.pts : 0);
-        newScores[target] = (newScores[target] || 0) + pts;
-      });
-    });
-  });
-
-  let alertMessage = '次の節に進みます！';
-  if (taeWinners.length > 0) {
-    alertMessage = `🪭 妙なりが出ました！今節の最高功労者: ${taeWinners.join(', ')} さん！(+${taePoints}誉)\n` + alertMessage;
-  }
-
-  await updateDoc(roomRef, {
-    status: "lobby", hostIndex: hostIndex + 1, roundCount: (currentData.roundCount || 1) + 1,
-    scores: newScores, history: [...(currentData.history || []), { round: currentData.roundCount || 1, phrases, phraseDetails: currentData.phraseDetails || {}, votes, host: players[hostIndex % (players.length || 1)] || '' }],
-    words5: [], words7: [], hands5: {}, hands7: {}, phrases: {}, phraseDetac(roomRef, {
-    [`selfPraise.${myName}`]: true
-  });
-};
-
-window.startGame = async function() {
-  const players = currentData?.players || [];
-  const st = currentData?.settings || { hand5: 5, hand7: 3 };
-  const w5 = currentData?.words5 || [], w7 = currentData?.words7 || [];
-
-  if (w5.length < players.length * st.hand5 || w7.length < players.length * st.hand7) {
-    return alert('素材が足りません！');[span_3](start_span)[span_3](end_span)
-  }
-
-  const s5 = [...w5].sort(() => Math.random() - 0.5);
-  const s7 = [...w7].sort(() => Math.random() - 0.5);
-  const h5 = {}, h7 = {};
-  players.forEach(p => { h5[p] = s5.splice(0, st.hand5); h7[p] = s7.splice(0, st.hand7); });
-
-  await updateDoc(roomRef, { status: "playing", hands5: h5, hands7: h7, phrases: {}, phraseDetails: {}, votes: {}, revealedPhrases: {}, selfPraise: {} });
-};
-
-function renderHand() {
-  const h5List = document.getElementById('hand-5-list');
-  if (h5List) {
-    if (isSpectator) {
-      h5List.innerHTML = '<div style="font-size:13px; color:#94a3b8;">※見学モード中</div>';
-    } else {
-      h5List.innerHTML = myHand5.map((item, idx) => `
-        <div class="card card-5 ${selectedHand.includes(item) ? 'selected' : ''}" onclick="selectCard(5, ${idx})">${item.text}</div>
-      `).join('');
-    }
-  }
-
-  const h7List = document.getElementById('hand-7-list');
-  if (h7List) {
-    if (isSpectator) {
-      h7List.innerHTML = '<div style="font-size:13px; color:#94a3b8;">※見学モード中</div>';
-    } else {
-      h7List.innerHTML = myHand7.map((item, idx) => `
-        <div class="card card-7 ${selectedHand[1] === item ? 'selected' : ''}" onclick="selectCard(7, ${idx})">${item.text}</div>
-      `).join('');
-    }
-  }
-
-  if (document.getElementById('phrase-1')) document.getElementById('phrase-1').innerText = selectedHand[0]?.text || '（選択してください）';
-  if (document.getElementById('phrase-2')) document.getElementById('phrase-2').innerText = selectedHand[1]?.text || '（選択してください）';
-  if (document.getElementById('phrase-3')) document.getElementById('phrase-3').innerText = selectedHand[2]?.text || '（選択してください）';
-}
-
-window.selectCard = function(type, idx) {
-  if (isSpectator) return;
-  if (type === 5) {
-    const item = myHand5[idx];
-    if (selectedHand[0] === item) selectedHand[0] = null;
-    else if (selectedHand[2] === item) selectedHand[2] = null;
-    else if (!selectedHand[0]) selectedHand[0] = item;
-    else if (!selectedHand[2]) selectedHand[2] = item;
-  } else {
-    selectedHand[1] = selectedHand[1] === myHand7[idx] ? null : myHand7[idx];
-  }
-  renderHand();
-};
-
-window.swap5Cards = function() { if (!isSpectator) { [selectedHand[0], selectedHand[2]] = [selectedHand[2], selectedHand[0]]; renderHand(); } };
-window.clearPhrase = function() { if (!isSpectator) { selectedHand = [null, null, null]; renderHand(); } };
-
-window.submitPhrase = async function() {
-  if (isSpectator) return alert('見学モードでは句の投稿はできません');[span_4](start_span)[span_4](end_span)
-  if (!selectedHand[0] || !selectedHand[1] || !selectedHand[2]) return alert('すべて選択してください');[span_5](start_span)[span_5](end_span)
-  await updateDoc(roomRef, {
-    [`phrases.${myName}`]: `${selectedHand[0].text} ${selectedHand[1].text} ${selectedHand[2].text}`,
-    [`phraseDetails.${myName}`]: selectedHand
-  });
-};
-
-window.revealPhrase = async function(pName) {
-  if (!roomRef) return;
-  await updateDoc(roomRef, {
-    [`revealedPhrases.${pName}`]: true
-  });
-};
-
-function renderBoards() {
-  const boardList = document.getElementById('board-list');
-  if (!boardList || !currentData) return;
-
-  const phrases = currentData.phrases || {};
-  const phraseDetails = currentData.phraseDetails || {};
-  const votes = currentData.votes || {};
-  const revealedPhrases = currentData.revealedPhrases || {};
-  const selfPraiseData = currentData.selfPraise || {};
-  const players = currentData.players || [];
-  const currentHost = players[(currentData.hostIndex || 0) % (players.length || 1)];
-  const isHost = (myName === currentHost);
-  const availableKeys = isHost ? hostOptionKeys : childOptionKeys;
-
-  boardList.innerHTML = Object.keys(phrases).map(pName => {
-    const isRevealed = revealedPhrases[pName];
-    const pDet = phraseDetails[pName] || [];
-
-    if (!isRevealed) {
-      return `
-        <div class="player-board" style="text-align: center; padding: 20px;">
-          <button onclick="revealPhrase('${pName}')" style="font-size: 16px; padding: 10px 20px; background-color: #3b82f6; color: white; border: none; border-radius: 8px; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-            📜 ${pName} の句を披露する（タップ）
-          </button>
-        </div>
-      `;
-    }
-
-    const phraseHtml = pDet.length === 3 ? pDet.map(d => {
-      const s = getAuthorStyle(d.author);
-      return `<span class="word-tag" style="background:${s.bg}; color:${s.text}; border-color:${s.border};">${d.text}<span class="author-label">(${d.author})</span></span>`;
-    }).join(' ') : `<strong>${phrases[pName]}</strong>`;
-
-    let evalBadgesHtml = '';
-    Object.keys(votes).forEach(voter => {
-      const vData = votes[voter]?.[pName];
-      if (vData) {
-        const keys = Array.isArray(vData) ? vData : [vData];
-        keys.forEach(k => {
-          if (evalOptionsMaster[k]) {
-            evalBadgesHtml += `<span style="font-size:12px; background:#f1f5f9; padding:2px 6px; border-radius:10px; margin-right:4px; border:1px solid #cbd5e1;">${evalOptionsMaster[k].icon}</span>`;
-          }
-        });
-      }
-    });
-
-    const hasAlreadyVotedAsChild = !isHost && votes[myName]?.[pName] != null;
-
-    const isSelfPraised = selfPraiseData[pName];
-    let selfPraiseHtml = '';
-    if (pName === myName) {
-      if (isSelfPraised) {
-        selfPraiseHtml = `<div style="margin-top:8px; text-align:center;"><span style="font-size:14px; background:#fef3c7; color:#d97706; padding:4px 12px; border-radius:15px; border:1px solid #f59e0b; font-weight:bold;">🪞 自画自賛 🪞</span></div>`;
-      } else {
-        selfPraiseHtml = `<div style="margin-top:8px; text-align:center;"><button onclick="doSelfPraise()" style="font-size:12px; padding:4px 10px; background:#f59e0b; color:white; border:none; border-radius:12px; cursor:pointer;">自画自賛する？</button></div>`;
-      }
-    } else if (isSelfPraised) {
-      selfPraiseHtml = `<div style="margin-top:8px; text-align:center;"><span style="font-size:14px; background:#fef3c7; color:#d97706; padding:4px 12px; border-radius:15px; border:1px solid #f59e0b; font-weight:bold;">🪞 自画自賛 🪞</span></div>`;
-    }
-
-    return `
-      <div class="player-board">
-        <div class="board-header"><strong>${pName} の句</strong></div>
-        <div>${phraseHtml}</div>
-        <div>${selfPraiseHtml}</div>
-        <div style="margin-top:6px;">${evalBadgesHtml}</div>
-        ${pName !== myName ? `
-          <div class="vote-select-group" style="margin-top:8px;">
-            ${hasAlreadyVotedAsChild ? `
-              <span style="font-size:13px; color:#10b981; font-weight:bold;">✅ 御印送信済み (${evalOptionsMaster[votes[myName][pName]]?.label || ''})</span>
-            ` : `
-              <select class="vote-select" id="vote-select-${pName}">
-                <option value="">-- 御印を選択 --</option>
-                ${availableKeys.map(k => `<option value="${k}">${evalOptionsMaster[k].label}</option>`).join('')}
-              </select>
-              <button class="vote-submit-btn" onclick="submitVote('${pName}')">御印を贈る</button>
-            `}
-          </div>
-        ` : ''}
-      </div>
-    `;
-  }).join('');
-}
-
-window.submitVote = async function(targetPlayer) {
-  const evalKey = document.getElementById(`vote-select-${targetPlayer}`)?.value;
-  if (!evalKey) return alert('御印を選択してください');[span_0](start_span)[span_0](end_span)
-
-  const players = currentData.players || [];
-  const currentHost = players[(currentData.hostIndex || 0) % (players.length || 1)];
-  const isHost = (myName === currentHost);
-
-  if (isHost) {
-    const currentVotes = currentData.votes?.[myName]?.[targetPlayer] || [];
-    const currentVotesArr = Array.isArray(currentVotes) ? currentVotes : [currentVotes];
-    const newVotesArr = [...currentVotesArr, evalKey];
-
-    await updateDoc(roomRef, { [`votes.${myName}.${targetPlayer}`]: newVotesArr });
-  } else {
-    const myVotes = currentData.votes?.[myName] || {};
-    const hasVotedAnywhere = Object.values(myVotes).some(vote => vote != null);
-
-    if (hasVotedAnywhere) {
-      return alert('御印は1節につき1つまでしか贈れません！');[span_1](start_span)[span_1](end_span)
-    }
-
-    await updateDoc(roomRef, { [`votes.${myName}.${targetPlayer}`]: evalKey });
+    alert('御印を贈りました！');
   }
 };
 
