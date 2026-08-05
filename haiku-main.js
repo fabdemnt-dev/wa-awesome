@@ -250,7 +250,7 @@ window.removePlayer = async function(pName) {
 window.doSelfPraise = async function() {
   if (!roomRef || isSpectator) return;
   await updateDoc(roomRef, {
-    [`selfPraise.${pName === myName ? myName : ''}`]: true // 自分の名前で保存
+    [`selfPraise.${myName}`]: true
   });
 };
 
