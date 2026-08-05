@@ -3,9 +3,25 @@ import { evalOptionsMaster } from './haiku-utils.js';
 
 window.exportText = function() {
   if (!state.currentData) return;
-  const history = state.currentData.history || [];
+  
+  // 過去の履歴データをコピー
+  const historyToExport = [...(state.currentData.history || [])];
+
+  // 現在進行中の節（句が1つでも提出されていれば）も出力用データに一時的に追加
+  const currentPhrases = state.currentData.phrases || {};
+  if (Object.keys(currentPhrases).length > 0) {
+    const players = state.currentData.players || [];
+    const hostIndex = state.currentData.hostIndex || 0;
+    historyToExport.push({
+      round: state.currentData.roundCount || 1,
+      host: players[hostIndex % (players.length || 1)] || '未設定',
+      phrases: currentPhrases,
+      votes: state.currentData.votes || {}
+    });
+  }
+
   let txt = `【わ〜鯖句会 記録】\n\n`;
-  history.forEach(h => {
+  historyToExport.forEach(h => {
     txt += `--- 第${h.round}節 (選者: ${h.host}) ---\n`;
     Object.keys(h.phrases || {}).forEach(p => {
       txt += `[句] ${p}: ${h.phrases[p]}\n`;
@@ -38,9 +54,25 @@ window.exportText = function() {
 
 window.exportCSV = function() {
   if (!state.currentData) return;
-  const history = state.currentData.history || [];
+  
+  // 過去の履歴データをコピー
+  const historyToExport = [...(state.currentData.history || [])];
+
+  // 現在進行中の節も追加
+  const currentPhrases = state.currentData.phrases || {};
+  if (Object.keys(currentPhrases).length > 0) {
+    const players = state.currentData.players || [];
+    const hostIndex = state.currentData.hostIndex || 0;
+    historyToExport.push({
+      round: state.currentData.roundCount || 1,
+      host: players[hostIndex % (players.length || 1)] || '未設定',
+      phrases: currentPhrases,
+      votes: state.currentData.votes || {}
+    });
+  }
+
   let csv = `節,選者,風流名,句,贈られた御印\n`;
-  history.forEach(h => {
+  historyToExport.forEach(h => {
     Object.keys(h.phrases || {}).forEach(p => {
       const phraseText = h.phrases[p] || '';
       
