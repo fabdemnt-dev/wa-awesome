@@ -82,7 +82,11 @@ window.joinRoom = async function() {
       if (state.currentData.status === 'lobby') {
         if (document.getElementById('game-sec')) document.getElementById('game-sec').style.display = 'none';
         if (document.getElementById('lobby-sec')) document.getElementById('lobby-sec').style.display = 'block';
+        
         state.myHand5 = []; state.myHand7 = []; state.selectedHand = [null, null, null];
+        
+        // ロビーに戻ったら、一時保存していた手札データを消す
+        sessionStorage.removeItem('haikuSelectedHand');
 
         ['5', '7'].forEach(type => {
           const container = document.getElementById(`inputs-${type}-container`);
