@@ -2,7 +2,7 @@ import { db } from "./firebase-config.js";
 import { doc, setDoc, onSnapshot, updateDoc, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { exportPoemText, exportPoemCSV } from "./poem-export.js";
 
-// 【修正】XSS対策：入力された文字を安全な形式に変換する関数を追加
+// XSS対策：入力された文字を安全な形式に変換する関数を追加
 function escapeHTML(str) {
   if (typeof str !== 'string') return '';
   return str.replace(/[&'`"<>]/g, function(match) {
@@ -17,7 +17,7 @@ function escapeHTML(str) {
   });
 }
 
-// 【修正】XSS対策：JSの引数用にシングルクォート等をエスケープする関数を追加
+// XSS対策：JSの引数用にシングルクォート等をエスケープする関数を追加
 function escapeJS(str) {
   if (typeof str !== 'string') return '';
   return str.replace(/'/g, "\\'").replace(/"/g, '\\"');
@@ -66,8 +66,11 @@ window.joinRoom = async function() {
   try {
     roomRef = doc(db, "rooms", "poem_" + roomId);
     
+    // 履歴(history)と回数(roundCount)を保存できるように追加
     const updateData = {
       status: "lobby",
+      roundCount: 1, 
+      history: [],   
       words: [],
       hands: {},
       poems: {},
@@ -107,7 +110,6 @@ window.joinRoom = async function() {
       if (document.getElementById('role-toggle-btn-lobby')) document.getElementById('role-toggle-btn-lobby').innerText = roleBtnText;
       if (document.getElementById('role-toggle-btn-game')) document.getElementById('role-toggle-btn-game').innerText = roleBtnText;
 
-      // 【修正】XSS対策：プレイヤー名をエスケープ処理
       let playerListHtml = players.map(p => `
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
           <span>・ ${escapeHTML(p)} ${p === myName ? '（あなた）' : ''}</span>
@@ -116,7 +118,6 @@ window.joinRoom = async function() {
       `).join('');
 
       if (spectators.length > 0) {
-        // 【修正】XSS対策：見学者名もエスケープ処理
         playerListHtml += `<div style="font-size:12px; color:#64748b; margin-top:8px;">👀 見学者: ${spectators.map(s => escapeHTML(s)).join(', ')}</div>`;
       }
       document.getElementById('player-list').innerHTML = playerListHtml;
@@ -212,7 +213,6 @@ window.addWords = async function() {
   
   inputs.forEach(inp => {
     const val = inp.value.trim();
-    // 【修正】素材重複バグ対策：同じ単語でもFirebaseが別物として認識するように、ランダムなIDを追加
     if (val) {
       newWords.push({ 
         text: val, 
@@ -233,7 +233,6 @@ window.addWords = async function() {
 window.startGame = async function() {
   if (!currentData) return;
   
-  // 【修正】誤操作防止：本当にゲームを開始するか確認のポップアップを入れる
   if (!confirm('全員の素材が集まりましたか？\nポエム作りを開始します。')) return;
 
   const players = currentData.players || [];
@@ -284,7 +283,6 @@ function renderHand() {
     return;
   }
 
-  // 【修正】XSS対策：手札のテキストをエスケープ処理
   handList.innerHTML = myHands.map((item, idx) => {
     const isSelected = selectedHandIndices.has(idx);
     const bgStyle = isSelected 
@@ -303,8 +301,19 @@ function setupAutoResize() {
   const textarea = document.getElementById('poem-input-area');
   if (!textarea) return;
 
+  // 画面を開いた時、もし前回書きかけのポエムが保存されていれば復元する
+  const savedDraft = sessionStorage.getItem('poemDraft');
+  if (savedDraft) {
+    textarea.value = savedDraft;
+    resizeTextarea.call(textarea);
+  }
+
   textarea.removeEventListener('input', resizeTextarea);
-  textarea.addEventListener('input', resizeTextarea);
+  textarea.addEventListener('input', function() {
+    resizeTextarea.call(this);
+    // 1文字打つごとにブラウザのメモリに自動保存する
+    sessionStorage.setItem('poemDraft', this.value);
+  });
 }
 
 function resizeTextarea() {
@@ -328,6 +337,10 @@ window.onCardClick = function(idx) {
   textarea.selectionStart = textarea.selectionEnd = start + wordText.length;
   
   resizeTextarea.call(textarea);
+  
+  // テキストエリアに挿入した時も自動保存を更新する
+  sessionStorage.setItem('poemDraft', textarea.value);
+  
   textarea.focus();
 
   if (selectedHandIndices.has(idx)) {
@@ -348,6 +361,10 @@ window.clearPoem = function() {
     textarea.focus();
   }
   selectedHandIndices.clear();
+  
+  // リセットボタンを押した時は自動保存データも消す
+  sessionStorage.removeItem('poemDraft');
+  
   renderHand();
 };
 
@@ -376,6 +393,10 @@ window.submitPoem = async function() {
       emos: 0
     }
   });
+  
+  // 投稿が完了したら自動保存データも消す
+  sessionStorage.removeItem('poemDraft');
+  
   alert('ポエムを投稿しました！');
 };
 
@@ -423,7 +444,6 @@ function renderBoards() {
 
   boardList.innerHTML = sortedPlayerNames.map(pName => {
     const poemData = poems[pName];
-    // 【修正】XSS対策：表示用の名前をエスケープ
     const safePName = escapeHTML(pName);
     const jsPName = escapeJS(pName);
 
@@ -445,7 +465,6 @@ function renderBoards() {
     
     const userColor = getColorFromName(pName);
 
-    // 【修正】XSS対策：使用した手札のテキストと作者名をエスケープ
     const handsHtml = hands.map(h => {
       const authorColor = getColorFromName(h.author);
       return `
@@ -455,7 +474,6 @@ function renderBoards() {
       `;
     }).join('');
 
-    // 【修正】XSS対策：ポエム本文をエスケープ
     return `
       <div class="player-board" style="margin-bottom: 20px; padding: 16px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff;">
         <strong>${safePName} の作品</strong>
@@ -491,17 +509,27 @@ function renderBoards() {
 }
 
 window.nextGame = async function() {
-  if (!roomRef) return;
-  // 【修正】誤操作防止：間違えてリセットしないように確認ポップアップを入れる
-  if (!confirm('本当に新しいポエム作りに進みますか？\n（現在の作品はリセットされます）')) return;
+  if (!roomRef || !currentData) return;
+  
+  // 次へ進む時に、今の作品を履歴として保存する処理を追加
+  if (!confirm('本当に新しいポエム作りに進みますか？\n（現在の作品は履歴に保存され、新しく作り直します）')) return;
+
+  const currentRoundHistory = {
+    round: currentData.roundCount || 1,
+    poems: currentData.poems || {}
+  };
+  const nextRoundNum = (currentData.roundCount || 1) + 1;
 
   await updateDoc(roomRef, {
     status: "lobby",
+    roundCount: nextRoundNum,
+    history: arrayUnion(currentRoundHistory),
     words: [],
     hands: {},
     poems: {}
   });
-  alert('次のポエム作成に進みます！');
+  
+  alert('作品を履歴に保存しました！次の作成に進みます。');
 };
 
 window.exportText = function() { exportPoemText(currentData); };
