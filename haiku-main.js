@@ -12,7 +12,9 @@ import './haiku-utils.js';
 import './haiku-audio.js';  // 音声読み上げ機能
 import './haiku-export.js'; // 出力機能
 import './haiku-render.js'; // UI描画処理
-import './haiku-action.js'; // ゲーム進行・通信処理
+import './haiku-room.js';   // 入室・ロビー・参加者管理
+import './haiku-game.js';   // 素材投稿・ゲーム進行
+import './haiku-action.js'; // 手札・投稿・投票操作
 
 // 参加ボタンにイベントリスナーを登録
 document.getElementById("join-btn")
