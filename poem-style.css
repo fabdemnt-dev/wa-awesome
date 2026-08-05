@@ -57,15 +57,19 @@ button:active {
 .card {
   padding: 8px 12px;
   border-radius: 6px;
-  background-color: #e2e8f0;
+  background-color: #ffffff;
+  border: 1px solid #cbd5e1;
   cursor: pointer;
   font-size: 14px;
   user-select: none;
+  transition: all 0.2s;
+  margin-bottom: 6px;
 }
 
 .card.selected {
-  background-color: #6366f1;
-  color: white;
+  background-color: #dbeafe;
+  border-color: #3b82f6;
+  color: #1e293b;
 }
 
 .display-area {
