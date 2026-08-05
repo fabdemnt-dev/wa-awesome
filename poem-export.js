@@ -5,8 +5,12 @@ export function exportPoemText(currentData) {
 
   let text = `【わ〜鯖せーへきポエム 作品集】\n\n`;
   Object.keys(currentData.poems).forEach(pName => {
+    // オブジェクト形式で保存されている場合は .text を取得する
+    const poemData = currentData.poems[pName];
+    const poemText = typeof poemData === 'object' ? poemData.text : poemData;
+    
     text += `■ ${pName} の作品\n`;
-    text += `   「${currentData.poems[pName]}」\n\n`;
+    text += `   「${poemText}」\n\n`;
   });
 
   navigator.clipboard.writeText(text).then(() => {
@@ -23,7 +27,9 @@ export function exportPoemCSV(currentData, roomId) {
   csvContent += "作者,作品\n";
 
   Object.keys(currentData.poems).forEach(pName => {
-    const poemText = currentData.poems[pName] || "";
+    const poemData = currentData.poems[pName];
+    const poemText = typeof poemData === 'object' ? poemData.text : poemData;
+    
     csvContent += `"${pName}","${poemText}"\n`;
   });
 
