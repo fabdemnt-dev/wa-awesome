@@ -1,6 +1,7 @@
 import { db } from "./firebase-config.js";
 import { doc, setDoc, onSnapshot, updateDoc, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { exportPoemText, exportPoemCSV } from "./poem-export.js";
+import "./poem-audio.js"; // 音声読み上げ機能をインポート
 
 // XSS対策：入力された文字を安全な形式に変換する関数を追加
 function escapeHTML(str) {
@@ -301,7 +302,6 @@ function setupAutoResize() {
   const textarea = document.getElementById('poem-input-area');
   if (!textarea) return;
 
-  // 画面を開いた時、もし前回書きかけのポエムが保存されていれば復元する
   const savedDraft = sessionStorage.getItem('poemDraft');
   if (savedDraft) {
     textarea.value = savedDraft;
@@ -311,7 +311,6 @@ function setupAutoResize() {
   textarea.removeEventListener('input', resizeTextarea);
   textarea.addEventListener('input', function() {
     resizeTextarea.call(this);
-    // 1文字打つごとにブラウザのメモリに自動保存する
     sessionStorage.setItem('poemDraft', this.value);
   });
 }
@@ -337,10 +336,7 @@ window.onCardClick = function(idx) {
   textarea.selectionStart = textarea.selectionEnd = start + wordText.length;
   
   resizeTextarea.call(textarea);
-  
-  // テキストエリアに挿入した時も自動保存を更新する
   sessionStorage.setItem('poemDraft', textarea.value);
-  
   textarea.focus();
 
   if (selectedHandIndices.has(idx)) {
@@ -361,10 +357,7 @@ window.clearPoem = function() {
     textarea.focus();
   }
   selectedHandIndices.clear();
-  
-  // リセットボタンを押した時は自動保存データも消す
   sessionStorage.removeItem('poemDraft');
-  
   renderHand();
 };
 
@@ -394,9 +387,7 @@ window.submitPoem = async function() {
     }
   });
   
-  // 投稿が完了したら自動保存データも消す
   sessionStorage.removeItem('poemDraft');
-  
   alert('ポエムを投稿しました！');
 };
 
@@ -450,7 +441,10 @@ function renderBoards() {
     if (typeof poemData === 'string') {
       return `
         <div class="player-board" style="margin-bottom: 20px; padding: 16px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff;">
-          <strong>${safePName} の作品</strong>
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <strong>${safePName} の作品</strong>
+            <button onclick="speakPoem('${escapeJS(poemData)}')" style="width: auto; margin-top: 0; padding: 4px 10px; font-size: 12px; background-color: #0284c7;">🔊 読み上げ</button>
+          </div>
           <div style="margin-top: 8px; padding: 12px; background: #f8fafc; border-left: 4px solid #4f46e5; border-radius: 4px;">
             <p style="font-size: 15px; line-height: 1.5; white-space: pre-wrap; margin: 0;">${escapeHTML(poemData)}</p>
           </div>
@@ -476,7 +470,10 @@ function renderBoards() {
 
     return `
       <div class="player-board" style="margin-bottom: 20px; padding: 16px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff;">
-        <strong>${safePName} の作品</strong>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <strong>${safePName} の作品</strong>
+          ${isRevealed ? `<button onclick="speakPoem('${escapeJS(poemData.text)}')" style="width: auto; margin-top: 0; padding: 4px 10px; font-size: 12px; background-color: #0284c7;">🔊 読み上げ</button>` : ''}
+        </div>
         
         <div style="margin-top: 8px;">
           <div style="font-size: 12px; color: #64748b; margin-bottom: 4px;">📌 使用した手札（元素材の作者）:</div>
@@ -484,7 +481,7 @@ function renderBoards() {
         </div>
 
         <div style="margin-top: 12px;">
-          ${!isRevealed ? `
+          {!isRevealed ? `
             <button onclick="revealPoem('${jsPName}')" style="background-color: #4f46e5; width: 100%; padding: 12px; font-size: 15px;">
               🎁 タップして作品を開く
             </button>
@@ -511,7 +508,6 @@ function renderBoards() {
 window.nextGame = async function() {
   if (!roomRef || !currentData) return;
   
-  // 次へ進む時に、今の作品を履歴として保存する処理を追加
   if (!confirm('本当に新しいポエム作りに進みますか？\n（現在の作品は履歴に保存され、新しく作り直します）')) return;
 
   const currentRoundHistory = {
