@@ -14,20 +14,52 @@ window.joinRoom = async function() {
 
   try {
     state.roomRef = doc(db, "rooms", "haiku_" + state.roomId);
-    
-    const updateData = {
-      status: "lobby", hostIndex: 0, roundCount: 1, history: [],
-      words5: [], words7: [], hands5: {}, hands7: {}, phrases: {}, phraseDetails: {}, votes: {}, scores: {}, selfPraise: {},
-      settings: { in5: 5, in7: 3, hand5: 5, hand7: 3 }
-    };
 
-    if (state.isSpectator) {
-      updateData.spectators = arrayUnion(state.myName);
-    } else {
-      updateData.players = arrayUnion(state.myName);
-    }
+const roomSnapshot = await getDoc(state.roomRef);
 
-    await setDoc(state.roomRef, updateData, { merge: true });
+if (!roomSnapshot.exists()) {
+  const initialData = {
+    status: "lobby",
+    hostIndex: 0,
+    roundCount: 1,
+    history: [],
+    words5: [],
+    words7: [],
+    hands5: {},
+    hands7: {},
+    phrases: {},
+    phraseDetails: {},
+    votes: {},
+    scores: {},
+    selfPraise: {},
+    settings: {
+      in5: 5,
+      in7: 3,
+      hand5: 5,
+      hand7: 3
+    },
+    players: [],
+    spectators: []
+  };
+
+  if (state.isSpectator) {
+    initialData.spectators = [state.myName];
+  } else {
+    initialData.players = [state.myName];
+  }
+
+  await setDoc(state.roomRef, initialData);
+} else {
+  if (state.isSpectator) {
+    await updateDoc(state.roomRef, {
+      spectators: arrayUnion(state.myName)
+    });
+  } else {
+    await updateDoc(state.roomRef, {
+      players: arrayUnion(state.myName)
+    });
+  }
+}
 
     document.getElementById('login-sec').style.display = 'none';
     document.getElementById('lobby-sec').style.display = 'block';
