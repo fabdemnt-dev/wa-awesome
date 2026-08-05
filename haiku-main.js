@@ -10,7 +10,7 @@ const evalOptionsMaster = {
   kuruoshi: { icon: "🍶", label: "🍶 狂おし", pts: 1 },
   medurashi: { icon: "✨", label: "✨ めづらし", pts: 1 },
   yugen:    { icon: "🌙", label: "🌙 幽玄", pts: 1 },
-  tae:      { icon: "🪭", label: "🪭 妙なり", pts: 10 }
+  tae:      { icon: "🪭", label: "🪭 妙なり", pts: 10 } // 基本ポイントをここで10に統一
 };
 const hostOptionKeys = [
   "okashi",
@@ -37,6 +37,7 @@ let myHand5 = [];
 let myHand7 = [];
 let selectedHand = [null, null, null];
 let currentData = null;
+let isSubmittingSelfPraise = false; // 自画自賛の連打防止フラグ
 
 const colorPalette = [
   { bg: '#dbeafe', text: '#1e40af', border: '#bfdbfe' }, // 1: 青
@@ -134,7 +135,7 @@ window.joinRoom = async function() {
       const scores = currentData.scores || {};
       let playerListHtml = players.map((p, idx) => `
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-          <span>・ ${p} ${idx === (currentData.hostIndex % players.length) ? '<span class="role-badge">選者（親）</span>' : ''}</span>
+          <span>・ ${p} ${idx === ((currentData.hostIndex || 0) % players.length) ? '<span class="role-badge">選者（親）</span>' : ''}</span>
           <div>
             <span class="score-badge" style="margin-right:8px;">${scores[p] || 0} 誉</span>
             <button onclick="removePlayer('${p}')" style="width:auto; margin:0; padding:4px 8px; font-size:12px; background-color:#ef4444;">鯖落ち</button>
@@ -247,10 +248,17 @@ window.removePlayer = async function(pName) {
 };
 
 window.doSelfPraise = async function() {
-  if (!roomRef || isSpectator) return;
-  await updateDoc(roomRef, {
-    [`selfPraise.${myName}`]: true
-  });
+  if (!roomRef || isSpectator || isSubmittingSelfPraise) return;
+  isSubmittingSelfPraise = true;
+  try {
+    await updateDoc(roomRef, {
+      [`selfPraise.${myName}`]: true
+    });
+  } catch (e) {
+    alert('自画自賛の登録に失敗しました: ' + e.message);
+  } finally {
+    isSubmittingSelfPraise = false;
+  }
 };
 
 window.startGame = async function() {
@@ -339,7 +347,7 @@ function renderBoards() {
   const phraseDetails = currentData.phraseDetails || {};
   const votes = currentData.votes || {};
   const revealedPhrases = currentData.revealedPhrases || {};
-  const selfPraiseData = currentData.selfPraise || {}; // 自画自賛データの取得[span_1](start_span)[span_1](end_span)
+  const selfPraiseData = currentData.selfPraise || {};
   const players = currentData.players || [];
   const currentHost = players[(currentData.hostIndex || 0) % (players.length || 1)];
   const isHost = (myName === currentHost);
@@ -379,7 +387,6 @@ function renderBoards() {
 
     const hasAlreadyVotedAsChild = !isHost && votes[myName]?.[pName] != null;
 
-    // ▼ 自画自賛ボタンまたはスタンプの表示ロジック（右側に配置しやすいよう調整）[span_2](start_span)[span_2](end_span)
     const isSelfPraised = selfPraiseData[pName];
     let selfPraiseHtml = '';
     if (pName === myName) {
@@ -465,6 +472,7 @@ window.nextRound = async function() {
           taeWinners.push(target);
         }
         const opt = evalOptionsMaster[k];
+        // 「妙なり」の場合は重複加算を防ぐためtaePointsのみ、それ以外はマスターのptsを使用
         const pts = (k === 'tae') ? taePoints : (opt ? opt.pts : 0);
         newScores[target] = (newScores[target] || 0) + pts;
       });
@@ -476,8 +484,10 @@ window.nextRound = async function() {
     alertMessage = `🪭 妙なりが出ました！今節の最高功労者: ${taeWinners.join(', ')} さん！(+${taePoints}誉)\n` + alertMessage;
   }
 
+  const nextRoundNum = (currentData.roundCount || 1) + 1;
+
   await updateDoc(roomRef, {
-    status: "lobby", hostIndex: hostIndex + 1, roundCount: (currentData.roundCount || 1) + 1,
+    status: "lobby", hostIndex: hostIndex + 1, roundCount: nextRoundNum,
     scores: newScores, history: [...(currentData.history || []), { round: currentData.roundCount || 1, phrases, phraseDetails: currentData.phraseDetails || {}, votes, host: players[hostIndex % (players.length || 1)] || '' }],
     words5: [], words7: [], hands5: {}, hands7: {}, phrases: {}, phraseDetails: {}, votes: {}, revealedPhrases: {}, selfPraise: {}
   });
@@ -534,7 +544,9 @@ window.exportCSV = function() {
           const keys = Array.isArray(vData) ? vData : [vData];
           keys.forEach(k => {
             if (evalOptionsMaster[k]) {
-              voteLabels.push(`${voter}(${evalOptionsMaster[k].label.replace(/[🌸🌾❄️🌀🍶🍃🌙🪭]/g, '').trim()})`);
+              // マスターのiconを動的に除去してラベル文字列をきれいに生成
+              const cleanLabel = evalOptionsMaster[k].label.replace(evalOptionsMaster[k].icon, '').trim();
+              voteLabels.push(`${voter}(${cleanLabel})`);
             }
           });
         }
