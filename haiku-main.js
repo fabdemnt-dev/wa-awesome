@@ -1,7 +1,28 @@
 import { db } from "./firebase-config.js";
 import { doc, setDoc, onSnapshot, updateDoc, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-// 評価マスタ定義（外部ファイル依存を解除）
+// 【修正】XSS対策：入力された文字を安全な形式に変換する関数を追加
+function escapeHTML(str) {
+  if (typeof str !== 'string') return '';
+  return str.replace(/[&'`"<>]/g, function(match) {
+    return {
+      '&': '&amp;',
+      "'": '&#x27;',
+      '`': '&#x60;',
+      '"': '&quot;',
+      '<': '&lt;',
+      '>': '&gt;',
+    }[match]
+  });
+}
+
+// 【修正】XSS対策：JSの引数用にシングルクォート等をエスケープする関数を追加
+function escapeJS(str) {
+  if (typeof str !== 'string') return '';
+  return str.replace(/'/g, "\\'").replace(/"/g, '\\"');
+}
+
+// 評価マスタ定義
 const evalOptionsMaster = {
   okashi:   { icon: "🌸", label: "🌸 いとおかし", pts: 1 },
   aware:    { icon: "🌾", label: "🌾 もののあはれ", pts: 1 },
@@ -10,23 +31,14 @@ const evalOptionsMaster = {
   kuruoshi: { icon: "🍶", label: "🍶 狂おし", pts: 1 },
   medurashi: { icon: "✨", label: "✨ めづらし", pts: 1 },
   yugen:    { icon: "🌙", label: "🌙 幽玄", pts: 1 },
-  tae:      { icon: "🪭", label: "🪭 妙なり", pts: 10 } // 基本ポイントをここで10に統一
+  tae:      { icon: "🪭", label: "🪭 妙なり", pts: 10 } 
 };
 const hostOptionKeys = [
-  "okashi",
-  "aware",
-  "wabisabi",
-  "ayashi",
-  "kuruoshi",
-  "medurashi",
-  "yugen",
-  "tae"
+  "okashi", "aware", "wabisabi", "ayashi", "kuruoshi", "medurashi", "yugen", "tae"
 ];
 
 const childOptionKeys = [
-  "okashi",
-  "aware",
-  "wabisabi"
+  "okashi", "aware", "wabisabi"
 ];
 
 let roomId = "";
@@ -37,7 +49,7 @@ let myHand5 = [];
 let myHand7 = [];
 let selectedHand = [null, null, null];
 let currentData = null;
-let isSubmittingSelfPraise = false; // 自画自賛の連打防止フラグ
+let isSubmittingSelfPraise = false; 
 
 const colorPalette = [
   { bg: '#dbeafe', text: '#1e40af', border: '#bfdbfe' }, // 1: 青
@@ -113,7 +125,8 @@ window.joinRoom = async function() {
       if (players.includes(myName)) isSpectator = false;
 
       const currentHost = players[(currentData.hostIndex || 0) % (players.length || 1)] || '未設定';
-      const hostText = `👑 今節の選者（親）: <strong>${currentHost}</strong> ${currentHost === myName ? '（あなた）' : ''}`;
+      // 【修正】XSS対策：ホスト名の表示をエスケープ
+      const hostText = `👑 今節の選者（親）: <strong>${escapeHTML(currentHost)}</strong> ${currentHost === myName ? '（あなた）' : ''}`;
       
       if (document.getElementById('host-info-lobby')) document.getElementById('host-info-lobby').innerHTML = hostText;
       if (document.getElementById('host-info-game')) document.getElementById('host-info-game').innerHTML = hostText;
@@ -133,18 +146,20 @@ window.joinRoom = async function() {
       if (document.getElementById('total-words-7')) document.getElementById('total-words-7').innerText = currentData.words7?.length || 0;
 
       const scores = currentData.scores || {};
+      // 【修正】XSS対策：プレイヤー名の表示をエスケープ
       let playerListHtml = players.map((p, idx) => `
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-          <span>・ ${p} ${idx === ((currentData.hostIndex || 0) % players.length) ? '<span class="role-badge">選者（親）</span>' : ''}</span>
+          <span>・ ${escapeHTML(p)} ${idx === ((currentData.hostIndex || 0) % players.length) ? '<span class="role-badge">選者（親）</span>' : ''}</span>
           <div>
             <span class="score-badge" style="margin-right:8px;">${scores[p] || 0} 誉</span>
-            <button onclick="removePlayer('${p}')" style="width:auto; margin:0; padding:4px 8px; font-size:12px; background-color:#ef4444;">鯖落ち</button>
+            <button onclick="removePlayer('${escapeJS(p)}')" style="width:auto; margin:0; padding:4px 8px; font-size:12px; background-color:#ef4444;">鯖落ち</button>
           </div>
         </div>
       `).join('');
 
       if (spectators.length > 0) {
-        playerListHtml += `<div style="font-size:12px; color:#64748b; margin-top:8px;">👀 見学者: ${spectators.join(', ')}</div>`;
+        // 【修正】XSS対策：見学者名の表示をエスケープ
+        playerListHtml += `<div style="font-size:12px; color:#64748b; margin-top:8px;">👀 見学者: ${spectators.map(s => escapeHTML(s)).join(', ')}</div>`;
       }
 
       if (document.getElementById('player-list')) document.getElementById('player-list').innerHTML = playerListHtml;
@@ -159,7 +174,7 @@ window.joinRoom = async function() {
         if (currentData.hands5?.[myName]) myHand5 = currentData.hands5[myName];
         if (currentData.hands7?.[myName]) myHand7 = currentData.hands7[myName];
         renderHand();
-        renderBoards();
+        if (typeof renderBoards === "function") renderBoards(); 
       }
     });
   } catch (e) {
@@ -222,11 +237,19 @@ window.updateSettings = async function() {
 window.addWords = async function() {
   if (!currentData || isSpectator) return;
   const st = currentData.settings || { in5: 5, in7: 3 };
+  
+  // 【修正】素材重複バグ対策：同じ単語でもFirebaseが別物として認識するように、ランダムなIDを追加
   const getWords = (type, count) => {
     const arr = [];
     for (let i = 1; i <= count; i++) {
       const val = document.getElementById(`word-${type}-input-${i}`)?.value.trim();
-      if (val) arr.push({ text: val, author: myName });
+      if (val) {
+        arr.push({ 
+          text: val, 
+          author: myName,
+          id: Date.now() + "_" + Math.random().toString(36).substring(2, 9) 
+        });
+      }
     }
     return arr;
   };
@@ -247,21 +270,10 @@ window.removePlayer = async function(pName) {
   }
 };
 
-window.doSelfPraise = async function() {
-  if (!roomRef || isSpectator || isSubmittingSelfPraise) return;
-  isSubmittingSelfPraise = true;
-  try {
-    await updateDoc(roomRef, {
-      [`selfPraise.${myName}`]: true
-    });
-  } catch (e) {
-    alert('自画自賛の登録に失敗しました: ' + e.message);
-  } finally {
-    isSubmittingSelfPraise = false;
-  }
-};
-
 window.startGame = async function() {
+  // 【修正】誤操作防止：本当にゲームを開始するか確認のポップアップを入れる
+  if (!confirm('全員の素材が集まりましたか？\n句会を始めます。')) return;
+
   const players = currentData?.players || [];
   const st = currentData?.settings || { hand5: 5, hand7: 3 };
   const w5 = currentData?.words5 || [], w7 = currentData?.words7 || [];
@@ -284,8 +296,9 @@ function renderHand() {
     if (isSpectator) {
       h5List.innerHTML = '<div style="font-size:13px; color:#94a3b8;">※見学モード中</div>';
     } else {
+      // 【修正】XSS対策：手札のテキストをエスケープ処理
       h5List.innerHTML = myHand5.map((item, idx) => `
-        <div class="card card-5 ${selectedHand.includes(item) ? 'selected' : ''}" onclick="selectCard(5, ${idx})">${item.text}</div>
+        <div class="card card-5 ${selectedHand.includes(item) ? 'selected' : ''}" onclick="selectCard(5, ${idx})">${escapeHTML(item.text)}</div>
       `).join('');
     }
   }
@@ -295,12 +308,14 @@ function renderHand() {
     if (isSpectator) {
       h7List.innerHTML = '<div style="font-size:13px; color:#94a3b8;">※見学モード中</div>';
     } else {
+      // 【修正】XSS対策：手札のテキストをエスケープ処理
       h7List.innerHTML = myHand7.map((item, idx) => `
-        <div class="card card-7 ${selectedHand[1] === item ? 'selected' : ''}" onclick="selectCard(7, ${idx})">${item.text}</div>
+        <div class="card card-7 ${selectedHand[1] === item ? 'selected' : ''}" onclick="selectCard(7, ${idx})">${escapeHTML(item.text)}</div>
       `).join('');
     }
   }
 
+  // 【修正】XSS対策：選択中の句を安全に表示（innerTextを使用）
   if (document.getElementById('phrase-1')) document.getElementById('phrase-1').innerText = selectedHand[0]?.text || '（選択してください）';
   if (document.getElementById('phrase-2')) document.getElementById('phrase-2').innerText = selectedHand[1]?.text || '（選択してください）';
   if (document.getElementById('phrase-3')) document.getElementById('phrase-3').innerText = selectedHand[2]?.text || '（選択してください）';
@@ -339,6 +354,20 @@ window.revealPhrase = async function(pName) {
   });
 };
 
+window.doSelfPraise = async function() {
+  if (!roomRef || isSpectator || isSubmittingSelfPraise) return;
+  isSubmittingSelfPraise = true;
+  try {
+    await updateDoc(roomRef, {
+      [`selfPraise.${myName}`]: true
+    });
+  } catch (e) {
+    alert('自画自賛の登録に失敗しました: ' + e.message);
+  } finally {
+    isSubmittingSelfPraise = false;
+  }
+};
+
 function renderBoards() {
   const boardList = document.getElementById('board-list');
   if (!boardList || !currentData) return;
@@ -356,21 +385,26 @@ function renderBoards() {
   boardList.innerHTML = Object.keys(phrases).map(pName => {
     const isRevealed = revealedPhrases[pName];
     const pDet = phraseDetails[pName] || [];
+    
+    // 【修正】XSS対策：プレイヤー名のエスケープ
+    const safePName = escapeHTML(pName);
+    const jsPName = escapeJS(pName);
 
     if (!isRevealed) {
       return `
         <div class="player-board" style="text-align: center; padding: 20px;">
-          <button onclick="revealPhrase('${pName}')" style="font-size: 16px; padding: 10px 20px; background-color: #3bab46; color: white; border: none; border-radius: 8px; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-            📜 ${pName} の句を披露する（タップ）
+          <button onclick="revealPhrase('${jsPName}')" style="font-size: 16px; padding: 10px 20px; background-color: #3bab46; color: white; border: none; border-radius: 8px; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+            📜 ${safePName} の句を披露する（タップ）
           </button>
         </div>
       `;
     }
 
+    // 【修正】XSS対策：句のテキストや作者名のエスケープ
     const phraseHtml = pDet.length === 3 ? pDet.map(d => {
       const s = getAuthorStyle(d.author);
-      return `<span class="word-tag" style="background:${s.bg}; color:${s.text}; border-color:${s.border};">${d.text}<span class="author-label">(${d.author})</span></span>`;
-    }).join(' ') : `<strong>${phrases[pName]}</strong>`;
+      return `<span class="word-tag" style="background:${s.bg}; color:${s.text}; border-color:${s.border};">${escapeHTML(d.text)}<span class="author-label">(${escapeHTML(d.author)})</span></span>`;
+    }).join(' ') : `<strong>${escapeHTML(phrases[pName])}</strong>`;
 
     let evalBadgesHtml = '';
     Object.keys(votes).forEach(voter => {
@@ -402,7 +436,7 @@ function renderBoards() {
     return `
       <div class="player-board">
         <div class="board-header" style="display: flex; justify-content: space-between; align-items: center;">
-          <strong>${pName} の句</strong>
+          <strong>${safePName} の句</strong>
           <div>${selfPraiseHtml}</div>
         </div>
         <div style="margin-top: 6px;">${phraseHtml}</div>
@@ -412,11 +446,11 @@ function renderBoards() {
             ${hasAlreadyVotedAsChild ? `
               <span style="font-size:13px; color:#10b981; font-weight:bold;">✅ 御印送信済み (${evalOptionsMaster[votes[myName][pName]]?.label || ''})</span>
             ` : `
-              <select class="vote-select" id="vote-select-${pName}">
+              <select class="vote-select" id="vote-select-${jsPName}">
                 <option value="">-- 御印を選択 --</option>
                 ${availableKeys.map(k => `<option value="${k}">${evalOptionsMaster[k].label}</option>`).join('')}
               </select>
-              <button class="vote-submit-btn" onclick="submitVote('${pName}')">御印を贈る</button>
+              <button class="vote-submit-btn" onclick="submitVote('${jsPName}')">御印を贈る</button>
             `}
           </div>
         ` : ''}
@@ -453,45 +487,73 @@ window.submitVote = async function(targetPlayer) {
   }
 };
 
+// 【修正】同時操作バグ対策：二重送信防止用フラグ
+let isProcessingNextRound = false; 
+
 window.nextRound = async function() {
-  if (!currentData) return;
-  const votes = currentData.votes || {}, phrases = currentData.phrases || {}, scores = currentData.scores || {};
-  const players = currentData.players || [], hostIndex = currentData.hostIndex || 0;
-  const newScores = { ...scores };
+  if (!currentData || isProcessingNextRound) return;
+  
+  // 【修正】誤操作防止：本当に次の節へ進むか確認のポップアップを追加
+  if (!confirm('本当に次の節に進みますか？\n（現在の句は履歴に保存され、新しい節が始まります）')) return;
 
-  let taeWinners = [];
-  const taePoints = Math.max(10, players.length * 2);
+  isProcessingNextRound = true;
 
-  Object.keys(votes).forEach(voter => {
-    Object.keys(votes[voter] || {}).forEach(target => {
-      const vData = votes[voter][target];
-      const keys = Array.isArray(vData) ? vData : [vData];
+  try {
+    const votes = currentData.votes || {}, phrases = currentData.phrases || {}, scores = currentData.scores || {};
+    const players = currentData.players || [], hostIndex = currentData.hostIndex || 0;
+    const newScores = { ...scores };
 
-      keys.forEach(k => {
-        if (k === 'tae' && !taeWinners.includes(target)) {
-          taeWinners.push(target);
-        }
-        const opt = evalOptionsMaster[k];
-        // 「妙なり」の場合は重複加算を防ぐためtaePointsのみ、それ以外はマスターのptsを使用
-        const pts = (k === 'tae') ? taePoints : (opt ? opt.pts : 0);
-        newScores[target] = (newScores[target] || 0) + pts;
+    let taeWinners = [];
+    const taePoints = Math.max(10, players.length * 2);
+
+    Object.keys(votes).forEach(voter => {
+      Object.keys(votes[voter] || {}).forEach(target => {
+        const vData = votes[voter][target];
+        const keys = Array.isArray(vData) ? vData : [vData];
+
+        keys.forEach(k => {
+          if (k === 'tae' && !taeWinners.includes(target)) {
+            taeWinners.push(target);
+          }
+          const opt = evalOptionsMaster[k];
+          const pts = (k === 'tae') ? taePoints : (opt ? opt.pts : 0);
+          newScores[target] = (newScores[target] || 0) + pts;
+        });
       });
     });
-  });
 
-  let alertMessage = '次の節に進みます！';
-  if (taeWinners.length > 0) {
-    alertMessage = `🪭 妙なりが出ました！今節の最高功労者: ${taeWinners.join(', ')} さん！(+${taePoints}誉)\n` + alertMessage;
+    let alertMessage = '次の節に進みます！';
+    if (taeWinners.length > 0) {
+      alertMessage = `🪭 妙なりが出ました！今節の最高功労者: ${taeWinners.join(', ')} さん！(+${taePoints}誉)\n` + alertMessage;
+    }
+
+    const nextRoundNum = (currentData.roundCount || 1) + 1;
+
+    // 【修正】同時操作バグ対策：複数人が同時にボタンを押しても履歴データが壊れないよう、Firebaseの arrayUnion を使って安全に履歴を追加する
+    const currentRoundHistory = { 
+      round: currentData.roundCount || 1, 
+      phrases, 
+      phraseDetails: currentData.phraseDetails || {}, 
+      votes, 
+      host: players[hostIndex % (players.length || 1)] || '' 
+    };
+
+    await updateDoc(roomRef, {
+      status: "lobby", 
+      hostIndex: hostIndex + 1, 
+      roundCount: nextRoundNum,
+      scores: newScores, 
+      history: arrayUnion(currentRoundHistory),
+      words5: [], words7: [], hands5: {}, hands7: {}, phrases: {}, phraseDetails: {}, votes: {}, revealedPhrases: {}, selfPraise: {}
+    });
+    
+    alert(alertMessage);
+  } catch (e) {
+    console.error(e);
+    alert('エラーが発生しました: ' + e.message);
+  } finally {
+    isProcessingNextRound = false;
   }
-
-  const nextRoundNum = (currentData.roundCount || 1) + 1;
-
-  await updateDoc(roomRef, {
-    status: "lobby", hostIndex: hostIndex + 1, roundCount: nextRoundNum,
-    scores: newScores, history: [...(currentData.history || []), { round: currentData.roundCount || 1, phrases, phraseDetails: currentData.phraseDetails || {}, votes, host: players[hostIndex % (players.length || 1)] || '' }],
-    words5: [], words7: [], hands5: {}, hands7: {}, phrases: {}, phraseDetails: {}, votes: {}, revealedPhrases: {}, selfPraise: {}
-  });
-  alert(alertMessage);
 };
 
 window.exportText = function() {
@@ -544,7 +606,6 @@ window.exportCSV = function() {
           const keys = Array.isArray(vData) ? vData : [vData];
           keys.forEach(k => {
             if (evalOptionsMaster[k]) {
-              // マスターのiconを動的に除去してラベル文字列をきれいに生成
               const cleanLabel = evalOptionsMaster[k].label.replace(evalOptionsMaster[k].icon, '').trim();
               voteLabels.push(`${voter}(${cleanLabel})`);
             }
