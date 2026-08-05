@@ -252,9 +252,6 @@ window.doSelfPraise = async function() {
   await updateDoc(roomRef, {
     [`selfPraise.${pName === myName ? myName : ''}`]: true // 自分の名前で保存
   });
-  // ※スッキリ書くため以下でもOKです
-  // await updateDoc(roomRef, { [`selfPraise.${myName}`]: true });
-  alert('自画自賛しました！');
 };
 
 window.startGame = async function() {
