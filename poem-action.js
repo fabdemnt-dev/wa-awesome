@@ -15,8 +15,15 @@ export const SAMPLE_PHRASES = [
 ];
 
 window.joinRoom = async function() {
-  state.myName = document.getElementById('player-name').value.trim();
-  state.roomId = document.getElementById('room-id').value.trim();
+  const nameInput = document.getElementById('player-name');
+  const roomInput = document.getElementById('room-id');
+  
+  if (!nameInput || !roomInput) {
+    return alert('入力フォームの要素が見つかりません');
+  }
+
+  state.myName = nameInput.value.trim();
+  state.roomId = roomInput.value.trim();
   const specCheck = document.getElementById('spectator-check');
   state.isSpectator = specCheck ? specCheck.checked : false;
 
