@@ -50,9 +50,9 @@ const SAMPLE_PHRASES = [
   "合言葉", 
   "踏切の音", 
   "枯れたひまわり", 
-  "ハチワレ", 
+  "跡部景吾", 
   "ちいかわ", 
-  "ローレライ"
+  "やっほー"
 ];
 
 window.joinRoom = async function() {
