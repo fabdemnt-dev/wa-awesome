@@ -18,7 +18,7 @@
     <label style="display:flex; align-items:center; gap:6px; margin: 8px 0; font-size:14px; cursor:pointer;">
       <input type="checkbox" id="spectator-check"> 👀 最初は見学モード（観戦のみ）で入る
     </label>
-    <button onclick="joinRoom()">参加する</button>
+    <button id="join-btn" type="button">参加する</button>
   </div>
 
   <!-- 2. ロビー & 素材登録 -->
@@ -94,6 +94,7 @@
     <button onclick="nextGame()" style="background-color: #0284c7; margin-top: 24px;">🔄 新しいポエムを作る（ロビーへ戻る）</button>
   </div>
 
+  <!-- エントリーポイントとなるJSファイルの読み込み -->
   <script type="module" src="poem-main.js"></script>
 </body>
 </html>
