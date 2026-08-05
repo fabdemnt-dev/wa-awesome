@@ -120,7 +120,7 @@ export function renderBoards() {
         const keys = Array.isArray(vData) ? vData : [vData];
         keys.forEach(k => {
           if (evalOptionsMaster[k]) {
-            evalBadgesHtml += `<span style="font-size:12px; background:#f1f5f9; padding:2px 6px; border-radius:10px; margin-right:4px; border:1px solid #cbd5e1;">${evalOptionsMaster[k].icon}</span>`;
+            evalBadgesHtml += `<span style="font-size:12px; margin-right:4px;">${evalOptionsMaster[k].icon}</span>`;
           }
         });
       }
