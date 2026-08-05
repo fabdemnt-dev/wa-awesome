@@ -1,4 +1,4 @@
-export const state = {
+const state = {
   roomId: "",
   myName: "",
   isSpectator: false,
@@ -6,3 +6,6 @@ export const state = {
   currentData: null,
   selectedHandIndices: new Set()
 };
+
+export default state;
+
