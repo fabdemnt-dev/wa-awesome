@@ -130,5 +130,39 @@
   <p>ごゆっくりお過ごしくださいませ♪</p>
 
 </section>
+
+<script type="module">
+import { db } from "./firebase-config.js";
+import {
+  doc,
+  runTransaction
+} from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+const ref = doc(db, "counter", "visits");
+const lucky = new Set([100,222,333,555,777,1000,2222,3333,5555,7777,10000]);
+
+(async()=>{
+  try{
+    const count = await runTransaction(db, async(tx)=>{
+      const snap = await tx.get(ref);
+      let n=1;
+      if(!snap.exists()){
+        tx.set(ref,{count:1});
+      }else{
+        n=(snap.data().count||0)+1;
+        tx.update(ref,{count:n});
+      }
+      return n;
+    });
+    document.getElementById("visitorCount").textContent=String(count).padStart(6,"0");
+    if(lucky.has(count)){
+      alert(`🎉 キリ番おめでとう！\n\n🐾 ${count}匹目の迷い猫です！\n📸 スクショを撮ってDiscordで「踏んだにゃ〜！」と報告してね🐟🍶`);
+    }
+  }catch(e){
+    console.error(e);
+  }
+})();
+</script>
+
 </body>
 </html>
