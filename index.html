@@ -139,7 +139,19 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
 const ref = doc(db, "counter", "visits");
-const lucky = new Set([100,222,333,555,777,1000,2222,3333,5555,7777,10000]);
+const KIRIBAN = new Set([
+  100,
+  222,
+  333,
+  555,
+  777,
+  1000
+]);
+
+const BIRTHDAY = {
+  926: "🎂 女児ちゃんのお誕生日！",
+  118: "🎂 マイメロさんのお誕生日！",
+};
 
 (async()=>{
   try{
@@ -155,8 +167,18 @@ const lucky = new Set([100,222,333,555,777,1000,2222,3333,5555,7777,10000]);
       return n;
     });
     document.getElementById("visitorCount").textContent=String(count).padStart(6,"0");
-    if(lucky.has(count)){
-      alert(`🎉 キリ番おめでとう！\n\n🐾 ${count}匹目の迷い猫です！\n📸 スクショを撮ってDiscordで「踏んだにゃ〜！」と報告してね🐟🍶`);
+    if (BIRTHDAY[count]) {
+  alert(
+    `${BIRTHDAY[count]}\n\n` +
+    `🐾 ${count}匹目の迷い猫です！\n` +
+    `今日は特別な日です🍶`
+  );
+} else if (KIRIBAN.has(count)) {
+  alert(
+    `🎉 キリ番おめでとう！\n\n` +
+    `🐾 ${count}匹目の迷い猫です！\n` +
+    `📸 スクショを撮ってDiscordで「踏んだにゃ〜！」と報告してね🐟`
+  );
     }
   }catch(e){
     console.error(e);
