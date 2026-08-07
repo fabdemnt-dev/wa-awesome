@@ -32,15 +32,8 @@ window.startNewWordSet = function () {
   const mode = state.mode;
   state.editingId[mode] = null;
   state.forms[mode] = mode === 'poem'
-    ? { name: '', words: '', creatorName: '', hasPassword: false, password: '', icon: null }
-    : { name: '', words5: '', words7: '', creatorName: '', hasPassword: false, password: '', icon: null };
-  renderAll();
-};
-
-// アイコンを選んだ時に呼ばれる（もう一度同じものを押すと「おまかせ」に戻る）
-window.selectWordSetIcon = function (iconId) {
-  const mode = state.mode;
-  state.forms[mode].icon = state.forms[mode].icon === iconId ? null : iconId;
+    ? { name: '', words: '', creatorName: '', hasPassword: false, password: '', icon: '' }
+    : { name: '', words5: '', words7: '', creatorName: '', hasPassword: false, password: '', icon: '' };
   renderAll();
 };
 
@@ -51,6 +44,7 @@ window.onWordSetFormInput = function () {
     state.forms.poem.name = document.getElementById('poem-set-name')?.value || '';
     state.forms.poem.words = document.getElementById('poem-words-input')?.value || '';
     state.forms.poem.creatorName = document.getElementById('poem-creator-name')?.value || '';
+    state.forms.poem.icon = document.getElementById('poem-icon-input')?.value || '';
     state.forms.poem.hasPassword = document.getElementById('poem-has-password')?.checked || false;
     state.forms.poem.password = document.getElementById('poem-password')?.value || '';
   } else {
@@ -58,6 +52,7 @@ window.onWordSetFormInput = function () {
     state.forms.haiku.words5 = document.getElementById('haiku-words5-input')?.value || '';
     state.forms.haiku.words7 = document.getElementById('haiku-words7-input')?.value || '';
     state.forms.haiku.creatorName = document.getElementById('haiku-creator-name')?.value || '';
+    state.forms.haiku.icon = document.getElementById('haiku-icon-input')?.value || '';
     state.forms.haiku.hasPassword = document.getElementById('haiku-has-password')?.checked || false;
     state.forms.haiku.password = document.getElementById('haiku-password')?.value || '';
   }
@@ -99,7 +94,7 @@ window.saveWordSet = async function () {
     payload = { type: 'haiku', name, words5, words7 };
   }
   payload.hasPassword = !!form.hasPassword;
-  payload.icon = form.icon || null;
+  payload.icon = (form.icon || '').trim() || null;
 
   try {
     const editingId = state.editingId[mode];
@@ -171,7 +166,7 @@ window.editWordSet = function (id) {
 
   state.editingId[mode] = id;
   // 名前欄は空にしておき、今回編集する人が自分の名前を入力する（入力した名前が編集者リストに追加される）
-  const base = { creatorName: '', hasPassword: !!target.hasPassword, password: '', icon: target.icon || null };
+  const base = { creatorName: '', hasPassword: !!target.hasPassword, password: '', icon: target.icon || '' };
   state.forms[mode] = mode === 'poem'
     ? { name: target.name, words: (target.words || []).join('　'), ...base }
     : { name: target.name, words5: (target.words5 || []).join('　'), words7: (target.words7 || []).join('　'), ...base };

@@ -38,7 +38,7 @@ export const iconPalette = [
   { id: "sparkle", emoji: "✨", bg: "#fdf4ff" },
 ];
 
-// idからアイコンを探す。見つからなければnullを返す
+// idからアイコンを探す。見つからなければnullを返す（過去にボタン選択式で保存された分の互換用）
 export function getIconById(id) {
   return iconPalette.find((icon) => icon.id === id) || null;
 }
@@ -51,6 +51,17 @@ export function iconForId(id) {
     hash = (hash * 31 + str.charCodeAt(i)) >>> 0;
   }
   return iconPalette[hash % iconPalette.length];
+}
+
+// 自分で入力した絵文字アイコン用に、背景色だけIDから自動で選ぶ
+const bgPalette = iconPalette.map((icon) => icon.bg);
+export function bgForId(id) {
+  let hash = 0;
+  const str = String(id || "");
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash * 17 + str.charCodeAt(i)) >>> 0;
+  }
+  return bgPalette[hash % bgPalette.length];
 }
 
 // パスワードをそのまま保存しないための簡易ハッシュ（※本格的な暗号強度はない、簡易な難読化）

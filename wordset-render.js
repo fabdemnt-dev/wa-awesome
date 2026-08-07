@@ -1,5 +1,5 @@
 import state from './wordset-state.js';
-import { escapeHTML, splitWords, iconForId, iconPalette, getIconById } from './wordset-utils.js';
+import { escapeHTML, splitWords, iconForId, getIconById, bgForId } from './wordset-utils.js';
 
 function setText(id, text) {
   const el = document.getElementById(id);
@@ -14,16 +14,15 @@ function previewLine(words, limit = 6) {
   const shown = words.slice(0, limit).join(' / ');
   return words.length > limit ? shown + ' …' : shown;
 }
-// フォーム内のアイコン選択ボタンを描画する（選択中のものだけハイライト）
-function renderIconPicker(containerId, selectedIconId) {
-  const el = document.getElementById(containerId);
-  if (!el) return;
-  el.innerHTML = iconPalette.map(icon => `
-    <button type="button" class="icon-option ${selectedIconId === icon.id ? 'selected' : ''}" style="background:${icon.bg};" onclick="selectWordSetIcon('${icon.id}')" title="${icon.emoji}">${icon.emoji}</button>
-  `).join('');
-}
+// 保存されているアイコンを表示用に解決する。
+// s.iconが絵文字そのものならそれを使い、過去のボタン選択式のID（'heart'等）ならそちらと互換をとる。
 function resolveIcon(s) {
-  return (s.icon && getIconById(s.icon)) || iconForId(s.id);
+  if (s.icon) {
+    const legacy = getIconById(s.icon); // 昔のボタン選択式で保存されたIDだった場合
+    if (legacy) return legacy;
+    return { emoji: s.icon, bg: bgForId(s.id) };
+  }
+  return iconForId(s.id);
 }
 
 function renderTabs() {
@@ -48,7 +47,7 @@ function renderPoemForm() {
   if (cb && cb.checked !== !!f.hasPassword) cb.checked = !!f.hasPassword;
   const pwBox = document.getElementById('poem-password-box');
   if (pwBox) pwBox.style.display = f.hasPassword ? 'block' : 'none';
-  renderIconPicker('poem-icon-picker', f.icon);
+  setInputValue('poem-icon-input', f.icon);
 
   setText('poem-name-counter', `${f.name.length}/20`);
   setText('poem-words-counter', `${f.words.length}/1000`);
@@ -75,7 +74,7 @@ function renderHaikuForm() {
   if (cb && cb.checked !== !!f.hasPassword) cb.checked = !!f.hasPassword;
   const pwBox = document.getElementById('haiku-password-box');
   if (pwBox) pwBox.style.display = f.hasPassword ? 'block' : 'none';
-  renderIconPicker('haiku-icon-picker', f.icon);
+  setInputValue('haiku-icon-input', f.icon);
 
   setText('haiku-name-counter', `${f.name.length}/20`);
   setText('haiku-words5-counter', `${f.words5.length}/1000`);

@@ -35,8 +35,10 @@
     </div>
 
     <div class="form-block">
-      <label class="form-label">アイコンを選ぶ（選ばなければおまかせになります）</label>
-      <div class="icon-picker" id="poem-icon-picker"></div>
+      <label class="form-label">アイコンを入力（絵文字を1つ、空欄なら自動）</label>
+      <div class="input-with-counter">
+        <input type="text" id="poem-icon-input" maxlength="4" placeholder="例：🎉" oninput="onWordSetFormInput()">
+      </div>
     </div>
 
     <div class="form-block">
@@ -103,8 +105,10 @@
     </div>
 
     <div class="form-block">
-      <label class="form-label">アイコンを選ぶ（選ばなければおまかせになります）</label>
-      <div class="icon-picker" id="haiku-icon-picker"></div>
+      <label class="form-label">アイコンを入力（絵文字を1つ、空欄なら自動）</label>
+      <div class="input-with-counter">
+        <input type="text" id="haiku-icon-input" maxlength="4" placeholder="例：🎉" oninput="onWordSetFormInput()">
+      </div>
     </div>
 
     <div class="form-block">
