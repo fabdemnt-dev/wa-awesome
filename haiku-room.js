@@ -64,6 +64,8 @@ if (!roomSnapshot.exists()) {
     document.getElementById('login-sec').style.display = 'none';
     document.getElementById('lobby-sec').style.display = 'block';
 
+    let previousStatus = null; // 直前のstatusを記録し、「lobbyに遷移した瞬間」だけ入力欄をクリアするために使う
+
     onSnapshot(state.roomRef, (snapshot) => {
       state.currentData = snapshot.data();
       if (!state.currentData) return;
@@ -114,20 +116,25 @@ if (!roomSnapshot.exists()) {
       if (state.currentData.status === 'lobby') {
         if (document.getElementById('game-sec')) document.getElementById('game-sec').style.display = 'none';
         if (document.getElementById('lobby-sec')) document.getElementById('lobby-sec').style.display = 'block';
-        
-        state.myHand5 = []; state.myHand7 = []; state.selectedHand = [null, null, null];
-        
-        // ロビーに戻ったら、一時保存していた手札データを消す
-        sessionStorage.removeItem('haikuSelectedHand');
 
-        ['5', '7'].forEach(type => {
-          const container = document.getElementById(`inputs-${type}-container`);
-          if (container) {
-            container.querySelectorAll('input').forEach(inp => inp.value = '');
-          }
-        });
-        const addBtn = document.getElementById('add-word-btn');
-        if (addBtn) addBtn.innerText = '素材を提出する';
+        // 他の状態(playing等)からlobbyに遷移した瞬間だけリセットする。
+        // status===lobbyのまま毎回ここを通すと、他プレイヤーの素材提出などで
+        // onSnapshotが発火するたびに、自分が入力中の素材まで消えてしまうため。
+        if (previousStatus !== 'lobby') {
+          state.myHand5 = []; state.myHand7 = []; state.selectedHand = [null, null, null];
+
+          // ロビーに戻ったら、一時保存していた手札データを消す
+          sessionStorage.removeItem('haikuSelectedHand');
+
+          ['5', '7'].forEach(type => {
+            const container = document.getElementById(`inputs-${type}-container`);
+            if (container) {
+              container.querySelectorAll('input').forEach(inp => inp.value = '');
+            }
+          });
+          const addBtn = document.getElementById('add-word-btn');
+          if (addBtn) addBtn.innerText = '素材を提出する';
+        }
 
       } else if (state.currentData.status === 'playing') {
         if (document.getElementById('lobby-sec')) document.getElementById('lobby-sec').style.display = 'none';
@@ -137,6 +144,8 @@ if (!roomSnapshot.exists()) {
         renderHand();
         renderBoards();
       }
+
+      previousStatus = state.currentData.status;
     });
   } catch (e) {
     alert('接続エラーが発生しました: ' + e.message);
