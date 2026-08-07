@@ -167,9 +167,10 @@ window.editWordSet = function (id) {
   state.editingId[mode] = id;
   // 名前欄は空にしておき、今回編集する人が自分の名前を入力する（入力した名前が編集者リストに追加される）
   const base = { creatorName: '', hasPassword: !!target.hasPassword, password: '', icon: target.icon || '' };
+  // ことばを改行区切りで復元する（分割の仕様が「改行のみ」なので、つなぐのも改行でないと1行に全部くっついてしまう）
   state.forms[mode] = mode === 'poem'
-    ? { name: target.name, words: (target.words || []).join('　'), ...base }
-    : { name: target.name, words5: (target.words5 || []).join('　'), words7: (target.words7 || []).join('　'), ...base };
+    ? { name: target.name, words: (target.words || []).join('\n'), ...base }
+    : { name: target.name, words5: (target.words5 || []).join('\n'), words7: (target.words7 || []).join('\n'), ...base };
   renderAll();
   document.getElementById(`panel-${mode}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 };
