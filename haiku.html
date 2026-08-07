@@ -39,22 +39,21 @@
       <div id="setting-content" class="collapsible-content" style="display:none;">
         <div class="setting-grid">
           <div>
-            <label>五音素材入力数:</label>
-            <input type="number" id="set-in-5" min="1" value="5">
-          </div>
-          <div>
-            <label>七音素材入力数:</label>
-            <input type="number" id="set-in-7" min="1" value="3">
-          </div>
-          <div>
-            <label>五音配分枚数:</label>
+            <label>五音の手札枚数:</label>
             <input type="number" id="set-hand-5" min="1" value="5">
           </div>
           <div>
-            <label>七音配分枚数:</label>
+            <label>七音の手札枚数:</label>
             <input type="number" id="set-hand-7" min="1" value="3">
           </div>
         </div>
+        <div style="font-size:11px; color:#94a3b8; margin-top:6px;">※1回の提出でこの枚数ぶん入力してもらいます。多めに入力するのはOKです。</div>
+
+        <label style="display:flex; align-items:center; gap:6px; margin-top:10px; font-size:13px; cursor:pointer;">
+          <input type="checkbox" id="set-carry-over" checked> 素材を次の節に持ち越す
+        </label>
+        <div style="font-size:11px; color:#94a3b8; margin-top:2px;">※プレイヤーが入力した素材は、使われたかどうかに関わらず全部持ち越されます。ワードセット/デフォルト補充で埋めた分（🎴マーク）は対象外です。</div>
+
         <button onclick="updateSettings()" class="btn-secondary" style="margin-top:10px;">設定を保存</button>
       </div>
 
@@ -75,6 +74,7 @@
       <div style="margin-top:10px; font-size:14px; color:#64748b;">
         集まった素材: 五音 <span id="total-words-5">0</span> 個 / 七音 <span id="total-words-7">0</span> 個
       </div>
+      <div id="my-submitted-words"></div>
 
       <div style="margin-top:10px;">
         <label style="font-size:13px; color:#475569; display:block; margin-bottom:4px;">🎴 使うワードセット:</label>
@@ -93,6 +93,9 @@
       <button id="role-toggle-btn-game" onclick="toggleRole()" class="btn-secondary" style="margin-bottom:10px;">モード切替</button>
 
       <h3>手札（素材）</h3>
+      <div style="margin-bottom:10px;">
+        <button id="redraw-hand-btn" onclick="redrawHand()" class="btn-secondary">🔄 手札を引き直す（1節1回まで）</button>
+      </div>
       <h4>五音</h4>
       <div id="hand-5-list" class="card-list"></div>
       <h4>七音</h4>
@@ -147,6 +150,9 @@
         <button onclick="exportText()" style="flex:1; background-color: #5865F2;">📋 コピー (Discord用)</button>
         <button onclick="exportCSV()" style="flex:1; background-color: #059669;">📥 CSV保存</button>
       </div>
+
+      <button onclick="saveGameAsWordSet()" class="btn-secondary" style="margin-top:10px; width:100%;">🎴 今日の素材をワードセットとして保存する</button>
+      <div style="font-size:11px; color:#94a3b8; margin-top:4px;">※プレイヤーが入力した素材だけが保存されます（ワードセット/デフォルト補充分は含みません）</div>
 
     </div>
   </div>

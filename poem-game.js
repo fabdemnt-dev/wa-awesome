@@ -1,4 +1,5 @@
-import { updateDoc, arrayUnion } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { updateDoc, arrayUnion, addDoc, collection, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { db } from './firebase-config.js';
 import state from './poem-state.js';
 import { defaultWords } from './poem-default-words.js';
 import { getWordSetById } from './poem-wordsets.js';
@@ -84,6 +85,36 @@ window.startGame = async function() {
   });
 };
 
+
+window.saveGameAsWordSet = async function() {
+  if (!state.currentData) return;
+
+  // ワードセット/デフォルト補充で埋めた分（🎴マーク）は除いて、プレイヤーが実際に入力した素材だけを対象にする
+  const words = (state.currentData.words || []).filter(w => !(w.author || '').startsWith('🎴'));
+
+  if (words.length === 0) {
+    return alert('保存できる素材がありません（プレイヤーが入力した素材がまだ無いようです）');
+  }
+
+  const name = (prompt('このワードセットの名前を付けてください', `${state.roomId}のポエム`) || '').trim();
+  if (!name) return;
+
+  try {
+    await addDoc(collection(db, 'wordsets'), {
+      type: 'poem',
+      name,
+      words: words.map(w => ({ text: w.text, author: w.author, id: w.id })),
+      creators: [state.myName],
+      hasPassword: false,
+      passwordHash: null,
+      createdAt: serverTimestamp()
+    });
+    alert(`🎴 ワードセット「${name}」として保存しました！\nワードセットのページから、いつでも使えます。`);
+  } catch (e) {
+    console.error(e);
+    alert('保存に失敗しました: ' + e.message);
+  }
+};
 
 window.nextGame = async function() {
   if (!state.roomRef || !state.currentData) return;

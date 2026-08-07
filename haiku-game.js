@@ -1,4 +1,5 @@
-import { updateDoc, arrayUnion } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { updateDoc, arrayUnion, addDoc, collection, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { db } from './firebase-config.js';
 import state from './haiku-state.js';
 import { evalOptionsMaster } from './haiku-utils.js';
 import { renderInputFields } from './haiku-render.js';
@@ -7,8 +8,8 @@ import { getWordSetById } from './haiku-wordsets.js';
 
 window.addWords = async function() {
   if (!state.currentData || state.isSpectator) return;
-  const st = state.currentData.settings || { in5: 5, in7: 3 };
-  
+  const st = state.currentData.settings || { hand5: 5, hand7: 3 };
+
   const getWords = (type, count) => {
     const arr = [];
     for (let i = 1; i <= count; i++) {
@@ -24,12 +25,12 @@ window.addWords = async function() {
     return arr;
   };
 
-  const new5 = getWords('5', st.in5);
-  const new7 = getWords('7', st.in7);
-  if (new5.length < st.in5 || new7.length < st.in7) return alert('全ての素材を入力してください');
+  const new5 = getWords('5', st.hand5);
+  const new7 = getWords('7', st.hand7);
+  if (new5.length < st.hand5 || new7.length < st.hand7) return alert('全ての素材を入力してください');
 
   await updateDoc(state.roomRef, { words5: arrayUnion(...new5), words7: arrayUnion(...new7) });
-  renderInputFields(st.in5, st.in7);
+  renderInputFields(st.hand5, st.hand7);
   const addBtn = document.getElementById('add-word-btn');
   if (addBtn) addBtn.innerText = "✅ 追加完了！";
 };
@@ -94,7 +95,91 @@ window.startGame = async function() {
   const h5 = {}, h7 = {};
   players.forEach(p => { h5[p] = s5.splice(0, st.hand5); h7[p] = s7.splice(0, st.hand7); });
 
-  await updateDoc(state.roomRef, { status: "playing", hands5: h5, hands7: h7, phrases: {}, phraseDetails: {}, votes: {}, revealedPhrases: {}, selfPraise: {} });
+  await updateDoc(state.roomRef, { status: "playing", hands5: h5, hands7: h7, phrases: {}, phraseDetails: {}, votes: {}, revealedPhrases: {}, selfPraise: {}, redraws: {} });
+};
+window.redrawHand = async function() {
+  if (!state.currentData || state.isSpectator) return;
+  if (state.currentData.status !== 'playing') return;
+
+  const phrases = state.currentData.phrases || {};
+  if (phrases[state.myName]) {
+    return alert('すでに句を披露した後は手札を引き直せません。');
+  }
+
+  const redraws = state.currentData.redraws || {};
+  if (redraws[state.myName]) {
+    return alert('手札の引き直しは1節につき1回までです。');
+  }
+
+  const st = state.currentData.settings || { hand5: 5, hand7: 3 };
+  const words5 = state.currentData.words5 || [];
+  const words7 = state.currentData.words7 || [];
+  const hands5 = state.currentData.hands5 || {};
+  const hands7 = state.currentData.hands7 || {};
+
+  // 自分以外が今持っている素材を除いた、引き直しに使える素材を集める
+  const othersAssignedIds5 = new Set(
+    Object.entries(hands5).filter(([p]) => p !== state.myName).flatMap(([, h]) => h || []).map(w => w.id)
+  );
+  const othersAssignedIds7 = new Set(
+    Object.entries(hands7).filter(([p]) => p !== state.myName).flatMap(([, h]) => h || []).map(w => w.id)
+  );
+  const available5 = words5.filter(w => !othersAssignedIds5.has(w.id));
+  const available7 = words7.filter(w => !othersAssignedIds7.has(w.id));
+
+  if (available5.length < st.hand5 || available7.length < st.hand7) {
+    return alert('引き直すための素材が足りません。');
+  }
+
+  if (!confirm('今の手札を捨てて、新しい手札に引き直しますか？\n（1節につき1回までです）')) return;
+
+  const newHand5 = [...available5].sort(() => Math.random() - 0.5).slice(0, st.hand5);
+  const newHand7 = [...available7].sort(() => Math.random() - 0.5).slice(0, st.hand7);
+
+  try {
+    await updateDoc(state.roomRef, {
+      [`hands5.${state.myName}`]: newHand5,
+      [`hands7.${state.myName}`]: newHand7,
+      [`redraws.${state.myName}`]: true
+    });
+    state.selectedHand = [null, null, null];
+    sessionStorage.removeItem('haikuSelectedHand');
+    alert('手札を引き直しました！');
+  } catch (e) {
+    console.error(e);
+    alert('引き直しに失敗しました: ' + e.message);
+  }
+};
+window.saveGameAsWordSet = async function() {
+  if (!state.currentData) return;
+
+  // ワードセット/デフォルト補充で埋めた分（🎴マーク）は除いて、プレイヤーが実際に入力した素材だけを対象にする
+  const words5 = (state.currentData.words5 || []).filter(w => !(w.author || '').startsWith('🎴'));
+  const words7 = (state.currentData.words7 || []).filter(w => !(w.author || '').startsWith('🎴'));
+
+  if (words5.length === 0 && words7.length === 0) {
+    return alert('保存できる素材がありません（プレイヤーが入力した素材がまだ無いようです）');
+  }
+
+  const name = (prompt('このワードセットの名前を付けてください', `${state.roomId}の句会`) || '').trim();
+  if (!name) return;
+
+  try {
+    await addDoc(collection(db, 'wordsets'), {
+      type: 'haiku',
+      name,
+      words5: words5.map(w => ({ text: w.text, author: w.author, id: w.id })),
+      words7: words7.map(w => ({ text: w.text, author: w.author, id: w.id })),
+      creators: [state.myName],
+      hasPassword: false,
+      passwordHash: null,
+      createdAt: serverTimestamp()
+    });
+    alert(`🎴 ワードセット「${name}」として保存しました！\nワードセットのページから、いつでも使えます。`);
+  } catch (e) {
+    console.error(e);
+    alert('保存に失敗しました: ' + e.message);
+  }
 };
 window.nextRound = async function() {
   if (!state.currentData || state.isProcessingNextRound) return;
@@ -152,13 +237,37 @@ window.nextRound = async function() {
       host: players[hostIndex % (players.length || 1)] || '' 
     };
 
+    // プレイヤーが入力した素材は、使われたかどうかに関わらず、設定がONなら次の節に持ち越す
+    const carryOverEnabled = (state.currentData.settings?.carryOver) !== false;
+    let carriedWords5 = [], carriedWords7 = [];
+
+    if (carryOverEnabled) {
+      const words5 = state.currentData.words5 || [];
+      const words7 = state.currentData.words7 || [];
+
+      // ワードセット/デフォルト補充で埋めた分（🎴マーク付き）だけ除外し、
+      // プレイヤーが実際に入力した分は使用済みかどうかに関わらずすべて持ち越す
+      carriedWords5 = words5.filter(w => !(w.author || '').startsWith('🎴'));
+      carriedWords7 = words7.filter(w => !(w.author || '').startsWith('🎴'));
+
+      const skipped5 = words5.length - carriedWords5.length;
+      const skipped7 = words7.length - carriedWords7.length;
+
+      if (carriedWords5.length > 0 || carriedWords7.length > 0) {
+        alertMessage += `\n📦 プレイヤーが入力した素材（五音${carriedWords5.length}個・七音${carriedWords7.length}個）を次の節に持ち越しました。`;
+      }
+      if (skipped5 > 0 || skipped7 > 0) {
+        alertMessage += `\n（ワードセット/デフォルト補充分の五音${skipped5}個・七音${skipped7}個は持ち越し対象外にしました）`;
+      }
+    }
+
     await updateDoc(state.roomRef, {
       status: "lobby", 
       hostIndex: hostIndex + 1, 
       roundCount: nextRoundNum,
       scores: newScores, 
       history: arrayUnion(currentRoundHistory),
-      words5: [], words7: [], hands5: {}, hands7: {}, phrases: {}, phraseDetails: {}, votes: {}, revealedPhrases: {}, selfPraise: {}
+      words5: carriedWords5, words7: carriedWords7, hands5: {}, hands7: {}, phrases: {}, phraseDetails: {}, votes: {}, revealedPhrases: {}, selfPraise: {}, redraws: {}
     });
     
     alert(alertMessage);

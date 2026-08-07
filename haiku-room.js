@@ -33,13 +33,13 @@ if (!roomSnapshot.exists()) {
     scores: {},
     selfPraise: {},
     settings: {
-      in5: 5,
-      in7: 3,
       hand5: 5,
-      hand7: 3
+      hand7: 3,
+      carryOver: true
     },
     players: [],
-    spectators: []
+    spectators: [],
+    redraws: {}
   };
 
   if (state.isSpectator) {
@@ -95,15 +95,34 @@ if (!roomSnapshot.exists()) {
         gameRoleBtn.style.cursor = isHostDuringPlaying ? 'not-allowed' : 'pointer';
       }
 
-      const st = state.currentData.settings || { in5: 5, in7: 3, hand5: 5, hand7: 3 };
-      if (document.getElementById('set-in-5')) document.getElementById('set-in-5').value = st.in5;
-      if (document.getElementById('set-in-7')) document.getElementById('set-in-7').value = st.in7;
+      const st = state.currentData.settings || { hand5: 5, hand7: 3, carryOver: true };
       if (document.getElementById('set-hand-5')) document.getElementById('set-hand-5').value = st.hand5;
       if (document.getElementById('set-hand-7')) document.getElementById('set-hand-7').value = st.hand7;
+      if (document.getElementById('set-carry-over')) document.getElementById('set-carry-over').checked = st.carryOver !== false;
 
-      renderInputFields(st.in5, st.in7);
+      renderInputFields(st.hand5, st.hand7);
       if (document.getElementById('total-words-5')) document.getElementById('total-words-5').innerText = state.currentData.words5?.length || 0;
       if (document.getElementById('total-words-7')) document.getElementById('total-words-7').innerText = state.currentData.words7?.length || 0;
+
+      // 自分がこれまでに提出した素材を一覧表示する
+      const myWordsEl = document.getElementById('my-submitted-words');
+      if (myWordsEl) {
+        const myWords5 = (state.currentData.words5 || []).filter(w => w.author === state.myName);
+        const myWords7 = (state.currentData.words7 || []).filter(w => w.author === state.myName);
+        if (myWords5.length === 0 && myWords7.length === 0) {
+          myWordsEl.innerHTML = '';
+        } else {
+          const chip5 = 'display:inline-block; background:#eff6ff; border:1px solid #93c5fd; border-radius:6px; padding:2px 8px; font-size:12px; margin:2px;';
+          const chip7 = 'display:inline-block; background:#fefce8; border:1px solid #fde047; border-radius:6px; padding:2px 8px; font-size:12px; margin:2px;';
+          myWordsEl.innerHTML = `
+            <div style="margin-top:8px; font-size:13px; color:#475569;">📝 あなたが提出した素材（五音${myWords5.length}個・七音${myWords7.length}個）</div>
+            <div style="margin-top:4px;">
+              ${myWords5.map(w => `<span style="${chip5}">${escapeHTML(w.text)}</span>`).join('')}
+              ${myWords7.map(w => `<span style="${chip7}">${escapeHTML(w.text)}</span>`).join('')}
+            </div>
+          `;
+        }
+      }
 
       const scores = state.currentData.scores || {};
       let playerListHtml = players.map((p, idx) => `
@@ -152,6 +171,18 @@ if (!roomSnapshot.exists()) {
         if (state.currentData.hands7?.[state.myName]) state.myHand7 = state.currentData.hands7[state.myName];
         renderHand();
         renderBoards();
+
+        // 手札引き直しボタンの状態を更新（見学者・披露済み・引き直し済みなら押せないようにする）
+        const redrawBtn = document.getElementById('redraw-hand-btn');
+        if (redrawBtn) {
+          const hasSubmitted = !!(state.currentData.phrases || {})[state.myName];
+          const hasRedrawn = !!(state.currentData.redraws || {})[state.myName];
+          const canRedraw = !state.isSpectator && !hasSubmitted && !hasRedrawn;
+          redrawBtn.disabled = !canRedraw;
+          redrawBtn.style.opacity = canRedraw ? '1' : '0.5';
+          redrawBtn.style.cursor = canRedraw ? 'pointer' : 'not-allowed';
+          redrawBtn.innerText = hasRedrawn ? '🔄 引き直し済み' : (hasSubmitted ? '🔄 披露後は引き直せません' : '🔄 手札を引き直す（1節1回まで）');
+        }
       }
 
       previousStatus = state.currentData.status;
@@ -223,10 +254,9 @@ window.updateSettings = async function() {
   if (!state.roomRef) return;
   await updateDoc(state.roomRef, {
     settings: {
-      in5: parseInt(document.getElementById('set-in-5').value) || 5,
-      in7: parseInt(document.getElementById('set-in-7').value) || 3,
       hand5: parseInt(document.getElementById('set-hand-5').value) || 5,
-      hand7: parseInt(document.getElementById('set-hand-7').value) || 3
+      hand7: parseInt(document.getElementById('set-hand-7').value) || 3,
+      carryOver: document.getElementById('set-carry-over')?.checked ?? true
     }
   });
 };
