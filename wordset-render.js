@@ -46,7 +46,7 @@ function renderPoemForm() {
   const chipEl = document.getElementById('poem-preview-chips');
   if (chipEl) {
     chipEl.innerHTML = words.length
-      ? words.map(w => `<span class="chip">${escapeHTML(w)}</span>`).join('')
+      ? words.map((w, i) => `<span class="chip">${escapeHTML(w)}<button type="button" class="chip-remove" onclick="removeWordSetWord('words', ${i})" title="このことばを消す">×</button></span>`).join('')
       : '<span class="chip-empty">まだことばがありません</span>';
   }
   setText('poem-save-label', state.editingId.poem ? '✨ 更新を保存する' : '✨ このセットを保存する');
@@ -78,13 +78,13 @@ function renderHaikuForm() {
   const c5 = document.getElementById('haiku5-preview-chips');
   if (c5) {
     c5.innerHTML = w5.length
-      ? w5.map(w => `<span class="chip chip-5">${escapeHTML(w)}</span>`).join('')
+      ? w5.map((w, i) => `<span class="chip chip-5">${escapeHTML(w)}<button type="button" class="chip-remove" onclick="removeWordSetWord('words5', ${i})" title="このことばを消す">×</button></span>`).join('')
       : '<span class="chip-empty">まだことばがありません</span>';
   }
   const c7 = document.getElementById('haiku7-preview-chips');
   if (c7) {
     c7.innerHTML = w7.length
-      ? w7.map(w => `<span class="chip chip-7">${escapeHTML(w)}</span>`).join('')
+      ? w7.map((w, i) => `<span class="chip chip-7">${escapeHTML(w)}<button type="button" class="chip-remove" onclick="removeWordSetWord('words7', ${i})" title="このことばを消す">×</button></span>`).join('')
       : '<span class="chip-empty">まだことばがありません</span>';
   }
   setText('haiku-save-label', state.editingId.haiku ? '✨ 更新を保存する' : '✨ このセットを保存する');

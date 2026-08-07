@@ -57,6 +57,16 @@ window.onWordSetFormInput = function () {
   renderAll();
 };
 
+// プレビューのチップの「×」を押した時、そのことばだけを入力欄からも取り除く
+window.removeWordSetWord = function (field, index) {
+  const mode = state.mode;
+  const form = state.forms[mode];
+  const words = splitWords(form[field]);
+  words.splice(index, 1);
+  form[field] = words.join('\n');
+  renderAll();
+};
+
 window.saveWordSet = async function () {
   const mode = state.mode;
   const form = state.forms[mode];

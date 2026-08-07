@@ -156,10 +156,25 @@ body {
   font-size: 13px;
   font-weight: bold;
   color: #1e293b;
+  display: inline-flex;
+  align-items: center;
 }
 .chip-5 { border-color: #93c5fd; background: #eff6ff; }
 .chip-7 { border-color: #fde047; background: #fefce8; }
 .chip-empty { font-size: 12px; color: #94a3b8; }
+.chip-remove {
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 14px;
+  font-weight: bold;
+  line-height: 1;
+  padding: 0 0 0 6px;
+  margin: 0;
+  width: auto;
+  cursor: pointer;
+}
+.chip-remove:hover { color: #ef4444; }
 
 .btn-save {
   width: 100%;
