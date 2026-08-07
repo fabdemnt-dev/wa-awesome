@@ -208,6 +208,7 @@ button:disabled { background-color: #94a3b8; cursor: not-allowed; }
   font-size: 13px;
   overflow: hidden;
 }
+/* 御印・選者の心得：木の掲示板風 */
 .eval-guide-header {
   padding: 8px 12px;
   background: #e2e8f0;
