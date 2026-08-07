@@ -1,5 +1,5 @@
 import state from './wordset-state.js';
-import { escapeHTML, splitWords, iconForId } from './wordset-utils.js';
+import { escapeHTML, splitWords, iconForId, iconPalette, getIconById } from './wordset-utils.js';
 
 function setText(id, text) {
   const el = document.getElementById(id);
@@ -13,6 +13,17 @@ function previewLine(words, limit = 6) {
   if (!words || words.length === 0) return '（ことば未設定）';
   const shown = words.slice(0, limit).join(' / ');
   return words.length > limit ? shown + ' …' : shown;
+}
+// フォーム内のアイコン選択ボタンを描画する（選択中のものだけハイライト）
+function renderIconPicker(containerId, selectedIconId) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML = iconPalette.map(icon => `
+    <button type="button" class="icon-option ${selectedIconId === icon.id ? 'selected' : ''}" style="background:${icon.bg};" onclick="selectWordSetIcon('${icon.id}')" title="${icon.emoji}">${icon.emoji}</button>
+  `).join('');
+}
+function resolveIcon(s) {
+  return (s.icon && getIconById(s.icon)) || iconForId(s.id);
 }
 
 function renderTabs() {
@@ -37,6 +48,7 @@ function renderPoemForm() {
   if (cb && cb.checked !== !!f.hasPassword) cb.checked = !!f.hasPassword;
   const pwBox = document.getElementById('poem-password-box');
   if (pwBox) pwBox.style.display = f.hasPassword ? 'block' : 'none';
+  renderIconPicker('poem-icon-picker', f.icon);
 
   setText('poem-name-counter', `${f.name.length}/20`);
   setText('poem-words-counter', `${f.words.length}/1000`);
@@ -63,6 +75,7 @@ function renderHaikuForm() {
   if (cb && cb.checked !== !!f.hasPassword) cb.checked = !!f.hasPassword;
   const pwBox = document.getElementById('haiku-password-box');
   if (pwBox) pwBox.style.display = f.hasPassword ? 'block' : 'none';
+  renderIconPicker('haiku-icon-picker', f.icon);
 
   setText('haiku-name-counter', `${f.name.length}/20`);
   setText('haiku-words5-counter', `${f.words5.length}/1000`);
@@ -104,7 +117,7 @@ function renderPoemList() {
   if (!el) return;
   const list = sortByNewest(state.sets.poem);
   el.innerHTML = list.length ? list.map(s => {
-    const icon = iconForId(s.id);
+    const icon = resolveIcon(s);
     const words = s.words || [];
     const isOpen = state.expandedId.poem === s.id;
     return `
@@ -142,7 +155,7 @@ function renderHaikuList() {
   if (!el) return;
   const list = sortByNewest(state.sets.haiku);
   el.innerHTML = list.length ? list.map(s => {
-    const icon = iconForId(s.id);
+    const icon = resolveIcon(s);
     const words5 = s.words5 || [], words7 = s.words7 || [];
     const isOpen = state.expandedId.haiku === s.id;
     return `

@@ -19,7 +19,7 @@
   <!-- ぽえむ用パネル -->
   <div id="panel-poem" class="panel">
     <div class="panel-header">
-      <span class="panel-icon">📗</span>
+      <span class="panel-icon">📝</span>
       <div>
         <h2>ワードセットをつくる（ぽえむ用）</h2>
         <p class="panel-sub">ことばを集めて、ぽえむの素材にしよう</p>
@@ -32,6 +32,11 @@
       <div class="input-with-counter">
         <input type="text" id="poem-creator-name" maxlength="20" placeholder="例：芭蕉" oninput="onWordSetFormInput()">
       </div>
+    </div>
+
+    <div class="form-block">
+      <label class="form-label">アイコンを選ぶ（選ばなければおまかせになります）</label>
+      <div class="icon-picker" id="poem-icon-picker"></div>
     </div>
 
     <div class="form-block">
@@ -55,9 +60,9 @@
 
     <div class="form-block">
       <label class="form-label">3. ことばを入力</label>
-      <p class="form-hint">改行・スペース・、。・，で区切ると、自動でことばに分けられます</p>
+      <p class="form-hint">改行で区切ると、自動でことばに分けられます（1行＝1つのことばとして、スペースや記号もそのまま使えます）</p>
       <div class="textarea-with-counter">
-        <textarea id="poem-words-input" maxlength="1000" placeholder="夏　海　青空、アイス。&#10;花火　せみ　入道雲、&#10;夕立" oninput="onWordSetFormInput()"></textarea>
+        <textarea id="poem-words-input" maxlength="1000" placeholder="夏&#10;海&#10;青空&#10;アイス&#10;On My Way" oninput="onWordSetFormInput()"></textarea>
         <span class="char-counter" id="poem-words-counter">0/1000</span>
       </div>
       <p class="form-hint">※長い言葉もそのまま使えます</p>
@@ -98,6 +103,11 @@
     </div>
 
     <div class="form-block">
+      <label class="form-label">アイコンを選ぶ（選ばなければおまかせになります）</label>
+      <div class="icon-picker" id="haiku-icon-picker"></div>
+    </div>
+
+    <div class="form-block">
       <label class="checkbox-label">
         <input type="checkbox" id="haiku-has-password" onchange="onWordSetFormInput()">
         🔒 パスワードをつける（自分だけが編集・削除できるようにする）
@@ -119,9 +129,9 @@
     <div class="grid-2col">
       <div class="form-block">
         <label class="form-label">3. 五音のことばを入力</label>
-        <p class="form-hint">改行・スペース・、。・，で区切ると、自動で五音のことばに分けられます</p>
+        <p class="form-hint">改行で区切ると、自動で五音のことばに分けられます（1行＝1つのことばとして、スペースや記号もそのまま使えます）</p>
         <div class="textarea-with-counter">
-          <textarea id="haiku-words5-input" maxlength="1000" placeholder="推しが好き　尊いなあ&#10;沼の中、課金する。" oninput="onWordSetFormInput()"></textarea>
+          <textarea id="haiku-words5-input" maxlength="1000" placeholder="推しが好き&#10;尊いなあ&#10;沼の中" oninput="onWordSetFormInput()"></textarea>
           <span class="char-counter" id="haiku-words5-counter">0/1000</span>
         </div>
         <p class="form-hint">※長い言葉もそのまま使えます</p>
@@ -129,9 +139,9 @@
       </div>
       <div class="form-block">
         <label class="form-label">4. 七音のことばを入力</label>
-        <p class="form-hint">改行・スペース・、。・，で区切ると、自動で七音のことばに分けられます</p>
+        <p class="form-hint">改行で区切ると、自動で七音のことばに分けられます（1行＝1つのことばとして、スペースや記号もそのまま使えます）</p>
         <div class="textarea-with-counter">
-          <textarea id="haiku-words7-input" maxlength="1000" placeholder="ガチャが出ない　眠れない&#10;推しの笑顔で　今日も生きる" oninput="onWordSetFormInput()"></textarea>
+          <textarea id="haiku-words7-input" maxlength="1000" placeholder="ガチャが出ない&#10;眠れない&#10;推しの笑顔で" oninput="onWordSetFormInput()"></textarea>
           <span class="char-counter" id="haiku-words7-counter">0/1000</span>
         </div>
         <p class="form-hint">※長い言葉もそのまま使えます</p>

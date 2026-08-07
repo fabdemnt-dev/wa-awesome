@@ -32,8 +32,15 @@ window.startNewWordSet = function () {
   const mode = state.mode;
   state.editingId[mode] = null;
   state.forms[mode] = mode === 'poem'
-    ? { name: '', words: '', creatorName: '', hasPassword: false, password: '' }
-    : { name: '', words5: '', words7: '', creatorName: '', hasPassword: false, password: '' };
+    ? { name: '', words: '', creatorName: '', hasPassword: false, password: '', icon: null }
+    : { name: '', words5: '', words7: '', creatorName: '', hasPassword: false, password: '', icon: null };
+  renderAll();
+};
+
+// アイコンを選んだ時に呼ばれる（もう一度同じものを押すと「おまかせ」に戻る）
+window.selectWordSetIcon = function (iconId) {
+  const mode = state.mode;
+  state.forms[mode].icon = state.forms[mode].icon === iconId ? null : iconId;
   renderAll();
 };
 
@@ -92,6 +99,7 @@ window.saveWordSet = async function () {
     payload = { type: 'haiku', name, words5, words7 };
   }
   payload.hasPassword = !!form.hasPassword;
+  payload.icon = form.icon || null;
 
   try {
     const editingId = state.editingId[mode];
@@ -163,7 +171,7 @@ window.editWordSet = function (id) {
 
   state.editingId[mode] = id;
   // 名前欄は空にしておき、今回編集する人が自分の名前を入力する（入力した名前が編集者リストに追加される）
-  const base = { creatorName: '', hasPassword: !!target.hasPassword, password: '' };
+  const base = { creatorName: '', hasPassword: !!target.hasPassword, password: '', icon: target.icon || null };
   state.forms[mode] = mode === 'poem'
     ? { name: target.name, words: (target.words || []).join('　'), ...base }
     : { name: target.name, words5: (target.words5 || []).join('　'), words7: (target.words7 || []).join('　'), ...base };

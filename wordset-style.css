@@ -83,6 +83,22 @@ body {
   cursor: pointer;
 }
 .checkbox-label input[type="checkbox"] { width: auto; margin: 0; }
+
+.icon-picker { display: flex; flex-wrap: wrap; gap: 8px; }
+.icon-option {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  margin: 0;
+}
+.icon-option.selected { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37,99,235,0.2); }
 .password-box { margin-top: 8px; }
 .password-box input[type="password"] {
   width: 100%;
