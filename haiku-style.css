@@ -232,6 +232,7 @@ button:disabled { background-color: #94a3b8; cursor: not-allowed; }
 .export-btn-text { background-color: #8b5cf6; }
 .export-btn-csv { background-color: #10b981; }
 
+/* 御印・選者の心得：木の掲示板風 */
 .eval-guide-board {
   background: #f3dfbd;
   border: 2px solid #b98b5f;
