@@ -1,3 +1,4 @@
+/* 基本レイアウト */
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   max-width: 600px;
@@ -14,6 +15,7 @@ h1, h2, h3 { text-align: center; margin-top: 0; }
   box-shadow: 0 4px 12px rgba(0,0,0,0.05);
   margin-bottom: 16px;
 }
+/* 入力・ボタン */
 input[type="text"], input[type="number"], select, button {
   font-size: 15px;
   padding: 10px;
@@ -33,6 +35,7 @@ button {
 }
 button:disabled { background-color: #94a3b8; cursor: not-allowed; }
 
+/* セクション見出し */
 .section-title {
   font-size: 14px;
   font-weight: bold;
@@ -42,6 +45,7 @@ button:disabled { background-color: #94a3b8; cursor: not-allowed; }
   padding-left: 8px;
 }
 
+/* 素材カード */
 .word-list { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .card {
   background: #f1f5f9;
@@ -56,6 +60,7 @@ button:disabled { background-color: #94a3b8; cursor: not-allowed; }
 .card.card-5 { border-color: #93c5fd; }
 .card.card-7 { border-color: #fde047; }
 
+/* 句の表示・入れ替え */
 .display-area {
   min-height: 60px;
   border: 2px dashed #94a3b8;
@@ -83,6 +88,7 @@ button:disabled { background-color: #94a3b8; cursor: not-allowed; }
   align-self: flex-start;
 }
 
+/* プレイヤー・投票 */
 .player-board {
   background: #f8fafc;
   border: 1px solid #e2e8f0;
@@ -118,6 +124,7 @@ button:disabled { background-color: #94a3b8; cursor: not-allowed; }
   white-space: nowrap;
 }
 
+/* 得点・役割表示 */
 .score-badge {
   background: #e0f2fe;
   color: #0369a1;
@@ -136,6 +143,7 @@ button:disabled { background-color: #94a3b8; cursor: not-allowed; }
   border: 1px solid #fde047;
 }
 
+/* ゲーム設定 */
 .setting-box {
   background: #f1f5f9;
   border-radius: 8px;
@@ -163,6 +171,7 @@ button:disabled { background-color: #94a3b8; cursor: not-allowed; }
 .setting-item:last-child { margin-bottom: 0; }
 .setting-item input { width: 60px; margin-bottom: 0; text-align: center; }
 
+/* 素材・作者表示 */
 .word-tag {
   display: inline-block;
   padding: 4px 8px;
@@ -178,6 +187,7 @@ button:disabled { background-color: #94a3b8; cursor: not-allowed; }
   opacity: 0.85;
   font-weight: normal;
 }
+/* 選者表示 */
 .host-banner {
   background: #fffbeb;
   border: 1px solid #fcd34d;
@@ -189,6 +199,7 @@ button:disabled { background-color: #94a3b8; cursor: not-allowed; }
   font-weight: bold;
   font-size: 14px;
 }
+/* 御印・選者の心得 */
 .eval-guide-box {
   background: #f8fafc;
   border: 1px solid #cbd5e1;
@@ -212,6 +223,7 @@ button:disabled { background-color: #94a3b8; cursor: not-allowed; }
   padding: 10px 12px;
   line-height: 1.6;
 }
+/* エクスポート */
 .export-group {
   display: flex;
   gap: 8px;
@@ -220,7 +232,6 @@ button:disabled { background-color: #94a3b8; cursor: not-allowed; }
 .export-btn-text { background-color: #8b5cf6; }
 .export-btn-csv { background-color: #10b981; }
 
-/* 御印・選者の心得：木の掲示板風 */
 .eval-guide-board {
   background: #f3dfbd;
   border: 2px solid #b98b5f;
