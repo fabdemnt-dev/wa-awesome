@@ -28,7 +28,9 @@ const evalOptionsMaster = {
   kuruoshi: { icon: "🍶", label: "🍶 狂おし", pts: 1 },
   medurashi:{ icon: "✨", label: "✨ めづらし", pts: 1 },
   yugen:    { icon: "🌙", label: "🌙 幽玄", pts: 1 },
-  tae:      { icon: "🪭", label: "🪭 妙なり", pts: 10 }
+  tae:      { icon: "🪭", label: "🪭 妙なり", pts: 10 },
+  // 見学者専用のお楽しみリアクション（得点計算には含めない）
+  kanpu:    { icon: "👏", label: "👏 感服つかまつった", pts: 0 }
 };
 
 const hostOptionKeys = [
@@ -48,6 +50,10 @@ const childOptionKeys = [
   "wabisabi"
 ];
 
+const spectatorOptionKeys = [
+  "kanpu"
+];
+
 const colorPalette = [
   { bg: '#dbeafe', text: '#1e40af', border: '#bfdbfe' },
   { bg: '#fef3c7', text: '#92400e', border: '#fde68a' },
@@ -65,5 +71,6 @@ export {
   evalOptionsMaster,
   hostOptionKeys,
   childOptionKeys,
+  spectatorOptionKeys,
   colorPalette
 };

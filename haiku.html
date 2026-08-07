@@ -133,8 +133,9 @@
         <input type="checkbox" id="export-all-check" checked> 過去の履歴もすべて含めて出力する
       </label>
 
+      <div id="next-round-hint" style="display:none; font-size:12px; color:#94a3b8; margin-bottom:6px;">※「次の節に進む」は今節の選者（親）だけが押せます</div>
       <div style="margin-top:20px; display:flex; gap:10px;">
-        <button onclick="nextRound()" class="btn-success" style="flex:2;">次の節に進む</button>
+        <button id="next-round-btn" onclick="nextRound()" class="btn-success" style="flex:2;">次の節に進む</button>
         <button onclick="exportText()" style="flex:1; background-color: #5865F2;">📋 コピー (Discord用)</button>
         <button onclick="exportCSV()" style="flex:1; background-color: #059669;">📥 CSV保存</button>
       </div>

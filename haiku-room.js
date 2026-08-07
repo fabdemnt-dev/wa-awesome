@@ -84,7 +84,16 @@ if (!roomSnapshot.exists()) {
 
       const roleBtnText = state.isSpectator ? "⚔️ プレイヤーとして途中参戦する" : "👀 見学モードに切り替える";
       if (document.getElementById('role-toggle-btn-lobby')) document.getElementById('role-toggle-btn-lobby').innerText = roleBtnText;
-      if (document.getElementById('role-toggle-btn-game')) document.getElementById('role-toggle-btn-game').innerText = roleBtnText;
+
+      // ラウンド中は選者本人だけ、見学モードへの切り替えボタンを無効化する
+      const isHostDuringPlaying = state.currentData.status === 'playing' && !state.isSpectator && state.myName === currentHost;
+      const gameRoleBtn = document.getElementById('role-toggle-btn-game');
+      if (gameRoleBtn) {
+        gameRoleBtn.innerText = isHostDuringPlaying ? "👑 選者はラウンド中切替不可" : roleBtnText;
+        gameRoleBtn.disabled = isHostDuringPlaying;
+        gameRoleBtn.style.opacity = isHostDuringPlaying ? '0.5' : '1';
+        gameRoleBtn.style.cursor = isHostDuringPlaying ? 'not-allowed' : 'pointer';
+      }
 
       const st = state.currentData.settings || { in5: 5, in7: 3, hand5: 5, hand7: 3 };
       if (document.getElementById('set-in-5')) document.getElementById('set-in-5').value = st.in5;
@@ -154,6 +163,37 @@ if (!roomSnapshot.exists()) {
 window.toggleRole = async function() {
   if (!state.roomRef) return;
   if (state.isSpectator) {
+    // ゲーム中の途中参戦は、配り終わってない素材の余りが手札分あるときだけ許可する
+    if (state.currentData?.status === 'playing') {
+      const st = state.currentData.settings || { hand5: 5, hand7: 3 };
+      const words5 = state.currentData.words5 || [];
+      const words7 = state.currentData.words7 || [];
+      const hands5 = state.currentData.hands5 || {};
+      const hands7 = state.currentData.hands7 || {};
+
+      const assignedIds5 = new Set(Object.values(hands5).flat().map(w => w.id));
+      const assignedIds7 = new Set(Object.values(hands7).flat().map(w => w.id));
+      const leftover5 = words5.filter(w => !assignedIds5.has(w.id));
+      const leftover7 = words7.filter(w => !assignedIds7.has(w.id));
+
+      if (leftover5.length < st.hand5 || leftover7.length < st.hand7) {
+        return alert(`途中参戦できません。手札に配るための素材が足りていません。\n（五音: 余り${leftover5.length}個 / 必要${st.hand5}個、七音: 余り${leftover7.length}個 / 必要${st.hand7}個）`);
+      }
+
+      const newHand5 = [...leftover5].sort(() => Math.random() - 0.5).slice(0, st.hand5);
+      const newHand7 = [...leftover7].sort(() => Math.random() - 0.5).slice(0, st.hand7);
+
+      await updateDoc(state.roomRef, {
+        spectators: arrayRemove(state.myName),
+        players: arrayUnion(state.myName),
+        [`hands5.${state.myName}`]: newHand5,
+        [`hands7.${state.myName}`]: newHand7
+      });
+      state.isSpectator = false;
+      alert("素材の余りから手札を配りました！プレイヤーとして参加しました！");
+      return;
+    }
+
     await updateDoc(state.roomRef, {
       spectators: arrayRemove(state.myName),
       players: arrayUnion(state.myName)
@@ -161,6 +201,16 @@ window.toggleRole = async function() {
     state.isSpectator = false;
     alert("プレイヤーとして参加しました！");
   } else {
+    // ラウンド中は選者本人が見学モードに切り替わると、players配列がズレて
+    // hostIndexが指す「選者」が別人にすり替わってしまうため、選者本人の切り替えを禁止する
+    if (state.currentData?.status === 'playing') {
+      const players = state.currentData.players || [];
+      const currentHost = players[(state.currentData.hostIndex || 0) % (players.length || 1)];
+      if (state.myName === currentHost) {
+        return alert('今節の選者（親）はラウンド中に見学モードへ切り替えられません。\n次の節に進んでから切り替えてください。');
+      }
+    }
+
     await updateDoc(state.roomRef, {
       players: arrayRemove(state.myName),
       spectators: arrayUnion(state.myName)

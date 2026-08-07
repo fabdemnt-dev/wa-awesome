@@ -1,5 +1,5 @@
 import state from './haiku-state.js';
-import { escapeHTML, escapeJS, evalOptionsMaster, hostOptionKeys, childOptionKeys, colorPalette } from './haiku-utils.js';
+import { escapeHTML, escapeJS, evalOptionsMaster, hostOptionKeys, childOptionKeys, spectatorOptionKeys, colorPalette } from './haiku-utils.js';
 
 export function getAuthorStyle(authorName) {
   if (!state.currentData || !state.currentData.players) return colorPalette[0];
@@ -25,7 +25,12 @@ window.toggleEvalGuide = function() {
   }
 };
 
+let previousIsSpectator = null; // 見学⇔プレイヤーの切り替わりを検知して、そのときは問答無用で入力欄を作り直すため
+
 export function renderInputFields(c5, c7) {
+  const spectatorChanged = previousIsSpectator !== null && previousIsSpectator !== state.isSpectator;
+  previousIsSpectator = state.isSpectator;
+
   ['5', '7'].forEach(type => {
     const container = document.getElementById(`inputs-${type}-container`);
     if (!container) return;
@@ -34,7 +39,7 @@ export function renderInputFields(c5, c7) {
       return;
     }
     const count = type === '5' ? c5 : c7;
-    if (container.children.length !== count) {
+    if (spectatorChanged || container.children.length !== count) {
       container.innerHTML = '';
       for (let i = 1; i <= count; i++) {
         const inp = document.createElement('input');
@@ -89,7 +94,7 @@ export function renderBoards() {
   const players = state.currentData.players || [];
   const currentHost = players[(state.currentData.hostIndex || 0) % (players.length || 1)];
   const isHost = (state.myName === currentHost);
-  const availableKeys = isHost ? hostOptionKeys : childOptionKeys;
+  const availableKeys = state.isSpectator ? spectatorOptionKeys : (isHost ? hostOptionKeys : childOptionKeys);
 
   boardList.innerHTML = Object.keys(phrases).map(pName => {
     const isRevealed = revealedPhrases[pName];
@@ -155,6 +160,8 @@ export function renderBoards() {
           <div class="vote-select-group" style="margin-top:8px;">
             ${hasAlreadyVotedAsChild ? `
               <span style="font-size:13px; color:#10b981; font-weight:bold;">✅ 御印送信済み (${evalOptionsMaster[votes[state.myName][pName]]?.label || ''})</span>
+            ` : state.isSpectator ? `
+              <button class="vote-submit-btn" onclick="submitVote('${jsPName}', '${spectatorOptionKeys[0]}')">${evalOptionsMaster[spectatorOptionKeys[0]].label}</button>
             ` : `
               <select class="vote-select" id="vote-select-${jsPName}">
                 <option value="">-- 御印を選択 --</option>
@@ -162,9 +169,27 @@ export function renderBoards() {
               </select>
               <button class="vote-submit-btn" onclick="submitVote('${jsPName}')">御印を贈る</button>
             `}
+            ${state.isSpectator ? '<div style="font-size:11px; color:#94a3b8; margin-top:4px;">👀 見学者の御印はお楽しみ用（得点には反映されません）</div>' : ''}
           </div>
         ` : ''}
       </div>
     `;
   }).join('');
+
+  // 「次の節に進む」は選者（親）だけが押せるようにする
+  const nextBtn = document.getElementById('next-round-btn');
+  const nextHint = document.getElementById('next-round-hint');
+  if (nextBtn) {
+    if (isHost) {
+      nextBtn.disabled = false;
+      nextBtn.style.opacity = '1';
+      nextBtn.style.cursor = 'pointer';
+      if (nextHint) nextHint.style.display = 'none';
+    } else {
+      nextBtn.disabled = true;
+      nextBtn.style.opacity = '0.5';
+      nextBtn.style.cursor = 'not-allowed';
+      if (nextHint) nextHint.style.display = 'block';
+    }
+  }
 }

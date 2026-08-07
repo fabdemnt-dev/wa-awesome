@@ -32,7 +32,7 @@ window.revealPhrase = async function(pName) {
   });
 };
 window.doSelfPraise = async function() {
-  if (!state.roomRef || state.isSpectator || state.isSubmittingSelfPraise) return;
+  if (!state.roomRef || state.isSubmittingSelfPraise) return;
   state.isSubmittingSelfPraise = true;
   try {
     await updateDoc(state.roomRef, {
@@ -44,8 +44,8 @@ window.doSelfPraise = async function() {
     state.isSubmittingSelfPraise = false;
   }
 };
-window.submitVote = async function(targetPlayer) {
-  const evalKey = document.getElementById(`vote-select-${targetPlayer}`)?.value;
+window.submitVote = async function(targetPlayer, forcedKey) {
+  const evalKey = forcedKey || document.getElementById(`vote-select-${targetPlayer}`)?.value;
   if (!evalKey) return alert('御印を選択してください');
 
   const players = state.currentData.players || [];
