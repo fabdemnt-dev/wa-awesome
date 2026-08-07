@@ -2,6 +2,8 @@ import { updateDoc, arrayUnion } from "https://www.gstatic.com/firebasejs/10.8.0
 import state from './haiku-state.js';
 import { evalOptionsMaster } from './haiku-utils.js';
 import { renderInputFields } from './haiku-render.js';
+import { defaultWords5, defaultWords7 } from './haiku-default-words.js';
+import { getWordSetById } from './haiku-wordsets.js';
 
 window.addWords = async function() {
   if (!state.currentData || state.isSpectator) return;
@@ -30,6 +32,50 @@ window.addWords = async function() {
   renderInputFields(st.in5, st.in7);
   const addBtn = document.getElementById('add-word-btn');
   if (addBtn) addBtn.innerText = "✅ 追加完了！";
+};
+window.fillDefaultWords = async function() {
+  if (!state.currentData) return;
+
+  const st = state.currentData.settings || { hand5: 5, hand7: 3 };
+  const players = state.currentData.players || [];
+  const w5 = state.currentData.words5 || [];
+  const w7 = state.currentData.words7 || [];
+
+  // 今いる人数分の句会を始められる数まで、足りない分だけデフォルト素材で埋める
+  const need5 = Math.max(0, players.length * st.hand5 - w5.length);
+  const need7 = Math.max(0, players.length * st.hand7 - w7.length);
+
+  if (need5 === 0 && need7 === 0) {
+    return alert('すでに句会を始められるだけの素材が集まっています！');
+  }
+
+  // ロビーで選ばれたワードセットがあればそれを使い、なければ標準セットを使う
+  const selectedId = document.getElementById('wordset-select')?.value || 'builtin';
+  const customSet = selectedId !== 'builtin' ? getWordSetById(selectedId) : null;
+  const pool5 = customSet?.words5?.length ? customSet.words5 : defaultWords5;
+  const pool7 = customSet?.words7?.length ? customSet.words7 : defaultWords7;
+  const authorLabel = customSet ? `🎴${customSet.name}` : "🎴お題ぶくろ";
+
+  const pickWords = (pool, count) => {
+    if (count === 0 || pool.length === 0) return [];
+    const shuffled = [...pool].sort(() => Math.random() - 0.5);
+    const picked = [];
+    for (let i = 0; i < count; i++) {
+      picked.push({
+        text: shuffled[i % shuffled.length],
+        author: authorLabel,
+        id: Date.now() + "_" + Math.random().toString(36).substring(2, 9)
+      });
+    }
+    return picked;
+  };
+
+  const add5 = pickWords(pool5, need5);
+  const add7 = pickWords(pool7, need7);
+
+  await updateDoc(state.roomRef, { words5: arrayUnion(...add5), words7: arrayUnion(...add7) });
+  const setLabel = customSet ? `「${customSet.name}」` : '標準セット';
+  alert(`🎴 ${setLabel}から 五音${add5.length}個・七音${add7.length}個 を補充しました！`);
 };
 window.startGame = async function() {
   if (state.isSpectator) return alert('見学モードでは句会を開始できません');

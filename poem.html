@@ -43,7 +43,15 @@
     <div id="word-inputs"></div>
     
     <button id="add-word-btn" onclick="addWords()" style="margin-top: 12px;">素材を追加</button>
-    
+
+    <div style="margin-top: 12px;">
+      <label style="font-size: 13px; color: #475569; display:block; margin-bottom: 4px;">🎴 使うワードセット:</label>
+      <select id="wordset-select" style="width:100%;"></select>
+      <div style="font-size: 11px; margin-top: 4px;"><a href="wordset.html" target="_blank">＋ ワードセットを作る・編集する</a></div>
+    </div>
+    <button id="fill-default-btn" onclick="fillDefaultWords()" style="background-color: #64748b; margin-top: 8px;">🎴 足りない素材をデフォルトで補充</button>
+    <div style="font-size: 11px; color: #94a3b8; margin-top: 4px;">※誰も素材を入力しなくても、この一発で開始できます</div>
+
     <div style="margin-top: 20px;">
       <h3>参加メンバー</h3>
       <div id="player-list"></div>

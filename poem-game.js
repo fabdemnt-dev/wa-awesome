@@ -1,5 +1,7 @@
 import { updateDoc, arrayUnion } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import state from './poem-state.js';
+import { defaultWords } from './poem-default-words.js';
+import { getWordSetById } from './poem-wordsets.js';
 
 window.addWords = async function() {
   if (state.isSpectator) return alert('見学モードでは素材投稿はできません');
@@ -23,6 +25,38 @@ window.addWords = async function() {
   await updateDoc(state.roomRef, { words: arrayUnion(...newWords) });
   inputs.forEach(inp => inp.value = '');
   alert('素材を追加しました！');
+};
+
+window.fillDefaultWords = async function() {
+  if (!state.currentData) return;
+
+  const players = state.currentData.players || [];
+  const words = state.currentData.words || [];
+  const st = state.currentData.settings || { handCount: 5 };
+
+  // 今いる人数分の手札を配れる数まで、足りない分だけデフォルト素材で埋める
+  const need = Math.max(0, players.length * st.handCount - words.length);
+  if (need === 0) return alert('すでに開始できるだけの素材が集まっています！');
+
+  // ロビーで選ばれたワードセットがあればそれを使い、なければ標準セットを使う
+  const selectedId = document.getElementById('wordset-select')?.value || 'builtin';
+  const customSet = selectedId !== 'builtin' ? getWordSetById(selectedId) : null;
+  const pool = customSet?.words?.length ? customSet.words : defaultWords;
+  const authorLabel = customSet ? `🎴${customSet.name}` : "🎴お題ぶくろ";
+
+  const shuffled = [...pool].sort(() => Math.random() - 0.5);
+  const added = [];
+  for (let i = 0; i < need; i++) {
+    added.push({
+      text: shuffled[i % shuffled.length],
+      author: authorLabel,
+      id: Date.now() + "_" + Math.random().toString(36).substring(2, 9)
+    });
+  }
+
+  await updateDoc(state.roomRef, { words: arrayUnion(...added) });
+  const setLabel = customSet ? `「${customSet.name}」` : '標準セット';
+  alert(`🎴 ${setLabel}から ${added.length}個 を補充しました！`);
 };
 
 window.startGame = async function() {

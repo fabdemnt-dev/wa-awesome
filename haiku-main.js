@@ -15,6 +15,7 @@ import './haiku-render.js'; // UI描画処理
 import './haiku-room.js';   // 入室・ロビー・参加者管理
 import './haiku-game.js';   // 素材投稿・ゲーム進行
 import './haiku-action.js'; // 手札・投稿・投票操作
+import './haiku-wordsets.js'; // 保存済みワードセットの読み込み
 
 // 参加ボタンにイベントリスナーを登録
 document.getElementById("join-btn")

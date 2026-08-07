@@ -1,0 +1,27 @@
+import { db } from './firebase-config.js';
+import { collection, query, where, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+let cachedSets = [];
+
+export function getWordSetById(id) {
+  return cachedSets.find(s => s.id === id) || null;
+}
+
+function escapeOpt(str) {
+  return String(str).replace(/[<>&"]/g, m => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[m]));
+}
+
+function renderOptions() {
+  const sel = document.getElementById('wordset-select');
+  if (!sel) return;
+  const current = sel.value;
+  sel.innerHTML = '<option value="builtin">🎲 標準セット（おまかせ）</option>' +
+    cachedSets.map(s => `<option value="${s.id}">📗 ${escapeOpt(s.name)}（${(s.words || []).length}こ）</option>`).join('');
+  if ([...sel.options].some(o => o.value === current)) sel.value = current;
+}
+
+const q = query(collection(db, 'wordsets'), where('type', '==', 'poem'));
+onSnapshot(q, (snap) => {
+  cachedSets = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  renderOptions();
+});

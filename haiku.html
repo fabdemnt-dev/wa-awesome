@@ -76,6 +76,14 @@
         集まった素材: 五音 <span id="total-words-5">0</span> 個 / 七音 <span id="total-words-7">0</span> 個
       </div>
 
+      <div style="margin-top:10px;">
+        <label style="font-size:13px; color:#475569; display:block; margin-bottom:4px;">🎴 使うワードセット:</label>
+        <select id="wordset-select" style="width:100%;"></select>
+        <div style="font-size:11px; margin-top:4px;"><a href="wordset.html" target="_blank">＋ ワードセットを作る・編集する</a></div>
+      </div>
+      <button id="fill-default-btn" onclick="fillDefaultWords()" class="btn-secondary" style="margin-top:8px;">🎴 足りない素材をデフォルトで補充</button>
+      <div style="font-size:12px; color:#94a3b8; margin-top:4px;">※誰も素材を入力しなくても、この一発で句会を始められます</div>
+
       <button onclick="startGame()" class="btn-success" style="margin-top:20px; width:100%; font-size:18px; padding:12px;">句会を始める！</button>
     </div>
 
@@ -106,7 +114,7 @@
 
       <hr style="margin:20px 0;">
 
-      <div class="collapsible-header　eval-guide-board" onclick="toggleEvalGuide()">
+      <div class="collapsible-header eval-guide-board" onclick="toggleEvalGuide()">
         <span>📜 御印・選者の心得</span>
         <span id="eval-guide-toggle-icon">▼</span>
       </div>
