@@ -27,7 +27,26 @@
     </div>
 
     <div class="form-block">
-      <label class="form-label">1. セットのなまえ</label>
+      <label class="form-label">1. あなたの名前</label>
+      <p class="form-hint">新規作成でも編集でも、あなたの名前が編集者として記録されます</p>
+      <div class="input-with-counter">
+        <input type="text" id="poem-creator-name" maxlength="20" placeholder="例：芭蕉" oninput="onWordSetFormInput()">
+      </div>
+    </div>
+
+    <div class="form-block">
+      <label class="checkbox-label">
+        <input type="checkbox" id="poem-has-password" onchange="onWordSetFormInput()">
+        🔒 パスワードをつける（自分だけが編集・削除できるようにする）
+      </label>
+      <div id="poem-password-box" class="password-box" style="display:none;">
+        <input type="password" id="poem-password" placeholder="パスワード" oninput="onWordSetFormInput()">
+        <p class="form-hint">※編集時に空欄のままにすると、今のパスワードのまま変更されません</p>
+      </div>
+    </div>
+
+    <div class="form-block">
+      <label class="form-label">2. セットのなまえ</label>
       <div class="input-with-counter">
         <input type="text" id="poem-set-name" maxlength="20" placeholder="例：夏のことば" oninput="onWordSetFormInput()">
         <span class="char-counter" id="poem-name-counter">0/20</span>
@@ -35,7 +54,7 @@
     </div>
 
     <div class="form-block">
-      <label class="form-label">2. ことばを入力</label>
+      <label class="form-label">3. ことばを入力</label>
       <p class="form-hint">改行・スペース・、。・，で区切ると、自動でことばに分けられます</p>
       <div class="textarea-with-counter">
         <textarea id="poem-words-input" maxlength="1000" placeholder="夏　海　青空、アイス。&#10;花火　せみ　入道雲、&#10;夕立" oninput="onWordSetFormInput()"></textarea>
@@ -45,7 +64,7 @@
     </div>
 
     <div class="form-block">
-      <label class="form-label">3. プレビュー（<span id="poem-preview-count">0</span>こ）</label>
+      <label class="form-label">4. プレビュー（<span id="poem-preview-count">0</span>こ）</label>
       <div class="chip-list" id="poem-preview-chips"></div>
     </div>
 
@@ -71,7 +90,26 @@
     </div>
 
     <div class="form-block">
-      <label class="form-label">1. セットのなまえ</label>
+      <label class="form-label">1. あなたの名前</label>
+      <p class="form-hint">新規作成でも編集でも、あなたの名前が編集者として記録されます</p>
+      <div class="input-with-counter">
+        <input type="text" id="haiku-creator-name" maxlength="20" placeholder="例：芭蕉" oninput="onWordSetFormInput()">
+      </div>
+    </div>
+
+    <div class="form-block">
+      <label class="checkbox-label">
+        <input type="checkbox" id="haiku-has-password" onchange="onWordSetFormInput()">
+        🔒 パスワードをつける（自分だけが編集・削除できるようにする）
+      </label>
+      <div id="haiku-password-box" class="password-box" style="display:none;">
+        <input type="password" id="haiku-password" placeholder="パスワード" oninput="onWordSetFormInput()">
+        <p class="form-hint">※編集時に空欄のままにすると、今のパスワードのまま変更されません</p>
+      </div>
+    </div>
+
+    <div class="form-block">
+      <label class="form-label">2. セットのなまえ</label>
       <div class="input-with-counter">
         <input type="text" id="haiku-set-name" maxlength="20" placeholder="例：オタクっぽいことば" oninput="onWordSetFormInput()">
         <span class="char-counter" id="haiku-name-counter">0/20</span>
@@ -80,7 +118,7 @@
 
     <div class="grid-2col">
       <div class="form-block">
-        <label class="form-label">2. 五音のことばを入力</label>
+        <label class="form-label">3. 五音のことばを入力</label>
         <p class="form-hint">改行・スペース・、。・，で区切ると、自動で五音のことばに分けられます</p>
         <div class="textarea-with-counter">
           <textarea id="haiku-words5-input" maxlength="1000" placeholder="推しが好き　尊いなあ&#10;沼の中、課金する。" oninput="onWordSetFormInput()"></textarea>
@@ -90,7 +128,7 @@
         <div class="count-pill" id="haiku-words5-pill">0こ のことば</div>
       </div>
       <div class="form-block">
-        <label class="form-label">3. 七音のことばを入力</label>
+        <label class="form-label">4. 七音のことばを入力</label>
         <p class="form-hint">改行・スペース・、。・，で区切ると、自動で七音のことばに分けられます</p>
         <div class="textarea-with-counter">
           <textarea id="haiku-words7-input" maxlength="1000" placeholder="ガチャが出ない　眠れない&#10;推しの笑顔で　今日も生きる" oninput="onWordSetFormInput()"></textarea>
@@ -102,7 +140,7 @@
     </div>
 
     <div class="form-block">
-      <label class="form-label">4. プレビュー</label>
+      <label class="form-label">5. プレビュー</label>
       <div class="grid-2col">
         <div class="preview-box preview-5">
           <div class="preview-box-title">五音のことば（<span id="haiku5-preview-count">0</span>こ）</div>

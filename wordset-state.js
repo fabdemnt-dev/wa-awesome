@@ -1,9 +1,10 @@
 const state = {
   mode: "poem", // 'poem' | 'haiku'
   editingId: { poem: null, haiku: null },
+  expandedId: { poem: null, haiku: null }, // 「詳細を見る」で開いているセットのID
   forms: {
-    poem: { name: "", words: "" },
-    haiku: { name: "", words5: "", words7: "" },
+    poem: { name: "", words: "", creatorName: "", hasPassword: false, password: "" },
+    haiku: { name: "", words5: "", words7: "", creatorName: "", hasPassword: false, password: "" },
   },
   sets: { poem: [], haiku: [] },
 };

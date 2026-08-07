@@ -43,3 +43,13 @@ export function iconForId(id) {
   }
   return iconPalette[hash % iconPalette.length];
 }
+
+// パスワードをそのまま保存しないための簡易ハッシュ（※本格的な暗号強度はない、簡易な難読化）
+export function simpleHash(str) {
+  let hash = 0;
+  const s = String(str || "");
+  for (let i = 0; i < s.length; i++) {
+    hash = (Math.imul(31, hash) + s.charCodeAt(i)) | 0;
+  }
+  return "h" + (hash >>> 0).toString(36);
+}

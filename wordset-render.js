@@ -31,6 +31,13 @@ function renderPoemForm() {
   const f = state.forms.poem;
   setInputValue('poem-set-name', f.name);
   setInputValue('poem-words-input', f.words);
+  setInputValue('poem-creator-name', f.creatorName);
+  setInputValue('poem-password', f.password);
+  const cb = document.getElementById('poem-has-password');
+  if (cb && cb.checked !== !!f.hasPassword) cb.checked = !!f.hasPassword;
+  const pwBox = document.getElementById('poem-password-box');
+  if (pwBox) pwBox.style.display = f.hasPassword ? 'block' : 'none';
+
   setText('poem-name-counter', `${f.name.length}/20`);
   setText('poem-words-counter', `${f.words.length}/1000`);
 
@@ -50,6 +57,13 @@ function renderHaikuForm() {
   setInputValue('haiku-set-name', f.name);
   setInputValue('haiku-words5-input', f.words5);
   setInputValue('haiku-words7-input', f.words7);
+  setInputValue('haiku-creator-name', f.creatorName);
+  setInputValue('haiku-password', f.password);
+  const cb = document.getElementById('haiku-has-password');
+  if (cb && cb.checked !== !!f.hasPassword) cb.checked = !!f.hasPassword;
+  const pwBox = document.getElementById('haiku-password-box');
+  if (pwBox) pwBox.style.display = f.hasPassword ? 'block' : 'none';
+
   setText('haiku-name-counter', `${f.name.length}/20`);
   setText('haiku-words5-counter', `${f.words5.length}/1000`);
   setText('haiku-words7-counter', `${f.words7.length}/1000`);
@@ -80,6 +94,11 @@ function sortByNewest(list) {
   return [...list].sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
 }
 
+function creatorsLabel(s) {
+  const creators = (s.creators && s.creators.length) ? s.creators : (s.creatorName ? [s.creatorName] : []);
+  return creators.length ? creators.join('、') : '不明';
+}
+
 function renderPoemList() {
   const el = document.getElementById('poem-set-list');
   if (!el) return;
@@ -87,20 +106,32 @@ function renderPoemList() {
   el.innerHTML = list.length ? list.map(s => {
     const icon = iconForId(s.id);
     const words = s.words || [];
+    const isOpen = state.expandedId.poem === s.id;
     return `
-      <div class="set-item">
-        <div class="set-icon" style="background:${icon.bg};">${icon.emoji}</div>
-        <div class="set-info">
-          <div class="set-name-row">
-            <span class="set-name">${escapeHTML(s.name)}</span>
-            <span class="count-badge">${words.length}こ</span>
+      <div class="set-item-wrap">
+        <div class="set-item" style="${isOpen ? 'border-radius:10px 10px 0 0;' : ''}">
+          <div class="set-icon" style="background:${icon.bg};">${icon.emoji}</div>
+          <div class="set-info">
+            <div class="set-name-row">
+              <span class="set-name">${s.hasPassword ? '🔒 ' : ''}${escapeHTML(s.name)}</span>
+              <span class="count-badge">${words.length}こ</span>
+            </div>
+            <div class="set-creator">作: ${escapeHTML(creatorsLabel(s))}</div>
+            <div class="set-preview">${escapeHTML(previewLine(words))}</div>
           </div>
-          <div class="set-preview">${escapeHTML(previewLine(words))}</div>
+          <div class="set-actions">
+            <button class="btn-view" onclick="toggleWordSetDetail('${s.id}')">${isOpen ? '📖 閉じる' : '📖 のぞく'}</button>
+            <button class="btn-edit" onclick="editWordSet('${s.id}')">✏️ 編集</button>
+            <button class="btn-delete" onclick="deleteWordSet('${s.id}')">🗑 削除</button>
+          </div>
         </div>
-        <div class="set-actions">
-          <button class="btn-edit" onclick="editWordSet('${s.id}')">✏️ 編集</button>
-          <button class="btn-delete" onclick="deleteWordSet('${s.id}')">🗑 削除</button>
-        </div>
+        ${isOpen ? `
+          <div class="set-detail">
+            <div class="chip-list">
+              ${words.length ? words.map(w => `<span class="chip">${escapeHTML(w)}</span>`).join('') : '<span class="chip-empty">ことばがありません</span>'}
+            </div>
+          </div>
+        ` : ''}
       </div>
     `;
   }).join('') : '<p class="empty-hint">まだワードセットがありません</p>';
@@ -113,21 +144,38 @@ function renderHaikuList() {
   el.innerHTML = list.length ? list.map(s => {
     const icon = iconForId(s.id);
     const words5 = s.words5 || [], words7 = s.words7 || [];
+    const isOpen = state.expandedId.haiku === s.id;
     return `
-      <div class="set-item">
-        <div class="set-icon" style="background:${icon.bg};">${icon.emoji}</div>
-        <div class="set-info">
-          <div class="set-name-row">
-            <span class="set-name">${escapeHTML(s.name)}</span>
-            <span class="count-badge count-badge-5">五音 ${words5.length}こ</span>
-            <span class="count-badge count-badge-7">七音 ${words7.length}こ</span>
+      <div class="set-item-wrap">
+        <div class="set-item" style="${isOpen ? 'border-radius:10px 10px 0 0;' : ''}">
+          <div class="set-icon" style="background:${icon.bg};">${icon.emoji}</div>
+          <div class="set-info">
+            <div class="set-name-row">
+              <span class="set-name">${s.hasPassword ? '🔒 ' : ''}${escapeHTML(s.name)}</span>
+              <span class="count-badge count-badge-5">五音 ${words5.length}こ</span>
+              <span class="count-badge count-badge-7">七音 ${words7.length}こ</span>
+            </div>
+            <div class="set-creator">作: ${escapeHTML(creatorsLabel(s))}</div>
+            <div class="set-preview">${escapeHTML(previewLine([...words5, ...words7]))}</div>
           </div>
-          <div class="set-preview">${escapeHTML(previewLine([...words5, ...words7]))}</div>
+          <div class="set-actions">
+            <button class="btn-view" onclick="toggleWordSetDetail('${s.id}')">${isOpen ? '📖 閉じる' : '📖 のぞく'}</button>
+            <button class="btn-edit" onclick="editWordSet('${s.id}')">✏️ 編集</button>
+            <button class="btn-delete" onclick="deleteWordSet('${s.id}')">🗑 削除</button>
+          </div>
         </div>
-        <div class="set-actions">
-          <button class="btn-edit" onclick="editWordSet('${s.id}')">✏️ 編集</button>
-          <button class="btn-delete" onclick="deleteWordSet('${s.id}')">🗑 削除</button>
-        </div>
+        ${isOpen ? `
+          <div class="set-detail">
+            <div class="preview-box-title">五音のことば（${words5.length}こ）</div>
+            <div class="chip-list">
+              ${words5.length ? words5.map(w => `<span class="chip chip-5">${escapeHTML(w)}</span>`).join('') : '<span class="chip-empty">ことばがありません</span>'}
+            </div>
+            <div class="preview-box-title" style="margin-top:10px;">七音のことば（${words7.length}こ）</div>
+            <div class="chip-list">
+              ${words7.length ? words7.map(w => `<span class="chip chip-7">${escapeHTML(w)}</span>`).join('') : '<span class="chip-empty">ことばがありません</span>'}
+            </div>
+          </div>
+        ` : ''}
       </div>
     `;
   }).join('') : '<p class="empty-hint">まだワードセットがありません</p>';
