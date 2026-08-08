@@ -176,6 +176,33 @@ window.updateHandCountSetting = async function() {
 window.toggleRole = async function() {
   if (!state.roomRef) return;
   if (state.isSpectator) {
+    // ゲーム中の途中参戦は、配り終わってない素材の余りが手札分あるときだけ許可する（俳句版と同じ考え方）
+    if (state.currentData?.status === 'playing') {
+      const st = state.currentData.settings || { handCount: 5 };
+      const words = state.currentData.words || [];
+      const hands = state.currentData.hands || {};
+
+      // 自分の古い手札も含めた「今どこかに配られている素材」のIDを集める
+      // （↓この後で自分の手札は新しいものに上書きされるので、古い分は自然に余りへ戻る）
+      const assignedIds = new Set(Object.values(hands).flat().map(w => w.id));
+      const leftover = words.filter(w => !assignedIds.has(w.id));
+
+      if (leftover.length < st.handCount) {
+        return alert(`途中参戦できません。手札に配るための素材が足りていません。\n（余り${leftover.length}個 / 必要${st.handCount}個）`);
+      }
+
+      const newHand = [...leftover].sort(() => Math.random() - 0.5).slice(0, st.handCount);
+
+      await updateDoc(state.roomRef, {
+        spectators: arrayRemove(state.myName),
+        players: arrayUnion(state.myName),
+        [`hands.${state.myName}`]: newHand
+      });
+      state.isSpectator = false;
+      alert("素材の余りから手札を配りました！プレイヤーとして参加しました！");
+      return;
+    }
+
     await updateDoc(state.roomRef, {
       spectators: arrayRemove(state.myName),
       players: arrayUnion(state.myName)
