@@ -10,7 +10,8 @@ export function escapeHTML(str) {
 
 export function escapeJS(str) {
   if (typeof str !== 'string') return '';
-  return str.replace(/'/g, "\\'").replace(/"/g, '\\"');
+  const jsEscaped = str.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"');
+  return escapeHTML(jsEscaped);
 }
 
 export function renderInputFields(count, SAMPLE_PHRASES) {

@@ -50,7 +50,7 @@ window.submitVote = async function(targetPlayer, forcedKey) {
   if (!evalKey) return alert('御印を選択してください');
 
   const players = state.currentData.players || [];
-  const currentHost = players[(state.currentData.hostIndex || 0) % (players.length || 1)];
+  const currentHost = players.includes(state.currentData.currentHost) ? state.currentData.currentHost : (players[0] || '');
   const isHost = (state.myName === currentHost);
 
   if (isHost) {
@@ -69,14 +69,26 @@ window.submitVote = async function(targetPlayer, forcedKey) {
       alert('御印の送信に失敗しました: ' + e.message);
     }
   } else {
-    const myVotes = state.currentData.votes?.[state.myName] || {};
-    const hasVotedAnywhere = Object.values(myVotes).some(vote => vote != null);
-
-    if (hasVotedAnywhere) {
-      return alert('御印は1節につき1つまでしか贈れません！');
+    // トランザクションでサーバー側から最新のvotesを読んでチェックすることで、
+    // 複数の句をほぼ同時にタップしても「1節1回」の制限をすり抜けられないようにする
+    try {
+      await runTransaction(db, async (tx) => {
+        const snap = await tx.get(state.roomRef);
+        const myVotes = snap.data()?.votes?.[state.myName] || {};
+        const hasVotedAnywhere = Object.values(myVotes).some(vote => vote != null);
+        if (hasVotedAnywhere) {
+          throw new Error('ALREADY_VOTED');
+        }
+        tx.update(state.roomRef, { [`votes.${state.myName}.${targetPlayer}`]: evalKey });
+      });
+      alert('御印を贈りました！');
+    } catch (e) {
+      if (e.message === 'ALREADY_VOTED') {
+        alert('御印は1節につき1つまでしか贈れません！');
+      } else {
+        console.error(e);
+        alert('御印の送信に失敗しました: ' + e.message);
+      }
     }
-
-    await updateDoc(state.roomRef, { [`votes.${state.myName}.${targetPlayer}`]: evalKey });
-    alert('御印を贈りました！');
   }
 };

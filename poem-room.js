@@ -98,6 +98,23 @@ if (materialCount) {
 }
       renderInputFields(st.handCount, SAMPLE_PHRASES);
 
+      // 自分がこれまでに提出した素材を一覧表示する
+      const myWordsEl = document.getElementById('my-submitted-words');
+      if (myWordsEl) {
+        const myWords = (state.currentData.words || []).filter(w => w.author === state.myName);
+        if (myWords.length === 0) {
+          myWordsEl.innerHTML = '';
+        } else {
+          const chip = 'display:inline-block; background:#eff6ff; border:1px solid #93c5fd; border-radius:6px; padding:2px 8px; font-size:12px; margin:2px;';
+          myWordsEl.innerHTML = `
+            <div style="margin-top:8px; font-size:13px; color:#475569;">📝 あなたが提出した素材（${myWords.length}個）</div>
+            <div style="margin-top:4px;">
+              ${myWords.map(w => `<span style="${chip}">${escapeHTML(w.text)}</span>`).join('')}
+            </div>
+          `;
+        }
+      }
+
       const roleBtnText = state.isSpectator ? "⚔️ プレイヤーとして途中参戦する" : "👀 見学モードに切り替える";
       if (document.getElementById('role-toggle-btn-lobby')) document.getElementById('role-toggle-btn-lobby').innerText = roleBtnText;
       if (document.getElementById('role-toggle-btn-game')) document.getElementById('role-toggle-btn-game').innerText = roleBtnText;

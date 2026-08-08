@@ -185,7 +185,7 @@ window.nextRound = async function() {
   if (!state.currentData || state.isProcessingNextRound) return;
 
   const players = state.currentData.players || [];
-  const currentHost = players[(state.currentData.hostIndex || 0) % (players.length || 1)];
+  const currentHost = players.includes(state.currentData.currentHost) ? state.currentData.currentHost : (players[0] || '');
   if (state.myName !== currentHost) {
     return alert('「次の節に進む」は今節の選者（親）だけが押せます');
   }
@@ -196,7 +196,7 @@ window.nextRound = async function() {
 
   try {
     const votes = state.currentData.votes || {}, phrases = state.currentData.phrases || {}, scores = state.currentData.scores || {};
-    const players = state.currentData.players || [], hostIndex = state.currentData.hostIndex || 0;
+    const players = state.currentData.players || [];
     const spectators = state.currentData.spectators || [];
     const newScores = { ...scores };
 
@@ -229,12 +229,20 @@ window.nextRound = async function() {
 
     const nextRoundNum = (state.currentData.roundCount || 1) + 1;
 
+    // 次の選者を「players配列の何番目か」ではなく名前そのもので決める。
+    // こうすることで、途中で誰かが見学に切り替わったり抜けたりして配列が変わっても、
+    // 順番がズレたり誰かが飛ばされたりしなくなる。
+    const currentHostIdx = players.indexOf(currentHost);
+    const nextHost = players.length > 0
+      ? players[(currentHostIdx === -1 ? 0 : currentHostIdx + 1) % players.length]
+      : '';
+
     const currentRoundHistory = { 
       round: state.currentData.roundCount || 1, 
       phrases, 
       phraseDetails: state.currentData.phraseDetails || {}, 
       votes, 
-      host: players[hostIndex % (players.length || 1)] || '' 
+      host: currentHost 
     };
 
     // プレイヤーが入力した素材は、使われたかどうかに関わらず、設定がONなら次の節に持ち越す
@@ -263,7 +271,7 @@ window.nextRound = async function() {
 
     await updateDoc(state.roomRef, {
       status: "lobby", 
-      hostIndex: hostIndex + 1, 
+      currentHost: nextHost,
       roundCount: nextRoundNum,
       scores: newScores, 
       history: arrayUnion(currentRoundHistory),

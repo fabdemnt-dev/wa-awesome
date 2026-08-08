@@ -92,7 +92,7 @@ export function renderBoards() {
   const revealedPhrases = state.currentData.revealedPhrases || {};
   const selfPraiseData = state.currentData.selfPraise || {};
   const players = state.currentData.players || [];
-  const currentHost = players[(state.currentData.hostIndex || 0) % (players.length || 1)];
+  const currentHost = players.includes(state.currentData.currentHost) ? state.currentData.currentHost : (players[0] || '');
   const isHost = (state.myName === currentHost);
   const availableKeys = state.isSpectator ? spectatorOptionKeys : (isHost ? hostOptionKeys : childOptionKeys);
 
@@ -101,7 +101,7 @@ export function renderBoards() {
   const myVotes = votes[state.myName] || {};
   const hasVotedAnywhereAsChild = !isHost && Object.values(myVotes).some(v => v != null);
 
-  boardList.innerHTML = Object.keys(phrases).map(pName => {
+  boardList.innerHTML = players.filter(pName => phrases[pName] !== undefined).map(pName => {
     const isRevealed = revealedPhrases[pName];
     const pDet = phraseDetails[pName] || [];
     
@@ -124,7 +124,8 @@ export function renderBoards() {
     }).join(' ') : `<strong>${escapeHTML(phrases[pName])}</strong>`;
 
     let evalBadgesHtml = '';
-    Object.keys(votes).forEach(voter => {
+    const allVoters = [...players, ...(state.currentData.spectators || [])];
+    allVoters.forEach(voter => {
       const vData = votes[voter]?.[pName];
       if (vData) {
         const keys = Array.isArray(vData) ? vData : [vData];

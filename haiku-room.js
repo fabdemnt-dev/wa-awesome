@@ -20,7 +20,7 @@ const roomSnapshot = await getDoc(state.roomRef);
 if (!roomSnapshot.exists()) {
   const initialData = {
     status: "lobby",
-    hostIndex: 0,
+    currentHost: state.isSpectator ? '' : state.myName,
     roundCount: 1,
     history: [],
     words5: [],
@@ -76,7 +76,7 @@ if (!roomSnapshot.exists()) {
       if (spectators.includes(state.myName)) state.isSpectator = true;
       if (players.includes(state.myName)) state.isSpectator = false;
 
-      const currentHost = players[(state.currentData.hostIndex || 0) % (players.length || 1)] || '未設定';
+      const currentHost = players.includes(state.currentData.currentHost) ? state.currentData.currentHost : (players[0] || '未設定');
       const hostText = `👑 今節の選者（親）: <strong>${escapeHTML(currentHost)}</strong> ${currentHost === state.myName ? '（あなた）' : ''}`;
       
       if (document.getElementById('host-info-lobby')) document.getElementById('host-info-lobby').innerHTML = hostText;
@@ -125,9 +125,9 @@ if (!roomSnapshot.exists()) {
       }
 
       const scores = state.currentData.scores || {};
-      let playerListHtml = players.map((p, idx) => `
+      let playerListHtml = players.map((p) => `
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-          <span>・ ${escapeHTML(p)} ${idx === ((state.currentData.hostIndex || 0) % players.length) ? '<span class="role-badge">選者（親）</span>' : ''}</span>
+          <span>・ ${escapeHTML(p)} ${p === currentHost ? '<span class="role-badge">選者（親）</span>' : ''}</span>
           <div>
             <span class="score-badge" style="margin-right:8px;">${scores[p] || 0} 誉</span>
             <button onclick="removePlayer('${escapeJS(p)}')" style="width:auto; margin:0; padding:4px 8px; font-size:12px; background-color:#ef4444;">鯖落ち</button>
@@ -232,11 +232,10 @@ window.toggleRole = async function() {
     state.isSpectator = false;
     alert("プレイヤーとして参加しました！");
   } else {
-    // ラウンド中は選者本人が見学モードに切り替わると、players配列がズレて
-    // hostIndexが指す「選者」が別人にすり替わってしまうため、選者本人の切り替えを禁止する
+    // ラウンド中に選者本人が見学モードへ切り替わると、進行が止まってしまうため、選者本人の切り替えを禁止する
     if (state.currentData?.status === 'playing') {
       const players = state.currentData.players || [];
-      const currentHost = players[(state.currentData.hostIndex || 0) % (players.length || 1)];
+      const currentHost = players.includes(state.currentData.currentHost) ? state.currentData.currentHost : (players[0] || '');
       if (state.myName === currentHost) {
         return alert('今節の選者（親）はラウンド中に見学モードへ切り替えられません。\n次の節に進んでから切り替えてください。');
       }

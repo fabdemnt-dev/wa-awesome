@@ -13,10 +13,12 @@ function escapeHTML(str) {
   });
 }
 
-// XSS対策：JSの引数用にエスケープ
+// XSS対策：JSの引数用にエスケープ（さらにHTMLエスケープもかけることで、
+// onclick="fn('...')" のようにHTML属性の中に埋め込んでも属性が壊れないようにする）
 function escapeJS(str) {
   if (typeof str !== "string") return "";
-  return str.replace(/'/g, "\\'").replace(/"/g, '\\"');
+  const jsEscaped = str.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/"/g, '\\"');
+  return escapeHTML(jsEscaped);
 }
 
 // 評価マスタ

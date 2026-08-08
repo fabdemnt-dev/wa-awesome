@@ -14,10 +14,10 @@ window.exportText = function() {
   const currentPhrases = state.currentData.phrases || {};
   if (Object.keys(currentPhrases).length > 0) {
     const players = state.currentData.players || [];
-    const hostIndex = state.currentData.hostIndex || 0;
+    const currentHost = players.includes(state.currentData.currentHost) ? state.currentData.currentHost : (players[0] || '未設定');
     historyToExport.push({
       round: state.currentData.roundCount || 1,
-      host: players[hostIndex % (players.length || 1)] || '未設定',
+      host: currentHost,
       phrases: currentPhrases,
       votes: state.currentData.votes || {}
     });
@@ -69,10 +69,10 @@ window.exportCSV = function() {
   const currentPhrases = state.currentData.phrases || {};
   if (Object.keys(currentPhrases).length > 0) {
     const players = state.currentData.players || [];
-    const hostIndex = state.currentData.hostIndex || 0;
+    const currentHost = players.includes(state.currentData.currentHost) ? state.currentData.currentHost : (players[0] || '未設定');
     historyToExport.push({
       round: state.currentData.roundCount || 1,
-      host: players[hostIndex % (players.length || 1)] || '未設定',
+      host: currentHost,
       phrases: currentPhrases,
       votes: state.currentData.votes || {}
     });
