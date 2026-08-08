@@ -287,13 +287,18 @@ if (!roomSnapshot.exists()) {
 
 } else {
 
+  // 見学モードで再入室した場合はplayersから、プレイヤーとして再入室した場合はspectatorsから、
+  // 前回いた側の名前を確実に消す。片方だけarrayUnionすると、以前と逆の役割で入り直した人が
+  // players/spectators両方に名前が残ったままになる（見学モード切替時の不整合の原因だった）。
   if (state.isSpectator) {
     await updateDoc(state.roomRef, {
-      spectators: arrayUnion(state.myName)
+      spectators: arrayUnion(state.myName),
+      players: arrayRemove(state.myName)
     });
   } else {
     await updateDoc(state.roomRef, {
-      players: arrayUnion(state.myName)
+      players: arrayUnion(state.myName),
+      spectators: arrayRemove(state.myName)
     });
   }
 
