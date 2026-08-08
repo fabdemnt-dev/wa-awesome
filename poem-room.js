@@ -111,6 +111,7 @@ async function resyncRoomFromFirestore() {
   try {
     const snapshot = await getDoc(state.roomRef);
     if (snapshot.exists()) {
+      debugShowSnapshotInfo(snapshot.data(), 'resync'); // ==== DEBUG: 確認後にこの行だけ削除 ====
       applyRoomData(snapshot.data());
     }
   } catch (e) {
@@ -167,10 +168,10 @@ function debugEnsureUI() {
   document.body.appendChild(panel);
   document.body.appendChild(btn);
 }
-function debugShowSnapshotInfo(data) {
+function debugShowSnapshotInfo(data, source = 'onSnapshot') {
   debugEnsureUI();
   const time = new Date().toLocaleTimeString();
-  debugLogLines.unshift(`[${time}] onSnapshot発火 players=${JSON.stringify(data?.players)} spectators=${JSON.stringify(data?.spectators)}`);
+  debugLogLines.unshift(`[${time}] [${source}] players=${JSON.stringify(data?.players)} spectators=${JSON.stringify(data?.spectators)}`);
   const panel = document.getElementById('debug-snapshot-panel');
   if (panel) panel.textContent = debugLogLines.join('\n');
   const btn = document.getElementById('debug-snapshot-toggle');
