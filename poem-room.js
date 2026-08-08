@@ -176,7 +176,7 @@ window.updateHandCountSetting = async function() {
 window.toggleRole = async function() {
   if (!state.roomRef) return;
   if (state.isSpectator) {
-    // ゲーム中の途中参戦は、配り終わってない素材の余りが手札分あるときだけ許可する（俳句版と同じ考え方）
+    // ゲーム中の途中参戦は、まず余っている素材を使い、足りない分だけデフォルトのお題（SAMPLE_PHRASES）で自動補充する
     if (state.currentData?.status === 'playing') {
       const st = state.currentData.settings || { handCount: 5 };
       const words = state.currentData.words || [];
@@ -187,11 +187,25 @@ window.toggleRole = async function() {
       const assignedIds = new Set(Object.values(hands).flat().map(w => w.id));
       const leftover = words.filter(w => !assignedIds.has(w.id));
 
-      if (leftover.length < st.handCount) {
-        return alert(`途中参戦できません。手札に配るための素材が足りていません。\n（余り${leftover.length}個 / 必要${st.handCount}個）`);
+      // ①まず余っている素材を使う
+      const fromLeftover = [...leftover].sort(() => Math.random() - 0.5).slice(0, st.handCount);
+
+      // ②余りだけでは手札枚数に足りない分を、SAMPLE_PHRASESからランダムに補充する
+      const shortfall = st.handCount - fromLeftover.length;
+      const filled = [];
+      if (shortfall > 0) {
+        const shuffledSamples = [...SAMPLE_PHRASES].sort(() => Math.random() - 0.5);
+        for (let i = 0; i < shortfall; i++) {
+          filled.push({
+            text: shuffledSamples[i % shuffledSamples.length],
+            author: "🎴お題ぶくろ",
+            id: Date.now() + "_" + Math.random().toString(36).substring(2, 9)
+          });
+        }
       }
 
-      const newHand = [...leftover].sort(() => Math.random() - 0.5).slice(0, st.handCount);
+      // ③合計が手札枚数になった状態で配る
+      const newHand = [...fromLeftover, ...filled];
 
       await updateDoc(state.roomRef, {
         spectators: arrayRemove(state.myName),
@@ -199,7 +213,9 @@ window.toggleRole = async function() {
         [`hands.${state.myName}`]: newHand
       });
       state.isSpectator = false;
-      alert("素材の余りから手札を配りました！プレイヤーとして参加しました！");
+      alert(shortfall > 0
+        ? `素材の余り${fromLeftover.length}枚＋お題ぶくろから${shortfall}枚を手札として配りました！プレイヤーとして参加しました！`
+        : "素材の余りから手札を配りました！プレイヤーとして参加しました！");
       return;
     }
 
