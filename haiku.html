@@ -57,8 +57,9 @@
         <button onclick="updateSettings()" class="btn-secondary" style="margin-top:10px;">設定を保存</button>
       </div>
 
-      <div style="margin-top:15px;">
+      <div style="margin-top:15px; display:flex; gap:8px; flex-wrap:wrap;">
         <button id="role-toggle-btn-lobby" onclick="toggleRole()" class="btn-secondary">モード切替</button>
+        <button id="manual-resync-btn-lobby" onclick="manualResync('lobby')" class="btn-secondary">🔄 最新の状態に更新</button>
       </div>
 
       <h3>参列者一覧</h3>
@@ -90,7 +91,10 @@
     <!-- 3. ゲーム画面 -->
     <div id="game-sec" class="card-sec" style="display:none;">
       <div id="host-info-game" class="info-banner"></div>
-      <button id="role-toggle-btn-game" onclick="toggleRole()" class="btn-secondary" style="margin-bottom:10px;">モード切替</button>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
+        <button id="role-toggle-btn-game" onclick="toggleRole()" class="btn-secondary">モード切替</button>
+        <button id="manual-resync-btn-game" onclick="manualResync('game')" class="btn-secondary">🔄 最新の状態に更新</button>
+      </div>
 
       <h3>手札（素材）</h3>
       <div style="font-size:13px; color:#64748b; margin-bottom:8px;">
