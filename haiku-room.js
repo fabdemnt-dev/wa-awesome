@@ -155,18 +155,36 @@ window.addEventListener('pageshow', (event) => {
 });
 
 // ==== DEBUG START: onSnapshot発火状況の確認用（確認が終わったらこのブロックごと削除） ====
-// Firestore・ゲームロジックには一切書き込まない。画面下に発火ログを表示するだけ。
+// Firestore・ゲームロジックには一切書き込まない。普段は右下の小さいボタンだけを表示し、
+// タップしたときだけログを開くので、画面下の入力欄やボタンを隠さないようにしている。
+let debugLogLines = [];
+function debugEnsureUI() {
+  if (document.getElementById('debug-snapshot-toggle')) return;
+
+  const btn = document.createElement('button');
+  btn.id = 'debug-snapshot-toggle';
+  btn.innerText = '🐛 ログ(0)';
+  btn.style.cssText = 'position:fixed; bottom:8px; right:8px; z-index:100000; font-size:11px; padding:6px 10px; background:#111; color:#0f0; border:1px solid #0f0; border-radius:6px;';
+
+  const panel = document.createElement('div');
+  panel.id = 'debug-snapshot-panel';
+  panel.style.cssText = 'position:fixed; bottom:44px; left:8px; right:8px; max-height:30vh; overflow-y:auto; background:rgba(0,0,0,0.9); color:#0f0; font-size:11px; font-family:monospace; padding:8px; z-index:99999; white-space:pre-wrap; border-radius:6px; display:none;';
+
+  btn.onclick = () => {
+    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+  };
+
+  document.body.appendChild(panel);
+  document.body.appendChild(btn);
+}
 function debugShowSnapshotInfo(data) {
-  let el = document.getElementById('debug-snapshot-log');
-  if (!el) {
-    el = document.createElement('div');
-    el.id = 'debug-snapshot-log';
-    el.style.cssText = 'position:fixed; bottom:0; left:0; right:0; max-height:35vh; overflow-y:auto; background:rgba(0,0,0,0.85); color:#0f0; font-size:11px; font-family:monospace; padding:6px; z-index:99999; white-space:pre-wrap;';
-    document.body.appendChild(el);
-  }
+  debugEnsureUI();
   const time = new Date().toLocaleTimeString();
-  const line = `[${time}] onSnapshot発火 players=${JSON.stringify(data?.players)} spectators=${JSON.stringify(data?.spectators)}\n`;
-  el.textContent = line + el.textContent;
+  debugLogLines.unshift(`[${time}] onSnapshot発火 players=${JSON.stringify(data?.players)} spectators=${JSON.stringify(data?.spectators)}`);
+  const panel = document.getElementById('debug-snapshot-panel');
+  if (panel) panel.textContent = debugLogLines.join('\n');
+  const btn = document.getElementById('debug-snapshot-toggle');
+  if (btn) btn.innerText = `🐛 ログ(${debugLogLines.length})`;
 }
 // ==== DEBUG END ====
 
