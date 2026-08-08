@@ -183,34 +183,39 @@ if (!roomSnapshot.exists()) {
 window.toggleRole = async function() {
   if (!state.roomRef) return;
   if (state.isSpectator) {
-    // ゲーム中の途中参戦は、配り終わってない素材の余りが手札分あるときだけ許可する
+    // ゲーム中の途中参戦は、山札(deck5/deck7)に手札分の余りがあるときだけ許可する
     if (state.currentData?.status === 'playing') {
       const st = state.currentData.settings || { hand5: 5, hand7: 3 };
-      const words5 = state.currentData.words5 || [];
-      const words7 = state.currentData.words7 || [];
-      const hands5 = state.currentData.hands5 || {};
-      const hands7 = state.currentData.hands7 || {};
+      const deck5 = state.currentData.deck5 || [];
+      const deck7 = state.currentData.deck7 || [];
 
-      const assignedIds5 = new Set(Object.values(hands5).flat().map(w => w.id));
-      const assignedIds7 = new Set(Object.values(hands7).flat().map(w => w.id));
-      const leftover5 = words5.filter(w => !assignedIds5.has(w.id));
-      const leftover7 = words7.filter(w => !assignedIds7.has(w.id));
-
-      if (leftover5.length < st.hand5 || leftover7.length < st.hand7) {
-        return alert(`途中参戦できません。手札に配るための素材が足りていません。\n（五音: 余り${leftover5.length}個 / 必要${st.hand5}個、七音: 余り${leftover7.length}個 / 必要${st.hand7}個）`);
+      // 五音・七音のどちらかだけ配って中途半端にならないよう、両方揃っているか先に確認する
+      if (deck5.length < st.hand5 || deck7.length < st.hand7) {
+        return alert(`途中参戦できません。山札に配るための素材が足りていません。\n（五音: 山札残り${deck5.length}個 / 必要${st.hand5}個、七音: 山札残り${deck7.length}個 / 必要${st.hand7}個）`);
       }
 
-      const newHand5 = [...leftover5].sort(() => Math.random() - 0.5).slice(0, st.hand5);
-      const newHand7 = [...leftover7].sort(() => Math.random() - 0.5).slice(0, st.hand7);
+      // 山札から直接、途中参戦者の手札を引く
+      const shuffled5 = [...deck5].sort(() => Math.random() - 0.5);
+      const shuffled7 = [...deck7].sort(() => Math.random() - 0.5);
+      const newHand5 = shuffled5.slice(0, st.hand5);
+      const newHand7 = shuffled7.slice(0, st.hand7);
+      const drawnIds5 = new Set(newHand5.map(w => w.id));
+      const drawnIds7 = new Set(newHand7.map(w => w.id));
+
+      // 配った札は必ず山札から取り除く（他の誰かの引き直しと重複しないようにするため）
+      const newDeck5 = deck5.filter(w => !drawnIds5.has(w.id));
+      const newDeck7 = deck7.filter(w => !drawnIds7.has(w.id));
 
       await updateDoc(state.roomRef, {
         spectators: arrayRemove(state.myName),
         players: arrayUnion(state.myName),
         [`hands5.${state.myName}`]: newHand5,
-        [`hands7.${state.myName}`]: newHand7
+        [`hands7.${state.myName}`]: newHand7,
+        deck5: newDeck5,
+        deck7: newDeck7
       });
       state.isSpectator = false;
-      alert("素材の余りから手札を配りました！プレイヤーとして参加しました！");
+      alert("山札から手札を配りました！プレイヤーとして参加しました！");
       return;
     }
 
