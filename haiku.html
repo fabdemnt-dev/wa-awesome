@@ -93,8 +93,12 @@
       <button id="role-toggle-btn-game" onclick="toggleRole()" class="btn-secondary" style="margin-bottom:10px;">モード切替</button>
 
       <h3>手札（素材）</h3>
+      <div style="font-size:13px; color:#64748b; margin-bottom:8px;">
+        🗻 山札（五音）：残り<span id="deck-5-count">0</span>枚　🗻 山札（七音）：残り<span id="deck-7-count">0</span>枚
+      </div>
+      <div style="font-size:12px; color:#94a3b8; margin-bottom:6px;">※カードの🔄ボタンで引き直したい札を選んでから、下のボタンを押してください</div>
       <div style="margin-bottom:10px;">
-        <button id="redraw-hand-btn" onclick="redrawHand()" class="btn-secondary">🔄 手札を引き直す（1節1回まで）</button>
+        <button id="redraw-hand-btn" onclick="redrawHand()" class="btn-secondary">🔄 札を選んで引き直す（1節1回まで）</button>
       </div>
       <h4>五音</h4>
       <div id="hand-5-list" class="card-list"></div>

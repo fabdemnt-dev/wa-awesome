@@ -150,6 +150,7 @@ if (!roomSnapshot.exists()) {
         // onSnapshotが発火するたびに、自分が入力中の素材まで消えてしまうため。
         if (previousStatus !== 'lobby') {
           state.myHand5 = []; state.myHand7 = []; state.selectedHand = [null, null, null];
+          state.redrawSelected5 = []; state.redrawSelected7 = [];
 
           // ロビーに戻ったら、一時保存していた手札データを消す
           sessionStorage.removeItem('haikuSelectedHand');
@@ -171,18 +172,6 @@ if (!roomSnapshot.exists()) {
         if (state.currentData.hands7?.[state.myName]) state.myHand7 = state.currentData.hands7[state.myName];
         renderHand();
         renderBoards();
-
-        // 手札引き直しボタンの状態を更新（見学者・披露済み・引き直し済みなら押せないようにする）
-        const redrawBtn = document.getElementById('redraw-hand-btn');
-        if (redrawBtn) {
-          const hasSubmitted = !!(state.currentData.phrases || {})[state.myName];
-          const hasRedrawn = !!(state.currentData.redraws || {})[state.myName];
-          const canRedraw = !state.isSpectator && !hasSubmitted && !hasRedrawn;
-          redrawBtn.disabled = !canRedraw;
-          redrawBtn.style.opacity = canRedraw ? '1' : '0.5';
-          redrawBtn.style.cursor = canRedraw ? 'pointer' : 'not-allowed';
-          redrawBtn.innerText = hasRedrawn ? '🔄 引き直し済み' : (hasSubmitted ? '🔄 披露後は引き直せません' : '🔄 手札を引き直す（1節1回まで）');
-        }
       }
 
       previousStatus = state.currentData.status;

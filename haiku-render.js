@@ -58,7 +58,10 @@ export function renderHand() {
       h5List.innerHTML = '<div style="font-size:13px; color:#94a3b8;">※見学モード中</div>';
     } else {
       h5List.innerHTML = state.myHand5.map((item, idx) => `
-        <div class="card card-5 ${state.selectedHand.includes(item) ? 'selected' : ''}" onclick="selectCard(5, ${idx})">${escapeHTML(item.text)}</div>
+        <div class="card card-5 ${state.selectedHand.includes(item) ? 'selected' : ''}" onclick="selectCard(5, ${idx})">
+          ${escapeHTML(item.text)}
+          <button type="button" class="redraw-toggle-btn ${state.redrawSelected5.includes(item.id) ? 'redraw-marked' : ''}" onclick="event.stopPropagation(); toggleRedrawCard(5, ${idx})" title="引き直し対象にする">🔄</button>
+        </div>
       `).join('');
     }
   }
@@ -69,7 +72,10 @@ export function renderHand() {
       h7List.innerHTML = '<div style="font-size:13px; color:#94a3b8;">※見学モード中</div>';
     } else {
       h7List.innerHTML = state.myHand7.map((item, idx) => `
-        <div class="card card-7 ${state.selectedHand[1] === item ? 'selected' : ''}" onclick="selectCard(7, ${idx})">${escapeHTML(item.text)}</div>
+        <div class="card card-7 ${state.selectedHand[1] === item ? 'selected' : ''}" onclick="selectCard(7, ${idx})">
+          ${escapeHTML(item.text)}
+          <button type="button" class="redraw-toggle-btn ${state.redrawSelected7.includes(item.id) ? 'redraw-marked' : ''}" onclick="event.stopPropagation(); toggleRedrawCard(7, ${idx})" title="引き直し対象にする">🔄</button>
+        </div>
       `).join('');
     }
   }
@@ -80,6 +86,41 @@ export function renderHand() {
 
   // 画面を更新するついでに、今の選択状態をブラウザに一時保存する
   sessionStorage.setItem('haikuSelectedHand', JSON.stringify(state.selectedHand));
+
+  updateDeckAndRedrawUI();
+}
+
+// 山札（引き直し用に残っている素材）の残り枚数表示と、引き直しボタンの状態を更新する。
+// カードの🔄をタップした直後にも即座に反映されるよう、renderHandの中から毎回呼ぶ。
+function updateDeckAndRedrawUI() {
+  if (!state.currentData) return;
+
+  const deck5Count = (state.currentData.deck5 || []).length;
+  const deck7Count = (state.currentData.deck7 || []).length;
+  if (document.getElementById('deck-5-count')) document.getElementById('deck-5-count').innerText = deck5Count;
+  if (document.getElementById('deck-7-count')) document.getElementById('deck-7-count').innerText = deck7Count;
+
+  const redrawBtn = document.getElementById('redraw-hand-btn');
+  if (!redrawBtn) return;
+
+  const hasSubmitted = !!(state.currentData.phrases || {})[state.myName];
+  const hasRedrawn = !!(state.currentData.redraws || {})[state.myName];
+  const selectedCount = (state.redrawSelected5?.length || 0) + (state.redrawSelected7?.length || 0);
+  const canRedraw = !state.isSpectator && !hasSubmitted && !hasRedrawn && selectedCount > 0;
+
+  redrawBtn.disabled = !canRedraw;
+  redrawBtn.style.opacity = canRedraw ? '1' : '0.5';
+  redrawBtn.style.cursor = canRedraw ? 'pointer' : 'not-allowed';
+
+  if (hasRedrawn) {
+    redrawBtn.innerText = '🔄 引き直し済み';
+  } else if (hasSubmitted) {
+    redrawBtn.innerText = '🔄 披露後は引き直せません';
+  } else if (selectedCount === 0) {
+    redrawBtn.innerText = '🔄 札を選んで引き直す（1節1回まで）';
+  } else {
+    redrawBtn.innerText = `🔄 選んだ${selectedCount}枚を引き直す（1節1回まで）`;
+  }
 }
 
 export function renderBoards() {

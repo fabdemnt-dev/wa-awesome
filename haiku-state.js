@@ -15,7 +15,13 @@ const state = {
   currentData: null,
 
   isSubmittingSelfPraise: false,
-  isProcessingNextRound: false
+  isProcessingNextRound: false,
+
+  // 「選んだ札だけ引き直す」機能用：引き直し対象として選んでいる札のid一覧
+  // （句をつくるためのselectedHandとは完全に別の選択状態として管理する）
+  redrawSelected5: [],
+  redrawSelected7: [],
+  isProcessingRedraw: false
 };
 
 export default state;

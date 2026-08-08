@@ -17,6 +17,18 @@ window.selectCard = function(type, idx) {
   renderHand();
 };
 window.swap5Cards = function() { if (!state.isSpectator) { [state.selectedHand[0], state.selectedHand[2]] = [state.selectedHand[2], state.selectedHand[0]]; renderHand(); } };
+// 「引き直し対象として選ぶ」用の選択切り替え。句をつくるための選択(selectCard)とは完全に別枠で管理する
+window.toggleRedrawCard = function(type, idx) {
+  if (state.isSpectator) return;
+  const item = type === 5 ? state.myHand5[idx] : state.myHand7[idx];
+  if (!item) return;
+  const key = type === 5 ? 'redrawSelected5' : 'redrawSelected7';
+  const list = state[key];
+  const pos = list.indexOf(item.id);
+  if (pos === -1) list.push(item.id);
+  else list.splice(pos, 1);
+  renderHand();
+};
 window.clearPhrase = function() { if (!state.isSpectator) { state.selectedHand = [null, null, null]; renderHand(); } };
 window.submitPhrase = async function() {
   if (state.isSpectator) return alert('見学モードでは句の投稿はできません');
