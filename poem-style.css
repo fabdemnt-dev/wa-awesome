@@ -1,3 +1,4 @@
+/* 全体レイアウト */
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   max-width: 600px;
@@ -12,6 +13,7 @@ h1, h2, h3 {
   margin-top: 0;
 }
 
+/* カード状のセクション枠(ログイン・ロビー・ゲーム画面など) */
 .card-panel {
   background: white;
   border-radius: 12px;
@@ -20,6 +22,7 @@ h1, h2, h3 {
   margin-bottom: 16px;
 }
 
+/* 入力欄・セレクトボックス共通 */
 input[type="text"], select {
   width: 100%;
   font-size: 15px;
@@ -30,6 +33,7 @@ input[type="text"], select {
   margin-bottom: 8px;
 }
 
+/* ボタン共通 */
 button {
   width: 100%;
   font-size: 16px;
@@ -47,6 +51,7 @@ button:active {
   opacity: 0.8;
 }
 
+/* 素材(ことば)入力欄の並び */
 .word-list {
   display: flex;
   flex-wrap: wrap;
@@ -54,6 +59,7 @@ button:active {
   margin-top: 8px;
 }
 
+/* 手札の1枚1枚のカード */
 .card {
   padding: 8px 12px;
   border-radius: 6px;
@@ -66,12 +72,14 @@ button:active {
   margin-bottom: 6px;
 }
 
+/* 選択中の手札カード */
 .card.selected {
   background-color: #dbeafe;
   border-color: #3b82f6;
   color: #1e293b;
 }
 
+/* プレイヤーごとの作品ボード枠(実際はJS側のインラインstyleが優先される) */
 .player-board {
   border: 1px solid #e2e8f0;
   border-radius: 8px;
@@ -80,6 +88,7 @@ button:active {
   background-color: #fafafa;
 }
 
+/* 各セクションの小見出し */
 .section-title {
   font-size: 14px;
   font-weight: bold;
