@@ -1,4 +1,4 @@
-import { updateDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { updateDoc, increment } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import state from './poem-state.js';
 import { renderHand } from './poem-render.js';
 import { exportPoemText, exportPoemCSV } from './poem-export.js';
@@ -105,9 +105,9 @@ window.addReaction = async function(pName, type) {
   const target = poems[pName];
   if (!target) return;
 
-  const currentCount = (type === 'like' ? target.likes : target.emos) || 0;
+  // increment()でサーバー側に加算させることで、同時押しでもカウントが失われないようにする
   await updateDoc(state.roomRef, {
-    [`poems.${pName}.${type === 'like' ? 'likes' : 'emos'}`]: currentCount + 1
+    [`poems.${pName}.${type === 'like' ? 'likes' : 'emos'}`]: increment(1)
   });
 };
 

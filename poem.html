@@ -58,7 +58,7 @@
       <div id="material-count">📦 集まった素材：0 / 0個</div>
     </div>
     
-    <button onclick="startGame()" style="background-color: #16a34a; margin-top: 20px;">ポエム作りを開始</button>
+    <button id="start-game-btn" onclick="startGame()" style="background-color: #16a34a; margin-top: 20px;">ポエム作りを開始</button>
   </div>
 
   <!-- 3. ゲーム画面 -->
@@ -100,7 +100,7 @@
       </div>
     </div>
 
-    <button onclick="nextGame()" style="background-color: #0284c7; margin-top: 24px;">🔄 新しいポエムを作る（ロビーへ戻る）</button>
+    <button id="next-game-btn" onclick="nextGame()" style="background-color: #0284c7; margin-top: 24px;">🔄 新しいポエムを作る（ロビーへ戻る）</button>
 
     <button onclick="saveGameAsWordSet()" style="background-color: #64748b; margin-top: 10px;">🎴 今日の素材をワードセットとして保存する</button>
     <div style="font-size: 11px; color: #94a3b8; margin-top: 4px;">※プレイヤーが入力した素材だけが保存されます（ワードセット/デフォルト補充分は含みません）</div>

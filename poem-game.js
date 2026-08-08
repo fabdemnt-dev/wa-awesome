@@ -62,6 +62,7 @@ window.fillDefaultWords = async function() {
 
 window.startGame = async function() {
   if (!state.currentData) return;
+  if (state.isSpectator) return alert('見学モードではポエム作りを開始できません');
   if (!confirm('全員の素材が集まりましたか？\nポエム作りを開始します。')) return;
 
   const players = state.currentData.players || [];
@@ -118,6 +119,7 @@ window.saveGameAsWordSet = async function() {
 
 window.nextGame = async function() {
   if (!state.roomRef || !state.currentData) return;
+  if (state.isSpectator) return alert('見学モードでは次のポエム作りに進められません');
   if (!confirm('本当に新しいポエム作りに進みますか？\n（現在の作品は履歴に保存され、新しく作り直します）')) return;
 
   const currentRoundHistory = {

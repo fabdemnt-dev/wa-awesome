@@ -187,6 +187,28 @@ button:disabled { background-color: #94a3b8; cursor: not-allowed; }
   opacity: 0.85;
   font-weight: normal;
 }
+/* 折りたたみ共通(ルーム設定・選者の心得などで使用) */
+.collapsible-header {
+  padding: 8px 12px;
+  background: #e2e8f0;
+  border-radius: 8px;
+  font-weight: bold;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  user-select: none;
+  color: #334155;
+}
+.collapsible-content {
+  padding: 10px 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-top: none;
+  border-radius: 0 0 8px 8px;
+  margin-bottom: 12px;
+}
+
 /* 選者表示 */
 .host-banner {
   background: #fffbeb;
@@ -198,31 +220,6 @@ button:disabled { background-color: #94a3b8; cursor: not-allowed; }
   text-align: center;
   font-weight: bold;
   font-size: 14px;
-}
-/* 御印・選者の心得 */
-.eval-guide-box {
-  background: #f8fafc;
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  margin-top: 12px;
-  font-size: 13px;
-  overflow: hidden;
-}
-/* 御印・選者の心得：木の掲示板風 */
-.eval-guide-header {
-  padding: 8px 12px;
-  background: #e2e8f0;
-  font-weight: bold;
-  cursor: pointer;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  user-select: none;
-  color: #334155;
-}
-.eval-guide-content {
-  padding: 10px 12px;
-  line-height: 1.6;
 }
 /* エクスポート */
 .export-group {
@@ -239,4 +236,12 @@ button:disabled { background-color: #94a3b8; cursor: not-allowed; }
   color: #5c3a21;
   border-radius: 8px;
   padding: 10px 12px;
+}
+/* 選者の心得の中身も、木の掲示板と同じ色味でつながって見えるようにする */
+.eval-guide-board + .collapsible-content {
+  background: #fbf3e3;
+  border: 2px solid #b98b5f;
+  border-top: none;
+  color: #5c3a21;
+  border-radius: 0 0 8px 8px;
 }

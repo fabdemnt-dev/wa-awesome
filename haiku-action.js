@@ -1,4 +1,5 @@
-import { updateDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { updateDoc, runTransaction } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { db } from './firebase-config.js';
 import state from './haiku-state.js';
 import { renderHand } from './haiku-render.js';
 
@@ -53,12 +54,20 @@ window.submitVote = async function(targetPlayer, forcedKey) {
   const isHost = (state.myName === currentHost);
 
   if (isHost) {
-    const currentVotes = state.currentData.votes?.[state.myName]?.[targetPlayer] || [];
-    const currentVotesArr = Array.isArray(currentVotes) ? currentVotes : [currentVotes];
-    const newVotesArr = [...currentVotesArr, evalKey];
-
-    await updateDoc(state.roomRef, { [`votes.${state.myName}.${targetPlayer}`]: newVotesArr });
-    alert('御印を追加で贈りました！');
+    // トランザクションでサーバー側に読み込み〜追加をまとめて行うことで、
+    // 連打しても加算が消えず、かつ同じ御印を何個でも贈れる仕様を維持する
+    try {
+      await runTransaction(db, async (tx) => {
+        const snap = await tx.get(state.roomRef);
+        const currentVotes = snap.data()?.votes?.[state.myName]?.[targetPlayer] || [];
+        const currentVotesArr = Array.isArray(currentVotes) ? currentVotes : [currentVotes];
+        tx.update(state.roomRef, { [`votes.${state.myName}.${targetPlayer}`]: [...currentVotesArr, evalKey] });
+      });
+      alert('御印を追加で贈りました！');
+    } catch (e) {
+      console.error(e);
+      alert('御印の送信に失敗しました: ' + e.message);
+    }
   } else {
     const myVotes = state.currentData.votes?.[state.myName] || {};
     const hasVotedAnywhere = Object.values(myVotes).some(vote => vote != null);

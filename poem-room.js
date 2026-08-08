@@ -102,6 +102,22 @@ if (materialCount) {
       if (document.getElementById('role-toggle-btn-lobby')) document.getElementById('role-toggle-btn-lobby').innerText = roleBtnText;
       if (document.getElementById('role-toggle-btn-game')) document.getElementById('role-toggle-btn-game').innerText = roleBtnText;
 
+      // 見学者は「開始」「次へ」を押せないように、見た目でも無効化する
+      const startBtn = document.getElementById('start-game-btn');
+      if (startBtn) {
+        startBtn.disabled = state.isSpectator;
+        startBtn.style.opacity = state.isSpectator ? '0.5' : '1';
+        startBtn.style.cursor = state.isSpectator ? 'not-allowed' : 'pointer';
+        startBtn.innerText = state.isSpectator ? '👀 見学者は開始できません' : 'ポエム作りを開始';
+      }
+      const nextBtn = document.getElementById('next-game-btn');
+      if (nextBtn) {
+        nextBtn.disabled = state.isSpectator;
+        nextBtn.style.opacity = state.isSpectator ? '0.5' : '1';
+        nextBtn.style.cursor = state.isSpectator ? 'not-allowed' : 'pointer';
+        nextBtn.innerText = state.isSpectator ? '👀 見学者は次へ進めません' : '🔄 新しいポエムを作る（ロビーへ戻る）';
+      }
+
       let playerListHtml = players.map(p => `
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
           <span>・ ${escapeHTML(p)} ${p === state.myName ? '（あなた）' : ''}</span>

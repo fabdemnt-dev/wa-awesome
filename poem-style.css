@@ -72,17 +72,6 @@ button:active {
   color: #1e293b;
 }
 
-.display-area {
-  min-height: 80px;
-  background-color: #f1f5f9;
-  border-radius: 8px;
-  padding: 12px;
-  font-size: 15px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  border: 1px dashed #cbd5e1;
-}
-
 .player-board {
   border: 1px solid #e2e8f0;
   border-radius: 8px;

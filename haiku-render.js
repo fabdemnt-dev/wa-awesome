@@ -96,6 +96,11 @@ export function renderBoards() {
   const isHost = (state.myName === currentHost);
   const availableKeys = state.isSpectator ? spectatorOptionKeys : (isHost ? hostOptionKeys : childOptionKeys);
 
+  // 子方は1節につき1つしか御印を贈れないため、誰かに投票済みなら他の句のボードでも
+  // 「投票済み」の表示にする（未投票の句にだけボタンが残るのを防ぐ）
+  const myVotes = votes[state.myName] || {};
+  const hasVotedAnywhereAsChild = !isHost && Object.values(myVotes).some(v => v != null);
+
   boardList.innerHTML = Object.keys(phrases).map(pName => {
     const isRevealed = revealedPhrases[pName];
     const pDet = phraseDetails[pName] || [];
@@ -131,7 +136,7 @@ export function renderBoards() {
       }
     });
 
-    const hasAlreadyVotedAsChild = !isHost && votes[state.myName]?.[pName] != null;
+    const hasAlreadyVotedAsChild = !isHost && (votes[state.myName]?.[pName] != null || hasVotedAnywhereAsChild);
 
     const isSelfPraised = selfPraiseData[pName];
     let selfPraiseHtml = '';
@@ -159,7 +164,7 @@ export function renderBoards() {
         ${pName !== state.myName ? `
           <div class="vote-select-group" style="margin-top:8px;">
             ${hasAlreadyVotedAsChild ? `
-              <span style="font-size:13px; color:#10b981; font-weight:bold;">✅ 御印送信済み (${evalOptionsMaster[votes[state.myName][pName]]?.label || ''})</span>
+              <span style="font-size:13px; color:#10b981; font-weight:bold;">✅ ${votes[state.myName]?.[pName] != null ? `御印送信済み (${evalOptionsMaster[votes[state.myName][pName]]?.label || ''})` : '御印は1節につき1つだけ（他の句に贈りました）'}</span>
             ` : state.isSpectator ? `
               <button class="vote-submit-btn" onclick="submitVote('${jsPName}', '${spectatorOptionKeys[0]}')">${evalOptionsMaster[spectatorOptionKeys[0]].label}</button>
             ` : `
