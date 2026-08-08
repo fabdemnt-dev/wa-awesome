@@ -154,6 +154,22 @@ window.addEventListener('pageshow', (event) => {
   resyncRoomFromFirestore();
 });
 
+// ==== DEBUG START: onSnapshot発火状況の確認用（確認が終わったらこのブロックごと削除） ====
+// Firestore・ゲームロジックには一切書き込まない。画面下に発火ログを表示するだけ。
+function debugShowSnapshotInfo(data) {
+  let el = document.getElementById('debug-snapshot-log');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'debug-snapshot-log';
+    el.style.cssText = 'position:fixed; bottom:0; left:0; right:0; max-height:35vh; overflow-y:auto; background:rgba(0,0,0,0.85); color:#0f0; font-size:11px; font-family:monospace; padding:6px; z-index:99999; white-space:pre-wrap;';
+    document.body.appendChild(el);
+  }
+  const time = new Date().toLocaleTimeString();
+  const line = `[${time}] onSnapshot発火 players=${JSON.stringify(data?.players)} spectators=${JSON.stringify(data?.spectators)}\n`;
+  el.textContent = line + el.textContent;
+}
+// ==== DEBUG END ====
+
 window.joinRoom = async function() {
   state.myName = document.getElementById('player-name')?.value.trim() || "";
   state.roomId = document.getElementById('room-id')?.value.trim() || "";
@@ -215,6 +231,7 @@ if (!roomSnapshot.exists()) {
     document.getElementById('lobby-sec').style.display = 'block';
 
     onSnapshot(state.roomRef, (snapshot) => {
+      debugShowSnapshotInfo(snapshot.data()); // ==== DEBUG: 確認後にこの行だけ削除 ====
       applyRoomData(snapshot.data());
     });
   } catch (e) {
