@@ -155,37 +155,102 @@ window.addEventListener('pageshow', (event) => {
   resyncRoomFromFirestore();
 });
 
+// 手動更新ボタン: 電波状況などでリアルタイム反映が遅れているときに、
+// ユーザーがボタンを押した瞬間にFirestoreから最新状態を取得して画面に反映する。
+// resyncRoomFromFirestoreと同じ処理を使うため、書き込みは一切行わない。
+window.manualResync = async function(where) {
+  const btn = document.getElementById(where === 'game' ? 'manual-resync-btn-game' : 'manual-resync-btn-lobby');
+  if (btn) { btn.disabled = true; btn.innerText = '🔄 更新中…'; }
+  await resyncRoomFromFirestore();
+  if (btn) { btn.disabled = false; btn.innerText = '🔄 最新の状態に更新'; }
+};
+
 // ==== DEBUG START: onSnapshot発火状況の確認用（確認が終わったらこのブロックごと削除） ====
 // Firestore・ゲームロジックには一切書き込まない。普段は右下の小さいボタンだけを表示し、
 // タップしたときだけログを開くので、画面下の入力欄やボタンを隠さないようにしている。
-let debugLogLines = [];
+// ログはこの端末のlocalStorageに保存され、ページを閉じたり開き直したりしても消えない。
+const DEBUG_LOG_KEY = 'haikuDebugSnapshotLog';
+const DEBUG_LOG_MAX = 200;
+
+function debugLoadLog() {
+  try {
+    return JSON.parse(localStorage.getItem(DEBUG_LOG_KEY) || '[]');
+  } catch (e) {
+    return [];
+  }
+}
+function debugSaveLog(lines) {
+  try {
+    localStorage.setItem(DEBUG_LOG_KEY, JSON.stringify(lines.slice(0, DEBUG_LOG_MAX)));
+  } catch (e) {
+    // 保存に失敗しても画面表示は続ける
+  }
+}
+
 function debugEnsureUI() {
   if (document.getElementById('debug-snapshot-toggle')) return;
 
   const btn = document.createElement('button');
   btn.id = 'debug-snapshot-toggle';
-  btn.innerText = '🐛 ログ(0)';
+  btn.innerText = `🐛 ログ(${debugLoadLog().length})`;
   btn.style.cssText = 'position:fixed; bottom:8px; right:8px; z-index:100000; font-size:11px; padding:6px 10px; background:#111; color:#0f0; border:1px solid #0f0; border-radius:6px;';
 
   const panel = document.createElement('div');
   panel.id = 'debug-snapshot-panel';
   panel.style.cssText = 'position:fixed; bottom:44px; left:8px; right:8px; max-height:30vh; overflow-y:auto; background:rgba(0,0,0,0.9); color:#0f0; font-size:11px; font-family:monospace; padding:8px; z-index:99999; white-space:pre-wrap; border-radius:6px; display:none;';
 
+  const toolbar = document.createElement('div');
+  toolbar.style.cssText = 'position:fixed; bottom:44px; left:8px; right:8px; display:none; gap:6px; z-index:100001; transform:translateY(-100%); padding-bottom:4px;';
+  toolbar.id = 'debug-snapshot-toolbar';
+
+  const copyBtn = document.createElement('button');
+  copyBtn.innerText = '📋 コピー';
+  copyBtn.style.cssText = 'font-size:11px; padding:4px 8px; background:#0369a1; color:#fff; border:none; border-radius:6px;';
+  copyBtn.onclick = async () => {
+    const text = debugLoadLog().join('\n');
+    try {
+      await navigator.clipboard.writeText(text);
+      copyBtn.innerText = '✅ コピーした！';
+      setTimeout(() => { copyBtn.innerText = '📋 コピー'; }, 1500);
+    } catch (e) {
+      alert('コピーに失敗しました。ログを長押しして手動で選択・コピーしてください。');
+    }
+  };
+
+  const clearBtn = document.createElement('button');
+  clearBtn.innerText = '🗑 ログを消す';
+  clearBtn.style.cssText = 'font-size:11px; padding:4px 8px; background:#b91c1c; color:#fff; border:none; border-radius:6px;';
+  clearBtn.onclick = () => {
+    debugSaveLog([]);
+    panel.textContent = '';
+    document.getElementById('debug-snapshot-toggle').innerText = '🐛 ログ(0)';
+  };
+
+  toolbar.appendChild(copyBtn);
+  toolbar.appendChild(clearBtn);
+
   btn.onclick = () => {
-    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+    const showing = panel.style.display !== 'none';
+    panel.style.display = showing ? 'none' : 'block';
+    toolbar.style.display = showing ? 'none' : 'flex';
   };
 
   document.body.appendChild(panel);
+  document.body.appendChild(toolbar);
   document.body.appendChild(btn);
+
+  panel.textContent = debugLoadLog().join('\n');
 }
 function debugShowSnapshotInfo(data, source = 'onSnapshot') {
   debugEnsureUI();
   const time = new Date().toLocaleTimeString();
-  debugLogLines.unshift(`[${time}] [${source}] players=${JSON.stringify(data?.players)} spectators=${JSON.stringify(data?.spectators)}`);
+  const lines = debugLoadLog();
+  lines.unshift(`[${time}] [${source}] players=${JSON.stringify(data?.players)} spectators=${JSON.stringify(data?.spectators)}`);
+  debugSaveLog(lines);
   const panel = document.getElementById('debug-snapshot-panel');
-  if (panel) panel.textContent = debugLogLines.join('\n');
+  if (panel) panel.textContent = lines.slice(0, DEBUG_LOG_MAX).join('\n');
   const btn = document.getElementById('debug-snapshot-toggle');
-  if (btn) btn.innerText = `🐛 ログ(${debugLogLines.length})`;
+  if (btn) btn.innerText = `🐛 ログ(${Math.min(lines.length, DEBUG_LOG_MAX)})`;
 }
 // ==== DEBUG END ====
 
