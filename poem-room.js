@@ -240,6 +240,19 @@ function debugEnsureUI() {
 
   panel.textContent = debugLoadLog().join('\n');
 }
+function debugRecordError(error, source = 'unknown') {
+  debugEnsureUI();
+  const code = error?.code || 'no-code';
+  const message = error?.message || String(error);
+  const lines = debugLoadLog();
+  lines.unshift(`[${new Date().toLocaleTimeString()}] [error:${source}] code=${code} message=${message}`);
+  debugSaveLog(lines);
+  const panel = document.getElementById('debug-snapshot-panel');
+  if (panel) panel.textContent = lines.slice(0, DEBUG_LOG_MAX).join('\n');
+  const btn = document.getElementById('debug-snapshot-toggle');
+  if (btn) btn.innerText = `🐛 ログ(${Math.min(lines.length, DEBUG_LOG_MAX)})`;
+  console.error(`[${source}]`, error);
+}
 function debugShowSnapshotInfo(data, source = 'onSnapshot') {
   debugEnsureUI();
   const time = new Date().toLocaleTimeString();
@@ -324,6 +337,8 @@ if (!roomSnapshot.exists()) {
     onSnapshot(state.roomRef, (snapshot) => {
       debugShowSnapshotInfo(snapshot.data()); // ==== DEBUG: 確認後にこの行だけ削除 ====
       applyRoomData(snapshot.data());
+    }, (error) => {
+      debugRecordError(error, 'room-onSnapshot');
     });
     state.roomHistory = [];
     state.legacyHistory = [];
@@ -335,7 +350,10 @@ if (!roomSnapshot.exists()) {
         applyRoomData(roomData);
       }
     });
-  } catch (e) { alert('接続エラー: ' + e.message); }
+  } catch (e) {
+    debugRecordError(e, 'joinRoom');
+    alert('接続エラー: ' + e.message);
+  }
 };
 
 window.updateHandCountSetting = async function() {
