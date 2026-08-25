@@ -1,7 +1,8 @@
 # ============================================================
 # firestore.rules を push のたびに自動で Firebase へ反映するワークフロー
+# 認証: GCP サービスアカウントJSON（PC不要 / スマホだけで完結）
 # ------------------------------------------------------------
-# 必要なもの: GitHub Actions の Secrets に FIREBASE_TOKEN が登録されていること
+# 必要なもの: GitHub Secrets に FIREBASE_SERVICE_ACCOUNT_JSON が登録されていること
 # 動くタイミング: firestore.rules が変更されて main に push されたとき
 # 手動実行も可: Actions タブ →「Deploy Firestore Rules」→ Run workflow
 # ============================================================
@@ -21,10 +22,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+
       - name: Setup Firebase CLI
         uses: w9jds/setup-firebase@main
-        with:
-          firebase_token: ${{ secrets.FIREBASE_TOKEN }}
 
       - name: Create minimal firebase.json if missing
         run: |
@@ -34,6 +38,9 @@ jobs:
           else
             echo "firebase.json already exists"
           fi
+
+      - name: Deploy Firestore rules
+        run: firebase deploy --only firestore:rules --project wa-awesome
 
       - name: Deploy Firestore rules
         run: firebase deploy --only firestore:rules --project wa-awesome
