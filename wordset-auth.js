@@ -20,14 +20,21 @@ export function ensureSignedIn() {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
         signedInUser = user;
-        unsubscribe();
-        resolve(user);
+        try {
+          await user.getIdToken(true);
+          unsubscribe();
+          resolve(user);
+        } catch (error) {
+          unsubscribe();
+          reject(error);
+        }
         return;
       }
 
       try {
         const credential = await signInAnonymously(auth);
         signedInUser = credential.user;
+        await credential.user.getIdToken(true);
         unsubscribe();
         resolve(credential.user);
       } catch (error) {
