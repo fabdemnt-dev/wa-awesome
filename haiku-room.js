@@ -4,6 +4,7 @@ import state from './haiku-state.js';
 import { escapeHTML, escapeJS } from './haiku-utils.js';
 import { renderInputFields, renderHand, renderBoards } from './haiku-render.js';
 import { subscribeRoomHistory } from './room-history.js';
+import { ensureSignedIn } from './wordset-auth.js';
 
 let previousStatus = null; // 直前のstatusを記録し、「lobbyに遷移した瞬間」だけ入力欄をクリアするために使う
 
@@ -263,6 +264,12 @@ function debugShowSnapshotInfo(data, source = 'onSnapshot') {
 // ==== DEBUG END ====
 
 window.joinRoom = async function() {
+  try {
+    await ensureSignedIn();
+  } catch (e) {
+    return alert('認証に失敗しました。ページを再読み込みしてください: ' + e.message);
+  }
+
   state.myName = document.getElementById('player-name')?.value.trim() || "";
   state.roomId = document.getElementById('room-id')?.value.trim() || "";
   const specCheck = document.getElementById('spectator-check');
