@@ -22,6 +22,34 @@ export function splitWords(text) {
     .filter((w) => w.length > 0);
 }
 
+// 永続化するワードセットは文字列配列を正規形とする。
+// 旧版のゲーム保存では { text, author, id } 形式が保存されていたため、読み込み時に文字列へ戻す。
+function normalizeWord(value) {
+  if (typeof value === 'string') return value.trim();
+  if (value && typeof value.text === 'string') return value.text.trim();
+  return '';
+}
+
+export function normalizeWordList(values) {
+  if (!Array.isArray(values)) return [];
+  return values
+    .map(normalizeWord)
+    .filter((value) => value.length > 0);
+}
+
+export function normalizeWordSet(wordSet) {
+  const normalized = { ...wordSet };
+
+  if (wordSet?.type === 'haiku') {
+    normalized.words5 = normalizeWordList(wordSet.words5);
+    normalized.words7 = normalizeWordList(wordSet.words7);
+  } else if (wordSet?.type === 'poem') {
+    normalized.words = normalizeWordList(wordSet.words);
+  }
+
+  return normalized;
+}
+
 // アイコンの選択肢一覧（フォームでユーザーが自分で選べる）
 export const iconPalette = [
   { id: "heart", emoji: "💗", bg: "#fce7f3" },
@@ -37,6 +65,14 @@ export const iconPalette = [
   { id: "music", emoji: "🎵", bg: "#ede9fe" },
   { id: "sparkle", emoji: "✨", bg: "#fdf4ff" },
 ];
+
+// 保存する自由入力アイコンは短いテキストだけに制限する。
+// 実際の描画時にもescapeHTMLを通すため、HTMLとして解釈されることはない。
+export function normalizeIcon(value) {
+  if (typeof value !== 'string') return null;
+  const icon = Array.from(value.trim()).slice(0, 4).join('');
+  return icon || null;
+}
 
 // idからアイコンを探す。見つからなければnullを返す（過去にボタン選択式で保存された分の互換用）
 export function getIconById(id) {
