@@ -3,6 +3,7 @@ import { db } from './firebase-config.js';
 import state from './poem-state.js';
 import { defaultWords } from './poem-default-words.js';
 import { getWordSetById } from './poem-wordsets.js';
+import { saveWordSetSecurely, userFacingError } from './wordset-auth.js';
 
 window.addWords = async function() {
   if (state.isSpectator) return alert('見学モードでは素材投稿はできません');
@@ -101,19 +102,20 @@ window.saveGameAsWordSet = async function() {
   if (!name) return;
 
   try {
-    await addDoc(collection(db, 'wordsets'), {
-      type: 'poem',
-      name,
-      words: words.map(w => w.text).filter(Boolean),
-      creators: [state.myName],
-      hasPassword: false,
-      passwordHash: null,
-      createdAt: serverTimestamp()
+    await saveWordSetSecurely({
+      editorName: state.myName || '不明',
+      wordSet: {
+        type: 'poem',
+        name,
+        words: words.map(w => w.text).filter(Boolean),
+        hasPassword: false,
+        icon: null,
+      },
     });
     alert(`🎴 ワードセット「${name}」として保存しました！\nワードセットのページから、いつでも使えます。`);
   } catch (e) {
     console.error(e);
-    alert('保存に失敗しました: ' + e.message);
+    alert(userFacingError(e));
   }
 };
 

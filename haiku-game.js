@@ -5,6 +5,7 @@ import { evalOptionsMaster } from './haiku-utils.js';
 import { renderInputFields } from './haiku-render.js';
 import { defaultWords5, defaultWords7 } from './haiku-default-words.js';
 import { getWordSetById } from './haiku-wordsets.js';
+import { saveWordSetSecurely, userFacingError } from './wordset-auth.js';
 
 window.addWords = async function() {
   if (!state.currentData || state.isSpectator) return;
@@ -193,20 +194,21 @@ window.saveGameAsWordSet = async function() {
   if (!name) return;
 
   try {
-    await addDoc(collection(db, 'wordsets'), {
-      type: 'haiku',
-      name,
-      words5: words5.map(w => w.text).filter(Boolean),
-      words7: words7.map(w => w.text).filter(Boolean),
-      creators: [state.myName],
-      hasPassword: false,
-      passwordHash: null,
-      createdAt: serverTimestamp()
+    await saveWordSetSecurely({
+      editorName: state.myName || '不明',
+      wordSet: {
+        type: 'haiku',
+        name,
+        words5: words5.map(w => w.text).filter(Boolean),
+        words7: words7.map(w => w.text).filter(Boolean),
+        hasPassword: false,
+        icon: null,
+      },
     });
     alert(`🎴 ワードセット「${name}」として保存しました！\nワードセットのページから、いつでも使えます。`);
   } catch (e) {
     console.error(e);
-    alert('保存に失敗しました: ' + e.message);
+    alert(userFacingError(e));
   }
 };
 window.nextRound = async function() {
