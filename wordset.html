@@ -44,10 +44,10 @@
     <div class="form-block">
       <label class="checkbox-label">
         <input type="checkbox" id="poem-has-password" onchange="onWordSetFormInput()">
-        🔒 パスワードをつける（自分だけが編集・削除できるようにする）
+        🔒 パスワードをつける（知っている人だけが編集・削除できる）
       </label>
       <div id="poem-password-box" class="password-box" style="display:none;">
-        <input type="password" id="poem-password" placeholder="パスワード" oninput="onWordSetFormInput()">
+        <input type="password" id="poem-password" minlength="8" placeholder="パスワード（8文字以上）" oninput="onWordSetFormInput()">
         <p class="form-hint">※編集時に空欄のままにすると、今のパスワードのまま変更されません</p>
       </div>
     </div>
@@ -114,10 +114,10 @@
     <div class="form-block">
       <label class="checkbox-label">
         <input type="checkbox" id="haiku-has-password" onchange="onWordSetFormInput()">
-        🔒 パスワードをつける（自分だけが編集・削除できるようにする）
+        🔒 パスワードをつける（知っている人だけが編集・削除できる）
       </label>
       <div id="haiku-password-box" class="password-box" style="display:none;">
-        <input type="password" id="haiku-password" placeholder="パスワード" oninput="onWordSetFormInput()">
+        <input type="password" id="haiku-password" minlength="8" placeholder="パスワード（8文字以上）" oninput="onWordSetFormInput()">
         <p class="form-hint">※編集時に空欄のままにすると、今のパスワードのまま変更されません</p>
       </div>
     </div>

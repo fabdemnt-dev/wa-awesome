@@ -1,27 +1,17 @@
 import { db } from './firebase-config.js';
 import {
-  collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, where, serverTimestamp
-} from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+  collection, onSnapshot, query, where,
+} from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
 import state from './wordset-state.js';
-import { splitWords, simpleHash, normalizeIcon } from './wordset-utils.js';
+import { splitWords, normalizeIcon } from './wordset-utils.js';
 import { renderAll } from './wordset-render.js';
+import {
+  deleteWordSetSecurely, saveWordSetSecurely, userFacingError,
+} from './wordset-auth.js';
 
-// 変更のたびに、そのワードセットの「history」サブコレクションにスナップショットを1件残しておく。
-// 見るための画面はまだ無いが、後で作るときのためにデータだけ先に貯めておく。
-// ※Firestoreはドキュメントを削除してもサブコレクションを自動削除しないので、
-//   削除記録もこのサブコレクションに書けば、セット自体が消えた後も残り続ける。
-async function logHistory(docId, action, editor, snapshot) {
-  try {
-    await addDoc(collection(db, 'wordsets', docId, 'history'), {
-      action, // 'created' | 'edited'
-      editor: editor || '不明',
-      snapshot,
-      timestamp: serverTimestamp()
-    });
-  } catch (e) {
-    console.error('編集履歴の記録に失敗しました', e);
-  }
-}
+// 編集を始める時に入力した現在のパスワードは、画面を閉じるまでメモリ内だけに保持する。
+// FirestoreやlocalStorageには保存しない。
+const unlockedPasswords = new Map();
 
 window.switchMode = function (mode) {
   state.mode = mode;
@@ -37,7 +27,6 @@ window.startNewWordSet = function () {
   renderAll();
 };
 
-// 入力欄が変化するたびに呼ばれ、状態を更新してプレビューだけ再描画する
 window.onWordSetFormInput = function () {
   const mode = state.mode;
   if (mode === 'poem') {
@@ -59,115 +48,89 @@ window.onWordSetFormInput = function () {
   renderAll();
 };
 
-// プレビューのチップの「×」を押した時、そのことばだけを入力欄からも取り除く
 window.removeWordSetWord = function (field, index) {
-  const mode = state.mode;
-  const form = state.forms[mode];
+  const form = state.forms[state.mode];
   const words = splitWords(form[field]);
   words.splice(index, 1);
   form[field] = words.join('\n');
   renderAll();
 };
 
+function buildWordSet(form, mode) {
+  const name = (form.name || '').trim();
+  if (!name) throw new Error('セットのなまえを入力してください');
+
+  const wordSet = {
+    type: mode,
+    name,
+    hasPassword: !!form.hasPassword,
+    icon: normalizeIcon(form.icon),
+  };
+
+  if (mode === 'poem') {
+    wordSet.words = splitWords(form.words);
+    if (wordSet.words.length === 0) throw new Error('ことばを入力してください');
+  } else {
+    wordSet.words5 = splitWords(form.words5);
+    wordSet.words7 = splitWords(form.words7);
+    if (wordSet.words5.length === 0 || wordSet.words7.length === 0) {
+      throw new Error('五音・七音のことばをそれぞれ入力してください');
+    }
+  }
+  return wordSet;
+}
+
 window.saveWordSet = async function () {
   const mode = state.mode;
   const form = state.forms[mode];
-  const name = (form.name || '').trim();
-  const creatorName = (form.creatorName || '').trim();
-  if (!name) return alert('セットのなまえを入力してください');
-  if (!creatorName) return alert('作った人の名前を入力してください');
-  if (form.hasPassword && !form.password && !state.editingId[mode]) {
-    return alert('パスワードをつける場合は、パスワードを入力してください');
-  }
-
-  let payload;
-  if (mode === 'poem') {
-    const words = splitWords(form.words);
-    if (words.length === 0) return alert('ことばを入力してください');
-    payload = { type: 'poem', name, words };
-  } else {
-    const words5 = splitWords(form.words5);
-    const words7 = splitWords(form.words7);
-    if (words5.length === 0 || words7.length === 0) {
-      return alert('五音・七音のことばをそれぞれ入力してください');
-    }
-    payload = { type: 'haiku', name, words5, words7 };
-  }
-  payload.hasPassword = !!form.hasPassword;
-  payload.icon = normalizeIcon(form.icon);
+  const editorName = (form.creatorName || '').trim();
+  if (!editorName) return alert('あなたの名前を入力してください');
 
   try {
-    const editingId = state.editingId[mode];
-    const original = editingId ? state.sets[mode].find(s => s.id === editingId) : null;
+    const wordSet = buildWordSet(form, mode);
+    const id = state.editingId[mode];
+    const currentPassword = id ? unlockedPasswords.get(id)?.password : null;
+    const newPassword = wordSet.hasPassword ? (form.password || null) : null;
 
-    // 過去の編集者リストに、今回操作した人の名前を（重複しなければ）追加していく
-    const existingCreators = original
-      ? (original.creators && original.creators.length ? original.creators : (original.creatorName ? [original.creatorName] : []))
-      : [];
-    payload.creators = existingCreators.includes(creatorName) ? existingCreators : [...existingCreators, creatorName];
-
-    if (payload.hasPassword) {
-      // パスワードを新しく入力していればそれを使い、空欄なら元のパスワードを維持する
-      payload.passwordHash = form.password ? simpleHash(form.password) : (original?.passwordHash || null);
-      if (!payload.passwordHash) return alert('パスワードをつける場合は、パスワードを入力してください');
-    } else {
-      payload.passwordHash = null;
+    if (!id && wordSet.hasPassword && !newPassword) {
+      return alert('パスワード付きセットには、8文字以上のパスワードを入力してください');
+    }
+    if (newPassword && newPassword.length < 8) {
+      return alert('パスワードは8文字以上で入力してください');
     }
 
-    if (editingId) {
-      await updateDoc(doc(db, 'wordsets', editingId), payload);
-      await logHistory(editingId, 'edited', creatorName, mode === 'poem'
-        ? { name, words: payload.words }
-        : { name, words5: payload.words5, words7: payload.words7 });
-      alert('ワードセットを更新しました！');
-    } else {
-      payload.createdAt = serverTimestamp();
-      const newRef = await addDoc(collection(db, 'wordsets'), payload);
-      await logHistory(newRef.id, 'created', creatorName, mode === 'poem'
-        ? { name, words: payload.words }
-        : { name, words5: payload.words5, words7: payload.words7 });
-      alert('ワードセットを保存しました！');
-    }
+    await saveWordSetSecurely({ id, editorName, wordSet, currentPassword, newPassword });
+    if (id) unlockedPasswords.delete(id);
+    alert(id ? 'ワードセットを更新しました！' : 'ワードセットを保存しました！');
     window.startNewWordSet();
-  } catch (e) {
-    console.error(e);
-    alert('保存に失敗しました: ' + e.message);
+  } catch (error) {
+    console.error(error);
+    alert(userFacingError(error));
   }
 };
 
-// パスワードつきのセットを編集・削除する前に、名前とパスワードが一致するか確認する
-// 戻り値: { ok: 通過したか, name: 入力された名前（パスワード無しの場合はnull） }
-function checkAuth(target) {
-  if (!target.hasPassword) return { ok: true, name: null };
-
-  const creators = (target.creators && target.creators.length) ? target.creators : (target.creatorName ? [target.creatorName] : []);
-  const inputName = prompt(`🔒「${target.name}」はパスワード付きセットです。\nこれまでの編集者（${creators.join('、') || '不明'}）のお名前を入力してください。`, '');
-  if (inputName === null) return { ok: false };
-  const trimmedName = inputName.trim();
-  if (!creators.includes(trimmedName)) {
-    alert('お名前が一致しません。');
+async function requestPassword(target) {
+  if (!target.hasPassword) return { ok: true, password: null };
+  const password = prompt(`🔒「${target.name}」はパスワード付きセットです。\n編集・削除するにはパスワードを入力してください。`);
+  if (password === null) return { ok: false };
+  if (!password) {
+    alert('パスワードを入力してください。');
     return { ok: false };
   }
-
-  const inputPass = prompt('パスワードを入力してください。');
-  if (inputPass === null) return { ok: false };
-  if (simpleHash(inputPass) !== target.passwordHash) {
-    alert('パスワードが一致しません。');
-    return { ok: false };
-  }
-  return { ok: true, name: trimmedName };
+  return { ok: true, password };
 }
 
-window.editWordSet = function (id) {
+window.editWordSet = async function (id) {
   const mode = state.mode;
-  const target = state.sets[mode].find(s => s.id === id);
+  const target = state.sets[mode].find((set) => set.id === id);
   if (!target) return;
-  if (!checkAuth(target).ok) return;
+
+  const auth = await requestPassword(target);
+  if (!auth.ok) return;
+  unlockedPasswords.set(id, { password: auth.password });
 
   state.editingId[mode] = id;
-  // 名前欄は空にしておき、今回編集する人が自分の名前を入力する（入力した名前が編集者リストに追加される）
   const base = { creatorName: '', hasPassword: !!target.hasPassword, password: '', icon: target.icon || '' };
-  // ことばを改行区切りで復元する（分割の仕様が「改行のみ」なので、つなぐのも改行でないと1行に全部くっついてしまう）
   state.forms[mode] = mode === 'poem'
     ? { name: target.name, words: (target.words || []).join('\n'), ...base }
     : { name: target.name, words5: (target.words5 || []).join('\n'), words7: (target.words7 || []).join('\n'), ...base };
@@ -183,32 +146,20 @@ window.toggleWordSetDetail = function (id) {
 
 window.deleteWordSet = async function (id) {
   const mode = state.mode;
-  const target = state.sets[mode].find(s => s.id === id);
+  const target = state.sets[mode].find((set) => set.id === id);
   if (!target) return;
 
-  const auth = checkAuth(target);
+  const auth = await requestPassword(target);
   if (!auth.ok) return;
-
-  // パスワード無しの場合は名前を確認していないので、記録用にここで聞く（空欄でもOK）
-  let deleterName = auth.name;
-  if (!deleterName) {
-    deleterName = (prompt(`「${target.name}」を削除する人のお名前を入力してください（記録用・空欄でも削除できます）`, '') || '').trim();
-  }
-
+  const editorName = (prompt(`「${target.name}」を削除する人のお名前を入力してください（記録用・空欄でもOK）`, '') || '').trim();
   if (!confirm('このワードセットを削除しますか？\n（この操作は取り消せません）')) return;
 
-  const snapshot = mode === 'poem'
-    ? { name: target.name, words: target.words || [] }
-    : { name: target.name, words5: target.words5 || [], words7: target.words7 || [] };
-
   try {
-    // ドキュメントを消す前に、historyサブコレクションへ「削除された」記録を残しておく
-    // （Firestoreはサブコレクションを自動で消さないので、親ドキュメントが無くなってもこの記録は残る）
-    await logHistory(id, 'deleted', deleterName, snapshot);
-    await deleteDoc(doc(db, 'wordsets', id));
-  } catch (e) {
-    console.error(e);
-    alert('削除に失敗しました: ' + e.message);
+    await deleteWordSetSecurely({ id, editorName, currentPassword: auth.password });
+    alert('ワードセットを削除しました。');
+  } catch (error) {
+    console.error(error);
+    alert(userFacingError(error));
   }
 };
 
@@ -216,7 +167,7 @@ export function listenWordSets() {
   ['poem', 'haiku'].forEach((type) => {
     const q = query(collection(db, 'wordsets'), where('type', '==', type));
     onSnapshot(q, (snap) => {
-      state.sets[type] = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      state.sets[type] = snap.docs.map((docSnapshot) => ({ id: docSnapshot.id, ...docSnapshot.data() }));
       renderAll();
     });
   });
