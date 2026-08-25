@@ -1,5 +1,5 @@
 const state = {
-  mode: "poem", // 'poem' | 'haiku'
+  mode: "haiku", // 'poem' | 'haiku'
   editingId: { poem: null, haiku: null },
   expandedId: { poem: null, haiku: null }, // 「詳細を見る」で開いているセットのID
   forms: {

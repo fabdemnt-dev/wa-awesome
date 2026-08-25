@@ -84,7 +84,6 @@ window.saveWordSet = async function () {
   const mode = state.mode;
   const form = state.forms[mode];
   const editorName = (form.creatorName || '').trim();
-  if (!editorName) return alert('あなたの名前を入力してください');
 
   try {
     const wordSet = buildWordSet(form, mode);
