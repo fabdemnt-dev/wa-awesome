@@ -28,30 +28,8 @@ jobs:
       - name: Install Firebase CLI
         run: npm install -g firebase-tools
 
-      # 複数行シェルは使わず、1行で firebase.json を作る
       - name: Create firebase.json
         run: echo '{"firestore":{"rules":"firestore.rules"}}' > firebase.json
-
-      - name: Deploy Firestore rules
-        run: firebase deploy --only firestore:rules --project wa-awesome
-      - name: Create minimal firebase.json if missing
-        run: |
-          if [ ! -f firebase.json ]; then
-            echo '{"firestore":{"rules":"firestore.rules"}}' > firebase.json
-            echo "created firebase.json (minimal)"
-          else
-            echo "firebase.json already exists"
-          fi
-
-      - name: Deploy Firestore rules
-        run: firebase deploy --only firestore:rules --project wa-awesome
-            echo "created firebase.json (minimal)"
-          else
-            echo "firebase.json already exists"
-          fi
-
-      - name: Deploy Firestore rules
-        run: firebase deploy --only firestore:rules --project wa-awesome
 
       - name: Deploy Firestore rules
         run: firebase deploy --only firestore:rules --project wa-awesome
