@@ -1,9 +1,3 @@
-# ============================================================
-# firestore.rules を main に push するたびに Firebase へ自動反映
-# ------------------------------------------------------------
-# 認証: GCP サービスアカウントJSON（Secrets: FIREBASE_SERVICE_ACCOUNT_JSON）
-# 手動実行: Actions タブ → Deploy Firestore Rules → Run workflow
-# ============================================================
 name: Deploy Firestore Rules
 
 on:
