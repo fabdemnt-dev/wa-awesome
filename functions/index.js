@@ -139,7 +139,7 @@ exports.saveWordSet = onCall(callableOptions, async (request) => {
 
   const input = request.data || {};
   const id = optionalText(input.id, 150);
-  const editorName = requireText(input.editorName, 'あなたの名前', 20);
+  const editorName = optionalText(input.editorName, 20) || '匿名';
   const wordSet = sanitizeWordSet(input.wordSet);
   const ref = id ? db.collection('wordsets').doc(id) : db.collection('wordsets').doc();
   const existingSnapshot = id ? await ref.get() : null;
