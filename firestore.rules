@@ -1,0 +1,88 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ============================================================
+    // 1) 訪問カウンタ counter/visits
+    //    トップページの「何匹目の迷い猫さん？」カウンタ。
+    //    - 読むのは誰でもOK（数字を表示するため）
+    //    - 書けるのは visits ドキュメントの count（数字）だけ
+    //    - ほかの項目・削除は禁止（キリ番・お誕生日を守る）
+    // ============================================================
+    match /counter/{docId} {
+      allow read: if true;
+      allow create, update: if
+          docId == 'visits'
+          && request.resource.data.keys().hasOnly(['count'])
+          && request.resource.data.count is int
+          && request.resource.data.count >= 0;
+      allow delete: if false;
+    }
+
+    // ============================================================
+    // 2) ゲームの部屋 rooms/haiku_○○○ と rooms/poem_○○○
+    //    俳句の庭・ポエム工房の部屋データを1ドキュメントで共有。
+    //    - 読むのは誰でもOK（入室・ライブ同期のため）
+    //    - 書くのは「サイズ上限内」ならOK
+    //      ※プレイヤー名がキー（phrases.○○など）になるため、
+    //        細かいフィールド検査はせず、言葉のリスト数に上限をかける
+    //    - 部屋の削除はアプリから行わないので禁止
+    // ============================================================
+    match /rooms/{roomId} {
+      allow read: if true;
+      allow create, update: if
+          request.resource != null
+          && request.resource.data.size() <= 1048576
+          && (roomId.startsWith('haiku_')
+              ? (!('words5' in request.resource.data)
+                  || (request.resource.data.words5 is list
+                      && request.resource.data.words5.size() <= 2000))
+                && (!('words7' in request.resource.data)
+                    || (request.resource.data.words7 is list
+                        && request.resource.data.words7.size() <= 2000))
+              : (!('words' in request.resource.data)
+                  || (request.resource.data.words is list
+                      && request.resource.data.words.size() <= 2000)));
+      allow delete: if false;
+    }
+
+    // ============================================================
+    // 3) ワードセット wordsets
+    //    みんなで共有する「神の手札」のカードセット。
+    //    - 読む・作る・編集する・消すのは誰でもOK
+    //      ※編集・削除のパスワード確認はアプリ画面側で実施中。
+    //        ログイン機能が無いため、サーバー側での本人確認は
+    //        Firebase Auth導入時の宿題にする（※補足参照）
+    //    - type は poem / haiku のどちらか
+    //    - サイズ上限つき
+    // ============================================================
+    match /wordsets/{docId} {
+      allow read: if true;
+      allow create, update: if
+          request.resource != null
+          && request.resource.data.size() <= 1048576
+          && request.resource.data.type in ['poem', 'haiku']
+          && (request.resource.data.words is list
+              || request.resource.data.words5 is list);
+      allow delete: if true;
+    }
+
+    // ============================================================
+    // 4) ワードセットの編集履歴 wordsets/○○○/history
+    //    セットを変えるたびに1件ずつ自動記録されるログ。
+    //    - 追記（create）のみ許可
+    //    - 編集・削除は禁止（履歴は残すためのもの）
+    //    - timestamp はサーバー時刻（serverTimestamp）であること
+    //      ※この記録が失敗しても、セット本体の保存が止まることはない
+    //        （コード側でログ失敗時は握りつぶす設計のため）
+    // ============================================================
+    match /wordsets/{docId}/history/{entryId} {
+      allow read: if true;
+      allow create: if
+          request.resource.data.keys().hasAll(['action', 'editor', 'snapshot', 'timestamp'])
+          && request.resource.data.size() <= 1048576
+          && request.resource.data.timestamp == request.time;
+      allow update, delete: if false;
+    }
+  }
+}
