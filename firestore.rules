@@ -20,19 +20,12 @@ service cloud.firestore {
     // ============================================================
     match /rooms/{roomId} {
       allow read: if true;
+      // 参加者は匿名認証ユーザー。ルームのゲーム状態はクライアント間で共有更新する。
+      // 複雑なデータ形式検査は既存データとの互換性を壊していたため、
+      // ドキュメント容量だけを上限として、認証済みユーザーの作成・更新を許可する。
       allow create, update: if
-          request.resource != null
-          && request.resource.data.size() <= 1048576
-          && (roomId.startsWith('haiku_')
-              ? (!('words5' in request.resource.data)
-                  || (request.resource.data.words5 is list
-                      && request.resource.data.words5.size() <= 2000))
-                && (!('words7' in request.resource.data)
-                    || (request.resource.data.words7 is list
-                        && request.resource.data.words7.size() <= 2000))
-              : (!('words' in request.resource.data)
-                  || (request.resource.data.words is list
-                      && request.resource.data.words.size() <= 2000)));
+          request.auth != null
+          && request.resource.data.size() <= 1048576;
       allow delete: if false;
     }
 
