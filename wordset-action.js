@@ -3,7 +3,7 @@ import {
   collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, where, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import state from './wordset-state.js';
-import { splitWords, simpleHash } from './wordset-utils.js';
+import { splitWords, simpleHash, normalizeIcon } from './wordset-utils.js';
 import { renderAll } from './wordset-render.js';
 
 // 変更のたびに、そのワードセットの「history」サブコレクションにスナップショットを1件残しておく。
@@ -94,7 +94,7 @@ window.saveWordSet = async function () {
     payload = { type: 'haiku', name, words5, words7 };
   }
   payload.hasPassword = !!form.hasPassword;
-  payload.icon = (form.icon || '').trim() || null;
+  payload.icon = normalizeIcon(form.icon);
 
   try {
     const editingId = state.editingId[mode];

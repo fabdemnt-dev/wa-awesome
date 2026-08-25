@@ -1,5 +1,6 @@
 import { db } from './firebase-config.js';
 import { collection, query, where, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { normalizeWordSet } from './wordset-utils.js';
 
 let cachedSets = [];
 
@@ -22,6 +23,6 @@ function renderOptions() {
 
 const q = query(collection(db, 'wordsets'), where('type', '==', 'haiku'));
 onSnapshot(q, (snap) => {
-  cachedSets = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  cachedSets = snap.docs.map(d => normalizeWordSet({ id: d.id, ...d.data() }));
   renderOptions();
 });

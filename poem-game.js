@@ -104,7 +104,7 @@ window.saveGameAsWordSet = async function() {
     await addDoc(collection(db, 'wordsets'), {
       type: 'poem',
       name,
-      words: words.map(w => ({ text: w.text, author: w.author, id: w.id })),
+      words: words.map(w => w.text).filter(Boolean),
       creators: [state.myName],
       hasPassword: false,
       passwordHash: null,

@@ -122,7 +122,7 @@ function renderPoemList() {
     return `
       <div class="set-item-wrap">
         <div class="set-item" style="${isOpen ? 'border-radius:10px 10px 0 0;' : ''}">
-          <div class="set-icon" style="background:${icon.bg};">${icon.emoji}</div>
+          <div class="set-icon" style="background:${icon.bg};">${escapeHTML(String(icon.emoji || ''))}</div>
           <div class="set-info">
             <div class="set-name-row">
               <span class="set-name">${s.hasPassword ? '🔒 ' : ''}${escapeHTML(s.name)}</span>
@@ -160,7 +160,7 @@ function renderHaikuList() {
     return `
       <div class="set-item-wrap">
         <div class="set-item" style="${isOpen ? 'border-radius:10px 10px 0 0;' : ''}">
-          <div class="set-icon" style="background:${icon.bg};">${icon.emoji}</div>
+          <div class="set-icon" style="background:${icon.bg};">${escapeHTML(String(icon.emoji || ''))}</div>
           <div class="set-info">
             <div class="set-name-row">
               <span class="set-name">${s.hasPassword ? '🔒 ' : ''}${escapeHTML(s.name)}</span>
