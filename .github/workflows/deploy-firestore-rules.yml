@@ -1,10 +1,10 @@
 # ============================================================
 # firestore.rules を push のたびに自動で Firebase へ反映するワークフロー
-# 認証: GCP サービスアカウントJSON（PC不要 / スマホだけで完結）
 # ------------------------------------------------------------
-# 必要なもの: GitHub Secrets に FIREBASE_SERVICE_ACCOUNT_JSON が登録されていること
-# 動くタイミング: firestore.rules が変更されて main に push されたとき
-# 手動実行も可: Actions タブ →「Deploy Firestore Rules」→ Run workflow
+# 認証: GCP サービスアカウントJSON（PC不要）
+# 必要な Secrets: FIREBASE_SERVICE_ACCOUNT_JSON（既に登録済み）
+# 動くタイミング: firestore.rules を変更して main に push した時
+# 手動実行: Actions タブ → Deploy Firestore Rules → Run workflow
 # ============================================================
 name: Deploy Firestore Rules
 
@@ -22,18 +22,29 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # サービスアカウントJSONで認証 →
+      # 以降のステップで GOOGLE_APPLICATION_CREDENTIALS が自動設定される
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
 
-      - name: Setup Firebase CLI
-        uses: w9jds/setup-firebase@main
+      # firebase CLI を入れるだけ（firebase_token不要）
+      # → 上のステップの GOOGLE_APPLICATION_CREDENTIALS で自動的にログインされる
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
 
       - name: Create minimal firebase.json if missing
         run: |
           if [ ! -f firebase.json ]; then
             echo '{"firestore":{"rules":"firestore.rules"}}' > firebase.json
+            echo "created firebase.json (minimal)"
+          else
+            echo "firebase.json already exists"
+          fi
+
+      - name: Deploy Firestore rules
+        run: firebase deploy --only firestore:rules --project wa-awesome
             echo "created firebase.json (minimal)"
           else
             echo "firebase.json already exists"
