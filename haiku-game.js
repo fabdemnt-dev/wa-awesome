@@ -1,4 +1,4 @@
-import { updateDoc, arrayUnion, addDoc, collection, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { updateDoc, arrayUnion, writeBatch, collection, doc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { db } from './firebase-config.js';
 import state from './haiku-state.js';
 import { evalOptionsMaster } from './haiku-utils.js';
@@ -299,14 +299,16 @@ window.nextRound = async function() {
       }
     }
 
-    await updateDoc(state.roomRef, {
+    const batch = writeBatch(db);
+    batch.update(state.roomRef, {
       status: "lobby", 
       currentHost: nextHost,
       roundCount: nextRoundNum,
       scores: newScores, 
-      history: arrayUnion(currentRoundHistory),
       words5: carriedWords5, words7: carriedWords7, hands5: {}, hands7: {}, deck5: [], deck7: [], phrases: {}, phraseDetails: {}, votes: {}, revealedPhrases: {}, selfPraise: {}, redraws: {}
     });
+    batch.set(doc(collection(state.roomRef, 'history')), currentRoundHistory);
+    await batch.commit();
     
     alert(alertMessage);
   } catch (e) {

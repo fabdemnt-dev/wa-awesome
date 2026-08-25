@@ -36,6 +36,12 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // ルームの過去ラウンド履歴。現在状態とは別ドキュメントに保存する。
+    match /rooms/{roomId}/history/{entryId} {
+      allow read, create: if true;
+      allow update, delete: if false;
+    }
+
     // ============================================================
     // 3) ワードセット wordsets
     //

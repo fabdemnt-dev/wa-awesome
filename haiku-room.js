@@ -3,13 +3,21 @@ import { doc, getDoc, setDoc, onSnapshot, updateDoc, arrayUnion, arrayRemove } f
 import state from './haiku-state.js';
 import { escapeHTML, escapeJS } from './haiku-utils.js';
 import { renderInputFields, renderHand, renderBoards } from './haiku-render.js';
+import { subscribeRoomHistory } from './room-history.js';
 
 let previousStatus = null; // 直前のstatusを記録し、「lobbyに遷移した瞬間」だけ入力欄をクリアするために使う
 
 // Firestoreの部屋データを受け取り、画面表示を最新状態へ反映する。
 // onSnapshotでの受信時と、Chrome復帰時のvisibilitychange再取得時の両方から呼ばれる共通処理。
 function applyRoomData(data) {
-  state.currentData = data;
+  const embeddedHistory = Array.isArray(data?.history)
+    ? data.history
+    : (state.legacyHistory || []);
+  if (Array.isArray(data?.history)) state.legacyHistory = data.history;
+  state.currentData = {
+    ...data,
+    history: [...embeddedHistory, ...(state.roomHistory || [])],
+  };
   if (!state.currentData) return;
 
   const players = state.currentData.players || [];
@@ -272,7 +280,6 @@ if (!roomSnapshot.exists()) {
     status: "lobby",
     currentHost: state.isSpectator ? '' : state.myName,
     roundCount: 1,
-    history: [],
     words5: [],
     words7: [],
     hands5: {},
@@ -322,6 +329,16 @@ if (!roomSnapshot.exists()) {
     onSnapshot(state.roomRef, (snapshot) => {
       debugShowSnapshotInfo(snapshot.data()); // ==== DEBUG: 確認後にこの行だけ削除 ====
       applyRoomData(snapshot.data());
+    });
+    state.roomHistory = [];
+    state.legacyHistory = [];
+    subscribeRoomHistory(state.roomRef, (history) => {
+      state.roomHistory = history;
+      if (state.currentData) {
+        const roomData = { ...state.currentData };
+        delete roomData.history;
+        applyRoomData(roomData);
+      }
     });
   } catch (e) {
     alert('接続エラーが発生しました: ' + e.message);
