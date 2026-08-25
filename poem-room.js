@@ -4,6 +4,7 @@ import state from './poem-state.js';
 import { escapeHTML, escapeJS, renderInputFields, renderHand, renderBoards } from './poem-render.js';
 import { setupAutoResize } from './poem-action.js';
 import { subscribeRoomHistory } from './room-history.js';
+import { ensureSignedIn } from './wordset-auth.js';
 
 // Firestoreの部屋データを受け取り、画面表示を最新状態へ反映する。
 // onSnapshotでの受信時と、Chrome復帰時のvisibilitychange再取得時の両方から呼ばれる共通処理。
@@ -253,6 +254,12 @@ function debugShowSnapshotInfo(data, source = 'onSnapshot') {
 // ==== DEBUG END ====
 
 window.joinRoom = async function() {
+  try {
+    await ensureSignedIn();
+  } catch (e) {
+    return alert('認証に失敗しました。ページを再読み込みしてください: ' + e.message);
+  }
+
   const nameInput = document.getElementById('player-name');
   const roomInput = document.getElementById('room-id');
   
