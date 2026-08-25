@@ -1,4 +1,4 @@
-import { updateDoc, arrayUnion, addDoc, collection, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { updateDoc, arrayUnion, writeBatch, collection, doc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { db } from './firebase-config.js';
 import state from './poem-state.js';
 import { defaultWords } from './poem-default-words.js';
@@ -130,14 +130,16 @@ window.nextGame = async function() {
   };
   const nextRoundNum = (state.currentData.roundCount || 1) + 1;
 
-  await updateDoc(state.roomRef, {
+  const batch = writeBatch(db);
+  batch.update(state.roomRef, {
     status: "lobby",
     roundCount: nextRoundNum,
-    history: arrayUnion(currentRoundHistory),
     words: [],
     hands: {},
     poems: {}
   });
+  batch.set(doc(collection(state.roomRef, 'history')), currentRoundHistory);
+  await batch.commit();
   
   alert('作品を履歴に保存しました！次の作成に進みます。');
 };

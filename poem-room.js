@@ -3,11 +3,19 @@ import { doc, getDoc, setDoc, onSnapshot, updateDoc, arrayUnion, arrayRemove } f
 import state from './poem-state.js';
 import { escapeHTML, escapeJS, renderInputFields, renderHand, renderBoards } from './poem-render.js';
 import { setupAutoResize } from './poem-action.js';
+import { subscribeRoomHistory } from './room-history.js';
 
 // Firestoreの部屋データを受け取り、画面表示を最新状態へ反映する。
 // onSnapshotでの受信時と、Chrome復帰時のvisibilitychange再取得時の両方から呼ばれる共通処理。
 function applyRoomData(data) {
-  state.currentData = data;
+  const embeddedHistory = Array.isArray(data?.history)
+    ? data.history
+    : (state.legacyHistory || []);
+  if (Array.isArray(data?.history)) state.legacyHistory = data.history;
+  state.currentData = {
+    ...data,
+    history: [...embeddedHistory, ...(state.roomHistory || [])],
+  };
   if (!state.currentData) return;
 
   const players = state.currentData.players || [];
@@ -268,7 +276,6 @@ if (!roomSnapshot.exists()) {
   const initialData = {
     status: "lobby",
     roundCount: 1,
-    history: [],
     words: [],
     hands: {},
     poems: {},
@@ -310,6 +317,16 @@ if (!roomSnapshot.exists()) {
     onSnapshot(state.roomRef, (snapshot) => {
       debugShowSnapshotInfo(snapshot.data()); // ==== DEBUG: 確認後にこの行だけ削除 ====
       applyRoomData(snapshot.data());
+    });
+    state.roomHistory = [];
+    state.legacyHistory = [];
+    subscribeRoomHistory(state.roomRef, (history) => {
+      state.roomHistory = history;
+      if (state.currentData) {
+        const roomData = { ...state.currentData };
+        delete roomData.history;
+        applyRoomData(roomData);
+      }
     });
   } catch (e) { alert('接続エラー: ' + e.message); }
 };
