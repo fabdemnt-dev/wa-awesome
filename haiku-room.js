@@ -139,11 +139,14 @@ function applyRoomData(data) {
   if (spectators.includes(state.myName)) state.isSpectator = true;
   if (players.includes(state.myName)) state.isSpectator = false;
 
+  // 役割をsnapshotへ反映した後の状態で、親不在ボタンを再評価する。
+  // 先に評価すると、見学者→プレイヤー変更直後などに古い役割が使われる。
+  refreshHostRecoveryUI();
+
   const currentHost = players.includes(state.currentData.currentHost) ? state.currentData.currentHost : (players[0] || '未設定');
   const hostText = `👑 今節の選者（親）: <strong>${escapeHTML(currentHost)}</strong> ${currentHost === state.myName ? '（あなた）' : ''}`;
 
   syncHostHeartbeat();
-  refreshHostRecoveryUI();
 
   if (document.getElementById('host-info-lobby')) document.getElementById('host-info-lobby').innerHTML = hostText;
   if (document.getElementById('host-info-game')) document.getElementById('host-info-game').innerHTML = hostText;
