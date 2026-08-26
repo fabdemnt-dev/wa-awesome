@@ -1,5 +1,6 @@
 import state from './poem-state.js';
 import { speakPoem } from './poem-audio.js';
+import { getParticipantStorageKey } from './participant-utils.js';
 
 export function escapeHTML(str) {
   if (typeof str !== 'string') return '';
@@ -57,7 +58,8 @@ export function renderHand() {
   }
 
   if (textarea) textarea.disabled = false;
-  const myHands = state.currentData.hands?.[state.myName] || [];
+  const storageKey = getParticipantStorageKey(state.currentData, state.myUid, state.myName);
+  const myHands = state.currentData.hands?.[storageKey] || [];
   
   if (myHands.length === 0) {
     handList.innerHTML = '<div style="font-size:13px; color:#94a3b8;">手札がありません</div>';

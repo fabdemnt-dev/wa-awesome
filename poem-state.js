@@ -1,5 +1,6 @@
 const state = {
   roomId: "",
+  myUid: "",
   myName: "",
   isSpectator: false,
   roomRef: null,
