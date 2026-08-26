@@ -8,6 +8,7 @@ import { ensureSignedIn } from './wordset-auth.js';
 import { showGameError } from './game-error.js';
 import { defaultWords5, defaultWords7 } from './haiku-default-words.js';
 import { normalizeParticipantName, setParticipantRole, normalizeParticipantRoles, getParticipantStorageKey } from './participant-utils.js';
+import { timestampMillis, isHostHeartbeatStale as isHeartbeatStale } from './host-recovery-utils.js';
 
 async function saveParticipantRole(role) {
   await runTransaction(db, async (transaction) => {
@@ -22,23 +23,15 @@ let hostHeartbeatTimer = null;
 let hostHeartbeatMissingSince = null;
 let hostRecoveryCheckTimer = null;
 const HOST_HEARTBEAT_INTERVAL_MS = 10000;
-const HOST_TIMEOUT_MS = 30000;
-
-function timestampMillis(value) {
-  if (!value) return 0;
-  if (typeof value.toMillis === 'function') return value.toMillis();
-  if (value instanceof Date) return value.getTime();
-  return Number(value) || 0;
-}
 
 function isHostHeartbeatStale(data) {
   const heartbeat = timestampMillis(data?.hostHeartbeatAt);
   if (!heartbeat) {
     if (!hostHeartbeatMissingSince) hostHeartbeatMissingSince = Date.now();
-    return Date.now() - hostHeartbeatMissingSince > HOST_TIMEOUT_MS;
+    return isHeartbeatStale(data, Date.now(), hostHeartbeatMissingSince);
   }
   hostHeartbeatMissingSince = null;
-  return Date.now() - heartbeat > HOST_TIMEOUT_MS;
+  return isHeartbeatStale(data);
 }
 
 async function sendHostHeartbeat() {
@@ -74,7 +67,8 @@ function refreshHostRecoveryUI() {
   const hostRecoveryBtn = document.getElementById('host-recovery-btn');
   const canRecoverHost = data?.status === 'playing'
     && !state.isSpectator
-    && currentHost !== state.myName;
+    && currentHost !== state.myName
+    && isHostHeartbeatStale(data);
   if (hostRecoveryBtn) hostRecoveryBtn.style.display = canRecoverHost ? 'block' : 'none';
 
   const nextHint = document.getElementById('next-round-hint');
@@ -100,7 +94,7 @@ window.claimHost = async function() {
       const data = snapshot.data() || {};
       const players = data.players || [];
       const oldHost = data.currentHost;
-      if (data.status !== 'playing' || !oldHost || !players.includes(oldHost) || oldHost === state.myName) {
+      if (data.status !== 'playing' || !oldHost || !players.includes(oldHost) || oldHost === state.myName || !isHostHeartbeatStale(data)) {
         return false;
       }
 
