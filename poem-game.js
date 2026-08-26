@@ -5,6 +5,7 @@ import { defaultWords } from './poem-default-words.js';
 import { getWordSetById } from './poem-wordsets.js';
 import { saveWordSetSecurely, userFacingError } from './wordset-auth.js';
 import { getParticipantUidByName } from './participant-utils.js';
+import { submitPoemWords } from './poem-functions.js';
 
 window.addWords = async function() {
   if (state.isSpectator) return alert('見学モードでは素材投稿はできません');
@@ -24,7 +25,11 @@ window.addWords = async function() {
 
   if (newWords.length === 0) return alert('少なくとも1つ素材を入力してください');
 
-  await updateDoc(state.roomRef, { words: arrayUnion(...newWords) });
+  if (state.currentData.schemaVersion === 2) {
+    await submitPoemWords(state.roomId, newWords);
+  } else {
+    await updateDoc(state.roomRef, { words: arrayUnion(...newWords) });
+  }
   inputs.forEach(inp => inp.value = '');
   alert('素材を追加しました！');
 };

@@ -12,6 +12,10 @@ const {
   revealPoemSecure,
   reactPoemSecure,
   changeHaikuRole,
+  submitHaikuWords,
+  removeHaikuWord,
+  submitPoemWords,
+  removePoemWord,
 } = require('../index.js');
 
 const db = getFirestore();
@@ -54,6 +58,40 @@ async function seedRoom(roomId) {
     hands7: { legacy: ['古い手札'] },
   });
 }
+
+test('素材Callableは本人投稿・他人偽装拒否・本人削除を検証する', async () => {
+  await roomRef('material-actions').set({
+    schemaVersion: 2,
+    status: 'lobby',
+    players: ['親', '参加者'],
+    spectators: [],
+    participantUids: { 'uid-host': '親', 'uid-player': '参加者' },
+    words5: [],
+    words7: [],
+  });
+  const ownWord = { id: 'own-5', text: '自分の素材', author: '参加者' };
+  await submitHaikuWords.run({ data: { roomId: 'material-actions', words5: [ownWord], words7: [] }, auth: { uid: 'uid-player' } });
+  await assert.rejects(
+    submitHaikuWords.run({ data: { roomId: 'material-actions', words5: [{ id: 'fake', text: '偽装', author: '親' }], words7: [] }, auth: { uid: 'uid-player' } }),
+    (error) => error.code === 'permission-denied',
+  );
+  await removeHaikuWord.run({ data: { roomId: 'material-actions', type: '5', wordId: 'own-5' }, auth: { uid: 'uid-player' } });
+  const haikuRoom = (await roomRef('material-actions').get()).data();
+  assert.deepEqual(haikuRoom.words5, []);
+
+  await poemRoomRef('material-actions').set({
+    schemaVersion: 2,
+    status: 'lobby',
+    players: ['参加者'],
+    spectators: [],
+    participantUids: { 'uid-player': '参加者' },
+    words: [],
+  });
+  const poemWord = { id: 'poem-word', text: 'ポエム素材', author: '参加者' };
+  await submitPoemWords.run({ data: { roomId: 'material-actions', words: [poemWord] }, auth: { uid: 'uid-player' } });
+  await removePoemWord.run({ data: { roomId: 'material-actions', wordId: 'poem-word' }, auth: { uid: 'uid-player' } });
+  assert.deepEqual((await poemRoomRef('material-actions').get()).data().words, []);
+});
 
 test('Haiku途中参加Callableは同名UIDを統合してUID別手札へ配札する', async () => {
   await roomRef('role-change').set({

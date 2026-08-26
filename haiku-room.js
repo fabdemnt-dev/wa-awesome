@@ -8,7 +8,7 @@ import { ensureSignedIn } from './wordset-auth.js';
 import { showGameError } from './game-error.js';
 import { defaultWords5, defaultWords7 } from './haiku-default-words.js';
 import { normalizeParticipantName, setParticipantRole, normalizeParticipantRoles, getParticipantStorageKey, canClaimHost } from './participant-utils.js';
-import { changeHaikuRole } from './haiku-functions.js';
+import { changeHaikuRole, removeHaikuWord } from './haiku-functions.js';
 
 async function saveParticipantRole(role) {
   await runTransaction(db, async (transaction) => {
@@ -500,7 +500,11 @@ window.removeSubmittedWord = async function(type, wordId) {
   if (!target) return alert('この素材は取り消せません');
   if (!confirm(`「${target.text}」を取り消しますか？`)) return;
   try {
-    await updateDoc(state.roomRef, { [field]: arrayRemove(target) });
+    if (state.currentData.schemaVersion === 2) {
+      await removeHaikuWord(state.roomId, type, wordId);
+    } else {
+      await updateDoc(state.roomRef, { [field]: arrayRemove(target) });
+    }
   } catch (e) {
     debugRecordError(e, 'remove-submitted-word');
     showGameError(e, '素材の取り消し');

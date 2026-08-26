@@ -316,6 +316,100 @@ exports.changeHaikuRole = onCall(callableOptions, async (request) => {
   return { ok: true };
 });
 
+function requireMaterialItems(value, label) {
+  if (!Array.isArray(value) || value.length > 100) fail('invalid-argument', `${label}が正しくありません。`);
+  return value.map((item) => {
+    if (!isPlainObject(item)) fail('invalid-argument', `${label}が正しくありません。`);
+    return { id: requireText(item.id, '素材ID', 200), text: requireText(item.text, '素材', 200), author: requireText(item.author, '作者名', 200) };
+  });
+}
+
+function requireLobbyPlayer(room, uid) {
+  const participants = participantsByUid(room);
+  const name = participants.get(uid);
+  if (!name || !Array.isArray(room.players) || !room.players.includes(name)) fail('permission-denied', 'プレイヤーだけが操作できます。');
+  if (room.status !== 'lobby') fail('failed-precondition', '句会開始後は素材を変更できません。');
+  return { participants, name };
+}
+
+exports.submitHaikuWords = onCall(callableOptions, async (request) => {
+  const uid = requireAuthenticated(request);
+  const roomId = requireText(request.data?.roomId, 'ルームID', 150);
+  const words5 = requireMaterialItems(request.data?.words5 || [], '五音素材');
+  const words7 = requireMaterialItems(request.data?.words7 || [], '七音素材');
+  if (!words5.length && !words7.length) fail('invalid-argument', '少なくとも1つ素材を入力してください。');
+  const roomRef = db.collection('rooms').doc(`haiku_${roomId}`);
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(roomRef);
+    if (!snapshot.exists) fail('not-found', 'ルームが見つかりません。');
+    const room = snapshot.data() || {};
+    const { name } = requireLobbyPlayer(room, uid);
+    if (room.schemaVersion !== 2) fail('failed-precondition', '新形式のルームだけ素材Callableを利用できます。');
+    if ([...words5, ...words7].some((item) => item.author !== name)) fail('permission-denied', '自分の名前以外の素材は投稿できません。');
+    const update = {};
+    if (words5.length) update.words5 = FieldValue.arrayUnion(...words5);
+    if (words7.length) update.words7 = FieldValue.arrayUnion(...words7);
+    transaction.update(roomRef, update);
+  });
+  return { ok: true };
+});
+
+exports.removeHaikuWord = onCall(callableOptions, async (request) => {
+  const uid = requireAuthenticated(request);
+  const roomId = requireText(request.data?.roomId, 'ルームID', 150);
+  const type = request.data?.type === '5' ? '5' : request.data?.type === '7' ? '7' : fail('invalid-argument', '音数が正しくありません。');
+  const wordId = requireText(request.data?.wordId, '素材ID', 200);
+  const roomRef = db.collection('rooms').doc(`haiku_${roomId}`);
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(roomRef);
+    if (!snapshot.exists) fail('not-found', 'ルームが見つかりません。');
+    const room = snapshot.data() || {};
+    const { name } = requireLobbyPlayer(room, uid);
+    if (room.schemaVersion !== 2) fail('failed-precondition', '新形式のルームだけ素材Callableを利用できます。');
+    const field = type === '5' ? 'words5' : 'words7';
+    const target = (room[field] || []).find((item) => item?.id === wordId && item?.author === name);
+    if (!target) fail('permission-denied', '自分が投稿した素材だけ取り消せます。');
+    transaction.update(roomRef, { [field]: FieldValue.arrayRemove(target) });
+  });
+  return { ok: true };
+});
+
+exports.submitPoemWords = onCall(callableOptions, async (request) => {
+  const uid = requireAuthenticated(request);
+  const roomId = requireText(request.data?.roomId, 'ルームID', 150);
+  const words = requireMaterialItems(request.data?.words || [], '素材');
+  if (!words.length) fail('invalid-argument', '少なくとも1つ素材を入力してください。');
+  const roomRef = db.collection('rooms').doc(`poem_${roomId}`);
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(roomRef);
+    if (!snapshot.exists) fail('not-found', 'ルームが見つかりません。');
+    const room = snapshot.data() || {};
+    const { name } = requireLobbyPlayer(room, uid);
+    if (room.schemaVersion !== 2) fail('failed-precondition', '新形式のルームだけ素材Callableを利用できます。');
+    if (words.some((item) => item.author !== name)) fail('permission-denied', '自分の名前以外の素材は投稿できません。');
+    transaction.update(roomRef, { words: FieldValue.arrayUnion(...words) });
+  });
+  return { ok: true };
+});
+
+exports.removePoemWord = onCall(callableOptions, async (request) => {
+  const uid = requireAuthenticated(request);
+  const roomId = requireText(request.data?.roomId, 'ルームID', 150);
+  const wordId = requireText(request.data?.wordId, '素材ID', 200);
+  const roomRef = db.collection('rooms').doc(`poem_${roomId}`);
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(roomRef);
+    if (!snapshot.exists) fail('not-found', 'ルームが見つかりません。');
+    const room = snapshot.data() || {};
+    const { name } = requireLobbyPlayer(room, uid);
+    if (room.schemaVersion !== 2) fail('failed-precondition', '新形式のルームだけ素材Callableを利用できます。');
+    const target = (room.words || []).find((item) => item?.id === wordId && item?.author === name);
+    if (!target) fail('permission-denied', '自分が投稿した素材だけ取り消せます。');
+    transaction.update(roomRef, { words: FieldValue.arrayRemove(target) });
+  });
+  return { ok: true };
+});
+
 function requirePhraseDetails(value) {
   if (!Array.isArray(value) || value.length !== 3) fail('invalid-argument', '句の素材が正しくありません。');
   return value.map((item) => {
