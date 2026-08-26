@@ -21,8 +21,7 @@ window.addWords = async function() {
     }
   });
 
-  const st = state.currentData?.settings || { handCount: 5 };
-  if (newWords.length < st.handCount) return alert(`設定された手札の枚数（${st.handCount}個）分すべて入力してください`);
+  if (newWords.length === 0) return alert('少なくとも1つ素材を入力してください');
 
   await updateDoc(state.roomRef, { words: arrayUnion(...newWords) });
   inputs.forEach(inp => inp.value = '');

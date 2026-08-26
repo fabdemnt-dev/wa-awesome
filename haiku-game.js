@@ -29,7 +29,7 @@ window.addWords = async function() {
 
   const new5 = getWords('5', st.hand5);
   const new7 = getWords('7', st.hand7);
-  if (new5.length < st.hand5 || new7.length < st.hand7) return alert('全ての素材を入力してください');
+  if (new5.length === 0 && new7.length === 0) return alert('少なくとも1つ素材を入力してください');
 
   await updateDoc(state.roomRef, { words5: arrayUnion(...new5), words7: arrayUnion(...new7) });
   renderInputFields(st.hand5, st.hand7);
