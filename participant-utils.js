@@ -34,6 +34,21 @@ export function isValidParticipantName(name) {
   return normalizeParticipantName(name).length > 0;
 }
 
+// ラウンド中に、現在の親とは別のプレイヤーだけが親を引き継げる。
+// 親が players から既に消えている状態は、ロビー側の自動親確定に任せるため対象外とする。
+export function canClaimHost(data, name, isSpectator = false) {
+  const participantName = normalizeParticipantName(name);
+  const players = Array.isArray(data?.players) ? data.players.map(normalizeParticipantName).filter(Boolean) : [];
+  const currentHost = normalizeParticipantName(data?.currentHost);
+  return data?.status === 'playing'
+    && !isSpectator
+    && Boolean(participantName)
+    && Boolean(currentHost)
+    && players.includes(currentHost)
+    && players.includes(participantName)
+    && currentHost !== participantName;
+}
+
 // UID対応ルームでは個人データをUIDキーにし、旧形式ルームでは表示名キーを維持する。
 export function getParticipantStorageKey(data, uid, name) {
   const participantUid = String(uid ?? '');
