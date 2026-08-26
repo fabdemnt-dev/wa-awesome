@@ -1,3 +1,5 @@
+import { showGameNotice } from './ui-feedback.js';
+
 function messageForError(error, action) {
   const code = error?.code || '';
   if (code.includes('permission-denied')) {
@@ -11,7 +13,7 @@ function messageForError(error, action) {
 
 export function showGameError(error, action = '操作') {
   console.error(`[${action}]`, error);
-  alert(messageForError(error, action));
+  showGameNotice(messageForError(error, action), 'error');
 }
 
 // DOMのonclickから呼ばれるasync関数など、個別にcatchできない失敗も画面に通知する。
