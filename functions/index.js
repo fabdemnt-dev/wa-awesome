@@ -90,14 +90,22 @@ async function verifyCurrentPassword(wordSetId, existing, password) {
   }
 
   const secret = await db.collection('wordsetSecrets').doc(wordSetId).get();
+  // 新形式のbcryptハッシュを確認する。
   if (secret.exists) {
     const passwordHash = secret.get('passwordHash');
-    if (typeof passwordHash === 'string' && await bcrypt.compare(password, passwordHash)) return true;
-  } else if (typeof existing.passwordHash === 'string' && legacySimpleHash(password) === existing.passwordHash) {
+    if (typeof passwordHash === 'string') {
+      if (await bcrypt.compare(password, passwordHash)) return true;
+      // 移行途中のデータでは、秘密コレクション内にも旧簡易ハッシュが残る場合がある。
+      if (legacySimpleHash(password) === passwordHash) return true;
+    }
+  }
+  // 旧データでは公開ドキュメント側に簡易ハッシュが残っている場合がある。
+  // 移行途中で両方が存在しても、旧ハッシュで正しく認証できるようにする。
+  if (typeof existing.passwordHash === 'string' && legacySimpleHash(password) === existing.passwordHash) {
     return true;
   }
 
-  fail('permission-denied', 'パスワードが一致しません。');
+  fail('permission-denied', 'パスワードが一致しません。作成時と同じ文字列を入力してください。');
 }
 
 async function passwordHashForSave({ id, existing, wordSet, currentPassword, newPassword }) {
@@ -122,7 +130,10 @@ async function passwordHashForSave({ id, existing, wordSet, currentPassword, new
 
   const existingSecret = await db.collection('wordsetSecrets').doc(id).get();
   if (existingSecret.exists && typeof existingSecret.get('passwordHash') === 'string') {
-    return existingSecret.get('passwordHash');
+    const existingHash = existingSecret.get('passwordHash');
+    // bcryptハッシュはそのまま維持し、旧簡易ハッシュは検証済みの入力値でbcryptへ移行する。
+    if (existingHash.startsWith('$2')) return existingHash;
+    return bcrypt.hash(currentPassword, 12);
   }
 
   // 旧公開ハッシュからの移行時は、検証済みの入力値をbcryptへ移し替える。
