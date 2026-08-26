@@ -6,6 +6,7 @@ import { renderInputFields, renderHand, renderBoards } from './haiku-render.js';
 import { subscribeRoomHistory } from './room-history.js';
 import { ensureSignedIn } from './wordset-auth.js';
 import { showGameError } from './game-error.js';
+import { defaultWords5, defaultWords7 } from './haiku-default-words.js';
 
 let previousStatus = null; // 直前のstatusを記録し、「lobbyに遷移した瞬間」だけ入力欄をクリアするために使う
 let hostHeartbeatTimer = null;
@@ -485,29 +486,41 @@ if (!roomSnapshot.exists()) {
 window.toggleRole = async function() {
   if (!state.roomRef) return;
   if (state.isSpectator) {
-    // ゲーム中の途中参戦は、山札(deck5/deck7)に手札分の余りがあるときだけ許可する
+    // ゲーム中の途中参戦は、本人の手札分と引き直し用の予備を山札に確保してから配る。
     if (state.currentData?.status === 'playing') {
       const st = state.currentData.settings || { hand5: 5, hand7: 3 };
-      const deck5 = state.currentData.deck5 || [];
-      const deck7 = state.currentData.deck7 || [];
+      const players = state.currentData.players || [];
+      let deck5 = [...(state.currentData.deck5 || [])];
+      let deck7 = [...(state.currentData.deck7 || [])];
+      const makeDefaultCards = (pool, count) => {
+        if (count <= 0 || pool.length === 0) return [];
+        const shuffled = [...pool].sort(() => Math.random() - 0.5);
+        return Array.from({ length: count }, (_, index) => ({
+          text: shuffled[index % shuffled.length],
+          author: '🎴お題ぶくろ',
+          id: `${Date.now()}_${Math.random().toString(36).substring(2, 9)}_${index}`
+        }));
+      };
 
-      // 五音・七音のどちらかだけ配って中途半端にならないよう、両方揃っているか先に確認する
-      if (deck5.length < st.hand5 || deck7.length < st.hand7) {
-        return alert(`途中参戦できません。山札に配るための素材が足りていません。\n（五音: 山札残り${deck5.length}個 / 必要${st.hand5}個、七音: 山札残り${deck7.length}個 / 必要${st.hand7}個）`);
-      }
+      // 途中参加後の全プレイヤーが1回、手札を全て引き直しても不足しないようにする。
+      // 配布後に「参加者全員分の手札1回分」が山札に残る必要があるため、
+      // 配布前は「現在のプレイヤー数＋新規参加者＋引き直し分」の量を確保する。
+      const reserve5 = (players.length + 2) * st.hand5;
+      const reserve7 = (players.length + 2) * st.hand7;
+      const add5 = makeDefaultCards(defaultWords5, Math.max(0, reserve5 - deck5.length));
+      const add7 = makeDefaultCards(defaultWords7, Math.max(0, reserve7 - deck7.length));
+      deck5.push(...add5);
+      deck7.push(...add7);
 
-      // 山札から直接、途中参戦者の手札を引く
       const shuffled5 = [...deck5].sort(() => Math.random() - 0.5);
       const shuffled7 = [...deck7].sort(() => Math.random() - 0.5);
       const newHand5 = shuffled5.slice(0, st.hand5);
       const newHand7 = shuffled7.slice(0, st.hand7);
       const drawnIds5 = new Set(newHand5.map(w => w.id));
       const drawnIds7 = new Set(newHand7.map(w => w.id));
-
-      // 配った札は必ず山札から取り除く（他の誰かの引き直しと重複しないようにするため）
+      // 配った札は山札から取り除き、残りは途中参加者・既存プレイヤーの引き直しに使う。
       const newDeck5 = deck5.filter(w => !drawnIds5.has(w.id));
       const newDeck7 = deck7.filter(w => !drawnIds7.has(w.id));
-
       await updateDoc(state.roomRef, {
         spectators: arrayRemove(state.myName),
         players: arrayUnion(state.myName),
@@ -517,7 +530,10 @@ window.toggleRole = async function() {
         deck7: newDeck7
       });
       state.isSpectator = false;
-      alert("山札から手札を配りました！プレイヤーとして参加しました！");
+      const addedMessage = (add5.length || add7.length)
+        ? `\nデフォルト素材を五音${add5.length}個・七音${add7.length}個、山札へ補充しました。`
+        : '';
+      alert(`山札から手札を配りました！プレイヤーとして参加しました！${addedMessage}`);
       return;
     }
 
