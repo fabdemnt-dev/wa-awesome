@@ -449,7 +449,10 @@ if (!roomSnapshot.exists()) {
     if (data.participantUids && typeof data.participantUids === 'object') {
       update.participantUids = { ...data.participantUids, [currentUser.uid]: state.myName };
     }
-    if (role === 'player' && !data.currentHost) update.currentHost = state.myName;
+    if (role === 'player' && !data.currentHost) {
+      update.currentHost = state.myName;
+      if (data.schemaVersion === 2) update.currentHostUid = currentUser.uid;
+    }
     transaction.update(state.roomRef, update);
   });
 }
