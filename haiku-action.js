@@ -3,6 +3,7 @@ import { db } from './firebase-config.js';
 import { getParticipantStorageKey, getParticipantUidByName } from './participant-utils.js';
 import state from './haiku-state.js';
 import { renderHand } from './haiku-render.js';
+import { submitHaikuPhrase, revealHaikuPhrase, selfPraiseHaikuPhrase, submitHaikuVote } from './haiku-functions.js';
 
 window.selectCard = function(type, idx) {
   if (state.isSpectator) return;
@@ -35,26 +36,35 @@ window.submitPhrase = async function() {
   if (state.isSpectator) return alert('見学モードでは句の投稿はできません');
   if (!state.selectedHand[0] || !state.selectedHand[1] || !state.selectedHand[2]) return alert('すべて選択してください');
   const storageKey = getParticipantStorageKey(state.currentData, state.myUid, state.myName);
-  await updateDoc(state.roomRef, {
-    [`phrases.${storageKey}`]: `${state.selectedHand[0].text} ${state.selectedHand[1].text} ${state.selectedHand[2].text}`,
-    [`phraseDetails.${storageKey}`]: state.selectedHand
-  });
+  const phrase = `${state.selectedHand[0].text} ${state.selectedHand[1].text} ${state.selectedHand[2].text}`;
+  if (state.currentData.schemaVersion === 2) {
+    await submitHaikuPhrase(state.roomId, phrase, state.selectedHand);
+  } else {
+    await updateDoc(state.roomRef, {
+      [`phrases.${storageKey}`]: phrase,
+      [`phraseDetails.${storageKey}`]: state.selectedHand
+    });
+  }
 };
 window.revealPhrase = async function(pName) {
   if (!state.roomRef) return;
   const targetKey = getParticipantUidByName(state.currentData, pName) || pName;
-  await updateDoc(state.roomRef, {
-    [`revealedPhrases.${targetKey}`]: true
-  });
+  if (state.currentData.schemaVersion === 2) {
+    await revealHaikuPhrase(state.roomId, targetKey);
+  } else {
+    await updateDoc(state.roomRef, { [`revealedPhrases.${targetKey}`]: true });
+  }
 };
 window.doSelfPraise = async function() {
   if (!state.roomRef || state.isSubmittingSelfPraise) return;
   state.isSubmittingSelfPraise = true;
   try {
     const storageKey = getParticipantStorageKey(state.currentData, state.myUid, state.myName);
-    await updateDoc(state.roomRef, {
-      [`selfPraise.${storageKey}`]: true
-    });
+    if (state.currentData.schemaVersion === 2) {
+      await selfPraiseHaikuPhrase(state.roomId);
+    } else {
+      await updateDoc(state.roomRef, { [`selfPraise.${storageKey}`]: true });
+    }
   } catch (e) {
     alert('自画自賛の登録に失敗しました: ' + e.message);
   } finally {
@@ -64,6 +74,18 @@ window.doSelfPraise = async function() {
 window.submitVote = async function(targetPlayer, forcedKey) {
   const evalKey = forcedKey || document.getElementById(`vote-select-${targetPlayer}`)?.value;
   if (!evalKey) return alert('御印を選択してください');
+
+  if (state.currentData.schemaVersion === 2) {
+    const targetUid = getParticipantUidByName(state.currentData, targetPlayer);
+    if (!targetUid) return alert('対象の句が見つかりません');
+    try {
+      await submitHaikuVote(state.roomId, targetUid, evalKey);
+      alert('御印を贈りました！');
+    } catch (e) {
+      alert('御印の送信に失敗しました: ' + (e.message || 'サーバーエラー'));
+    }
+    return;
+  }
 
   const players = state.currentData.players || [];
   const currentHost = players.includes(state.currentData.currentHost) ? state.currentData.currentHost : (players[0] || '');

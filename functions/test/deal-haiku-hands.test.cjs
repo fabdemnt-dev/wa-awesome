@@ -1,7 +1,14 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { getFirestore } = require('firebase-admin/firestore');
-const { dealHaikuHands, redrawHaikuHand } = require('../index.js');
+const {
+  dealHaikuHands,
+  redrawHaikuHand,
+  submitHaikuPhrase,
+  revealHaikuPhrase,
+  selfPraiseHaikuPhrase,
+  submitHaikuVote,
+} = require('../index.js');
 
 const db = getFirestore();
 
@@ -24,16 +31,16 @@ async function seedRoom(roomId) {
     },
     settings: { hand5: 1, hand7: 1 },
     words5: [
-      { id: 'five-1', text: '五1' },
-      { id: 'five-2', text: '五2' },
-      { id: 'five-3', text: '五3' },
-      { id: 'five-4', text: '五4' },
+      { id: 'five-1', text: '五1', author: '素材' },
+      { id: 'five-2', text: '五2', author: '素材' },
+      { id: 'five-3', text: '五3', author: '素材' },
+      { id: 'five-4', text: '五4', author: '素材' },
     ],
     words7: [
-      { id: 'seven-1', text: '七1' },
-      { id: 'seven-2', text: '七2' },
-      { id: 'seven-3', text: '七3' },
-      { id: 'seven-4', text: '七4' },
+      { id: 'seven-1', text: '七1', author: '素材' },
+      { id: 'seven-2', text: '七2', author: '素材' },
+      { id: 'seven-3', text: '七3', author: '素材' },
+      { id: 'seven-4', text: '七4', author: '素材' },
     ],
     hands5: { legacy: ['古い手札'] },
     hands7: { legacy: ['古い手札'] },
@@ -96,6 +103,38 @@ test('同名で再接続した最新UIDの親は旧UIDが残っていても配�
   });
   assert.deepEqual(result, { ok: true });
   assert.equal((await roomRef('duplicate-host-name').collection('hands').doc('uid-new-host').get()).exists, true);
+});
+
+test('作品・披露・自画自賛・投票CallableはUID本人性と重複操作を検証する', async () => {
+  await seedRoom('haiku-actions');
+  await dealHaikuHands.run({ data: { roomId: 'haiku-actions' }, auth: { uid: 'uid-host' } });
+  const hostHand = (await roomRef('haiku-actions').collection('hands').doc('uid-host').get()).data();
+  const playerHand = (await roomRef('haiku-actions').collection('hands').doc('uid-player').get()).data();
+  const makePhrase = (hand) => ({
+    phrase: hand.hand5[0].text + ' ' + hand.hand7[0].text + ' ' + hand.hand5[0].text,
+    phraseDetails: [hand.hand5[0], hand.hand7[0], hand.hand5[0]],
+  });
+
+  await submitHaikuPhrase.run({ data: { roomId: 'haiku-actions', ...makePhrase(hostHand) }, auth: { uid: 'uid-host' } });
+  await assert.rejects(
+    submitHaikuPhrase.run({ data: { roomId: 'haiku-actions', ...makePhrase(hostHand) }, auth: { uid: 'uid-player' } }),
+    (error) => error.code === 'permission-denied',
+  );
+  await submitHaikuPhrase.run({ data: { roomId: 'haiku-actions', ...makePhrase(playerHand) }, auth: { uid: 'uid-player' } });
+  await assert.rejects(
+    submitHaikuPhrase.run({ data: { roomId: 'haiku-actions', ...makePhrase(hostHand) }, auth: { uid: 'uid-host' } }),
+    (error) => error.code === 'failed-precondition',
+  );
+
+  await revealHaikuPhrase.run({ data: { roomId: 'haiku-actions', targetUid: 'uid-host' }, auth: { uid: 'uid-host' } });
+  await revealHaikuPhrase.run({ data: { roomId: 'haiku-actions', targetUid: 'uid-player' }, auth: { uid: 'uid-host' } });
+  await selfPraiseHaikuPhrase.run({ data: { roomId: 'haiku-actions' }, auth: { uid: 'uid-host' } });
+  await submitHaikuVote.run({ data: { roomId: 'haiku-actions', targetUid: 'uid-player', evalKey: 'tae' }, auth: { uid: 'uid-host' } });
+  await submitHaikuVote.run({ data: { roomId: 'haiku-actions', targetUid: 'uid-host', evalKey: 'okashi' }, auth: { uid: 'uid-player' } });
+  await assert.rejects(
+    submitHaikuVote.run({ data: { roomId: 'haiku-actions', targetUid: 'uid-host', evalKey: 'aware' }, auth: { uid: 'uid-player' } }),
+    (error) => error.code === 'failed-precondition',
+  );
 });
 
 test('本人の引き直しは成功し、他人の札と二重実行は拒否する', async () => {
