@@ -527,6 +527,64 @@ exports.selfPraiseHaikuPhrase = onCall(callableOptions, async (request) => {
 });
 
 const haikuVoteKeys = new Set(['okashi', 'aware', 'wabisabi', 'ayashi', 'kuruoshi', 'medurashi', 'yugen', 'tae', 'kanpu']);
+const haikuVotePoints = { okashi: 1, aware: 1, wabisabi: 1, ayashi: 1, kuruoshi: 1, medurashi: 1, yugen: 1 };
+
+exports.advanceHaikuRound = onCall(callableOptions, async (request) => {
+  const uid = requireAuthenticated(request);
+  const roomId = requireText(request.data?.roomId, 'ルームID', 150);
+  const roomRef = db.collection('rooms').doc(`haiku_${roomId}`);
+  let result;
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(roomRef);
+    if (!snapshot.exists) fail('not-found', 'ルームが見つかりません。');
+    const room = snapshot.data() || {};
+    if (room.schemaVersion !== 2) fail('failed-precondition', '新形式のルームだけ次節Callableを利用できます。');
+    const participants = participantsByUid(room);
+    requireHostUid(room, uid, participants);
+    if (room.status !== 'playing') fail('failed-precondition', 'プレイ中のルームだけ次節へ進めます。');
+    const players = Array.isArray(room.players) ? room.players : [];
+    if (!players.length) fail('failed-precondition', '次節へ進むプレイヤーがいません。');
+    const currentHost = room.currentHost || participants.get(uid);
+    const currentHostIndex = players.indexOf(currentHost);
+    const nextHost = players[(currentHostIndex < 0 ? 0 : currentHostIndex + 1) % players.length];
+    const nextHostUid = latestUidForName(participants, nextHost);
+    const spectators = Array.isArray(room.spectators) ? room.spectators : [];
+    const votes = isPlainObject(room.votes) ? room.votes : {};
+    const phrases = isPlainObject(room.phrases) ? room.phrases : {};
+    const phraseDetails = isPlainObject(room.phraseDetails) ? room.phraseDetails : {};
+    const scores = isPlainObject(room.scores) ? room.scores : {};
+    const nextScores = { ...scores };
+    const taePoints = Math.max(10, players.length * 2);
+    const taeWinners = new Set();
+    for (const [voterUid, voterVotes] of Object.entries(votes)) {
+      const voterName = participants.get(voterUid) || voterUid;
+      if (spectators.includes(voterName) || !isPlainObject(voterVotes)) continue;
+      for (const [targetUid, rawKeys] of Object.entries(voterVotes)) {
+        const targetName = participants.get(targetUid) || targetUid;
+        const keys = Array.isArray(rawKeys) ? rawKeys : [rawKeys];
+        for (const key of keys) {
+          if (!haikuVoteKeys.has(key)) continue;
+          if (key === 'tae') taeWinners.add(targetName);
+          const points = key === 'tae' ? taePoints : (haikuVotePoints[key] || 0);
+          nextScores[targetName] = (nextScores[targetName] || 0) + points;
+        }
+      }
+    }
+    const carryOver = room.settings?.carryOver !== false;
+    const carriedWords5 = carryOver ? (Array.isArray(room.words5) ? room.words5.filter((word) => !(word?.author || '').startsWith('🎴')) : []) : [];
+    const carriedWords7 = carryOver ? (Array.isArray(room.words7) ? room.words7.filter((word) => !(word?.author || '').startsWith('🎴')) : []) : [];
+    const currentRound = room.roundCount || 1;
+    const historyRef = roomRef.collection('history').doc();
+    transaction.update(roomRef, {
+      status: 'lobby', currentHost: nextHost, currentHostUid: nextHostUid, roundCount: currentRound + 1,
+      scores: nextScores, words5: carriedWords5, words7: carriedWords7,
+      hands5: {}, hands7: {}, deck5: [], deck7: [], phrases: {}, phraseDetails: {}, votes: {}, revealedPhrases: {}, selfPraise: {}, redraws: {},
+    });
+    transaction.set(historyRef, { round: currentRound, phrases, phraseDetails, votes, participantUids: room.participantUids || {}, host: currentHost, createdAt: FieldValue.serverTimestamp() });
+    result = { ok: true, nextRound: currentRound + 1, nextHost, taeWinners: [...taeWinners] };
+  });
+  return result;
+});
 
 exports.submitHaikuVote = onCall(callableOptions, async (request) => {
   const uid = requireAuthenticated(request);

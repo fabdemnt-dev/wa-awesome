@@ -7,7 +7,7 @@ import { defaultWords5, defaultWords7 } from './haiku-default-words.js';
 import { getWordSetById } from './haiku-wordsets.js';
 import { saveWordSetSecurely, userFacingError } from './wordset-auth.js';
 import { getParticipantUidByName, getParticipantStorageKey, getParticipantNameByUid } from './participant-utils.js';
-import { dealHaikuHands, redrawHaikuHand, submitHaikuWords } from './haiku-functions.js';
+import { dealHaikuHands, redrawHaikuHand, submitHaikuWords, advanceHaikuRound } from './haiku-functions.js';
 
 window.addWords = async function() {
   if (!state.currentData || state.isSpectator) return;
@@ -293,6 +293,20 @@ window.nextRound = async function() {
   }
 
   if (!confirm('本当に次の節に進みますか？\n（現在の句は履歴に保存され、新しい節が始まります）')) return;
+
+  if (state.currentData.schemaVersion === 2) {
+    state.isProcessingNextRound = true;
+    try {
+      const result = await advanceHaikuRound(state.roomId);
+      alert(result.taeWinners?.length ? `🪭 妙なりが出ました！${result.taeWinners.join(', ')} さん！\n次の節に進みます！` : '次の節に進みます！');
+    } catch (e) {
+      console.error(e);
+      alert('次の節への移行に失敗しました: ' + (e.message || 'サーバーエラー'));
+    } finally {
+      state.isProcessingNextRound = false;
+    }
+    return;
+  }
 
   state.isProcessingNextRound = true;
 
