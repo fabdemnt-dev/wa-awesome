@@ -18,6 +18,7 @@ const {
   removePoemWord,
   updateHaikuSettings,
   updatePoemSettings,
+  advanceHaikuRound,
 } = require('../index.js');
 
 const db = getFirestore();
@@ -60,6 +61,28 @@ async function seedRoom(roomId) {
     hands7: { legacy: ['古い手札'] },
   });
 }
+
+test('Haiku次節Callableは得点・履歴・親交代・素材持越しを一括処理する', async () => {
+  await roomRef('advance-round').set({
+    schemaVersion: 2, status: 'playing', roundCount: 1, currentHost: '親', currentHostUid: 'uid-host',
+    players: ['親', '参加者'], spectators: ['見学者'],
+    participantUids: { 'uid-host': '親', 'uid-player': '参加者', 'uid-spectator': '見学者' },
+    settings: { hand5: 1, hand7: 1, carryOver: true },
+    words5: [{ id: 'user-word', text: '持越し', author: '参加者' }, { id: 'default-word', text: '補充', author: '🎴お題ぶくろ' }],
+    words7: [], phrases: { 'uid-player': '作品' }, phraseDetails: {},
+    votes: { 'uid-host': { 'uid-player': ['tae'] }, 'uid-spectator': { 'uid-player': ['kanpu'] } }, scores: { '参加者': 0 },
+  });
+  const result = await advanceHaikuRound.run({ data: { roomId: 'advance-round' }, auth: { uid: 'uid-host' } });
+  const room = (await roomRef('advance-round').get()).data();
+  const history = await roomRef('advance-round').collection('history').get();
+  assert.equal(result.nextRound, 2);
+  assert.equal(result.nextHost, '参加者');
+  assert.equal(room.status, 'lobby');
+  assert.equal(room.currentHostUid, 'uid-player');
+  assert.equal(room.scores['参加者'], 10);
+  assert.deepEqual(room.words5.map((word) => word.id), ['user-word']);
+  assert.equal(history.size, 1);
+});
 
 test('設定Callableは親限定と入力範囲を検証する', async () => {
   await roomRef('settings-actions').set({ schemaVersion: 2, status: 'lobby', currentHost: '親', currentHostUid: 'uid-host', players: ['親', '参加者'], spectators: [], participantUids: { 'uid-host': '親', 'uid-player': '参加者' }, settings: { hand5: 5, hand7: 3, carryOver: true } });
