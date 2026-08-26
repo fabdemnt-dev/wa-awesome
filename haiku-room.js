@@ -173,13 +173,13 @@ function applyRoomData(data) {
     if (myWords5.length === 0 && myWords7.length === 0) {
       myWordsEl.innerHTML = '';
     } else {
-      const chip5 = 'display:inline-block; background:#eff6ff; border:1px solid #93c5fd; color:#1e3a8a; border-radius:8px; padding:6px 10px; font-size:13px; font-weight:bold; margin:2px;';
-      const chip7 = 'display:inline-block; background:#fefce8; border:1px solid #fde047; color:#854d0e; border-radius:8px; padding:6px 10px; font-size:13px; font-weight:bold; margin:2px;';
+      const chip5 = 'display:inline-block; background:#eff6ff; border:1px solid #93c5fd; color:#1e293b; border-radius:8px; padding:6px 10px; font-size:13px; font-weight:bold; margin:2px;';
+      const chip7 = 'display:inline-block; background:#fefce8; border:1px solid #fde047; color:#1e293b; border-radius:8px; padding:6px 10px; font-size:13px; font-weight:bold; margin:2px;';
       myWordsEl.innerHTML = `
         <div style="margin-top:8px; font-size:13px; color:#475569;">📝 あなたが提出した素材（五音${myWords5.length}個・七音${myWords7.length}個）</div>
         <div style="margin-top:4px;">
-          ${myWords5.map(w => `<button type="button" onclick="removeSubmittedWord('5','${escapeJS(w.id)}')" style="${chip5} cursor:pointer;">${escapeHTML(w.text)} ×</button>`).join('')}
-          ${myWords7.map(w => `<button type="button" onclick="removeSubmittedWord('7','${escapeJS(w.id)}')" style="${chip7} cursor:pointer;">${escapeHTML(w.text)} ×</button>`).join('')}
+          ${myWords5.map(w => `<button type="button" onclick="removeSubmittedWord('5','${escapeJS(w.id)}')" style="${chip5} cursor:pointer;">${escapeHTML(w.text)} <span style="color:#94a3b8;">×</span></button>`).join('')}
+          ${myWords7.map(w => `<button type="button" onclick="removeSubmittedWord('7','${escapeJS(w.id)}')" style="${chip7} cursor:pointer;">${escapeHTML(w.text)} <span style="color:#94a3b8;">×</span></button>`).join('')}
         </div>
         <div style="font-size:11px; color:#64748b; margin-top:4px;">取り消したい素材の「×」を押してください（句会開始前のみ）</div>
       `;
