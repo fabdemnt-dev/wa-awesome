@@ -1,5 +1,5 @@
 import { db } from "./firebase-config.js";
-import { doc, getDoc, setDoc, onSnapshot, updateDoc, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { doc, getDoc, setDoc, onSnapshot, updateDoc, runTransaction, serverTimestamp, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import state from './haiku-state.js';
 import { escapeHTML, escapeJS } from './haiku-utils.js';
 import { renderInputFields, renderHand, renderBoards } from './haiku-render.js';
@@ -8,6 +8,117 @@ import { ensureSignedIn } from './wordset-auth.js';
 import { showGameError } from './game-error.js';
 
 let previousStatus = null; // 直前のstatusを記録し、「lobbyに遷移した瞬間」だけ入力欄をクリアするために使う
+let hostHeartbeatTimer = null;
+let hostHeartbeatMissingSince = null;
+let hostRecoveryCheckTimer = null;
+const HOST_HEARTBEAT_INTERVAL_MS = 10000;
+const HOST_TIMEOUT_MS = 30000;
+
+function timestampMillis(value) {
+  if (!value) return 0;
+  if (typeof value.toMillis === 'function') return value.toMillis();
+  if (value instanceof Date) return value.getTime();
+  return Number(value) || 0;
+}
+
+function isHostHeartbeatStale(data) {
+  const heartbeat = timestampMillis(data?.hostHeartbeatAt);
+  if (!heartbeat) {
+    if (!hostHeartbeatMissingSince) hostHeartbeatMissingSince = Date.now();
+    return Date.now() - hostHeartbeatMissingSince > HOST_TIMEOUT_MS;
+  }
+  hostHeartbeatMissingSince = null;
+  return Date.now() - heartbeat > HOST_TIMEOUT_MS;
+}
+
+async function sendHostHeartbeat() {
+  if (!state.roomRef || state.currentData?.status !== 'playing') return;
+  const players = state.currentData.players || [];
+  if (state.isSpectator || state.currentData.currentHost !== state.myName || !players.includes(state.myName)) return;
+  try {
+    await updateDoc(state.roomRef, { hostHeartbeatAt: serverTimestamp() });
+  } catch (error) {
+    debugRecordError(error, 'host-heartbeat');
+  }
+}
+
+function syncHostHeartbeat() {
+  const isCurrentHost = state.currentData?.status === 'playing'
+    && !state.isSpectator
+    && state.currentData.currentHost === state.myName
+    && (state.currentData.players || []).includes(state.myName);
+
+  if (isCurrentHost && !hostHeartbeatTimer) {
+    sendHostHeartbeat();
+    hostHeartbeatTimer = setInterval(sendHostHeartbeat, HOST_HEARTBEAT_INTERVAL_MS);
+  } else if (!isCurrentHost && hostHeartbeatTimer) {
+    clearInterval(hostHeartbeatTimer);
+    hostHeartbeatTimer = null;
+  }
+}
+
+function refreshHostRecoveryUI() {
+  const data = state.currentData;
+  const players = data?.players || [];
+  const currentHost = players.includes(data?.currentHost) ? data.currentHost : (players[0] || '');
+  const hostRecoveryBtn = document.getElementById('host-recovery-btn');
+  const canRecoverHost = data?.status === 'playing'
+    && !state.isSpectator
+    && currentHost !== state.myName
+    && isHostHeartbeatStale(data);
+  if (hostRecoveryBtn) hostRecoveryBtn.style.display = canRecoverHost ? 'block' : 'none';
+
+  const nextHint = document.getElementById('next-round-hint');
+  if (nextHint && canRecoverHost) {
+    nextHint.innerText = '※親の接続が30秒以上確認できないため、必要なら親を引き継げます';
+  } else if (nextHint) {
+    nextHint.innerText = '※「次の節に進む」は今節の選者（親）だけが押せます';
+  }
+}
+
+if (!hostRecoveryCheckTimer) {
+  hostRecoveryCheckTimer = setInterval(refreshHostRecoveryUI, 1000);
+}
+
+window.claimHost = async function() {
+  if (!state.roomRef || state.isSpectator) return;
+  if (state.currentData?.status !== 'playing') return;
+  if (!isHostHeartbeatStale(state.currentData)) {
+    return alert('親はまだ接続中です。もう少し待ってください。');
+  }
+
+  try {
+    const claimed = await runTransaction(db, async (transaction) => {
+      const snapshot = await transaction.get(state.roomRef);
+      const data = snapshot.data() || {};
+      const players = data.players || [];
+      const oldHost = data.currentHost;
+      const heartbeat = timestampMillis(data.hostHeartbeatAt);
+
+      if (data.status !== 'playing' || !oldHost || !players.includes(oldHost)
+        || (heartbeat && Date.now() - heartbeat <= HOST_TIMEOUT_MS)) {
+        return false;
+      }
+
+      const nextHost = players.find((player) => player !== oldHost) || '';
+      if (!nextHost) return false;
+      transaction.update(state.roomRef, {
+        currentHost: nextHost,
+        hostHeartbeatAt: serverTimestamp()
+      });
+      return nextHost === state.myName;
+    });
+
+    if (claimed) {
+      alert('親が不在のため、あなたが新しい親になりました。');
+    } else {
+      alert('別の参加者が先に親を引き継いだか、親が復帰しました。');
+    }
+  } catch (error) {
+    debugRecordError(error, 'claim-host');
+    showGameError(error, '親の引き継ぎ');
+  }
+};
 
 // Firestoreの部屋データを受け取り、画面表示を最新状態へ反映する。
 // onSnapshotでの受信時と、Chrome復帰時のvisibilitychange再取得時の両方から呼ばれる共通処理。
@@ -30,6 +141,9 @@ function applyRoomData(data) {
 
   const currentHost = players.includes(state.currentData.currentHost) ? state.currentData.currentHost : (players[0] || '未設定');
   const hostText = `👑 今節の選者（親）: <strong>${escapeHTML(currentHost)}</strong> ${currentHost === state.myName ? '（あなた）' : ''}`;
+
+  syncHostHeartbeat();
+  refreshHostRecoveryUI();
 
   if (document.getElementById('host-info-lobby')) document.getElementById('host-info-lobby').innerHTML = hostText;
   if (document.getElementById('host-info-game')) document.getElementById('host-info-game').innerHTML = hostText;
@@ -337,10 +451,13 @@ if (!roomSnapshot.exists()) {
       players: arrayRemove(state.myName)
     });
   } else {
-    await updateDoc(state.roomRef, {
+    const existingData = roomSnapshot.data() || {};
+    const playerUpdate = {
       players: arrayUnion(state.myName),
       spectators: arrayRemove(state.myName)
-    });
+    };
+    if (!existingData.currentHost) playerUpdate.currentHost = state.myName;
+    await updateDoc(state.roomRef, playerUpdate);
   }
 }
 
