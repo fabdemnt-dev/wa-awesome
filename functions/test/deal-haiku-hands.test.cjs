@@ -8,12 +8,19 @@ const {
   revealHaikuPhrase,
   selfPraiseHaikuPhrase,
   submitHaikuVote,
+  submitPoemSecure,
+  revealPoemSecure,
+  reactPoemSecure,
 } = require('../index.js');
 
 const db = getFirestore();
 
 function roomRef(roomId) {
   return db.collection('rooms').doc(`haiku_${roomId}`);
+}
+
+function poemRoomRef(roomId) {
+  return db.collection('rooms').doc(`poem_${roomId}`);
 }
 
 async function seedRoom(roomId) {
@@ -46,6 +53,39 @@ async function seedRoom(roomId) {
     hands7: { legacy: ['古い手札'] },
   });
 }
+
+test('Poem作品・披露・リアクションCallableはUIDと状態を検証する', async () => {
+  await poemRoomRef('poem-actions').set({
+    schemaVersion: 2,
+    status: 'playing',
+    roundCount: 1,
+    currentHost: '親',
+    players: ['親', '参加者'],
+    spectators: ['見学者'],
+    participantUids: { 'uid-host': '親', 'uid-player': '参加者', 'uid-spectator': '見学者' },
+    hands: {
+      'uid-host': [{ id: 'h1', text: '親の素材', author: '親' }],
+      'uid-player': [{ id: 'p1', text: '参加者の素材', author: '参加者' }],
+    },
+    poems: {},
+  });
+  const poem = { text: '親の作品', usedHands: [{ id: 'h1', text: '親の素材', author: '親' }] };
+  await submitPoemSecure.run({ data: { roomId: 'poem-actions', ...poem }, auth: { uid: 'uid-host' } });
+  await assert.rejects(
+    submitPoemSecure.run({ data: { roomId: 'poem-actions', text: '偽装作品', usedHands: poem.usedHands }, auth: { uid: 'uid-player' } }),
+    (error) => error.code === 'permission-denied',
+  );
+  await submitPoemSecure.run({ data: { roomId: 'poem-actions', text: '参加者の作品', usedHands: [{ id: 'p1', text: '参加者の素材', author: '参加者' }] }, auth: { uid: 'uid-player' } });
+  await assert.rejects(
+    reactPoemSecure.run({ data: { roomId: 'poem-actions', targetUid: 'uid-player', type: 'like' }, auth: { uid: 'uid-spectator' } }),
+    (error) => error.code === 'failed-precondition',
+  );
+  await revealPoemSecure.run({ data: { roomId: 'poem-actions', targetUid: 'uid-player' }, auth: { uid: 'uid-host' } });
+  await reactPoemSecure.run({ data: { roomId: 'poem-actions', targetUid: 'uid-player', type: 'like' }, auth: { uid: 'uid-spectator' } });
+  const saved = (await poemRoomRef('poem-actions').get()).data();
+  assert.equal(saved.poems['uid-player'].revealed, true);
+  assert.equal(saved.poems['uid-player'].likes, 1);
+});
 
 test('未認証Callableは拒否される', async () => {
   await assert.rejects(

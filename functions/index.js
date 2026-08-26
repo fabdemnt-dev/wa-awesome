@@ -365,6 +365,82 @@ exports.submitHaikuVote = onCall(callableOptions, async (request) => {
   return { ok: true };
 });
 
+function requirePoemRoomParticipant(room, uid) {
+  const participants = participantsByUid(room);
+  const name = participants.get(uid);
+  if (!name) fail('permission-denied', '参加者だけが操作できます。');
+  return { participants, name };
+}
+
+function requirePoemPlayer(room, uid) {
+  const result = requirePoemRoomParticipant(room, uid);
+  if (!Array.isArray(room.players) || !room.players.includes(result.name)) {
+    fail('permission-denied', 'プレイヤーだけが操作できます。');
+  }
+  return result;
+}
+
+exports.submitPoemSecure = onCall(callableOptions, async (request) => {
+  const uid = requireAuthenticated(request);
+  const roomId = requireText(request.data?.roomId, 'ルームID', 150);
+  const text = requireText(request.data?.text, '作品', 4000);
+  const usedHands = Array.isArray(request.data?.usedHands) ? request.data.usedHands : [];
+  if (usedHands.length > 20 || usedHands.some((item) => !isPlainObject(item) || !requireText(item.id, '素材ID', 200))) {
+    fail('invalid-argument', '使用素材が正しくありません。');
+  }
+  const roomRef = db.collection('rooms').doc(`poem_${roomId}`);
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(roomRef);
+    if (!snapshot.exists) fail('not-found', 'ルームが見つかりません。');
+    const room = snapshot.data() || {};
+    requirePoemPlayer(room, uid);
+    if (room.schemaVersion !== 2 || room.status !== 'playing') fail('failed-precondition', '新形式のポエム作成中だけ投稿できます。');
+    if (room.poems?.[uid] !== undefined) fail('failed-precondition', '作品は1幕につき1つまでです。');
+    const owned = new Set((Array.isArray(room.hands?.[uid]) ? room.hands[uid] : []).map((item) => item?.id));
+    if (usedHands.some((item) => !owned.has(item.id))) fail('permission-denied', '自分の手札にない素材は使えません。');
+    transaction.update(roomRef, { [`poems.${uid}`]: { text, hands: usedHands, revealed: false, likes: 0, emos: 0 } });
+  });
+  return { ok: true };
+});
+
+exports.revealPoemSecure = onCall(callableOptions, async (request) => {
+  const uid = requireAuthenticated(request);
+  const roomId = requireText(request.data?.roomId, 'ルームID', 150);
+  const targetUid = requireText(request.data?.targetUid, '対象UID', 200);
+  const roomRef = db.collection('rooms').doc(`poem_${roomId}`);
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(roomRef);
+    if (!snapshot.exists) fail('not-found', 'ルームが見つかりません。');
+    const room = snapshot.data() || {};
+    const { participants } = requirePoemPlayer(room, uid);
+    if (room.schemaVersion !== 2 || room.status !== 'playing' || room.poems?.[targetUid] === undefined) fail('failed-precondition', '披露する作品がありません。');
+    const hostUid = latestUidForName(participants, room.currentHost);
+    if (uid !== targetUid && uid !== hostUid) fail('permission-denied', '自分または親の作品だけ披露できます。');
+    transaction.update(roomRef, { [`poems.${targetUid}.revealed`]: true });
+  });
+  return { ok: true };
+});
+
+exports.reactPoemSecure = onCall(callableOptions, async (request) => {
+  const uid = requireAuthenticated(request);
+  const roomId = requireText(request.data?.roomId, 'ルームID', 150);
+  const targetUid = requireText(request.data?.targetUid, '対象UID', 200);
+  const type = requireText(request.data?.type, 'リアクション', 10);
+  if (type !== 'like' && type !== 'emo') fail('invalid-argument', 'リアクションが正しくありません。');
+  const roomRef = db.collection('rooms').doc(`poem_${roomId}`);
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(roomRef);
+    if (!snapshot.exists) fail('not-found', 'ルームが見つかりません。');
+    const room = snapshot.data() || {};
+    requirePoemRoomParticipant(room, uid);
+    if (room.schemaVersion !== 2 || room.status !== 'playing' || room.poems?.[targetUid] === undefined || room.poems?.[targetUid]?.revealed !== true) {
+      fail('failed-precondition', '披露済みの作品だけリアクションできます。');
+    }
+    transaction.update(roomRef, { [`poems.${targetUid}.${type === 'like' ? 'likes' : 'emos'}`]: FieldValue.increment(1) });
+  });
+  return { ok: true };
+});
+
 function sanitizeWordSet(input) {
   if (!isPlainObject(input)) fail('invalid-argument', 'ワードセットの内容が正しくありません。');
 

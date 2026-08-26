@@ -2,7 +2,8 @@ import { updateDoc, increment } from "https://www.gstatic.com/firebasejs/10.8.0/
 import state from './poem-state.js';
 import { renderHand } from './poem-render.js';
 import { exportPoemText, exportPoemCSV } from './poem-export.js';
-import { getParticipantStorageKey } from './participant-utils.js';
+import { getParticipantStorageKey, getParticipantUidByName } from './participant-utils.js';
+import { submitPoemSecure, revealPoemSecure, reactPoemSecure } from './poem-functions.js';
 
 export function setupAutoResize() {
   const textarea = document.getElementById('poem-input-area');
@@ -83,15 +84,19 @@ window.submitPoem = async function() {
     if (myHands[idx]) usedHands.push(myHands[idx]);
   });
 
-  await updateDoc(state.roomRef, {
-    [`poems.${getParticipantStorageKey(state.currentData, state.myUid, state.myName)}`]: {
-      text: poemText,
-      hands: usedHands,
-      revealed: false,
-      likes: 0,
-      emos: 0
-    }
-  });
+  if (state.currentData.schemaVersion === 2) {
+    await submitPoemSecure(state.roomId, poemText, usedHands);
+  } else {
+    await updateDoc(state.roomRef, {
+      [`poems.${getParticipantStorageKey(state.currentData, state.myUid, state.myName)}`]: {
+        text: poemText,
+        hands: usedHands,
+        revealed: false,
+        likes: 0,
+        emos: 0
+      }
+    });
+  }
   
   sessionStorage.removeItem('poemDraft');
   alert('ポエムを投稿しました！');
@@ -99,19 +104,29 @@ window.submitPoem = async function() {
 
 window.revealPoem = async function(pName) {
   if (!state.roomRef) return;
-  await updateDoc(state.roomRef, { [`poems.${pName}.revealed`]: true });
+  const targetUid = getParticipantUidByName(state.currentData, pName) || pName;
+  if (state.currentData.schemaVersion === 2) {
+    await revealPoemSecure(state.roomId, targetUid);
+  } else {
+    await updateDoc(state.roomRef, { [`poems.${pName}.revealed`]: true });
+  }
 };
 
 window.addReaction = async function(pName, type) {
   if (!state.roomRef || !state.currentData) return;
   const poems = state.currentData.poems || {};
-  const target = poems[pName];
+  const targetUid = getParticipantUidByName(state.currentData, pName) || pName;
+  const target = poems[targetUid] || poems[pName];
   if (!target) return;
 
   // increment()でサーバー側に加算させることで、同時押しでもカウントが失われないようにする
-  await updateDoc(state.roomRef, {
-    [`poems.${pName}.${type === 'like' ? 'likes' : 'emos'}`]: increment(1)
-  });
+  if (state.currentData.schemaVersion === 2) {
+    await reactPoemSecure(state.roomId, targetUid, type);
+  } else {
+    await updateDoc(state.roomRef, {
+      [`poems.${pName}.${type === 'like' ? 'likes' : 'emos'}`]: increment(1)
+    });
+  }
 };
 
 
