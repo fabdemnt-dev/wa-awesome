@@ -5,6 +5,7 @@ import { escapeHTML, escapeJS } from './haiku-utils.js';
 import { renderInputFields, renderHand, renderBoards } from './haiku-render.js';
 import { subscribeRoomHistory } from './room-history.js';
 import { ensureSignedIn } from './wordset-auth.js';
+import { showGameError } from './game-error.js';
 
 let previousStatus = null; // 直前のstatusを記録し、「lobbyに遷移した瞬間」だけ入力欄をクリアするために使う
 
@@ -361,6 +362,9 @@ if (!roomSnapshot.exists()) {
         delete roomData.history;
         applyRoomData(roomData);
       }
+    }, (error) => {
+      debugRecordError(error, 'history-onSnapshot');
+      showGameError(error, '履歴の読み込み');
     });
   } catch (e) {
     debugRecordError(e, 'joinRoom');

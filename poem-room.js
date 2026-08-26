@@ -5,6 +5,7 @@ import { escapeHTML, escapeJS, renderInputFields, renderHand, renderBoards } fro
 import { setupAutoResize } from './poem-action.js';
 import { subscribeRoomHistory } from './room-history.js';
 import { ensureSignedIn } from './wordset-auth.js';
+import { showGameError } from './game-error.js';
 
 // Firestoreの部屋データを受け取り、画面表示を最新状態へ反映する。
 // onSnapshotでの受信時と、Chrome復帰時のvisibilitychange再取得時の両方から呼ばれる共通処理。
@@ -349,6 +350,9 @@ if (!roomSnapshot.exists()) {
         delete roomData.history;
         applyRoomData(roomData);
       }
+    }, (error) => {
+      debugRecordError(error, 'history-onSnapshot');
+      showGameError(error, '履歴の読み込み');
     });
   } catch (e) {
     debugRecordError(e, 'joinRoom');
