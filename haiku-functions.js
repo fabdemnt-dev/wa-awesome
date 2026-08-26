@@ -13,10 +13,22 @@ const submitHaikuPhraseCallable = httpsCallable(functions, 'submitHaikuPhrase');
 const revealHaikuPhraseCallable = httpsCallable(functions, 'revealHaikuPhrase');
 const selfPraiseHaikuPhraseCallable = httpsCallable(functions, 'selfPraiseHaikuPhrase');
 const submitHaikuVoteCallable = httpsCallable(functions, 'submitHaikuVote');
+const removePlayerCallable = httpsCallable(functions, 'removePlayer');
+const claimHostCallable = httpsCallable(functions, 'claimHost');
 
 function requireRoomId(roomId) {
   if (typeof roomId !== 'string' || !roomId.trim()) throw new Error('ルームIDがありません。');
   return roomId.trim();
+}
+
+export async function removePlayer(roomId, targetUid) {
+  const result = await removePlayerCallable({ roomId: requireRoomId(roomId), game: 'haiku', targetUid });
+  return result.data;
+}
+
+export async function claimHost(roomId) {
+  const result = await claimHostCallable({ roomId: requireRoomId(roomId), game: 'haiku' });
+  return result.data;
 }
 
 export async function advanceHaikuRound(roomId) {

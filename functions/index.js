@@ -316,6 +316,107 @@ exports.changeHaikuRole = onCall(callableOptions, async (request) => {
   return { ok: true };
 });
 
+function roomPrefix(value) {
+  if (value !== 'haiku' && value !== 'poem') fail('invalid-argument', 'ゲーム種別が正しくありません。');
+  return value;
+}
+
+exports.removePlayer = onCall(callableOptions, async (request) => {
+  const uid = requireAuthenticated(request);
+  const roomId = requireText(request.data?.roomId, 'ルームID', 150);
+  const game = roomPrefix(request.data?.game);
+  const targetUid = requireText(request.data?.targetUid, '対象UID', 200);
+  const roomRef = db.collection('rooms').doc(`${game}_${roomId}`);
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(roomRef);
+    if (!snapshot.exists) fail('not-found', 'ルームが見つかりません。');
+    const room = snapshot.data() || {};
+    if (room.schemaVersion !== 2) fail('failed-precondition', '新形式のルームだけ安全な退室処理を利用できます。');
+    const participants = participantsByUid(room);
+    const targetName = participants.get(targetUid);
+    if (!targetName) fail('not-found', '対象プレイヤーが見つかりません。');
+    if (uid !== targetUid) requireHostUid(room, uid, participants);
+    const removedUids = [...participants.entries()]
+      .filter(([, name]) => name === targetName)
+      .map(([participantUid]) => participantUid);
+    const update = {
+      players: (room.players || []).filter((name) => name !== targetName),
+      spectators: (room.spectators || []).filter((name) => name !== targetName),
+      participantUids: Object.fromEntries([...participants.entries()].filter(([participantUid]) => !removedUids.includes(participantUid))),
+    };
+    if (room.currentHost === targetName || room.currentHostUid === targetUid) {
+      update.currentHost = null;
+      update.currentHostUid = null;
+    }
+    if (game === 'poem' && isPlainObject(room.hands)) {
+      update.hands = Object.fromEntries(Object.entries(room.hands).filter(([handUid]) => !removedUids.includes(handUid)));
+    }
+    transaction.update(roomRef, update);
+    if (game === 'haiku' || game === 'poem') {
+      removedUids.forEach((removedUid) => transaction.delete(roomRef.collection('hands').doc(removedUid)));
+    }
+  });
+  return { ok: true };
+});
+
+exports.claimHost = onCall(callableOptions, async (request) => {
+  const uid = requireAuthenticated(request);
+  const roomId = requireText(request.data?.roomId, 'ルームID', 150);
+  const game = roomPrefix(request.data?.game);
+  const roomRef = db.collection('rooms').doc(`${game}_${roomId}`);
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(roomRef);
+    if (!snapshot.exists) fail('not-found', 'ルームが見つかりません。');
+    const room = snapshot.data() || {};
+    if (room.schemaVersion !== 2) fail('failed-precondition', '新形式のルームだけ親引き継ぎを利用できます。');
+    const participants = participantsByUid(room);
+    const name = participants.get(uid);
+    const hostName = room.currentHost;
+    const hostUid = latestUidForName(participants, hostName);
+    if (room.status !== 'playing' || !name || !Array.isArray(room.players) || !room.players.includes(name) || name === hostName || !hostUid || !room.players.includes(hostName)) {
+      fail('failed-precondition', '親不在を確認できるプレイヤーだけが親を引き継げます。');
+    }
+    transaction.update(roomRef, { currentHost: name, currentHostUid: uid });
+  });
+  return { ok: true };
+});
+
+exports.changePoemRole = onCall(callableOptions, async (request) => {
+  const uid = requireAuthenticated(request);
+  const roomId = requireText(request.data?.roomId, 'ルームID', 150);
+  const role = requireRole(request.data?.role);
+  const suppliedWords = requireMaterialItems(request.data?.supplementWords || [], '補充素材');
+  const roomRef = db.collection('rooms').doc(`poem_${roomId}`);
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(roomRef);
+    if (!snapshot.exists) fail('not-found', 'ルームが見つかりません。');
+    const room = snapshot.data() || {};
+    if (room.schemaVersion !== 2) fail('failed-precondition', '新形式のルームだけ役割変更Callableを利用できます。');
+    const participants = participantsByUid(room);
+    const name = participants.get(uid);
+    if (!name) fail('permission-denied', '参加者だけが役割変更できます。');
+    if (room.status === 'playing' && role === 'spectator' && name === room.currentHost) fail('failed-precondition', '親はラウンド中に見学者へ切り替えられません。');
+    const players = (room.players || []).filter((item) => item !== name);
+    const spectators = (room.spectators || []).filter((item) => item !== name);
+    const update = { players: role === 'player' ? [...players, name] : players, spectators: role === 'spectator' ? [...spectators, name] : spectators };
+    if (!room.currentHost && role === 'player') { update.currentHost = name; update.currentHostUid = uid; }
+    if (room.status === 'playing' && role === 'player') {
+      const settings = room.settings || { handCount: 5 };
+      const hands = isPlainObject(room.hands) ? { ...room.hands } : {};
+      const assigned = new Set(Object.values(hands).flatMap((hand) => Array.isArray(hand) ? hand.map((word) => word?.id) : []));
+      const leftover = (Array.isArray(room.words) ? room.words : []).filter((word) => !assigned.has(word?.id));
+      const shuffled = shuffle(leftover);
+      const hand = shuffled.splice(0, Number(settings.handCount) || 5);
+      if (hand.length < (Number(settings.handCount) || 5)) hand.push(...suppliedWords.slice(0, (Number(settings.handCount) || 5) - hand.length));
+      if (hand.length < (Number(settings.handCount) || 5)) fail('failed-precondition', '途中参加者へ配る素材が不足しています。');
+      hands[uid] = hand;
+      update.hands = hands;
+    }
+    transaction.update(roomRef, update);
+  });
+  return { ok: true };
+});
+
 function requireSettingInteger(value, label, fallback, max = 20) {
   const number = Number(value ?? fallback);
   if (!Number.isInteger(number) || number < 1 || number > max) fail('invalid-argument', `${label}は1〜${max}の整数で指定してください。`);
@@ -540,7 +641,13 @@ exports.dealPoemHands = onCall(callableOptions, async (request) => {
     const room = snapshot.data() || {};
     if (room.schemaVersion !== 2) fail('failed-precondition', '新形式のルームだけ配札Callableを利用できます。');
     const participants = participantsByUid(room);
-    requireHostUid(room, uid, participants);
+    if (room.currentHost || room.currentHostUid) {
+      requireHostUid(room, uid, participants);
+    } else {
+      const firstPlayer = Array.isArray(room.players) ? room.players[0] : null;
+      const firstPlayerUid = firstPlayer ? latestUidForName(participants, firstPlayer) : null;
+      if (!firstPlayerUid || firstPlayerUid !== uid) fail('permission-denied', '親だけが配札できます。');
+    }
     if (room.status !== 'lobby') fail('failed-precondition', 'ロビー状態のルームだけ配札できます。');
     const playerUids = validatePlayerUids(room, participants);
     const count = handCount(room, 'handCount', 5);
@@ -549,7 +656,9 @@ exports.dealPoemHands = onCall(callableOptions, async (request) => {
     const shuffled = shuffle(words);
     const hands = {};
     playerUids.forEach((playerUid) => { hands[playerUid] = shuffled.splice(0, count); });
-    transaction.update(roomRef, { status: 'playing', hands, poems: {} });
+    const hostName = room.currentHost || (Array.isArray(room.players) ? room.players[0] : null);
+    const hostUid = room.currentHostUid || latestUidForName(participants, hostName);
+    transaction.update(roomRef, { status: 'playing', hands, poems: {}, currentHost: hostName, currentHostUid: hostUid });
     result = { ok: true, hands: playerUids.length, handCount: count };
   });
   return result;
