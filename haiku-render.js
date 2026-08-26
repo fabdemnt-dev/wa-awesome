@@ -57,10 +57,11 @@ export function renderHand() {
     if (state.isSpectator) {
       h5List.innerHTML = '<div style="font-size:13px; color:#94a3b8;">※見学モード中</div>';
     } else {
+      const hasRedrawn = !!(state.currentData?.redraws || {})[state.myName];
       h5List.innerHTML = state.myHand5.map((item, idx) => `
         <div class="card card-5 ${state.selectedHand.includes(item) ? 'selected' : ''}" onclick="selectCard(5, ${idx})">
           ${escapeHTML(item.text)}
-          <button type="button" class="redraw-toggle-btn ${state.redrawSelected5.includes(item.id) ? 'redraw-marked' : ''}" onclick="event.stopPropagation(); toggleRedrawCard(5, ${idx})" title="引き直し対象にする">🔄</button>
+          ${hasRedrawn ? '' : `<button type="button" class="redraw-toggle-btn ${state.redrawSelected5.includes(item.id) ? 'redraw-marked' : ''}" onclick="event.stopPropagation(); toggleRedrawCard(5, ${idx})" title="引き直し対象にする">🔄</button>`}
         </div>
       `).join('');
     }
@@ -71,10 +72,11 @@ export function renderHand() {
     if (state.isSpectator) {
       h7List.innerHTML = '<div style="font-size:13px; color:#94a3b8;">※見学モード中</div>';
     } else {
+      const hasRedrawn = !!(state.currentData?.redraws || {})[state.myName];
       h7List.innerHTML = state.myHand7.map((item, idx) => `
         <div class="card card-7 ${state.selectedHand[1] === item ? 'selected' : ''}" onclick="selectCard(7, ${idx})">
           ${escapeHTML(item.text)}
-          <button type="button" class="redraw-toggle-btn ${state.redrawSelected7.includes(item.id) ? 'redraw-marked' : ''}" onclick="event.stopPropagation(); toggleRedrawCard(7, ${idx})" title="引き直し対象にする">🔄</button>
+          ${hasRedrawn ? '' : `<button type="button" class="redraw-toggle-btn ${state.redrawSelected7.includes(item.id) ? 'redraw-marked' : ''}" onclick="event.stopPropagation(); toggleRedrawCard(7, ${idx})" title="引き直し対象にする">🔄</button>`}
         </div>
       `).join('');
     }
