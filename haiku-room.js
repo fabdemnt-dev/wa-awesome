@@ -492,23 +492,29 @@ window.toggleRole = async function() {
       const players = state.currentData.players || [];
       let deck5 = [...(state.currentData.deck5 || [])];
       let deck7 = [...(state.currentData.deck7 || [])];
-      const makeDefaultCards = (pool, count) => {
-        if (count <= 0 || pool.length === 0) return [];
-        const shuffled = [...pool].sort(() => Math.random() - 0.5);
+      const selectedPool5 = state.currentData.supplementPool5?.length ? state.currentData.supplementPool5 : defaultWords5;
+      const selectedPool7 = state.currentData.supplementPool7?.length ? state.currentData.supplementPool7 : defaultWords7;
+      const supplementAuthorLabel = state.currentData.supplementAuthorLabel || '🎴お題ぶくろ';
+      const makeDefaultCards = (pool, fallbackPool, count) => {
+        const sourcePool = pool.length ? pool : fallbackPool;
+        if (count <= 0 || sourcePool.length === 0) return [];
+        const shuffled = [...sourcePool].sort(() => Math.random() - 0.5);
         return Array.from({ length: count }, (_, index) => ({
           text: shuffled[index % shuffled.length],
-          author: '🎴お題ぶくろ',
+          author: supplementAuthorLabel,
           id: `${Date.now()}_${Math.random().toString(36).substring(2, 9)}_${index}`
         }));
       };
+
+
 
       // 途中参加後の全プレイヤーが1回、手札を全て引き直しても不足しないようにする。
       // 配布後に「参加者全員分の手札1回分」が山札に残る必要があるため、
       // 配布前は「現在のプレイヤー数＋新規参加者＋引き直し分」の量を確保する。
       const reserve5 = (players.length + 2) * st.hand5;
       const reserve7 = (players.length + 2) * st.hand7;
-      const add5 = makeDefaultCards(defaultWords5, Math.max(0, reserve5 - deck5.length));
-      const add7 = makeDefaultCards(defaultWords7, Math.max(0, reserve7 - deck7.length));
+      const add5 = makeDefaultCards(selectedPool5, defaultWords5, Math.max(0, reserve5 - deck5.length));
+      const add7 = makeDefaultCards(selectedPool7, defaultWords7, Math.max(0, reserve7 - deck7.length));
       deck5.push(...add5);
       deck7.push(...add7);
 

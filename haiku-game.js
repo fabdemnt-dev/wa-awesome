@@ -89,6 +89,11 @@ window.startGame = async function() {
   const players = state.currentData?.players || [];
   const st = state.currentData?.settings || { hand5: 5, hand7: 3 };
   const w5 = state.currentData?.words5 || [], w7 = state.currentData?.words7 || [];
+  const selectedId = document.getElementById('wordset-select')?.value || 'builtin';
+  const customSet = selectedId !== 'builtin' ? getWordSetById(selectedId) : null;
+  const supplementPool5 = customSet?.words5?.length ? customSet.words5 : defaultWords5;
+  const supplementPool7 = customSet?.words7?.length ? customSet.words7 : defaultWords7;
+  const supplementAuthorLabel = customSet ? `🎴${customSet.name}` : '🎴お題ぶくろ';
 
   // 必要素材数は「最初の手札分」＋「引き直し用の山札分」＝手札分の2倍
   // （全プレイヤーが1節に1回、手札を全部引き直しても足りる量を自動確保する）
@@ -105,7 +110,11 @@ window.startGame = async function() {
   const deck5 = s5;
   const deck7 = s7;
 
-  await updateDoc(state.roomRef, { status: "playing", hands5: h5, hands7: h7, deck5, deck7, hostHeartbeatAt: serverTimestamp(), phrases: {}, phraseDetails: {}, votes: {}, revealedPhrases: {}, selfPraise: {}, redraws: {} });
+  await updateDoc(state.roomRef, {
+    status: "playing", hands5: h5, hands7: h7, deck5, deck7,
+    supplementPool5, supplementPool7, supplementAuthorLabel,
+    hostHeartbeatAt: serverTimestamp(), phrases: {}, phraseDetails: {}, votes: {}, revealedPhrases: {}, selfPraise: {}, redraws: {}
+  });
 };
 window.redrawHand = async function() {
   if (!state.currentData || state.isSpectator || state.isProcessingRedraw) return;
