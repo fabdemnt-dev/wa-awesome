@@ -1,26 +1,34 @@
-export function exportPoemText(currentData, exportAll = true) {
-  if (!currentData) return;
+import { getParticipantNameByUid } from './participant-utils.js';
+
+function displayName(data, key) {
+  return getParticipantNameByUid(data, key) || key;
+}
+
+function buildHistory(currentData, exportAll) {
   const historyToExport = exportAll ? [...(currentData.history || [])] : [];
-  
   const currentPoems = currentData.poems || {};
   if (Object.keys(currentPoems).length > 0) {
     historyToExport.push({
       round: currentData.roundCount || 1,
-      poems: currentPoems
+      poems: currentPoems,
+      participantUids: currentData.participantUids || {}
     });
   }
+  return historyToExport;
+}
 
-  if (historyToExport.length === 0) {
-    return alert('出力するポエムがありません');
-  }
+export function exportPoemText(currentData, exportAll = true) {
+  if (!currentData) return;
+  const historyToExport = buildHistory(currentData, exportAll);
+  if (historyToExport.length === 0) return alert('出力するポエムがありません');
 
   let text = `【わ〜鯖せーへきポエム 作品集】\n\n`;
   historyToExport.forEach(h => {
     text += `--- 第${h.round}幕 ---\n`;
-    Object.keys(h.poems || {}).forEach(pName => {
-      const poemData = h.poems[pName];
+    Object.keys(h.poems || {}).forEach(poemKey => {
+      const poemData = h.poems[poemKey];
       const poemText = typeof poemData === 'object' ? poemData.text : poemData;
-      text += `■ ${pName} の作品\n   「${poemText}」\n\n`;
+      text += `■ ${displayName(h, poemKey)} の作品\n   「${poemText}」\n\n`;
     });
   });
 
@@ -31,29 +39,17 @@ export function exportPoemText(currentData, exportAll = true) {
 
 export function exportPoemCSV(currentData, roomId, exportAll = true) {
   if (!currentData) return;
-  const historyToExport = exportAll ? [...(currentData.history || [])] : [];
-  const currentPoems = currentData.poems || {};
-
-  if (Object.keys(currentPoems).length > 0) {
-    historyToExport.push({
-      round: currentData.roundCount || 1,
-      poems: currentPoems
-    });
-  }
-
-  if (historyToExport.length === 0) {
-    return alert('出力するポエムがありません');
-  }
+  const historyToExport = buildHistory(currentData, exportAll);
+  if (historyToExport.length === 0) return alert('出力するポエムがありません');
 
   let csvContent = "data:text/csv;charset=utf-8,\uFEFF";
   csvContent += "幕,作者,作品\n";
-
   historyToExport.forEach(h => {
-    Object.keys(h.poems || {}).forEach(pName => {
-      const poemData = h.poems[pName];
+    Object.keys(h.poems || {}).forEach(poemKey => {
+      const poemData = h.poems[poemKey];
       const poemText = typeof poemData === 'object' ? poemData.text : poemData;
-      const cleanText = poemText.replace(/"/g, '""');
-      csvContent += `${h.round},"${pName}","${cleanText}"\n`;
+      const cleanText = String(poemText || '').replace(/"/g, '""');
+      csvContent += `${h.round},"${displayName(h, poemKey)}","${cleanText}"\n`;
     });
   });
 

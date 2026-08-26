@@ -129,7 +129,8 @@ window.nextGame = async function() {
 
   const currentRoundHistory = {
     round: state.currentData.roundCount || 1,
-    poems: state.currentData.poems || {}
+    poems: state.currentData.poems || {},
+    participantUids: state.currentData.participantUids || {}
   };
   const nextRoundNum = (state.currentData.roundCount || 1) + 1;
 
