@@ -49,7 +49,7 @@ function applyRoomData(data) {
     if (myWords.length === 0) {
       myWordsEl.innerHTML = '';
     } else {
-      const chip = 'display:inline-block; background:#eff6ff; border:1px solid #93c5fd; border-radius:6px; padding:2px 8px; font-size:12px; margin:2px;';
+      const chip = 'display:inline-block; background:#eff6ff; border:1px solid #93c5fd; color:#1e3a8a; border-radius:6px; padding:2px 8px; font-size:12px; font-weight:600; margin:2px;';
       myWordsEl.innerHTML = `
         <div style="margin-top:8px; font-size:13px; color:#475569;">📝 あなたが提出した素材（${myWords.length}個）</div>
         <div style="margin-top:4px;">
