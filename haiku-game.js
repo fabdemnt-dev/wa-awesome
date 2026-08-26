@@ -288,7 +288,10 @@ window.nextRound = async function() {
 
   const players = state.currentData.players || [];
   const currentHost = players.includes(state.currentData.currentHost) ? state.currentData.currentHost : (players[0] || '');
-  if (state.myName !== currentHost) {
+  const isCurrentHost = state.currentData.schemaVersion === 2 && state.myUid && state.currentData.currentHostUid
+    ? state.myUid === state.currentData.currentHostUid
+    : state.myName === currentHost;
+  if (!isCurrentHost) {
     return alert('「次の節に進む」は今節の選者（親）だけが押せます');
   }
 

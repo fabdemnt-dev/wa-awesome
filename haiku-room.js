@@ -78,7 +78,10 @@ window.claimHost = async function() {
   try {
     if (state.currentData?.schemaVersion === 2) {
       await claimHostSecure(state.roomId);
-      alert('あなたが新しい親になりました。');
+      state.currentData = { ...state.currentData, currentHost: state.myName, currentHostUid: state.myUid };
+      refreshHostRecoveryUI();
+      renderBoards();
+      alert('あなたが新しい親になりました。次の節へ進めます。');
       return;
     }
     const claimed = await runTransaction(db, async (transaction) => {

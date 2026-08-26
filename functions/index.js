@@ -71,12 +71,18 @@ function latestUidForName(participants, name) {
   return [...participants.entries()].filter(([, participantName]) => participantName === name).at(-1)?.[0];
 }
 
-function requireHostUid(room, uid, participants) {
+function getCurrentHostUid(room, participants) {
   const currentHostUid = typeof room.currentHostUid === 'string' && room.currentHostUid;
   const currentHostName = room.currentHost;
-  const hostUid = currentHostName
-    ? latestUidForName(participants, currentHostName)
-    : currentHostUid;
+  if (currentHostUid && participants.has(currentHostUid)) {
+    const mappedName = participants.get(currentHostUid);
+    if (!currentHostName || mappedName === currentHostName) return currentHostUid;
+  }
+  return currentHostName ? latestUidForName(participants, currentHostName) : null;
+}
+
+function requireHostUid(room, uid, participants) {
+  const hostUid = getCurrentHostUid(room, participants);
   if (!hostUid || hostUid !== uid || !participants.has(hostUid)) {
     fail('permission-denied', '親だけが配札できます。');
   }
@@ -372,7 +378,7 @@ exports.claimHost = onCall(callableOptions, async (request) => {
     const participants = participantsByUid(room);
     const name = participants.get(uid);
     const hostName = room.currentHost;
-    const hostUid = latestUidForName(participants, hostName);
+    const hostUid = getCurrentHostUid(room, participants);
     if (room.status !== 'playing' || !name || !Array.isArray(room.players) || !room.players.includes(name) || name === hostName || !hostUid || !room.players.includes(hostName)) {
       fail('failed-precondition', '親不在を確認できるプレイヤーだけが親を引き継げます。');
     }
@@ -603,7 +609,7 @@ exports.revealHaikuPhrase = onCall(callableOptions, async (request) => {
     const { participants, name } = requirePlayingParticipant(room, uid);
     if (room.schemaVersion !== 2 || room.status !== 'playing') fail('failed-precondition', '新形式の句会中だけ披露できます。');
     if (!participants.has(targetUid) || room.phrases?.[targetUid] === undefined) fail('not-found', '対象の句が見つかりません。');
-    const hostUid = latestUidForName(participants, room.currentHost);
+    const hostUid = getCurrentHostUid(room, participants);
     if (uid !== targetUid && uid !== hostUid) fail('permission-denied', '自分または親の句だけ披露できます。');
     transaction.update(roomRef, { [`revealedPhrases.${targetUid}`]: true });
   });
@@ -737,7 +743,7 @@ exports.submitHaikuVote = onCall(callableOptions, async (request) => {
     if (!participants.has(targetUid) || room.phrases?.[targetUid] === undefined || room.revealedPhrases?.[targetUid] !== true) {
       fail('failed-precondition', '披露済みの句だけ投票できます。');
     }
-    const hostUid = latestUidForName(participants, room.currentHost);
+    const hostUid = getCurrentHostUid(room, participants);
     const isHost = uid === hostUid;
     const isSpectator = Array.isArray(room.spectators) && room.spectators.includes(name);
     const allowed = isSpectator ? evalKey === 'kanpu' : isHost ? evalKey !== 'kanpu' : ['okashi', 'aware', 'wabisabi'].includes(evalKey);
@@ -802,7 +808,7 @@ exports.revealPoemSecure = onCall(callableOptions, async (request) => {
     const room = snapshot.data() || {};
     const { participants } = requirePoemPlayer(room, uid);
     if (room.schemaVersion !== 2 || room.status !== 'playing' || room.poems?.[targetUid] === undefined) fail('failed-precondition', '披露する作品がありません。');
-    const hostUid = latestUidForName(participants, room.currentHost);
+    const hostUid = getCurrentHostUid(room, participants);
     if (uid !== targetUid && uid !== hostUid) fail('permission-denied', '自分または親の作品だけ披露できます。');
     transaction.update(roomRef, { [`poems.${targetUid}.revealed`]: true });
   });
