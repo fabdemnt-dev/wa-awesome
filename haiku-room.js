@@ -447,7 +447,14 @@ if (!roomSnapshot.exists()) {
     const roles = setParticipantRole(data, state.myName, role);
     const update = { ...roles };
     if (data.participantUids && typeof data.participantUids === 'object') {
-      update.participantUids = { ...data.participantUids, [currentUser.uid]: state.myName };
+      const participantUids = Object.fromEntries(
+        Object.entries(data.participantUids).filter(([uid, name]) => name !== state.myName || uid === currentUser.uid)
+      );
+      participantUids[currentUser.uid] = state.myName;
+      update.participantUids = participantUids;
+      if (data.schemaVersion === 2 && data.currentHost === state.myName) {
+        update.currentHostUid = currentUser.uid;
+      }
     }
     if (role === 'player' && !data.currentHost) {
       update.currentHost = state.myName;
