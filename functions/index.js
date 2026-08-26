@@ -48,6 +48,119 @@ function requireWords(value, label) {
   return value.map((word) => requireText(word, label, 200));
 }
 
+function shuffle(values) {
+  const result = [...values];
+  for (let i = result.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
+}
+
+function participantsByUid(room) {
+  if (!isPlainObject(room.participantUids)) {
+    fail('failed-precondition', 'UID対応済みのルームではありません。');
+  }
+  const entries = Object.entries(room.participantUids)
+    .filter(([uid, name]) => typeof uid === 'string' && uid && typeof name === 'string' && name.trim());
+  if (entries.length === 0) fail('failed-precondition', '参加者UIDが見つかりません。');
+  return new Map(entries);
+}
+
+function requireHostUid(room, uid, participants) {
+  const hostUid = typeof room.currentHostUid === 'string' && room.currentHostUid
+    ? room.currentHostUid
+    : [...participants.entries()].find(([, name]) => name === room.currentHost)?.[0];
+  if (!hostUid || hostUid !== uid) fail('permission-denied', '親だけが配札できます。');
+  return hostUid;
+}
+
+function handCount(room, field, fallback) {
+  const value = Number(room.settings?.[field]);
+  if (!Number.isInteger(value) || value < 1 || value > 20) return fallback;
+  return value;
+}
+
+function validatePlayerUids(room, participants) {
+  if (!Array.isArray(room.players) || room.players.length === 0) {
+    fail('failed-precondition', 'プレイヤーがいません。');
+  }
+  const uids = room.players.map((name) => {
+    const uid = [...participants.entries()].find(([, participantName]) => participantName === name)?.[0];
+    if (!uid) fail('failed-precondition', 'プレイヤーのUIDが見つかりません。');
+    return uid;
+  });
+  if (new Set(uids).size !== uids.length) fail('failed-precondition', '参加者が重複しています。');
+  return uids;
+}
+
+function validateDealRequest(room, uid) {
+  const participants = participantsByUid(room);
+  requireHostUid(room, uid, participants);
+  if (room.schemaVersion !== 2) fail('failed-precondition', '新形式のルームではありません。');
+  if (room.status !== 'lobby') fail('failed-precondition', 'ロビー状態のルームだけ配札できます。');
+  const playerUids = validatePlayerUids(room, participants);
+  const hand5 = handCount(room, 'hand5', 5);
+  const hand7 = handCount(room, 'hand7', 3);
+  if (!Array.isArray(room.words5) || !Array.isArray(room.words7)) {
+    fail('failed-precondition', '配札用の素材がありません。');
+  }
+  if (room.words5.length < playerUids.length * hand5 * 2 || room.words7.length < playerUids.length * hand7 * 2) {
+    fail('failed-precondition', '引き直し用を含む素材が不足しています。');
+  }
+  return { participants, playerUids, hand5, hand7 };
+};
+
+exports.dealHaikuHands = onCall(callableOptions, async (request) => {
+  const uid = requireAuthenticated(request);
+  const roomId = requireText(request.data?.roomId, 'ルームID', 150);
+  const roomRef = db.collection('rooms').doc(`haiku_${roomId}`);
+
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(roomRef);
+    if (!snapshot.exists) fail('not-found', 'ルームが見つかりません。');
+    const room = snapshot.data() || {};
+    const { participants, playerUids, hand5, hand7 } = validateDealRequest(room, uid);
+    const words5 = shuffle(room.words5);
+    const words7 = shuffle(room.words7);
+    const handRefs = playerUids.map((playerUid) => roomRef.collection('hands').doc(playerUid));
+    const hands = playerUids.map((playerUid, index) => ({
+      uid: playerUid,
+      name: participants.get(playerUid),
+      hand5: words5.splice(0, hand5),
+      hand7: words7.splice(0, hand7),
+      round: room.roundCount || 1,
+    }));
+
+    // Functionが素材から手札を生成し、個人手札をルーム文書へ書き込まない。
+    handRefs.forEach((ref, index) => {
+      transaction.set(ref, {
+        hand5: hands[index].hand5,
+        hand7: hands[index].hand7,
+        redrawUsed: false,
+        round: hands[index].round,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    });
+    transaction.update(roomRef, {
+      schemaVersion: 2,
+      status: 'playing',
+      deck5: words5,
+      deck7: words7,
+      hands5: FieldValue.delete(),
+      hands7: FieldValue.delete(),
+      phrases: {},
+      phraseDetails: {},
+      votes: {},
+      revealedPhrases: {},
+      selfPraise: {},
+      redraws: {},
+    });
+  });
+
+  return { ok: true };
+});
+
 function sanitizeWordSet(input) {
   if (!isPlainObject(input)) fail('invalid-argument', 'ワードセットの内容が正しくありません。');
 
