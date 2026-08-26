@@ -62,4 +62,3 @@ test('連続した役割切り替えでも参加者は一方の配列にしか�
 });
 
 export { applyRoleUpdate };
-
