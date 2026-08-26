@@ -64,13 +64,12 @@ function refreshHostRecoveryUI() {
   const hostRecoveryBtn = document.getElementById('host-recovery-btn');
   const canRecoverHost = data?.status === 'playing'
     && !state.isSpectator
-    && currentHost !== state.myName
-    && isHostHeartbeatStale(data);
+    && currentHost !== state.myName;
   if (hostRecoveryBtn) hostRecoveryBtn.style.display = canRecoverHost ? 'block' : 'none';
 
   const nextHint = document.getElementById('next-round-hint');
   if (nextHint && canRecoverHost) {
-    nextHint.innerText = '※親の接続が30秒以上確認できないため、必要なら親を引き継げます';
+    nextHint.innerText = '※親が不在・操作不能のときは、確認して親を引き継げます';
   } else if (nextHint) {
     nextHint.innerText = '※「次の節に進む」は今節の選者（親）だけが押せます';
   }
@@ -83,9 +82,7 @@ if (!hostRecoveryCheckTimer) {
 window.claimHost = async function() {
   if (!state.roomRef || state.isSpectator) return;
   if (state.currentData?.status !== 'playing') return;
-  if (!isHostHeartbeatStale(state.currentData)) {
-    return alert('親はまだ接続中です。もう少し待ってください。');
-  }
+  if (!confirm('親が不在・操作不能になったことを確認しましたか？\n引き継ぐと、あなたが新しい親になり、次の節へ進めるようになります。')) return;
 
   try {
     const claimed = await runTransaction(db, async (transaction) => {
@@ -93,14 +90,11 @@ window.claimHost = async function() {
       const data = snapshot.data() || {};
       const players = data.players || [];
       const oldHost = data.currentHost;
-      const heartbeat = timestampMillis(data.hostHeartbeatAt);
-
-      if (data.status !== 'playing' || !oldHost || !players.includes(oldHost)
-        || (heartbeat && Date.now() - heartbeat <= HOST_TIMEOUT_MS)) {
+      if (data.status !== 'playing' || !oldHost || !players.includes(oldHost) || oldHost === state.myName) {
         return false;
       }
 
-      const nextHost = players.find((player) => player !== oldHost) || '';
+      const nextHost = state.myName;
       if (!nextHost) return false;
       transaction.update(state.roomRef, {
         currentHost: nextHost,
@@ -110,9 +104,9 @@ window.claimHost = async function() {
     });
 
     if (claimed) {
-      alert('親が不在のため、あなたが新しい親になりました。');
+      alert('あなたが新しい親になりました。');
     } else {
-      alert('別の参加者が先に親を引き継いだか、親が復帰しました。');
+      alert('別の参加者が先に親を引き継いだか、親が復帰しました。画面を更新してください。');
     }
   } catch (error) {
     debugRecordError(error, 'claim-host');
