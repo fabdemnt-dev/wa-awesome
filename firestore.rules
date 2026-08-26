@@ -21,11 +21,9 @@ service cloud.firestore {
     match /rooms/{roomId} {
       allow read: if request.auth != null;
       // 参加者は匿名認証ユーザー。ルームのゲーム状態はクライアント間で共有更新する。
-      // 複雑なデータ形式検査は既存データとの互換性を壊していたため、
-      // ドキュメント容量だけを上限として、認証済みユーザーの作成・更新を許可する。
-      allow create, update: if
-          request.auth != null
-          && request.resource.data.size() <= 1048576;
+      // 詳細なフィールド検査は既存データとの互換性を壊すため、
+      // ここでは認証済みユーザーによる作成・更新のみを許可する。
+      allow create, update: if request.auth != null;
       allow delete: if false;
     }
 
