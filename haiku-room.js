@@ -173,8 +173,8 @@ function applyRoomData(data) {
     if (myWords5.length === 0 && myWords7.length === 0) {
       myWordsEl.innerHTML = '';
     } else {
-      const chip5 = 'display:inline-block; background:#ffffff; border:1px solid #93c5fd; color:#1e3a8a; border-radius:6px; padding:4px 10px; font-size:12px; font-weight:600; margin:2px; box-shadow:0 1px 2px rgba(30,58,138,0.08);';
-      const chip7 = 'display:inline-block; background:#ffffff; border:1px solid #fde047; color:#854d0e; border-radius:6px; padding:4px 10px; font-size:12px; font-weight:600; margin:2px; box-shadow:0 1px 2px rgba(133,77,14,0.08);';
+      const chip5 = 'display:inline-block; background:#eff6ff; border:1px solid #93c5fd; color:#1e3a8a; border-radius:8px; padding:6px 10px; font-size:13px; font-weight:bold; margin:2px;';
+      const chip7 = 'display:inline-block; background:#fefce8; border:1px solid #fde047; color:#854d0e; border-radius:8px; padding:6px 10px; font-size:13px; font-weight:bold; margin:2px;';
       myWordsEl.innerHTML = `
         <div style="margin-top:8px; font-size:13px; color:#475569;">📝 あなたが提出した素材（五音${myWords5.length}個・七音${myWords7.length}個）</div>
         <div style="margin-top:4px;">
