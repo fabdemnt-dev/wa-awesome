@@ -1,4 +1,4 @@
-import { updateDoc, arrayUnion, writeBatch, collection, doc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { updateDoc, arrayUnion, writeBatch, collection, doc, runTransaction } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { db } from './firebase-config.js';
 import { serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import state from './haiku-state.js';
@@ -142,7 +142,7 @@ window.redrawHand = async function() {
   const deck5 = state.currentData.deck5 || [];
   const deck7 = state.currentData.deck7 || [];
 
-  // 山札が選んだ枚数分あるか確認する
+  // 事前確認は表示用。実際の山札確認と配布はトランザクション内で最新状態に対して行う。
   if (deck5.length < selectedCount5 || deck7.length < selectedCount7) {
     return alert(`選択した枚数分の山札がありません。\n（山札 五音:残り${deck5.length}枚 / 七音:残り${deck7.length}枚）`);
   }
@@ -151,33 +151,53 @@ window.redrawHand = async function() {
 
   state.isProcessingRedraw = true;
   try {
-    const myHand5 = state.myHand5 || [];
-    const myHand7 = state.myHand7 || [];
+    const result = await runTransaction(db, async (transaction) => {
+      const snapshot = await transaction.get(state.roomRef);
+      const data = snapshot.data() || {};
+      if (data.status !== 'playing') return { ok: false, reason: 'playing-ended' };
+      if ((data.phrases || {})[state.myName]) return { ok: false, reason: 'already-revealed' };
+      if ((data.redraws || {})[state.myName]) return { ok: false, reason: 'already-redrawn' };
 
-    // 選ばれた札を手札から取り除く（捨て札。山札には戻さない）
-    const keptHand5 = myHand5.filter(w => !selectedIds5.includes(w.id));
-    const keptHand7 = myHand7.filter(w => !selectedIds7.includes(w.id));
+      const latestHand5 = data.hands5?.[state.myName] || [];
+      const latestHand7 = data.hands7?.[state.myName] || [];
+      const latestDeck5 = data.deck5 || [];
+      const latestDeck7 = data.deck7 || [];
+      if (latestDeck5.length < selectedCount5 || latestDeck7.length < selectedCount7) {
+        return { ok: false, reason: 'deck-shortage', deck5: latestDeck5.length, deck7: latestDeck7.length };
+      }
 
-    // 山札から選んだ枚数分をランダムに引く
-    const shuffledDeck5 = [...deck5].sort(() => Math.random() - 0.5);
-    const shuffledDeck7 = [...deck7].sort(() => Math.random() - 0.5);
-    const drawn5 = shuffledDeck5.slice(0, selectedCount5);
-    const drawn7 = shuffledDeck7.slice(0, selectedCount7);
-    const drawnIds5 = new Set(drawn5.map(w => w.id));
-    const drawnIds7 = new Set(drawn7.map(w => w.id));
+      // 最新の手札・山札を使うため、同時操作でもFirestoreが競合を検出して再試行する。
+      const keptHand5 = latestHand5.filter(w => !selectedIds5.includes(w.id));
+      const keptHand7 = latestHand7.filter(w => !selectedIds7.includes(w.id));
+      const shuffledDeck5 = [...latestDeck5].sort(() => Math.random() - 0.5);
+      const shuffledDeck7 = [...latestDeck7].sort(() => Math.random() - 0.5);
+      const drawn5 = shuffledDeck5.slice(0, selectedCount5);
+      const drawn7 = shuffledDeck7.slice(0, selectedCount7);
+      const drawnIds5 = new Set(drawn5.map(w => w.id));
+      const drawnIds7 = new Set(drawn7.map(w => w.id));
+      const newHand5 = [...keptHand5, ...drawn5];
+      const newHand7 = [...keptHand7, ...drawn7];
+      const newDeck5 = latestDeck5.filter(w => !drawnIds5.has(w.id));
+      const newDeck7 = latestDeck7.filter(w => !drawnIds7.has(w.id));
 
-    const newHand5 = [...keptHand5, ...drawn5];
-    const newHand7 = [...keptHand7, ...drawn7];
-    const newDeck5 = deck5.filter(w => !drawnIds5.has(w.id));
-    const newDeck7 = deck7.filter(w => !drawnIds7.has(w.id));
-
-    await updateDoc(state.roomRef, {
-      [`hands5.${state.myName}`]: newHand5,
-      [`hands7.${state.myName}`]: newHand7,
-      deck5: newDeck5,
-      deck7: newDeck7,
-      [`redraws.${state.myName}`]: true
+      transaction.update(state.roomRef, {
+        [`hands5.${state.myName}`]: newHand5,
+        [`hands7.${state.myName}`]: newHand7,
+        deck5: newDeck5,
+        deck7: newDeck7,
+        [`redraws.${state.myName}`]: true
+      });
+      return { ok: true };
     });
+
+    if (!result.ok) {
+      if (result.reason === 'deck-shortage') {
+        return alert(`選択した枚数分の山札がありません。\n（山札 五音:残り${result.deck5}枚 / 七音:残り${result.deck7}枚）`);
+      }
+      if (result.reason === 'already-redrawn') return alert('手札の引き直しは1節につき1回までです。');
+      if (result.reason === 'already-revealed') return alert('すでに句を披露した後は手札を引き直せません。');
+      return alert('句会の状態が変わったため、引き直しできません。画面を更新してください。');
+    }
 
     state.redrawSelected5 = [];
     state.redrawSelected7 = [];
