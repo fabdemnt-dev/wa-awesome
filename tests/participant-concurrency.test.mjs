@@ -4,6 +4,7 @@ import {
   normalizeParticipantRoles,
   setParticipantRole,
   hasParticipantRoleOverlap,
+  canClaimHost,
 } from '../participant-utils.js';
 
 // Firestore transactionが競合後に最新スナップショットで再実行される動作を、
@@ -59,6 +60,23 @@ test('連続した役割切り替えでも参加者は一方の配列にしか�
   }
   assert.deepEqual(state.players, ['ホスト', '参加者']);
   assert.deepEqual(state.spectators, []);
+});
+
+test('ラウンド中は別プレイヤーだけが親を引き継げる', () => {
+  const playing = { status: 'playing', players: ['親', '子'], currentHost: '親' };
+
+  assert.equal(canClaimHost(playing, '子'), true);
+  assert.equal(canClaimHost(playing, '親'), false);
+  assert.equal(canClaimHost(playing, '見学者', true), false);
+});
+
+test('親が既にplayersから消えた状態では手動引き継ぎ判定を許可しない', () => {
+  const hostMissing = { status: 'playing', players: ['子'], currentHost: '親' };
+  const notPlaying = { status: 'lobby', players: ['親', '子'], currentHost: '親' };
+
+  assert.equal(canClaimHost(hostMissing, '子'), false);
+  assert.equal(canClaimHost(notPlaying, '子'), false);
+  assert.equal(canClaimHost({ status: 'playing', players: ['親', '子'] }, '子'), false);
 });
 
 export { applyRoleUpdate };

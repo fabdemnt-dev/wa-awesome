@@ -7,7 +7,7 @@ import { subscribeRoomHistory } from './room-history.js';
 import { ensureSignedIn } from './wordset-auth.js';
 import { showGameError } from './game-error.js';
 import { defaultWords5, defaultWords7 } from './haiku-default-words.js';
-import { normalizeParticipantName, setParticipantRole, normalizeParticipantRoles, getParticipantStorageKey } from './participant-utils.js';
+import { normalizeParticipantName, setParticipantRole, normalizeParticipantRoles, getParticipantStorageKey, canClaimHost } from './participant-utils.js';
 
 async function saveParticipantRole(role) {
   await runTransaction(db, async (transaction) => {
@@ -23,7 +23,7 @@ function refreshHostRecoveryUI() {
   const players = data?.players || [];
   const currentHost = players.includes(data?.currentHost) ? data.currentHost : (players[0] || '');
   const isPlaying = data?.status === 'playing';
-  const canTakeover = isPlaying && !state.isSpectator && currentHost !== state.myName;
+  const canTakeover = canClaimHost(data, state.myName, state.isSpectator);
   const hostRecoveryBtn = document.getElementById('host-recovery-btn');
   if (hostRecoveryBtn) {
     hostRecoveryBtn.style.display = isPlaying ? 'block' : 'none';
@@ -53,9 +53,7 @@ window.claimHost = async function() {
     const claimed = await runTransaction(db, async (transaction) => {
       const snapshot = await transaction.get(state.roomRef);
       const data = snapshot.data() || {};
-      const players = data.players || [];
-      const oldHost = data.currentHost;
-      if (data.status !== 'playing' || !oldHost || !players.includes(oldHost) || oldHost === state.myName || !players.includes(state.myName)) {
+      if (!canClaimHost(data, state.myName, state.isSpectator)) {
         return false;
       }
 
