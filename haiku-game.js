@@ -7,7 +7,7 @@ import { renderInputFields } from './haiku-render.js';
 import { defaultWords5, defaultWords7 } from './haiku-default-words.js';
 import { getWordSetById } from './haiku-wordsets.js';
 import { saveWordSetSecurely, userFacingError } from './wordset-auth.js';
-import { getParticipantUidByName, getParticipantStorageKey } from './participant-utils.js';
+import { getParticipantUidByName, getParticipantStorageKey, getParticipantNameByUid } from './participant-utils.js';
 
 window.addWords = async function() {
   if (!state.currentData || state.isSpectator) return;
@@ -126,7 +126,8 @@ window.redrawHand = async function() {
   if (state.currentData.status !== 'playing') return;
 
   const phrases = state.currentData.phrases || {};
-  if (phrases[state.myName]) {
+  const myPhraseKey = getParticipantStorageKey(state.currentData, state.myUid, state.myName);
+  if (phrases[myPhraseKey]) {
     return alert('すでに句を披露した後は手札を引き直せません。');
   }
 
@@ -161,7 +162,8 @@ window.redrawHand = async function() {
       const snapshot = await transaction.get(state.roomRef);
       const data = snapshot.data() || {};
       if (data.status !== 'playing') return { ok: false, reason: 'playing-ended' };
-      if ((data.phrases || {})[state.myName]) return { ok: false, reason: 'already-revealed' };
+      const phraseKey = getParticipantStorageKey(data, state.myUid, state.myName);
+      if ((data.phrases || {})[phraseKey]) return { ok: false, reason: 'already-revealed' };
       const storageKey = getParticipantStorageKey(data, state.myUid, state.myName);
       if ((data.redraws || {})[storageKey]) return { ok: false, reason: 'already-redrawn' };
 
@@ -270,21 +272,23 @@ window.nextRound = async function() {
     let taeWinners = [];
     const taePoints = Math.max(10, players.length * 2);
 
-    Object.keys(votes).forEach(voter => {
+    Object.keys(votes).forEach(voterKey => {
+      const voterName = getParticipantNameByUid(state.currentData, voterKey) || voterKey;
       // 見学者の御印はお楽しみ用なので得点計算には含めない
-      if (spectators.includes(voter)) return;
+      if (spectators.includes(voterName)) return;
 
-      Object.keys(votes[voter] || {}).forEach(target => {
-        const vData = votes[voter][target];
+      Object.keys(votes[voterKey] || {}).forEach(targetKey => {
+        const targetName = getParticipantNameByUid(state.currentData, targetKey) || targetKey;
+        const vData = votes[voterKey][targetKey];
         const keys = Array.isArray(vData) ? vData : [vData];
 
         keys.forEach(k => {
-          if (k === 'tae' && !taeWinners.includes(target)) {
-            taeWinners.push(target);
+          if (k === 'tae' && !taeWinners.includes(targetName)) {
+            taeWinners.push(targetName);
           }
           const opt = evalOptionsMaster[k];
           const pts = (k === 'tae') ? taePoints : (opt ? opt.pts : 0);
-          newScores[target] = (newScores[target] || 0) + pts;
+          newScores[targetName] = (newScores[targetName] || 0) + pts;
         });
       });
     });
@@ -308,8 +312,9 @@ window.nextRound = async function() {
       round: state.currentData.roundCount || 1, 
       phrases, 
       phraseDetails: state.currentData.phraseDetails || {}, 
-      votes, 
-      host: currentHost 
+      votes,
+      participantUids: state.currentData.participantUids || {},
+      host: currentHost
     };
 
     // プレイヤーが入力した素材は、使われたかどうかに関わらず、設定がONなら次の節に持ち越す

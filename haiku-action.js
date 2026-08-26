@@ -1,5 +1,6 @@
 import { updateDoc, runTransaction } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { db } from './firebase-config.js';
+import { getParticipantStorageKey, getParticipantUidByName } from './participant-utils.js';
 import state from './haiku-state.js';
 import { renderHand } from './haiku-render.js';
 
@@ -33,23 +34,26 @@ window.clearPhrase = function() { if (!state.isSpectator) { state.selectedHand =
 window.submitPhrase = async function() {
   if (state.isSpectator) return alert('見学モードでは句の投稿はできません');
   if (!state.selectedHand[0] || !state.selectedHand[1] || !state.selectedHand[2]) return alert('すべて選択してください');
+  const storageKey = getParticipantStorageKey(state.currentData, state.myUid, state.myName);
   await updateDoc(state.roomRef, {
-    [`phrases.${state.myName}`]: `${state.selectedHand[0].text} ${state.selectedHand[1].text} ${state.selectedHand[2].text}`,
-    [`phraseDetails.${state.myName}`]: state.selectedHand
+    [`phrases.${storageKey}`]: `${state.selectedHand[0].text} ${state.selectedHand[1].text} ${state.selectedHand[2].text}`,
+    [`phraseDetails.${storageKey}`]: state.selectedHand
   });
 };
 window.revealPhrase = async function(pName) {
   if (!state.roomRef) return;
+  const targetKey = getParticipantUidByName(state.currentData, pName) || pName;
   await updateDoc(state.roomRef, {
-    [`revealedPhrases.${pName}`]: true
+    [`revealedPhrases.${targetKey}`]: true
   });
 };
 window.doSelfPraise = async function() {
   if (!state.roomRef || state.isSubmittingSelfPraise) return;
   state.isSubmittingSelfPraise = true;
   try {
+    const storageKey = getParticipantStorageKey(state.currentData, state.myUid, state.myName);
     await updateDoc(state.roomRef, {
-      [`selfPraise.${state.myName}`]: true
+      [`selfPraise.${storageKey}`]: true
     });
   } catch (e) {
     alert('自画自賛の登録に失敗しました: ' + e.message);
@@ -71,9 +75,12 @@ window.submitVote = async function(targetPlayer, forcedKey) {
     try {
       await runTransaction(db, async (tx) => {
         const snap = await tx.get(state.roomRef);
-        const currentVotes = snap.data()?.votes?.[state.myName]?.[targetPlayer] || [];
+        const data = snap.data() || {};
+        const voterKey = getParticipantStorageKey(data, state.myUid, state.myName);
+        const targetKey = getParticipantUidByName(data, targetPlayer) || targetPlayer;
+        const currentVotes = data.votes?.[voterKey]?.[targetKey] || [];
         const currentVotesArr = Array.isArray(currentVotes) ? currentVotes : [currentVotes];
-        tx.update(state.roomRef, { [`votes.${state.myName}.${targetPlayer}`]: [...currentVotesArr, evalKey] });
+        tx.update(state.roomRef, { [`votes.${voterKey}.${targetKey}`]: [...currentVotesArr, evalKey] });
       });
       alert('御印を追加で贈りました！');
     } catch (e) {
@@ -86,12 +93,15 @@ window.submitVote = async function(targetPlayer, forcedKey) {
     try {
       await runTransaction(db, async (tx) => {
         const snap = await tx.get(state.roomRef);
-        const myVotes = snap.data()?.votes?.[state.myName] || {};
+        const data = snap.data() || {};
+        const voterKey = getParticipantStorageKey(data, state.myUid, state.myName);
+        const targetKey = getParticipantUidByName(data, targetPlayer) || targetPlayer;
+        const myVotes = data.votes?.[voterKey] || {};
         const hasVotedAnywhere = Object.values(myVotes).some(vote => vote != null);
         if (hasVotedAnywhere) {
           throw new Error('ALREADY_VOTED');
         }
-        tx.update(state.roomRef, { [`votes.${state.myName}.${targetPlayer}`]: evalKey });
+        tx.update(state.roomRef, { [`votes.${voterKey}.${targetKey}`]: evalKey });
       });
       alert('御印を贈りました！');
     } catch (e) {

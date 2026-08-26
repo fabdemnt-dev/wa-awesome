@@ -1,5 +1,5 @@
 import state from './haiku-state.js';
-import { getParticipantStorageKey } from './participant-utils.js';
+import { getParticipantStorageKey, getParticipantUidByName } from './participant-utils.js';
 import { escapeHTML, escapeJS, evalOptionsMaster, hostOptionKeys, childOptionKeys, spectatorOptionKeys, colorPalette } from './haiku-utils.js';
 
 export function getAuthorStyle(authorName) {
@@ -109,7 +109,8 @@ function updateDeckAndRedrawUI() {
   if (!redrawBtn) return;
 
   const storageKey = getParticipantStorageKey(state.currentData, state.myUid, state.myName);
-  const hasSubmitted = !!(state.currentData.phrases || {})[state.myName];
+  const myStorageKey = getParticipantStorageKey(state.currentData, state.myUid, state.myName);
+  const hasSubmitted = !!(state.currentData.phrases || {})[myStorageKey];
   const hasRedrawn = !!(state.currentData.redraws || {})[storageKey];
   const selectedCount = (state.redrawSelected5?.length || 0) + (state.redrawSelected7?.length || 0);
   const canRedraw = !state.isSpectator && !hasSubmitted && !hasRedrawn && selectedCount > 0;
@@ -145,12 +146,16 @@ export function renderBoards() {
 
   // 子方は1節につき1つしか御印を贈れないため、誰かに投票済みなら他の句のボードでも
   // 「投票済み」の表示にする（未投票の句にだけボタンが残るのを防ぐ）
-  const myVotes = votes[state.myName] || {};
+  const myVoteKey = getParticipantStorageKey(state.currentData, state.myUid, state.myName);
+  const myVotes = votes[myVoteKey] || {};
   const hasVotedAnywhereAsChild = !isHost && Object.values(myVotes).some(v => v != null);
 
-  boardList.innerHTML = players.filter(pName => phrases[pName] !== undefined).map(pName => {
-    const isRevealed = revealedPhrases[pName];
-    const pDet = phraseDetails[pName] || [];
+  boardList.innerHTML = players.map(pName => {
+    const phraseKey = getParticipantUidByName(state.currentData, pName) || pName;
+    if (phrases[phraseKey] === undefined && phrases[pName] === undefined) return '';
+    const actualPhraseKey = phrases[phraseKey] !== undefined ? phraseKey : pName;
+    const isRevealed = revealedPhrases[actualPhraseKey] ?? revealedPhrases[pName];
+    const pDet = phraseDetails[actualPhraseKey] || phraseDetails[pName] || [];
     
     const safePName = escapeHTML(pName);
     const jsPName = escapeJS(pName);
@@ -168,12 +173,13 @@ export function renderBoards() {
     const phraseHtml = pDet.length === 3 ? pDet.map(d => {
       const s = getAuthorStyle(d.author);
       return `<span class="word-tag" style="background:${s.bg}; color:${s.text}; border-color:${s.border};">${escapeHTML(d.text)}<span class="author-label">(${escapeHTML(d.author)})</span></span>`;
-    }).join(' ') : `<strong>${escapeHTML(phrases[pName])}</strong>`;
+    }).join(' ') : `<strong>${escapeHTML(phrases[actualPhraseKey] ?? phrases[pName])}</strong>`;
 
     let evalBadgesHtml = '';
     const allVoters = [...players, ...(state.currentData.spectators || [])];
     allVoters.forEach(voter => {
-      const vData = votes[voter]?.[pName];
+      const voterKey = getParticipantUidByName(state.currentData, voter) || voter;
+      const vData = votes[voterKey]?.[actualPhraseKey] ?? votes[voterKey]?.[pName] ?? votes[voter]?.[pName];
       if (vData) {
         const keys = Array.isArray(vData) ? vData : [vData];
         keys.forEach(k => {
@@ -184,9 +190,9 @@ export function renderBoards() {
       }
     });
 
-    const hasAlreadyVotedAsChild = !isHost && (votes[state.myName]?.[pName] != null || hasVotedAnywhereAsChild);
+    const hasAlreadyVotedAsChild = !isHost && (myVotes[actualPhraseKey] != null || myVotes[pName] != null || hasVotedAnywhereAsChild);
 
-    const isSelfPraised = selfPraiseData[pName];
+    const isSelfPraised = selfPraiseData[actualPhraseKey] ?? selfPraiseData[pName];
     let selfPraiseHtml = '';
     if (pName === state.myName) {
       if (isSelfPraised) {
@@ -203,7 +209,7 @@ export function renderBoards() {
         <div class="board-header" style="display: flex; justify-content: space-between; align-items: center;">
           <strong>${safePName} の句</strong>
           <div style="display: flex; align-items: center; gap: 6px;">
-            <button onclick="speakPhrase('${escapeJS(phrases[pName])}')" style="font-size:11px; padding:3px 8px; background:#0284c7; color:white; border:none; border-radius:10px; cursor:pointer; width:auto; margin-top:0;">🔊 読み上げ</button>
+            <button onclick="speakPhrase('${escapeJS(phrases[actualPhraseKey] ?? phrases[pName])}')" style="font-size:11px; padding:3px 8px; background:#0284c7; color:white; border:none; border-radius:10px; cursor:pointer; width:auto; margin-top:0;">🔊 読み上げ</button>
             ${selfPraiseHtml}
           </div>
         </div>
@@ -212,7 +218,7 @@ export function renderBoards() {
         ${pName !== state.myName ? `
           <div class="vote-select-group" style="margin-top:8px;">
             ${hasAlreadyVotedAsChild ? `
-              <span style="font-size:13px; color:#10b981; font-weight:bold;">✅ ${votes[state.myName]?.[pName] != null ? `御印送信済み (${evalOptionsMaster[votes[state.myName][pName]]?.label || ''})` : '御印は1節につき1つだけ（他の句に贈りました）'}</span>
+              <span style="font-size:13px; color:#10b981; font-weight:bold;">✅ ${(myVotes[actualPhraseKey] ?? myVotes[pName]) != null ? `御印送信済み (${evalOptionsMaster[myVotes[actualPhraseKey] ?? myVotes[pName]]?.label || ''})` : '御印は1節につき1つだけ（他の句に贈りました）'}</span>
             ` : state.isSpectator ? `
               <button class="vote-submit-btn" onclick="submitVote('${jsPName}', '${spectatorOptionKeys[0]}')">${evalOptionsMaster[spectatorOptionKeys[0]].label}</button>
             ` : `
