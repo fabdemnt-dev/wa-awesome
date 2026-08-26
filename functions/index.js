@@ -236,6 +236,135 @@ exports.redrawHaikuHand = onCall(callableOptions, async (request) => {
   return { ok: true };
 });
 
+function requireParticipant(room, uid) {
+  const participants = participantsByUid(room);
+  const name = participants.get(uid);
+  if (!name) fail('permission-denied', '参加者だけが操作できます。');
+  return { participants, name };
+}
+
+function requirePlayingParticipant(room, uid) {
+  const result = requireParticipant(room, uid);
+  if (!Array.isArray(room.players) || !room.players.includes(result.name)) {
+    fail('permission-denied', 'プレイヤーだけが操作できます。');
+  }
+  return result;
+}
+
+function requirePhraseDetails(value) {
+  if (!Array.isArray(value) || value.length !== 3) fail('invalid-argument', '句の素材が正しくありません。');
+  return value.map((item) => {
+    if (!isPlainObject(item)) fail('invalid-argument', '句の素材が正しくありません。');
+    return {
+      id: requireText(item.id, '素材ID', 200),
+      text: requireText(item.text, '素材', 200),
+      author: requireText(item.author, '素材作者', 200),
+    };
+  });
+}
+
+exports.submitHaikuPhrase = onCall(callableOptions, async (request) => {
+  const uid = requireAuthenticated(request);
+  const roomId = requireText(request.data?.roomId, 'ルームID', 150);
+  const phrase = requireText(request.data?.phrase, '句', 600);
+  const phraseDetails = requirePhraseDetails(request.data?.phraseDetails);
+  const roomRef = db.collection('rooms').doc(`haiku_${roomId}`);
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(roomRef);
+    if (!snapshot.exists) fail('not-found', 'ルームが見つかりません。');
+    const room = snapshot.data() || {};
+    const { name } = requirePlayingParticipant(room, uid);
+    if (room.schemaVersion !== 2 || room.status !== 'playing') fail('failed-precondition', '新形式の句会中だけ投稿できます。');
+    const handSnapshot = await transaction.get(roomRef.collection('hands').doc(uid));
+    const hand = handSnapshot.data() || {};
+    const ownedIds = new Set([
+      ...(Array.isArray(hand.hand5) ? hand.hand5 : []),
+      ...(Array.isArray(hand.hand7) ? hand.hand7 : []),
+    ].map((item) => item?.id));
+    if (!handSnapshot.exists || hand.round !== (room.roundCount || 1) || phraseDetails.some((item) => !ownedIds.has(item.id))) {
+      fail('permission-denied', '自分の手札にない素材は句に使えません。');
+    }
+    if (room.phrases?.[uid] !== undefined) fail('failed-precondition', '句は1節につき1つまでです。');
+    transaction.update(roomRef, {
+      [`phrases.${uid}`]: phrase,
+      [`phraseDetails.${uid}`]: phraseDetails,
+      [`revealedPhrases.${uid}`]: false,
+      [`selfPraise.${uid}`]: false,
+    });
+  });
+  return { ok: true };
+});
+
+exports.revealHaikuPhrase = onCall(callableOptions, async (request) => {
+  const uid = requireAuthenticated(request);
+  const roomId = requireText(request.data?.roomId, 'ルームID', 150);
+  const targetUid = requireText(request.data?.targetUid, '対象UID', 200);
+  const roomRef = db.collection('rooms').doc(`haiku_${roomId}`);
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(roomRef);
+    if (!snapshot.exists) fail('not-found', 'ルームが見つかりません。');
+    const room = snapshot.data() || {};
+    const { participants, name } = requirePlayingParticipant(room, uid);
+    if (room.schemaVersion !== 2 || room.status !== 'playing') fail('failed-precondition', '新形式の句会中だけ披露できます。');
+    if (!participants.has(targetUid) || room.phrases?.[targetUid] === undefined) fail('not-found', '対象の句が見つかりません。');
+    const hostUid = latestUidForName(participants, room.currentHost);
+    if (uid !== targetUid && uid !== hostUid) fail('permission-denied', '自分または親の句だけ披露できます。');
+    transaction.update(roomRef, { [`revealedPhrases.${targetUid}`]: true });
+  });
+  return { ok: true };
+});
+
+exports.selfPraiseHaikuPhrase = onCall(callableOptions, async (request) => {
+  const uid = requireAuthenticated(request);
+  const roomId = requireText(request.data?.roomId, 'ルームID', 150);
+  const roomRef = db.collection('rooms').doc(`haiku_${roomId}`);
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(roomRef);
+    if (!snapshot.exists) fail('not-found', 'ルームが見つかりません。');
+    const room = snapshot.data() || {};
+    requirePlayingParticipant(room, uid);
+    if (room.schemaVersion !== 2 || room.status !== 'playing' || room.phrases?.[uid] === undefined) {
+      fail('failed-precondition', '披露する句がありません。');
+    }
+    transaction.update(roomRef, { [`selfPraise.${uid}`]: true });
+  });
+  return { ok: true };
+});
+
+const haikuVoteKeys = new Set(['okashi', 'aware', 'wabisabi', 'ayashi', 'kuruoshi', 'medurashi', 'yugen', 'tae', 'kanpu']);
+
+exports.submitHaikuVote = onCall(callableOptions, async (request) => {
+  const uid = requireAuthenticated(request);
+  const roomId = requireText(request.data?.roomId, 'ルームID', 150);
+  const targetUid = requireText(request.data?.targetUid, '対象UID', 200);
+  const evalKey = requireText(request.data?.evalKey, '御印', 30);
+  if (!haikuVoteKeys.has(evalKey)) fail('invalid-argument', '御印が正しくありません。');
+  const roomRef = db.collection('rooms').doc(`haiku_${roomId}`);
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(roomRef);
+    if (!snapshot.exists) fail('not-found', 'ルームが見つかりません。');
+    const room = snapshot.data() || {};
+    const { participants, name } = requireParticipant(room, uid);
+    if (room.schemaVersion !== 2 || room.status !== 'playing') fail('failed-precondition', '新形式の句会中だけ投票できます。');
+    if (!participants.has(targetUid) || room.phrases?.[targetUid] === undefined || room.revealedPhrases?.[targetUid] !== true) {
+      fail('failed-precondition', '披露済みの句だけ投票できます。');
+    }
+    const hostUid = latestUidForName(participants, room.currentHost);
+    const isHost = uid === hostUid;
+    const isSpectator = Array.isArray(room.spectators) && room.spectators.includes(name);
+    const allowed = isSpectator ? evalKey === 'kanpu' : isHost ? evalKey !== 'kanpu' : ['okashi', 'aware', 'wabisabi'].includes(evalKey);
+    if (!allowed) fail('permission-denied', 'この御印は選べません。');
+    const voterVotes = room.votes?.[uid] || {};
+    if (!isHost && Object.values(voterVotes).some((value) => value != null)) {
+      fail('failed-precondition', '御印は1節につき1つまでです。');
+    }
+    const current = voterVotes[targetUid];
+    const next = isHost ? [...(Array.isArray(current) ? current : current ? [current] : []), evalKey] : evalKey;
+    transaction.update(roomRef, { [`votes.${uid}.${targetUid}`]: next });
+  });
+  return { ok: true };
+});
+
 function sanitizeWordSet(input) {
   if (!isPlainObject(input)) fail('invalid-argument', 'ワードセットの内容が正しくありません。');
 
