@@ -16,6 +16,8 @@ const {
   removeHaikuWord,
   submitPoemWords,
   removePoemWord,
+  updateHaikuSettings,
+  updatePoemSettings,
 } = require('../index.js');
 
 const db = getFirestore();
@@ -58,6 +60,24 @@ async function seedRoom(roomId) {
     hands7: { legacy: ['古い手札'] },
   });
 }
+
+test('設定Callableは親限定と入力範囲を検証する', async () => {
+  await roomRef('settings-actions').set({ schemaVersion: 2, status: 'lobby', currentHost: '親', currentHostUid: 'uid-host', players: ['親', '参加者'], spectators: [], participantUids: { 'uid-host': '親', 'uid-player': '参加者' }, settings: { hand5: 5, hand7: 3, carryOver: true } });
+  await assert.rejects(
+    updateHaikuSettings.run({ data: { roomId: 'settings-actions', hand5: 4, hand7: 2, carryOver: false }, auth: { uid: 'uid-player' } }),
+    (error) => error.code === 'permission-denied',
+  );
+  await updateHaikuSettings.run({ data: { roomId: 'settings-actions', hand5: 4, hand7: 2, carryOver: false }, auth: { uid: 'uid-host' } });
+  assert.deepEqual((await roomRef('settings-actions').get()).data().settings, { hand5: 4, hand7: 2, carryOver: false });
+  await assert.rejects(
+    updateHaikuSettings.run({ data: { roomId: 'settings-actions', hand5: 0, hand7: 2 }, auth: { uid: 'uid-host' } }),
+    (error) => error.code === 'invalid-argument',
+  );
+
+  await poemRoomRef('settings-actions').set({ schemaVersion: 2, status: 'lobby', currentHost: '親', currentHostUid: 'uid-host', players: ['親'], spectators: [], participantUids: { 'uid-host': '親' }, settings: { handCount: 5 } });
+  await updatePoemSettings.run({ data: { roomId: 'settings-actions', handCount: 8 }, auth: { uid: 'uid-host' } });
+  assert.equal((await poemRoomRef('settings-actions').get()).data().settings.handCount, 8);
+});
 
 test('素材Callableは本人投稿・他人偽装拒否・本人削除を検証する', async () => {
   await roomRef('material-actions').set({

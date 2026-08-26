@@ -8,7 +8,7 @@ import { ensureSignedIn } from './wordset-auth.js';
 import { showGameError } from './game-error.js';
 import { defaultWords5, defaultWords7 } from './haiku-default-words.js';
 import { normalizeParticipantName, setParticipantRole, normalizeParticipantRoles, getParticipantStorageKey, canClaimHost } from './participant-utils.js';
-import { changeHaikuRole, removeHaikuWord } from './haiku-functions.js';
+import { changeHaikuRole, removeHaikuWord, updateHaikuSettings } from './haiku-functions.js';
 
 async function saveParticipantRole(role) {
   await runTransaction(db, async (transaction) => {
@@ -592,13 +592,14 @@ window.toggleRole = async function() {
 };
 window.updateSettings = async function() {
   if (!state.roomRef) return;
-  await updateDoc(state.roomRef, {
-    settings: {
-      hand5: parseInt(document.getElementById('set-hand-5').value) || 5,
-      hand7: parseInt(document.getElementById('set-hand-7').value) || 3,
-      carryOver: document.getElementById('set-carry-over')?.checked ?? true
-    }
-  });
+  const hand5 = parseInt(document.getElementById('set-hand-5').value) || 5;
+  const hand7 = parseInt(document.getElementById('set-hand-7').value) || 3;
+  const carryOver = document.getElementById('set-carry-over')?.checked ?? true;
+  if (state.currentData?.schemaVersion === 2) {
+    await updateHaikuSettings(state.roomId, hand5, hand7, carryOver);
+  } else {
+    await updateDoc(state.roomRef, { settings: { hand5, hand7, carryOver } });
+  }
 };
 window.removePlayer = async function(pName) {
   if (confirm(`${pName} さんを退出させますか？`)) {
