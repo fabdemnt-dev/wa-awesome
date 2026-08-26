@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "test": "node --test tests/participant-utils.test.mjs tests/participant-concurrency.test.mjs tests/wordset-utils.test.mjs",
-    "test:rules": "firebase emulators:exec --only firestore --project demo-wa-awesome \"node --test tests/firestore-rules.test.mjs\""
+    "test:rules": "firebase emulators:exec --only firestore --project demo-wa-awesome \"node --test tests/firestore-rules.test.mjs\"",
+    "test:functions": "npm --prefix functions install --ignore-scripts --no-audit --no-fund && firebase emulators:exec --only firestore,functions --project demo-wa-awesome-functions \"node --test functions/test/*.test.cjs\""
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^3.0.4",
