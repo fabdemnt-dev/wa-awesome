@@ -37,6 +37,12 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // UID別の個人手札は本人だけが読める。書込みはCallable Functions（Admin SDK）のみ。
+    match /rooms/{roomId}/hands/{handUid} {
+      allow read: if request.auth != null && request.auth.uid == handUid;
+      allow create, update, delete: if false;
+    }
+
     // ============================================================
     // 3) ワードセット wordsets
     //
