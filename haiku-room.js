@@ -8,7 +8,6 @@ import { ensureSignedIn } from './wordset-auth.js';
 import { showGameError } from './game-error.js';
 import { defaultWords5, defaultWords7 } from './haiku-default-words.js';
 import { normalizeParticipantName, setParticipantRole, normalizeParticipantRoles, getParticipantStorageKey } from './participant-utils.js';
-import { timestampMillis, isHostHeartbeatStale as isHeartbeatStale } from './host-recovery-utils.js';
 
 async function saveParticipantRole(role) {
   await runTransaction(db, async (transaction) => {
@@ -19,68 +18,30 @@ async function saveParticipantRole(role) {
 }
 
 let previousStatus = null; // 直前のstatusを記録し、「lobbyに遷移した瞬間」だけ入力欄をクリアするために使う
-let hostHeartbeatTimer = null;
-let hostHeartbeatMissingSince = null;
-let hostRecoveryCheckTimer = null;
-const HOST_HEARTBEAT_INTERVAL_MS = 10000;
-
-function isHostHeartbeatStale(data) {
-  const heartbeat = timestampMillis(data?.hostHeartbeatAt);
-  if (!heartbeat) {
-    if (!hostHeartbeatMissingSince) hostHeartbeatMissingSince = Date.now();
-    return isHeartbeatStale(data, Date.now(), hostHeartbeatMissingSince);
-  }
-  hostHeartbeatMissingSince = null;
-  return isHeartbeatStale(data);
-}
-
-async function sendHostHeartbeat() {
-  if (!state.roomRef || state.currentData?.status !== 'playing') return;
-  const players = state.currentData.players || [];
-  if (state.isSpectator || state.currentData.currentHost !== state.myName || !players.includes(state.myName)) return;
-  try {
-    await updateDoc(state.roomRef, { hostHeartbeatAt: serverTimestamp() });
-  } catch (error) {
-    debugRecordError(error, 'host-heartbeat');
-  }
-}
-
-function syncHostHeartbeat() {
-  const isCurrentHost = state.currentData?.status === 'playing'
-    && !state.isSpectator
-    && state.currentData.currentHost === state.myName
-    && (state.currentData.players || []).includes(state.myName);
-
-  if (isCurrentHost && !hostHeartbeatTimer) {
-    sendHostHeartbeat();
-    hostHeartbeatTimer = setInterval(sendHostHeartbeat, HOST_HEARTBEAT_INTERVAL_MS);
-  } else if (!isCurrentHost && hostHeartbeatTimer) {
-    clearInterval(hostHeartbeatTimer);
-    hostHeartbeatTimer = null;
-  }
-}
-
 function refreshHostRecoveryUI() {
   const data = state.currentData;
   const players = data?.players || [];
   const currentHost = players.includes(data?.currentHost) ? data.currentHost : (players[0] || '');
+  const isPlaying = data?.status === 'playing';
+  const canTakeover = isPlaying && !state.isSpectator && currentHost !== state.myName;
   const hostRecoveryBtn = document.getElementById('host-recovery-btn');
-  const canRecoverHost = data?.status === 'playing'
-    && !state.isSpectator
-    && currentHost !== state.myName
-    && isHostHeartbeatStale(data);
-  if (hostRecoveryBtn) hostRecoveryBtn.style.display = canRecoverHost ? 'block' : 'none';
+  if (hostRecoveryBtn) {
+    hostRecoveryBtn.style.display = isPlaying ? 'block' : 'none';
+    hostRecoveryBtn.disabled = !canTakeover;
+    hostRecoveryBtn.style.opacity = canTakeover ? '1' : '0.55';
+    hostRecoveryBtn.style.cursor = canTakeover ? 'pointer' : 'not-allowed';
+    hostRecoveryBtn.innerText = state.isSpectator
+      ? '親を引き継ぐ（プレイヤーのみ）'
+      : currentHost === state.myName
+        ? '親を引き継ぐ（現在あなたが親です）'
+        : '親を引き継ぐ';
+  }
 
   const nextHint = document.getElementById('next-round-hint');
-  if (nextHint && canRecoverHost) {
-    nextHint.innerText = '※親が不在・操作不能のときは、確認して親を引き継げます';
-  } else if (nextHint) {
-    nextHint.innerText = '※「次の節に進む」は今節の選者（親）だけが押せます';
+  if (nextHint) {
+    nextHint.style.display = isPlaying ? 'block' : 'none';
+    nextHint.innerText = '※押すと最新のルーム状態を確認し、確認後に親を引き継ぎます（プレイヤーのみ）';
   }
-}
-
-if (!hostRecoveryCheckTimer) {
-  hostRecoveryCheckTimer = setInterval(refreshHostRecoveryUI, 1000);
 }
 
 window.claimHost = async function() {
@@ -94,15 +55,14 @@ window.claimHost = async function() {
       const data = snapshot.data() || {};
       const players = data.players || [];
       const oldHost = data.currentHost;
-      if (data.status !== 'playing' || !oldHost || !players.includes(oldHost) || oldHost === state.myName || !isHostHeartbeatStale(data)) {
+      if (data.status !== 'playing' || !oldHost || !players.includes(oldHost) || oldHost === state.myName || !players.includes(state.myName)) {
         return false;
       }
 
       const nextHost = state.myName;
       if (!nextHost) return false;
       transaction.update(state.roomRef, {
-        currentHost: nextHost,
-        hostHeartbeatAt: serverTimestamp()
+        currentHost: nextHost
       });
       return nextHost === state.myName;
     });
@@ -142,7 +102,7 @@ function applyRoomData(data) {
   const currentHost = players.includes(state.currentData.currentHost) ? state.currentData.currentHost : (players[0] || '未設定');
   const hostText = `👑 今節の選者（親）: <strong>${escapeHTML(currentHost)}</strong> ${currentHost === state.myName ? '（あなた）' : ''}`;
 
-  syncHostHeartbeat();
+
   refreshHostRecoveryUI();
 
   if (document.getElementById('host-info-lobby')) document.getElementById('host-info-lobby').innerHTML = hostText;

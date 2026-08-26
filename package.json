@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test tests/participant-utils.test.mjs tests/participant-concurrency.test.mjs tests/wordset-utils.test.mjs tests/host-recovery.test.mjs",
+    "test": "node --test tests/participant-utils.test.mjs tests/participant-concurrency.test.mjs tests/wordset-utils.test.mjs",
     "test:rules": "firebase emulators:exec --only firestore --project demo-wa-awesome \"node --test tests/firestore-rules.test.mjs\""
   },
   "devDependencies": {

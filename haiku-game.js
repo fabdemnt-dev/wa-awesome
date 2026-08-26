@@ -1,6 +1,5 @@
 import { updateDoc, arrayUnion, writeBatch, collection, doc, runTransaction } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { db } from './firebase-config.js';
-import { serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import state from './haiku-state.js';
 import { evalOptionsMaster } from './haiku-utils.js';
 import { renderInputFields } from './haiku-render.js';
@@ -118,7 +117,7 @@ window.startGame = async function() {
   await updateDoc(state.roomRef, {
     status: "playing", hands5: h5, hands7: h7, deck5, deck7,
     supplementPool5, supplementPool7, supplementAuthorLabel,
-    hostHeartbeatAt: serverTimestamp(), phrases: {}, phraseDetails: {}, votes: {}, revealedPhrases: {}, selfPraise: {}, redraws: {}
+    phrases: {}, phraseDetails: {}, votes: {}, revealedPhrases: {}, selfPraise: {}, redraws: {}
   });
 };
 window.redrawHand = async function() {
