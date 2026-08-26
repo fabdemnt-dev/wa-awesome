@@ -147,7 +147,9 @@ export function renderBoards() {
   const selfPraiseData = state.currentData.selfPraise || {};
   const players = state.currentData.players || [];
   const currentHost = players.includes(state.currentData.currentHost) ? state.currentData.currentHost : (players[0] || '');
-  const isHost = (state.myName === currentHost);
+  const isHost = state.currentData.schemaVersion === 2 && state.myUid && state.currentData.currentHostUid
+    ? state.myUid === state.currentData.currentHostUid
+    : state.myName === currentHost;
   const availableKeys = state.isSpectator ? spectatorOptionKeys : (isHost ? hostOptionKeys : childOptionKeys);
 
   // 子方は1節につき1つしか御印を贈れないため、誰かに投票済みなら他の句のボードでも
