@@ -143,7 +143,6 @@ async function resyncRoomFromFirestore() {
   try {
     const snapshot = await getDoc(state.roomRef);
     if (snapshot.exists()) {
-      debugShowSnapshotInfo(snapshot.data(), 'resync'); // ==== DEBUG: 確認後にこの行だけ削除 ====
       applyRoomData(snapshot.data());
     }
   } catch (e) {
@@ -187,107 +186,6 @@ export const SAMPLE_PHRASES = [
   "跡部景吾", "記憶喪失", "降臨する王者"
 ];
 
-// ==== DEBUG START: onSnapshot発火状況の確認用（確認が終わったらこのブロックごと削除） ====
-// Firestore・ゲームロジックには一切書き込まない。普段は右下の小さいボタンだけを表示し、
-// タップしたときだけログを開くので、画面下の入力欄やボタンを隠さないようにしている。
-// ログはこの端末のlocalStorageに保存され、ページを閉じたり開き直したりしても消えない。
-const DEBUG_LOG_KEY = 'poemDebugSnapshotLog';
-const DEBUG_LOG_MAX = 200;
-
-function debugLoadLog() {
-  try {
-    return JSON.parse(localStorage.getItem(DEBUG_LOG_KEY) || '[]');
-  } catch (e) {
-    return [];
-  }
-}
-function debugSaveLog(lines) {
-  try {
-    localStorage.setItem(DEBUG_LOG_KEY, JSON.stringify(lines.slice(0, DEBUG_LOG_MAX)));
-  } catch (e) {
-    // 保存に失敗しても画面表示は続ける
-  }
-}
-
-function debugEnsureUI() {
-  if (document.getElementById('debug-snapshot-toggle')) return;
-
-  const btn = document.createElement('button');
-  btn.id = 'debug-snapshot-toggle';
-  btn.innerText = `🐛 ログ(${debugLoadLog().length})`;
-  btn.style.cssText = 'position:fixed; bottom:8px; right:8px; z-index:100000; font-size:11px; padding:6px 10px; background:#111; color:#0f0; border:1px solid #0f0; border-radius:6px;';
-
-  const panel = document.createElement('div');
-  panel.id = 'debug-snapshot-panel';
-  panel.style.cssText = 'position:fixed; bottom:44px; left:8px; right:8px; max-height:30vh; overflow-y:auto; background:rgba(0,0,0,0.9); color:#0f0; font-size:11px; font-family:monospace; padding:8px; z-index:99999; white-space:pre-wrap; border-radius:6px; display:none;';
-
-  const toolbar = document.createElement('div');
-  toolbar.style.cssText = 'position:fixed; bottom:44px; left:8px; right:8px; display:none; gap:6px; z-index:100001; transform:translateY(-100%); padding-bottom:4px;';
-  toolbar.id = 'debug-snapshot-toolbar';
-
-  const copyBtn = document.createElement('button');
-  copyBtn.innerText = '📋 コピー';
-  copyBtn.style.cssText = 'font-size:11px; padding:4px 8px; background:#0369a1; color:#fff; border:none; border-radius:6px;';
-  copyBtn.onclick = async () => {
-    const text = debugLoadLog().join('\n');
-    try {
-      await navigator.clipboard.writeText(text);
-      copyBtn.innerText = '✅ コピーした！';
-      setTimeout(() => { copyBtn.innerText = '📋 コピー'; }, 1500);
-    } catch (e) {
-      alert('コピーに失敗しました。ログを長押しして手動で選択・コピーしてください。');
-    }
-  };
-
-  const clearBtn = document.createElement('button');
-  clearBtn.innerText = '🗑 ログを消す';
-  clearBtn.style.cssText = 'font-size:11px; padding:4px 8px; background:#b91c1c; color:#fff; border:none; border-radius:6px;';
-  clearBtn.onclick = () => {
-    debugSaveLog([]);
-    panel.textContent = '';
-    document.getElementById('debug-snapshot-toggle').innerText = '🐛 ログ(0)';
-  };
-
-  toolbar.appendChild(copyBtn);
-  toolbar.appendChild(clearBtn);
-
-  btn.onclick = () => {
-    const showing = panel.style.display !== 'none';
-    panel.style.display = showing ? 'none' : 'block';
-    toolbar.style.display = showing ? 'none' : 'flex';
-  };
-
-  document.body.appendChild(panel);
-  document.body.appendChild(toolbar);
-  document.body.appendChild(btn);
-
-  panel.textContent = debugLoadLog().join('\n');
-}
-function debugRecordError(error, source = 'unknown') {
-  debugEnsureUI();
-  const code = error?.code || 'no-code';
-  const message = error?.message || String(error);
-  const lines = debugLoadLog();
-  lines.unshift(`[${new Date().toLocaleTimeString()}] [error:${source}] code=${code} message=${message}`);
-  debugSaveLog(lines);
-  const panel = document.getElementById('debug-snapshot-panel');
-  if (panel) panel.textContent = lines.slice(0, DEBUG_LOG_MAX).join('\n');
-  const btn = document.getElementById('debug-snapshot-toggle');
-  if (btn) btn.innerText = `🐛 ログ(${Math.min(lines.length, DEBUG_LOG_MAX)})`;
-  console.error(`[${source}]`, error);
-}
-function debugShowSnapshotInfo(data, source = 'onSnapshot') {
-  debugEnsureUI();
-  const time = new Date().toLocaleTimeString();
-  const lines = debugLoadLog();
-  lines.unshift(`[${time}] [${source}] players=${JSON.stringify(data?.players)} spectators=${JSON.stringify(data?.spectators)}`);
-  debugSaveLog(lines);
-  const panel = document.getElementById('debug-snapshot-panel');
-  if (panel) panel.textContent = lines.slice(0, DEBUG_LOG_MAX).join('\n');
-  const btn = document.getElementById('debug-snapshot-toggle');
-  if (btn) btn.innerText = `🐛 ログ(${Math.min(lines.length, DEBUG_LOG_MAX)})`;
-}
-// ==== DEBUG END ====
 
 window.joinRoom = async function() {
   let currentUser;
@@ -364,10 +262,9 @@ if (!roomSnapshot.exists()) {
     document.getElementById('lobby-sec').style.display = 'block';
 
     onSnapshot(state.roomRef, (snapshot) => {
-      debugShowSnapshotInfo(snapshot.data()); // ==== DEBUG: 確認後にこの行だけ削除 ====
       applyRoomData(snapshot.data());
     }, (error) => {
-      debugRecordError(error, 'room-onSnapshot');
+      console.error('[room-onSnapshot]', error);
     });
     state.roomHistory = [];
     state.legacyHistory = [];
@@ -379,11 +276,11 @@ if (!roomSnapshot.exists()) {
         applyRoomData(roomData);
       }
     }, (error) => {
-      debugRecordError(error, 'history-onSnapshot');
+      console.error('[history-onSnapshot]', error);
       showGameError(error, '履歴の読み込み');
     });
   } catch (e) {
-    debugRecordError(e, 'joinRoom');
+    console.error('[joinRoom]', e);
     alert('接続エラー: ' + e.message);
   }
 };
@@ -411,7 +308,7 @@ window.removeSubmittedWord = async function(wordId) {
       await updateDoc(state.roomRef, { words: arrayRemove(target) });
     }
   } catch (e) {
-    debugRecordError(e, 'remove-submitted-word');
+    console.error('[remove-submitted-word]', e);
     showGameError(e, '素材の取り消し');
   }
 };
@@ -454,7 +351,7 @@ window.claimHost = async function() {
     await claimHostSecure(state.roomId);
     alert('あなたが新しい親になりました。');
   } catch (error) {
-    debugRecordError(error, 'claim-host');
+    console.error('[claim-host]', error);
     showGameError(error, '親の引き継ぎ');
   }
 };
@@ -470,7 +367,7 @@ window.removePlayer = async function(pName) {
       await updateDoc(state.roomRef, { players: arrayRemove(pName), spectators: arrayRemove(pName) });
     }
   } catch (error) {
-    debugRecordError(error, 'remove-player');
+    console.error('[remove-player]', error);
     showGameError(error, '鯖落ち');
   }
 };
