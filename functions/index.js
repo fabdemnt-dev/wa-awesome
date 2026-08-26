@@ -71,7 +71,13 @@ function requireHostUid(room, uid, participants) {
   const hostUid = typeof room.currentHostUid === 'string' && room.currentHostUid
     ? room.currentHostUid
     : [...participants.entries()].find(([, name]) => name === room.currentHost)?.[0];
-  if (!hostUid || hostUid !== uid) fail('permission-denied', '親だけが配札できます。');
+  if (!hostUid || hostUid !== uid || !participants.has(hostUid)) {
+    fail('permission-denied', '親だけが配札できます。');
+  }
+  const hostName = participants.get(hostUid);
+  if (!Array.isArray(room.players) || !room.players.includes(hostName)) {
+    fail('permission-denied', 'プレイヤーの親だけが配札できます。');
+  }
   return hostUid;
 }
 
