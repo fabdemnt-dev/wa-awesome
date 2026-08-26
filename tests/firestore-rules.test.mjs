@@ -12,6 +12,18 @@ let testEnv;
 
 before(async () => {
   const rules = await fs.readFile(new URL('../firestore.rules', import.meta.url), 'utf8');
+  const seedEnv = await initializeTestEnvironment({
+    projectId: 'demo-wa-awesome',
+    firestore: { rules },
+  });
+  await seedEnv.withSecurityRulesDisabled(async (context) => {
+    const firestore = context.firestore();
+    await setDoc(doc(firestore, 'rooms/rule-test-hands'), { status: 'playing' });
+    await setDoc(doc(firestore, 'rooms/rule-test-hands/hands/uid-hand-owner'), {
+      hand5: [{ id: 'five-1', text: '五1' }], hand7: [],
+    });
+  });
+  await seedEnv.cleanup();
   testEnv = await initializeTestEnvironment({
     projectId: 'demo-wa-awesome',
     firestore: { rules },
@@ -46,6 +58,15 @@ test('認証済みユーザーは履歴を作成・読み取りできるが更�
   await assertSucceeds(setDoc(entry, { status: 'lobby' }));
   await assertSucceeds(getDoc(entry));
   await assertFails(updateDoc(entry, { status: 'playing' }));
+});
+
+test('UID別手札は他人・未認証ユーザーが読めず、クライアント書込みも拒否される', async () => {
+  const owner = testEnv.authenticatedContext({ uid: 'uid-hand-owner' }).firestore();
+  const other = testEnv.authenticatedContext({ uid: 'uid-hand-other' }).firestore();
+  const hand = doc(owner, 'rooms/rule-test-hands/hands/uid-hand-owner');
+  await assertFails(getDoc(doc(other, 'rooms/rule-test-hands/hands/uid-hand-owner')));
+  await assertFails(getDoc(doc(testEnv.unauthenticatedContext().firestore(), 'rooms/rule-test-hands/hands/uid-hand-owner')));
+  await assertFails(updateDoc(hand, { redrawUsed: true }));
 });
 
 test('UID対応済みルームでも既存の共有ゲーム状態を更新できる', async () => {
