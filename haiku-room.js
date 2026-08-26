@@ -84,8 +84,11 @@ window.claimHost = async function() {
 
       const nextHost = state.myName;
       if (!nextHost) return false;
+      const nextHostUid = Object.entries(data.participantUids || {})
+        .find(([, name]) => name === nextHost)?.[0] || '';
       transaction.update(state.roomRef, {
-        currentHost: nextHost
+        currentHost: nextHost,
+        ...(data.schemaVersion === 2 ? { currentHostUid: nextHostUid } : {})
       });
       return nextHost === state.myName;
     });

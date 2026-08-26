@@ -371,9 +371,11 @@ window.nextRound = async function() {
     }
 
     const batch = writeBatch(db);
+    const nextHostUid = getParticipantUidByName(state.currentData, nextHost);
     batch.update(state.roomRef, {
       status: "lobby", 
       currentHost: nextHost,
+      ...(state.currentData.schemaVersion === 2 ? { currentHostUid: nextHostUid } : {}),
       roundCount: nextRoundNum,
       scores: newScores, 
       words5: carriedWords5, words7: carriedWords7, hands5: {}, hands7: {}, deck5: [], deck7: [], phrases: {}, phraseDetails: {}, votes: {}, revealedPhrases: {}, selfPraise: {}, redraws: {}
