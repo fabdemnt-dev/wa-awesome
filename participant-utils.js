@@ -11,6 +11,7 @@ export function setParticipantRole(data, name, role) {
     .filter(Boolean)
     .filter((value) => value !== participantName);
 
+  if (!participantName) return { players, spectators };
   if (role === 'player') players.push(participantName);
   if (role === 'spectator') spectators.push(participantName);
 
