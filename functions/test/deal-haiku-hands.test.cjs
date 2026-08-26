@@ -79,6 +79,25 @@ test('親のCallableはUID別に配札し二重配札を拒否する', async () 
   );
 });
 
+test('同名で再接続した最新UIDの親は旧UIDが残っていても配札できる', async () => {
+  await seedRoom('duplicate-host-name');
+  await roomRef('duplicate-host-name').update({
+    currentHostUid: 'uid-old-host',
+    participantUids: {
+      'uid-old-host': '親',
+      'uid-new-host': '親',
+      'uid-player': '参加者',
+    },
+  });
+
+  const result = await dealHaikuHands.run({
+    data: { roomId: 'duplicate-host-name' },
+    auth: { uid: 'uid-new-host' },
+  });
+  assert.deepEqual(result, { ok: true });
+  assert.equal((await roomRef('duplicate-host-name').collection('hands').doc('uid-new-host').get()).exists, true);
+});
+
 test('本人の引き直しは成功し、他人の札と二重実行は拒否する', async () => {
   await seedRoom('redraw-success');
   await dealHaikuHands.run({

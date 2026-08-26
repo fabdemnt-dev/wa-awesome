@@ -67,10 +67,16 @@ function participantsByUid(room) {
   return new Map(entries);
 }
 
+function latestUidForName(participants, name) {
+  return [...participants.entries()].filter(([, participantName]) => participantName === name).at(-1)?.[0];
+}
+
 function requireHostUid(room, uid, participants) {
-  const hostUid = typeof room.currentHostUid === 'string' && room.currentHostUid
-    ? room.currentHostUid
-    : [...participants.entries()].find(([, name]) => name === room.currentHost)?.[0];
+  const currentHostUid = typeof room.currentHostUid === 'string' && room.currentHostUid;
+  const currentHostName = room.currentHost;
+  const hostUid = currentHostName
+    ? latestUidForName(participants, currentHostName)
+    : currentHostUid;
   if (!hostUid || hostUid !== uid || !participants.has(hostUid)) {
     fail('permission-denied', '親だけが配札できます。');
   }
@@ -92,7 +98,7 @@ function validatePlayerUids(room, participants) {
     fail('failed-precondition', 'プレイヤーがいません。');
   }
   const uids = room.players.map((name) => {
-    const uid = [...participants.entries()].find(([, participantName]) => participantName === name)?.[0];
+    const uid = latestUidForName(participants, name);
     if (!uid) fail('failed-precondition', 'プレイヤーのUIDが見つかりません。');
     return uid;
   });
