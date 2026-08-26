@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { getFirestore } = require('firebase-admin/firestore');
-const { dealHaikuHands } = require('../index.js');
+const { dealHaikuHands, redrawHaikuHand } = require('../index.js');
 
 const db = getFirestore();
 
@@ -23,8 +23,18 @@ async function seedRoom(roomId) {
       'uid-player': '参加者',
     },
     settings: { hand5: 1, hand7: 1 },
-    words5: ['五1', '五2', '五3', '五4'],
-    words7: ['七1', '七2', '七3', '七4'],
+    words5: [
+      { id: 'five-1', text: '五1' },
+      { id: 'five-2', text: '五2' },
+      { id: 'five-3', text: '五3' },
+      { id: 'five-4', text: '五4' },
+    ],
+    words7: [
+      { id: 'seven-1', text: '七1' },
+      { id: 'seven-2', text: '七2' },
+      { id: 'seven-3', text: '七3' },
+      { id: 'seven-4', text: '七4' },
+    ],
     hands5: { legacy: ['古い手札'] },
     hands7: { legacy: ['古い手札'] },
   });
@@ -63,6 +73,56 @@ test('親のCallableはUID別に配札し二重配札を拒否する', async () 
   await assert.rejects(
     dealHaikuHands.run({
       data: { roomId: 'deal-success' },
+      auth: { uid: 'uid-host' },
+    }),
+    (error) => error.code === 'failed-precondition',
+  );
+});
+
+test('本人の引き直しは成功し、他人の札と二重実行は拒否する', async () => {
+  await seedRoom('redraw-success');
+  await dealHaikuHands.run({
+    data: { roomId: 'redraw-success' },
+    auth: { uid: 'uid-host' },
+  });
+  const handRef = roomRef('redraw-success').collection('hands').doc('uid-host');
+  const before = (await handRef.get()).data();
+  const selectedId = before.hand5[0].id;
+
+  const updatedHand = {
+    ...before,
+    hand5: [{ id: selectedId, text: '五1' }],
+    hand7: [{ id: 'seven-selected', text: '七1' }],
+  };
+  await handRef.set(updatedHand);
+  await roomRef('redraw-success').update({
+    deck5: [{ id: 'five-drawn', text: '五2' }],
+    deck7: [{ id: 'seven-drawn', text: '七2' }],
+  });
+
+  const result = await redrawHaikuHand.run({
+    data: {
+      roomId: 'redraw-success',
+      selectedIds5: [selectedId],
+      selectedIds7: [],
+    },
+    auth: { uid: 'uid-host' },
+  });
+  assert.deepEqual(result, { ok: true });
+  const after = (await handRef.get()).data();
+  assert.equal(after.redrawUsed, true);
+  assert.deepEqual(after.hand5.map((word) => word.id), ['five-drawn']);
+
+  await assert.rejects(
+    redrawHaikuHand.run({
+      data: { roomId: 'redraw-success', selectedIds5: ['not-owned'], selectedIds7: [] },
+      auth: { uid: 'uid-player' },
+    }),
+    (error) => error.code === 'invalid-argument' || error.code === 'failed-precondition',
+  );
+  await assert.rejects(
+    redrawHaikuHand.run({
+      data: { roomId: 'redraw-success', selectedIds5: ['five-drawn'], selectedIds7: [] },
       auth: { uid: 'uid-host' },
     }),
     (error) => error.code === 'failed-precondition',

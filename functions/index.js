@@ -167,6 +167,69 @@ exports.dealHaikuHands = onCall(callableOptions, async (request) => {
   return { ok: true };
 });
 
+function requireSelectedIds(value, label) {
+  if (!Array.isArray(value) || value.length > 20 || value.some((id) => typeof id !== 'string' || !id)) {
+    fail('invalid-argument', `${label}の指定が正しくありません。`);
+  }
+  return [...new Set(value)];
+}
+
+exports.redrawHaikuHand = onCall(callableOptions, async (request) => {
+  const uid = requireAuthenticated(request);
+  const roomId = requireText(request.data?.roomId, 'ルームID', 150);
+  const selectedIds5 = requireSelectedIds(request.data?.selectedIds5 || [], '五音札');
+  const selectedIds7 = requireSelectedIds(request.data?.selectedIds7 || [], '七音札');
+  if (selectedIds5.length === 0 && selectedIds7.length === 0) {
+    fail('invalid-argument', '引き直す札を選んでください。');
+  }
+  const roomRef = db.collection('rooms').doc(`haiku_${roomId}`);
+  await db.runTransaction(async (transaction) => {
+    const roomSnapshot = await transaction.get(roomRef);
+    if (!roomSnapshot.exists) fail('not-found', 'ルームが見つかりません。');
+    const room = roomSnapshot.data() || {};
+    if (room.schemaVersion !== 2 || room.status !== 'playing') {
+      fail('failed-precondition', '新形式の句会中のルームだけ引き直しできます。');
+    }
+    const participants = participantsByUid(room);
+    if (!Array.isArray(room.players) || !room.players.includes(participants.get(uid))) {
+      fail('permission-denied', 'プレイヤーだけが引き直しできます。');
+    }
+    const handRef = roomRef.collection('hands').doc(uid);
+    const handSnapshot = await transaction.get(handRef);
+    if (!handSnapshot.exists) fail('failed-precondition', '手札が見つかりません。');
+    const hand = handSnapshot.data() || {};
+    if (hand.round !== (room.roundCount || 1)) fail('failed-precondition', '手札の節が一致しません。');
+    if (hand.redrawUsed === true) fail('failed-precondition', '引き直しは1節につき1回までです。');
+    if (room.phrases?.[uid]) fail('failed-precondition', '句を披露した後は引き直せません。');
+    const hand5 = Array.isArray(hand.hand5) ? hand.hand5 : [];
+    const hand7 = Array.isArray(hand.hand7) ? hand.hand7 : [];
+    const selected5 = hand5.filter((word) => selectedIds5.includes(word?.id));
+    const selected7 = hand7.filter((word) => selectedIds7.includes(word?.id));
+    if (selected5.length !== selectedIds5.length || selected7.length !== selectedIds7.length) {
+      fail('invalid-argument', '自分の手札にない札は引き直せません。');
+    }
+    const deck5 = Array.isArray(room.deck5) ? room.deck5 : [];
+    const deck7 = Array.isArray(room.deck7) ? room.deck7 : [];
+    if (deck5.length < selected5.length || deck7.length < selected7.length) {
+      fail('failed-precondition', '山札が不足しています。');
+    }
+    const newDeck5 = shuffle(deck5);
+    const newDeck7 = shuffle(deck7);
+    const drawn5 = newDeck5.splice(0, selected5.length);
+    const drawn7 = newDeck7.splice(0, selected7.length);
+    const kept5 = hand5.filter((word) => !selectedIds5.includes(word?.id));
+    const kept7 = hand7.filter((word) => !selectedIds7.includes(word?.id));
+    transaction.update(handRef, {
+      hand5: [...kept5, ...drawn5],
+      hand7: [...kept7, ...drawn7],
+      redrawUsed: true,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    transaction.update(roomRef, { deck5: newDeck5, deck7: newDeck7 });
+  });
+  return { ok: true };
+});
+
 function sanitizeWordSet(input) {
   if (!isPlainObject(input)) fail('invalid-argument', 'ワードセットの内容が正しくありません。');
 
