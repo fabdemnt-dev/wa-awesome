@@ -7,6 +7,15 @@ import { subscribeRoomHistory } from './room-history.js';
 import { ensureSignedIn } from './wordset-auth.js';
 import { showGameError } from './game-error.js';
 import { defaultWords5, defaultWords7 } from './haiku-default-words.js';
+import { normalizeParticipantName, setParticipantRole, normalizeParticipantRoles } from './participant-utils.js';
+
+async function saveParticipantRole(role) {
+  await runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(state.roomRef);
+    if (!snapshot.exists()) throw new Error('ルームが見つかりません');
+    transaction.update(state.roomRef, setParticipantRole(snapshot.data(), state.myName, role));
+  });
+}
 
 let previousStatus = null; // 直前のstatusを記録し、「lobbyに遷移した瞬間」だけ入力欄をクリアするために使う
 let hostHeartbeatTimer = null;
@@ -118,6 +127,8 @@ window.claimHost = async function() {
 // Firestoreの部屋データを受け取り、画面表示を最新状態へ反映する。
 // onSnapshotでの受信時と、Chrome復帰時のvisibilitychange再取得時の両方から呼ばれる共通処理。
 function applyRoomData(data) {
+  const normalizedRoles = normalizeParticipantRoles(data);
+  data = { ...data, ...normalizedRoles };
   const embeddedHistory = Array.isArray(data?.history)
     ? data.history
     : (state.legacyHistory || []);
@@ -438,23 +449,16 @@ if (!roomSnapshot.exists()) {
 
   await setDoc(state.roomRef, initialData);
 } else {
-  // 見学モードで再入室した場合はplayersから、プレイヤーとして再入室した場合はspectatorsから、
-  // 前回いた側の名前を確実に消す。片方だけarrayUnionすると、以前と逆の役割で入り直した人が
-  // players/spectators両方に名前が残ったままになる（見学モード切替時の不整合の原因だった）。
-  if (state.isSpectator) {
-    await updateDoc(state.roomRef, {
-      spectators: arrayUnion(state.myName),
-      players: arrayRemove(state.myName)
-    });
-  } else {
-    const existingData = roomSnapshot.data() || {};
-    const playerUpdate = {
-      players: arrayUnion(state.myName),
-      spectators: arrayRemove(state.myName)
-    };
-    if (!existingData.currentHost) playerUpdate.currentHost = state.myName;
-    await updateDoc(state.roomRef, playerUpdate);
-  }
+  const role = state.isSpectator ? 'spectator' : 'player';
+  await runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(state.roomRef);
+    if (!snapshot.exists()) throw new Error('ルームが見つかりません');
+    const data = snapshot.data() || {};
+    const roles = setParticipantRole(data, state.myName, role);
+    const update = { ...roles };
+    if (role === 'player' && !data.currentHost) update.currentHost = state.myName;
+    transaction.update(state.roomRef, update);
+  });
 }
 
     document.getElementById('login-sec').style.display = 'none';
@@ -559,10 +563,7 @@ window.toggleRole = async function() {
       return;
     }
 
-    await updateDoc(state.roomRef, {
-      spectators: arrayRemove(state.myName),
-      players: arrayUnion(state.myName)
-    });
+    await saveParticipantRole('player');
     state.isSpectator = false;
     alert("プレイヤーとして参加しました！");
   } else {
@@ -575,10 +576,7 @@ window.toggleRole = async function() {
       }
     }
 
-    await updateDoc(state.roomRef, {
-      players: arrayRemove(state.myName),
-      spectators: arrayUnion(state.myName)
-    });
+    await saveParticipantRole('spectator');
     state.isSpectator = true;
     alert("見学モードに切り替えました！");
   }

@@ -1,5 +1,6 @@
 import { db } from "./firebase-config.js";
-import { doc, getDoc, setDoc, onSnapshot, updateDoc, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { doc, getDoc, setDoc, onSnapshot, updateDoc, runTransaction, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { normalizeParticipantName, setParticipantRole, normalizeParticipantRoles } from './participant-utils.js';
 import state from './poem-state.js';
 import { escapeHTML, escapeJS, renderInputFields, renderHand, renderBoards } from './poem-render.js';
 import { setupAutoResize } from './poem-action.js';
@@ -7,9 +8,19 @@ import { subscribeRoomHistory } from './room-history.js';
 import { ensureSignedIn } from './wordset-auth.js';
 import { showGameError } from './game-error.js';
 
+async function saveParticipantRole(role) {
+  await runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(state.roomRef);
+    if (!snapshot.exists()) throw new Error('ルームが見つかりません');
+    transaction.update(state.roomRef, setParticipantRole(snapshot.data(), state.myName, role));
+  });
+}
+
 // Firestoreの部屋データを受け取り、画面表示を最新状態へ反映する。
 // onSnapshotでの受信時と、Chrome復帰時のvisibilitychange再取得時の両方から呼ばれる共通処理。
 function applyRoomData(data) {
+  const normalizedRoles = normalizeParticipantRoles(data);
+  data = { ...data, ...normalizedRoles };
   const embeddedHistory = Array.isArray(data?.history)
     ? data.history
     : (state.legacyHistory || []);
@@ -427,17 +438,11 @@ window.toggleRole = async function() {
       return;
     }
 
-    await updateDoc(state.roomRef, {
-      spectators: arrayRemove(state.myName),
-      players: arrayUnion(state.myName)
-    });
+    await saveParticipantRole('player');
     state.isSpectator = false;
     alert("プレイヤーとして参加しました！");
   } else {
-    await updateDoc(state.roomRef, {
-      players: arrayRemove(state.myName),
-      spectators: arrayUnion(state.myName)
-    });
+    await saveParticipantRole('spectator');
     state.isSpectator = true;
     alert("見学モードに切り替えました！");
   }
