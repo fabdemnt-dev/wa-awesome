@@ -94,7 +94,8 @@ async function verifyCurrentPassword(wordSetId, existing, password) {
   if (secret.exists) {
     const passwordHash = secret.get('passwordHash');
     if (typeof passwordHash === 'string') {
-      if (await bcrypt.compare(password, passwordHash)) return true;
+      // 旧簡易ハッシュをbcrypt.compareへ渡すと例外になり、互換照合に進めない。
+      if (passwordHash.startsWith('$2') && await bcrypt.compare(password, passwordHash)) return true;
       // 移行途中のデータでは、秘密コレクション内にも旧簡易ハッシュが残る場合がある。
       if (legacySimpleHash(password) === passwordHash) return true;
     }
