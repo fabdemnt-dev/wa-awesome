@@ -272,3 +272,26 @@ button:disabled { background-color: #94a3b8; cursor: not-allowed; }
   color: #5c3a21;
   border-radius: 0 0 8px 8px;
 }
+
+/* 参加メンバーのロール別カード */
+.participant-roster { margin-top: 14px; }
+.participant-roster-header { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:10px; color:#475569; font-size:12px; }
+.participant-roster-header strong { color:#1e293b; font-size:15px; }
+.participant-group-title { margin:10px 0 6px; color:#334155; font-size:12px; font-weight:800; letter-spacing:.04em; }
+.participant-group-spectator { color:#64748b; border-top:1px solid #e2e8f0; padding-top:10px; }
+.participant-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:8px; }
+.participant-card { display:flex; align-items:center; gap:9px; min-width:0; padding:9px 10px; border:1px solid #e2e8f0; border-radius:10px; background:#f8fafc; }
+.participant-card-host { border-color:#fbbf24; background:#fffbeb; }
+.participant-card-me { box-shadow:0 0 0 2px rgba(59,130,246,.14); }
+.participant-card-spectator { background:#f8fafc; border-style:dashed; }
+.participant-avatar { flex:0 0 32px; width:32px; height:32px; display:grid; place-items:center; border-radius:50%; background:#dbeafe; color:#1d4ed8; font-weight:800; }
+.participant-card-host .participant-avatar { background:#fef3c7; color:#b45309; }
+.participant-main { min-width:0; flex:1; }
+.participant-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#1e293b; font-weight:800; font-size:14px; }
+.participant-self { display:inline-block; margin-left:5px; padding:1px 5px; border-radius:5px; background:#dbeafe; color:#1d4ed8; font-size:10px; vertical-align:middle; }
+.participant-role { margin-top:2px; color:#64748b; font-size:11px; }
+.participant-score { flex:0 0 auto; margin-left:auto; white-space:nowrap; }
+.participant-kick { flex:0 0 auto; width:auto; margin:0; padding:5px 7px; border:0; border-radius:6px; background:#fee2e2; color:#b91c1c; font-size:11px; cursor:pointer; }
+.participant-kick:hover { background:#fecaca; }
+.participant-empty { padding:10px; color:#94a3b8; font-size:12px; }
+@media (max-width:560px) { .participant-roster-header { align-items:flex-start; flex-direction:column; gap:3px; } .participant-grid { grid-template-columns:1fr; } }

@@ -171,19 +171,30 @@ function applyRoomData(data) {
   }
 
   const scores = state.currentData.scores || {};
-  let playerListHtml = players.map((p) => `
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-      <span>・ ${escapeHTML(p)} ${p === currentHost ? '<span class="role-badge">選者（親）</span>' : ''}</span>
-      <div>
-        <span class="score-badge" style="margin-right:8px;">${scores[p] || 0} 誉</span>
-        <button onclick="removePlayer('${escapeJS(p)}')" style="width:auto; margin:0; padding:4px 8px; font-size:12px; background-color:#ef4444;">鯖落ち</button>
-      </div>
-    </div>
-  `).join('');
-
-  if (spectators.length > 0) {
-    playerListHtml += `<div style="font-size:12px; color:#64748b; margin-top:8px;">👀 見学者: ${spectators.map(s => escapeHTML(s)).join(', ')}</div>`;
-  }
+  const participantCard = (name, role) => {
+    const isHost = role === 'player' && name === currentHost;
+    const isMe = name === state.myName;
+    const label = role === 'spectator' ? '見学者' : (isHost ? '親・選者' : 'プレイヤー');
+    const initial = escapeHTML((name || '？').slice(0, 1));
+    return `
+      <div class="participant-card participant-card-${role}${isHost ? ' participant-card-host' : ''}${isMe ? ' participant-card-me' : ''}">
+        <div class="participant-avatar" aria-hidden="true">${initial}</div>
+        <div class="participant-main">
+          <div class="participant-name">${escapeHTML(name)}${isMe ? '<span class="participant-self">あなた</span>' : ''}</div>
+          <div class="participant-role">${label}${isHost ? ' · 次の節を進行' : ''}</div>
+        </div>
+        ${role === 'player' ? `<span class="score-badge participant-score">${scores[name] || 0} 誉</span><button class="participant-kick" onclick="removePlayer('${escapeJS(name)}')">鯖落ち</button>` : ''}
+      </div>`;
+  };
+  const playerCards = players.map((name) => participantCard(name, 'player')).join('');
+  const spectatorCards = spectators.map((name) => participantCard(name, 'spectator')).join('');
+  const playerListHtml = `
+    <div class="participant-roster">
+      <div class="participant-roster-header"><strong>参加メンバー</strong><span>${players.length}人プレイ中 · ${spectators.length}人見学</span></div>
+      <div class="participant-group-title">プレイヤー</div>
+      <div class="participant-grid">${playerCards || '<div class="participant-empty">プレイヤーがいません</div>'}</div>
+      ${spectators.length ? `<div class="participant-group-title participant-group-spectator">見学者</div><div class="participant-grid">${spectatorCards}</div>` : ''}
+    </div>`;
 
   if (document.getElementById('player-list')) document.getElementById('player-list').innerHTML = playerListHtml;
 
