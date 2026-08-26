@@ -280,8 +280,9 @@ function debugShowSnapshotInfo(data, source = 'onSnapshot') {
 // ==== DEBUG END ====
 
 window.joinRoom = async function() {
+  let currentUser;
   try {
-    await ensureSignedIn();
+    currentUser = await ensureSignedIn();
   } catch (e) {
     return alert('認証に失敗しました。ページを再読み込みしてください: ' + e.message);
   }
@@ -314,7 +315,8 @@ if (!roomSnapshot.exists()) {
     poems: {},
     settings: { handCount: 5 },
     players: [],
-    spectators: []
+    spectators: [],
+    participantUids: { [currentUser.uid]: state.myName }
   };
 
   if (state.isSpectator) {
@@ -330,17 +332,17 @@ if (!roomSnapshot.exists()) {
   // 見学モードで再入室した場合はplayersから、プレイヤーとして再入室した場合はspectatorsから、
   // 前回いた側の名前を確実に消す。片方だけarrayUnionすると、以前と逆の役割で入り直した人が
   // players/spectators両方に名前が残ったままになる（見学モード切替時の不整合の原因だった）。
-  if (state.isSpectator) {
-    await updateDoc(state.roomRef, {
-      spectators: arrayUnion(state.myName),
-      players: arrayRemove(state.myName)
-    });
-  } else {
-    await updateDoc(state.roomRef, {
-      players: arrayUnion(state.myName),
-      spectators: arrayRemove(state.myName)
-    });
-  }
+  await runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(state.roomRef);
+    if (!snapshot.exists()) throw new Error('ルームが見つかりません');
+    const data = snapshot.data() || {};
+    const roles = setParticipantRole(data, state.myName, state.isSpectator ? 'spectator' : 'player');
+    const update = { ...roles };
+    if (data.participantUids && typeof data.participantUids === 'object') {
+      update.participantUids = { ...data.participantUids, [currentUser.uid]: state.myName };
+    }
+    transaction.update(state.roomRef, update);
+  });
 
 }
 

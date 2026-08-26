@@ -399,8 +399,9 @@ function debugShowSnapshotInfo(data, source = 'onSnapshot') {
 // ==== DEBUG END ====
 
 window.joinRoom = async function() {
+  let currentUser;
   try {
-    await ensureSignedIn();
+    currentUser = await ensureSignedIn();
   } catch (e) {
     return alert('認証に失敗しました。ページを再読み込みしてください: ' + e.message);
   }
@@ -438,7 +439,8 @@ if (!roomSnapshot.exists()) {
     },
     players: [],
     spectators: [],
-    redraws: {}
+    redraws: {},
+    participantUids: { [currentUser.uid]: state.myName }
   };
 
   if (state.isSpectator) {
@@ -456,6 +458,9 @@ if (!roomSnapshot.exists()) {
     const data = snapshot.data() || {};
     const roles = setParticipantRole(data, state.myName, role);
     const update = { ...roles };
+    if (data.participantUids && typeof data.participantUids === 'object') {
+      update.participantUids = { ...data.participantUids, [currentUser.uid]: state.myName };
+    }
     if (role === 'player' && !data.currentHost) update.currentHost = state.myName;
     transaction.update(state.roomRef, update);
   });
