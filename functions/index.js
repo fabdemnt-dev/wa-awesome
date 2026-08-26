@@ -316,6 +316,42 @@ exports.changeHaikuRole = onCall(callableOptions, async (request) => {
   return { ok: true };
 });
 
+function requireSettingInteger(value, label, fallback, max = 20) {
+  const number = Number(value ?? fallback);
+  if (!Number.isInteger(number) || number < 1 || number > max) fail('invalid-argument', `${label}は1〜${max}の整数で指定してください。`);
+  return number;
+}
+
+async function updateGameSettings(request, prefix, fields) {
+  const uid = requireAuthenticated(request);
+  const roomId = requireText(request.data?.roomId, 'ルームID', 150);
+  const roomRef = db.collection('rooms').doc(`${prefix}_${roomId}`);
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(roomRef);
+    if (!snapshot.exists) fail('not-found', 'ルームが見つかりません。');
+    const room = snapshot.data() || {};
+    if (room.schemaVersion !== 2) fail('failed-precondition', '新形式のルームだけ設定Callableを利用できます。');
+    const participants = participantsByUid(room);
+    requireHostUid(room, uid, participants);
+    if (room.status !== 'lobby') fail('failed-precondition', '開始後は設定を変更できません。');
+    const currentSettings = isPlainObject(room.settings) ? room.settings : {};
+    const settings = { ...currentSettings };
+    for (const [key, spec] of Object.entries(fields)) settings[key] = requireSettingInteger(request.data?.[key], spec.label, spec.fallback, spec.max);
+    if (prefix === 'haiku') settings.carryOver = request.data?.carryOver !== false;
+    transaction.update(roomRef, { settings });
+  });
+  return { ok: true };
+}
+
+exports.updateHaikuSettings = onCall(callableOptions, (request) => updateGameSettings(request, 'haiku', {
+  hand5: { label: '五音手札枚数', fallback: 5, max: 20 },
+  hand7: { label: '七音手札枚数', fallback: 3, max: 20 },
+}));
+
+exports.updatePoemSettings = onCall(callableOptions, (request) => updateGameSettings(request, 'poem', {
+  handCount: { label: '手札枚数', fallback: 5, max: 20 },
+}));
+
 function requireMaterialItems(value, label) {
   if (!Array.isArray(value) || value.length > 100) fail('invalid-argument', `${label}が正しくありません。`);
   return value.map((item) => {

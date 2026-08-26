@@ -7,10 +7,16 @@ const revealPoemSecureCallable = httpsCallable(functions, 'revealPoemSecure');
 const reactPoemSecureCallable = httpsCallable(functions, 'reactPoemSecure');
 const submitPoemWordsCallable = httpsCallable(functions, 'submitPoemWords');
 const removePoemWordCallable = httpsCallable(functions, 'removePoemWord');
+const updatePoemSettingsCallable = httpsCallable(functions, 'updatePoemSettings');
 
 function requireRoomId(roomId) {
   if (typeof roomId !== 'string' || !roomId.trim()) throw new Error('ルームIDがありません。');
   return roomId.trim();
+}
+
+export async function updatePoemSettings(roomId, handCount) {
+  const result = await updatePoemSettingsCallable({ roomId: requireRoomId(roomId), handCount });
+  return result.data;
 }
 
 export async function submitPoemWords(roomId, words) {

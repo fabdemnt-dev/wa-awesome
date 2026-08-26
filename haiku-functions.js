@@ -6,6 +6,7 @@ const dealHaikuHandsCallable = httpsCallable(functions, 'dealHaikuHands');
 const changeHaikuRoleCallable = httpsCallable(functions, 'changeHaikuRole');
 const submitHaikuWordsCallable = httpsCallable(functions, 'submitHaikuWords');
 const removeHaikuWordCallable = httpsCallable(functions, 'removeHaikuWord');
+const updateHaikuSettingsCallable = httpsCallable(functions, 'updateHaikuSettings');
 const redrawHaikuHandCallable = httpsCallable(functions, 'redrawHaikuHand');
 const submitHaikuPhraseCallable = httpsCallable(functions, 'submitHaikuPhrase');
 const revealHaikuPhraseCallable = httpsCallable(functions, 'revealHaikuPhrase');
@@ -15,6 +16,11 @@ const submitHaikuVoteCallable = httpsCallable(functions, 'submitHaikuVote');
 function requireRoomId(roomId) {
   if (typeof roomId !== 'string' || !roomId.trim()) throw new Error('ルームIDがありません。');
   return roomId.trim();
+}
+
+export async function updateHaikuSettings(roomId, hand5, hand7, carryOver) {
+  const result = await updateHaikuSettingsCallable({ roomId: requireRoomId(roomId), hand5, hand7, carryOver });
+  return result.data;
 }
 
 export async function submitHaikuWords(roomId, words5, words7) {

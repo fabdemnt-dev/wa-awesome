@@ -4,7 +4,7 @@ import { normalizeParticipantName, setParticipantRole, normalizeParticipantRoles
 import state from './poem-state.js';
 import { escapeHTML, escapeJS, renderInputFields, renderHand, renderBoards } from './poem-render.js';
 import { setupAutoResize } from './poem-action.js';
-import { removePoemWord } from './poem-functions.js';
+import { removePoemWord, updatePoemSettings } from './poem-functions.js';
 import { subscribeRoomHistory } from './room-history.js';
 import { ensureSignedIn } from './wordset-auth.js';
 import { showGameError } from './game-error.js';
@@ -380,7 +380,11 @@ if (!roomSnapshot.exists()) {
 window.updateHandCountSetting = async function() {
   if (!state.roomRef) return;
   const count = parseInt(document.getElementById('set-hand-count').value) || 5;
-  await updateDoc(state.roomRef, { "settings.handCount": count });
+  if (state.currentData?.schemaVersion === 2) {
+    await updatePoemSettings(state.roomId, count);
+  } else {
+    await updateDoc(state.roomRef, { "settings.handCount": count });
+  }
 };
 
 window.removeSubmittedWord = async function(wordId) {
