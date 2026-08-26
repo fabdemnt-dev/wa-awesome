@@ -1,6 +1,6 @@
 import state from './poem-state.js';
 import { speakPoem } from './poem-audio.js';
-import { getParticipantStorageKey } from './participant-utils.js';
+import { getParticipantStorageKey, getParticipantNameByUid } from './participant-utils.js';
 
 export function escapeHTML(str) {
   if (typeof str !== 'string') return '';
@@ -95,10 +95,11 @@ export function renderBoards() {
     return colors[Math.abs(hash) % colors.length];
   }
 
-  boardList.innerHTML = Object.keys(poems).sort().map(pName => {
-    const poemData = poems[pName];
+  boardList.innerHTML = Object.keys(poems).sort().map(poemKey => {
+    const poemData = poems[poemKey];
+    const pName = getParticipantNameByUid(state.currentData, poemKey) || poemKey;
     const safePName = escapeHTML(pName);
-    const jsPName = escapeJS(pName);
+    const jsPName = escapeJS(poemKey);
 
     if (typeof poemData === 'string') {
       return `

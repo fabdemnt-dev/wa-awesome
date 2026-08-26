@@ -84,7 +84,7 @@ window.submitPoem = async function() {
   });
 
   await updateDoc(state.roomRef, {
-    [`poems.${state.myName}`]: {
+    [`poems.${getParticipantStorageKey(state.currentData, state.myUid, state.myName)}`]: {
       text: poemText,
       hands: usedHands,
       revealed: false,
