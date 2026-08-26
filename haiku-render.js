@@ -1,4 +1,5 @@
 import state from './haiku-state.js';
+import { getParticipantStorageKey } from './participant-utils.js';
 import { escapeHTML, escapeJS, evalOptionsMaster, hostOptionKeys, childOptionKeys, spectatorOptionKeys, colorPalette } from './haiku-utils.js';
 
 export function getAuthorStyle(authorName) {
@@ -57,7 +58,8 @@ export function renderHand() {
     if (state.isSpectator) {
       h5List.innerHTML = '<div style="font-size:13px; color:#94a3b8;">※見学モード中</div>';
     } else {
-      const hasRedrawn = !!(state.currentData?.redraws || {})[state.myName];
+      const storageKey = getParticipantStorageKey(state.currentData, state.myUid, state.myName);
+      const hasRedrawn = !!(state.currentData?.redraws || {})[storageKey];
       h5List.innerHTML = state.myHand5.map((item, idx) => `
         <div class="card card-5 ${state.selectedHand.includes(item) ? 'selected' : ''}" onclick="selectCard(5, ${idx})">
           ${escapeHTML(item.text)}
@@ -72,7 +74,8 @@ export function renderHand() {
     if (state.isSpectator) {
       h7List.innerHTML = '<div style="font-size:13px; color:#94a3b8;">※見学モード中</div>';
     } else {
-      const hasRedrawn = !!(state.currentData?.redraws || {})[state.myName];
+      const storageKey = getParticipantStorageKey(state.currentData, state.myUid, state.myName);
+      const hasRedrawn = !!(state.currentData?.redraws || {})[storageKey];
       h7List.innerHTML = state.myHand7.map((item, idx) => `
         <div class="card card-7 ${state.selectedHand[1] === item ? 'selected' : ''}" onclick="selectCard(7, ${idx})">
           ${escapeHTML(item.text)}
@@ -105,8 +108,9 @@ function updateDeckAndRedrawUI() {
   const redrawBtn = document.getElementById('redraw-hand-btn');
   if (!redrawBtn) return;
 
+  const storageKey = getParticipantStorageKey(state.currentData, state.myUid, state.myName);
   const hasSubmitted = !!(state.currentData.phrases || {})[state.myName];
-  const hasRedrawn = !!(state.currentData.redraws || {})[state.myName];
+  const hasRedrawn = !!(state.currentData.redraws || {})[storageKey];
   const selectedCount = (state.redrawSelected5?.length || 0) + (state.redrawSelected7?.length || 0);
   const canRedraw = !state.isSpectator && !hasSubmitted && !hasRedrawn && selectedCount > 0;
 
