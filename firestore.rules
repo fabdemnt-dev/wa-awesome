@@ -19,11 +19,15 @@ service cloud.firestore {
     // 2) ゲームの部屋 rooms/haiku_○○○ と rooms/poem_○○○
     // ============================================================
     match /rooms/{roomId} {
-      allow read: if request.auth != null;
-      // 参加者は匿名認証ユーザー。ルームのゲーム状態はクライアント間で共有更新する。
-      // 詳細なフィールド検査は既存データとの互換性を壊すため、
-      // ここでは認証済みユーザーによる作成・更新のみを許可する。
-      allow create, update: if request.auth != null;
+      function signedIn() {
+        return request.auth != null;
+      }
+      allow read: if signedIn();
+      // 新規ルームは作成者の匿名UIDと表示名を対応付ける。旧形式ルームは従来互換で許可する。
+      allow create: if signedIn();
+      // 個人データのUID単位制限は、クライアント側のデータキー移行後に追加する。
+      // 現段階では新旧ルームのゲーム進行を壊さないため、認証済み更新を維持する。
+      allow update: if signedIn();
       allow delete: if false;
     }
 

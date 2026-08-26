@@ -47,3 +47,29 @@ test('認証済みユーザーは履歴を作成・読み取りできるが更�
   await assertSucceeds(getDoc(entry));
   await assertFails(updateDoc(entry, { status: 'playing' }));
 });
+
+test('UID対応済みルームでも既存の共有ゲーム状態を更新できる', async () => {
+  const owner = testEnv.authenticatedContext({ uid: 'uid-owner' }).firestore();
+  const room = doc(owner, 'rooms/rule-test-uid');
+  await assertSucceeds(setDoc(room, {
+    status: 'playing',
+    players: ['あ'],
+    spectators: [],
+    participantUids: { 'uid-owner': 'あ' },
+    hands: { あ: ['札'] },
+  }));
+  await assertSucceeds(updateDoc(room, { status: 'lobby', currentHost: 'あ' }));
+});
+
+test('UID対応済みルームでも共有状態の更新は既存仕様どおり許可する', async () => {
+  const owner = testEnv.authenticatedContext({ uid: 'uid-shared-owner' }).firestore();
+  const room = doc(owner, 'rooms/rule-test-shared');
+  await assertSucceeds(setDoc(room, {
+    status: 'lobby',
+    players: ['あ'],
+    spectators: [],
+    participantUids: { 'uid-shared-owner': 'あ' },
+    hands: { あ: [] },
+  }));
+  await assertSucceeds(updateDoc(room, { status: 'playing', currentHost: 'あ' }));
+});

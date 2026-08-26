@@ -6,6 +6,10 @@ import {
   normalizeParticipantRoles,
   hasParticipantRoleOverlap,
   isValidParticipantName,
+  getParticipantStorageKey,
+  getParticipantNameByUid,
+  getParticipantUidByName,
+  migrateParticipantMapToUids,
 } from '../participant-utils.js';
 
 test('名前の前後の空白を取り除く', () => {
@@ -41,5 +45,26 @@ test('対象外の参加者を変更しない', () => {
   assert.deepEqual(
     setParticipantRole({ players: ['あ'], spectators: ['い'] }, 'う', 'player'),
     { players: ['あ', 'う'], spectators: ['い'] },
+  );
+});
+
+test('UID対応ルームでは個人データのキーにUIDを使う', () => {
+  const data = { participantUids: { 'uid-a': 'あ' } };
+  assert.equal(getParticipantStorageKey(data, 'uid-a', 'あ'), 'uid-a');
+  assert.equal(getParticipantNameByUid(data, 'uid-a'), 'あ');
+  assert.equal(getParticipantUidByName(data, 'あ'), 'uid-a');
+});
+
+test('旧形式ルームでは表示名キーへフォールバックする', () => {
+  assert.equal(getParticipantStorageKey({}, 'uid-a', 'あ'), 'あ');
+  assert.equal(getParticipantNameByUid({}, 'uid-a'), '');
+  assert.equal(getParticipantUidByName({}, 'あ'), '');
+});
+
+test('表示名キーの個人データをUIDキーへ移行し、未対応データを保持する', () => {
+  const data = { participantUids: { 'uid-a': 'あ', 'uid-b': 'い' } };
+  assert.deepEqual(
+    migrateParticipantMapToUids(data, { あ: ['札A'], い: ['札B'], legacy: ['旧データ'] }),
+    { あ: ['札A'], い: ['札B'], legacy: ['旧データ'], 'uid-a': ['札A'], 'uid-b': ['札B'] },
   );
 });
