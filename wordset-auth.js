@@ -57,6 +57,10 @@ async function call(name, data) {
   return result.data;
 }
 
+export function verifyWordSetPassword(data) {
+  return call('verifyWordSetPassword', data);
+}
+
 export function saveWordSetSecurely(data) {
   return call('saveWordSet', data);
 }

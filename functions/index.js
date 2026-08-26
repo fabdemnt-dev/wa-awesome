@@ -145,6 +145,18 @@ function snapshotForHistory(wordSet) {
   return { name: wordSet.name, words5: wordSet.words5, words7: wordSet.words7 };
 }
 
+exports.verifyWordSetPassword = onCall(callableOptions, async (request) => {
+  requireAuthenticated(request);
+  const input = request.data || {};
+  const id = requireText(input.id, 'ワードセットID', 150);
+  const snapshot = await db.collection('wordsets').doc(id).get();
+  if (!snapshot.exists) fail('not-found', 'ワードセットが見つかりません。');
+  const wordSet = snapshot.data();
+  if (wordSet.hasPassword !== true) return { verified: true };
+  await verifyCurrentPassword(id, wordSet, input.currentPassword);
+  return { verified: true };
+});
+
 exports.saveWordSet = onCall(callableOptions, async (request) => {
   requireAuthenticated(request);
 
