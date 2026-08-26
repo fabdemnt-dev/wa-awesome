@@ -308,7 +308,8 @@ window.joinRoom = async function() {
 const roomSnapshot = await getDoc(state.roomRef);
 
 if (!roomSnapshot.exists()) {
-  const initialData = {
+          const initialData = {
+    schemaVersion: 2,
     status: "lobby",
     roundCount: 1,
     words: [],
