@@ -53,8 +53,9 @@ function applyRoomData(data) {
       myWordsEl.innerHTML = `
         <div style="margin-top:8px; font-size:13px; color:#475569;">📝 あなたが提出した素材（${myWords.length}個）</div>
         <div style="margin-top:4px;">
-          ${myWords.map(w => `<span style="${chip}">${escapeHTML(w.text)}</span>`).join('')}
+          ${myWords.map(w => `<button type="button" onclick="removeSubmittedWord('${escapeJS(w.id)}')" style="${chip} cursor:pointer;">${escapeHTML(w.text)} ×</button>`).join('')}
         </div>
+        <div style="font-size:11px; color:#64748b; margin-top:4px;">取り消したい素材の「×」を押してください（ポエム開始前のみ）</div>
       `;
     }
   }
@@ -364,6 +365,20 @@ window.updateHandCountSetting = async function() {
   if (!state.roomRef) return;
   const count = parseInt(document.getElementById('set-hand-count').value) || 5;
   await updateDoc(state.roomRef, { "settings.handCount": count });
+};
+
+window.removeSubmittedWord = async function(wordId) {
+  if (!state.roomRef || !state.currentData) return;
+  if (state.currentData.status !== 'lobby') return alert('素材の取り消しはポエム開始前のみできます');
+  const target = (state.currentData.words || []).find(w => w.id === wordId && w.author === state.myName);
+  if (!target) return alert('この素材は取り消せません');
+  if (!confirm(`「${target.text}」を取り消しますか？`)) return;
+  try {
+    await updateDoc(state.roomRef, { words: arrayRemove(target) });
+  } catch (e) {
+    debugRecordError(e, 'remove-submitted-word');
+    showGameError(e, '素材の取り消し');
+  }
 };
 
 window.toggleRole = async function() {

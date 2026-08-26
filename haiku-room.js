@@ -178,9 +178,10 @@ function applyRoomData(data) {
       myWordsEl.innerHTML = `
         <div style="margin-top:8px; font-size:13px; color:#475569;">📝 あなたが提出した素材（五音${myWords5.length}個・七音${myWords7.length}個）</div>
         <div style="margin-top:4px;">
-          ${myWords5.map(w => `<span style="${chip5}">${escapeHTML(w.text)}</span>`).join('')}
-          ${myWords7.map(w => `<span style="${chip7}">${escapeHTML(w.text)}</span>`).join('')}
+          ${myWords5.map(w => `<button type="button" onclick="removeSubmittedWord('5','${escapeJS(w.id)}')" style="${chip5} cursor:pointer;">${escapeHTML(w.text)} ×</button>`).join('')}
+          ${myWords7.map(w => `<button type="button" onclick="removeSubmittedWord('7','${escapeJS(w.id)}')" style="${chip7} cursor:pointer;">${escapeHTML(w.text)} ×</button>`).join('')}
         </div>
+        <div style="font-size:11px; color:#64748b; margin-top:4px;">取り消したい素材の「×」を押してください（句会開始前のみ）</div>
       `;
     }
   }
@@ -483,6 +484,21 @@ if (!roomSnapshot.exists()) {
     alert('接続エラーが発生しました: ' + e.message);
   }
 };
+window.removeSubmittedWord = async function(type, wordId) {
+  if (!state.roomRef || !state.currentData) return;
+  if (state.currentData.status !== 'lobby') return alert('素材の取り消しは句会開始前のみできます');
+  const field = type === '5' ? 'words5' : 'words7';
+  const target = (state.currentData[field] || []).find(w => w.id === wordId && w.author === state.myName);
+  if (!target) return alert('この素材は取り消せません');
+  if (!confirm(`「${target.text}」を取り消しますか？`)) return;
+  try {
+    await updateDoc(state.roomRef, { [field]: arrayRemove(target) });
+  } catch (e) {
+    debugRecordError(e, 'remove-submitted-word');
+    showGameError(e, '素材の取り消し');
+  }
+};
+
 window.toggleRole = async function() {
   if (!state.roomRef) return;
   if (state.isSpectator) {
