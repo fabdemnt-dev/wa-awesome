@@ -7,6 +7,7 @@ import { defaultWords5, defaultWords7 } from './haiku-default-words.js';
 import { getWordSetById } from './haiku-wordsets.js';
 import { saveWordSetSecurely, userFacingError } from './wordset-auth.js';
 import { getParticipantUidByName, getParticipantStorageKey, getParticipantNameByUid } from './participant-utils.js';
+import { dealHaikuHands, redrawHaikuHand } from './haiku-functions.js';
 
 window.addWords = async function() {
   if (!state.currentData || state.isSpectator) return;
@@ -101,6 +102,17 @@ window.startGame = async function() {
     return alert('素材が足りません！（引き直し用の山札分も必要なため、通常の2倍の素材が必要です）');
   }
 
+  if (state.currentData.schemaVersion === 2) {
+    try {
+      await dealHaikuHands(state.roomId);
+      alert('句会を開始しました！');
+    } catch (e) {
+      console.error(e);
+      alert('句会の開始に失敗しました: ' + (e.message || 'サーバーエラー'));
+    }
+    return;
+  }
+
   const s5 = [...w5].sort(() => Math.random() - 0.5);
   const s7 = [...w7].sort(() => Math.random() - 0.5);
   const h5 = {}, h7 = {};
@@ -122,6 +134,24 @@ window.startGame = async function() {
 };
 window.redrawHand = async function() {
   if (!state.currentData || state.isSpectator || state.isProcessingRedraw) return;
+  if (state.currentData.schemaVersion === 2) {
+    if (state.currentData.status !== 'playing') return;
+    if (state.redrawSelected5.length === 0 && state.redrawSelected7.length === 0) return alert('引き直す札を選んでください。');
+    state.isProcessingRedraw = true;
+    try {
+      await redrawHaikuHand(state.roomId, state.redrawSelected5, state.redrawSelected7);
+      state.redrawSelected5 = [];
+      state.redrawSelected7 = [];
+      state.redrawUsed = true;
+      alert('手札を引き直しました。');
+    } catch (e) {
+      console.error(e);
+      alert('引き直しに失敗しました: ' + (e.message || 'サーバーエラー'));
+    } finally {
+      state.isProcessingRedraw = false;
+    }
+    return;
+  }
   if (state.currentData.status !== 'playing') return;
 
   const phrases = state.currentData.phrases || {};
@@ -341,9 +371,11 @@ window.nextRound = async function() {
     }
 
     const batch = writeBatch(db);
+    const nextHostUid = getParticipantUidByName(state.currentData, nextHost);
     batch.update(state.roomRef, {
       status: "lobby", 
       currentHost: nextHost,
+      ...(state.currentData.schemaVersion === 2 ? { currentHostUid: nextHostUid } : {}),
       roundCount: nextRoundNum,
       scores: newScores, 
       words5: carriedWords5, words7: carriedWords7, hands5: {}, hands7: {}, deck5: [], deck7: [], phrases: {}, phraseDetails: {}, votes: {}, revealedPhrases: {}, selfPraise: {}, redraws: {}

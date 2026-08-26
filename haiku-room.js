@@ -18,6 +18,31 @@ async function saveParticipantRole(role) {
 }
 
 let previousStatus = null; // 直前のstatusを記録し、「lobbyに遷移した瞬間」だけ入力欄をクリアするために使う
+let handUnsubscribe = null;
+let handSubscriptionKey = '';
+
+function subscribeOwnHand(data) {
+  if (!state.roomRef || !state.myUid || data?.schemaVersion !== 2 || data.status !== 'playing') {
+    if (handUnsubscribe) handUnsubscribe();
+    handUnsubscribe = null;
+    handSubscriptionKey = '';
+    return;
+  }
+  const key = `${state.roomRef.path}/hands/${state.myUid}`;
+  if (handSubscriptionKey === key) return;
+  if (handUnsubscribe) handUnsubscribe();
+  handSubscriptionKey = key;
+  handUnsubscribe = onSnapshot(doc(state.roomRef, 'hands', state.myUid), (snapshot) => {
+    const hand = snapshot.exists() ? snapshot.data() : {};
+    state.myHand5 = Array.isArray(hand.hand5) ? hand.hand5 : [];
+    state.myHand7 = Array.isArray(hand.hand7) ? hand.hand7 : [];
+    state.redrawUsed = hand.redrawUsed === true;
+    renderHand();
+    renderBoards();
+  }, (error) => {
+    debugRecordError(error, 'hand-onSnapshot');
+  });
+}
 function refreshHostRecoveryUI() {
   const data = state.currentData;
   const players = data?.players || [];
@@ -59,8 +84,11 @@ window.claimHost = async function() {
 
       const nextHost = state.myName;
       if (!nextHost) return false;
+      const nextHostUid = Object.entries(data.participantUids || {})
+        .find(([, name]) => name === nextHost)?.[0] || '';
       transaction.update(state.roomRef, {
-        currentHost: nextHost
+        currentHost: nextHost,
+        ...(data.schemaVersion === 2 ? { currentHostUid: nextHostUid } : {})
       });
       return nextHost === state.myName;
     });
@@ -96,6 +124,8 @@ function applyRoomData(data) {
 
   if (spectators.includes(state.myName)) state.isSpectator = true;
   if (players.includes(state.myName)) state.isSpectator = false;
+
+  subscribeOwnHand(state.currentData);
 
   const currentHost = players.includes(state.currentData.currentHost) ? state.currentData.currentHost : (players[0] || '未設定');
   const hostText = `👑 今節の選者（親）: <strong>${escapeHTML(currentHost)}</strong> ${currentHost === state.myName ? '（あなた）' : ''}`;
@@ -194,9 +224,11 @@ function applyRoomData(data) {
     if (document.getElementById('lobby-sec')) document.getElementById('lobby-sec').style.display = 'none';
     if (document.getElementById('game-sec')) document.getElementById('game-sec').style.display = 'block';
     const storageKey = getParticipantStorageKey(state.currentData, state.myUid, state.myName);
-    if (state.currentData.hands5?.[storageKey]) state.myHand5 = state.currentData.hands5[storageKey];
-    if (state.currentData.hands7?.[storageKey]) state.myHand7 = state.currentData.hands7[storageKey];
-    renderHand();
+    if (state.currentData.schemaVersion !== 2) {
+      if (state.currentData.hands5?.[storageKey]) state.myHand5 = state.currentData.hands5[storageKey];
+      if (state.currentData.hands7?.[storageKey]) state.myHand7 = state.currentData.hands7[storageKey];
+      renderHand();
+    }
     renderBoards();
   }
 
@@ -373,9 +405,11 @@ window.joinRoom = async function() {
 const roomSnapshot = await getDoc(state.roomRef);
 
 if (!roomSnapshot.exists()) {
-  const initialData = {
-    status: "lobby",
-    currentHost: state.isSpectator ? '' : state.myName,
+    const initialData = {
+      schemaVersion: 2,
+      status: "lobby",
+      currentHost: state.isSpectator ? '' : state.myName,
+      currentHostUid: state.isSpectator ? '' : currentUser.uid,
     roundCount: 1,
     words5: [],
     words7: [],
@@ -415,7 +449,10 @@ if (!roomSnapshot.exists()) {
     if (data.participantUids && typeof data.participantUids === 'object') {
       update.participantUids = { ...data.participantUids, [currentUser.uid]: state.myName };
     }
-    if (role === 'player' && !data.currentHost) update.currentHost = state.myName;
+    if (role === 'player' && !data.currentHost) {
+      update.currentHost = state.myName;
+      if (data.schemaVersion === 2) update.currentHostUid = currentUser.uid;
+    }
     transaction.update(state.roomRef, update);
   });
 }

@@ -13,6 +13,7 @@ import './haiku-audio.js';  // 音声読み上げ機能
 import './haiku-export.js'; // 出力機能
 import './haiku-render.js'; // UI描画処理
 import './haiku-room.js';   // 入室・ロビー・参加者管理
+import './haiku-functions.js'; // サーバー側の配札・引き直し
 import './haiku-game.js';   // 素材投稿・ゲーム進行
 import './haiku-action.js'; // 手札・投稿・投票操作
 import './haiku-wordsets.js'; // 保存済みワードセットの読み込み

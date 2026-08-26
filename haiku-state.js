@@ -10,6 +10,7 @@ const state = {
 
   myHand5: [],
   myHand7: [],
+  redrawUsed: false,
   // 保存データがあればそれを復元、なければ空っぽにする
   selectedHand: savedHand ? JSON.parse(savedHand) : [null, null, null],
 
