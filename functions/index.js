@@ -90,14 +90,18 @@ async function verifyCurrentPassword(wordSetId, existing, password) {
   }
 
   const secret = await db.collection('wordsetSecrets').doc(wordSetId).get();
+  // 新形式のbcryptハッシュを確認する。
   if (secret.exists) {
     const passwordHash = secret.get('passwordHash');
     if (typeof passwordHash === 'string' && await bcrypt.compare(password, passwordHash)) return true;
-  } else if (typeof existing.passwordHash === 'string' && legacySimpleHash(password) === existing.passwordHash) {
+  }
+  // 旧データでは公開ドキュメント側に簡易ハッシュが残っている場合がある。
+  // 移行途中で両方が存在しても、旧ハッシュで正しく認証できるようにする。
+  if (typeof existing.passwordHash === 'string' && legacySimpleHash(password) === existing.passwordHash) {
     return true;
   }
 
-  fail('permission-denied', 'パスワードが一致しません。');
+  fail('permission-denied', 'パスワードが一致しません。作成時と同じ文字列を入力してください。');
 }
 
 async function passwordHashForSave({ id, existing, wordSet, currentPassword, newPassword }) {
