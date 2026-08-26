@@ -3,6 +3,7 @@ import { app } from './firebase-config.js';
 
 const functions = getFunctions(app, 'asia-northeast1');
 const dealHaikuHandsCallable = httpsCallable(functions, 'dealHaikuHands');
+const changeHaikuRoleCallable = httpsCallable(functions, 'changeHaikuRole');
 const redrawHaikuHandCallable = httpsCallable(functions, 'redrawHaikuHand');
 const submitHaikuPhraseCallable = httpsCallable(functions, 'submitHaikuPhrase');
 const revealHaikuPhraseCallable = httpsCallable(functions, 'revealHaikuPhrase');
@@ -12,6 +13,16 @@ const submitHaikuVoteCallable = httpsCallable(functions, 'submitHaikuVote');
 function requireRoomId(roomId) {
   if (typeof roomId !== 'string' || !roomId.trim()) throw new Error('ルームIDがありません。');
   return roomId.trim();
+}
+
+export async function changeHaikuRole(roomId, role, supplement5 = [], supplement7 = []) {
+  const result = await changeHaikuRoleCallable({
+    roomId: requireRoomId(roomId),
+    role,
+    supplement5: Array.isArray(supplement5) ? supplement5 : [],
+    supplement7: Array.isArray(supplement7) ? supplement7 : [],
+  });
+  return result.data;
 }
 
 export async function dealHaikuHands(roomId) {

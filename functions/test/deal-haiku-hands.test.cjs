@@ -11,6 +11,7 @@ const {
   submitPoemSecure,
   revealPoemSecure,
   reactPoemSecure,
+  changeHaikuRole,
 } = require('../index.js');
 
 const db = getFirestore();
@@ -53,6 +54,31 @@ async function seedRoom(roomId) {
     hands7: { legacy: ['古い手札'] },
   });
 }
+
+test('Haiku途中参加Callableは同名UIDを統合してUID別手札へ配札する', async () => {
+  await roomRef('role-change').set({
+    schemaVersion: 2,
+    status: 'playing',
+    roundCount: 1,
+    currentHost: '親',
+    currentHostUid: 'uid-host',
+    players: ['親'],
+    spectators: ['参加者'],
+    participantUids: { 'uid-host': '親', 'old-uid': '参加者', 'uid-player': '参加者' },
+    settings: { hand5: 1, hand7: 1 },
+    deck5: [{ id: 'new-5', text: '五', author: '🎴お題ぶくろ' }],
+    deck7: [{ id: 'new-7', text: '七', author: '🎴お題ぶくろ' }],
+    hands: {},
+  });
+  await changeHaikuRole.run({ data: { roomId: 'role-change', role: 'player' }, auth: { uid: 'uid-player' } });
+  const room = (await roomRef('role-change').get()).data();
+  const hand = (await roomRef('role-change').collection('hands').doc('uid-player').get()).data();
+  assert.deepEqual(room.players, ['親', '参加者']);
+  assert.deepEqual(room.spectators, []);
+  assert.equal(room.participantUids['old-uid'], undefined);
+  assert.equal(hand.hand5[0].id, 'new-5');
+  assert.equal(hand.hand7[0].id, 'new-7');
+});
 
 test('Poem作品・披露・リアクションCallableはUIDと状態を検証する', async () => {
   await poemRoomRef('poem-actions').set({
