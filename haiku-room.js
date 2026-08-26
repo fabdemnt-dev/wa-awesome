@@ -426,9 +426,19 @@ window.toggleRole = async function() {
       }
     }
 
+    const currentPlayers = state.currentData?.players || [];
+    const currentHost = currentPlayers.includes(state.currentData?.currentHost)
+      ? state.currentData.currentHost
+      : (currentPlayers[0] || '');
+    const remainingPlayers = currentPlayers.filter((player) => player !== state.myName);
+    const nextHost = currentHost === state.myName
+      ? (remainingPlayers[0] || '')
+      : currentHost;
+
     await updateDoc(state.roomRef, {
       players: arrayRemove(state.myName),
-      spectators: arrayUnion(state.myName)
+      spectators: arrayUnion(state.myName),
+      currentHost: nextHost
     });
     state.isSpectator = true;
     alert("見学モードに切り替えました！");
@@ -446,6 +456,19 @@ window.updateSettings = async function() {
 };
 window.removePlayer = async function(pName) {
   if (confirm(`${pName} さんを退出させますか？`)) {
-    await updateDoc(state.roomRef, { players: arrayRemove(pName), spectators: arrayRemove(pName) });
+    const currentPlayers = state.currentData?.players || [];
+    const currentHost = currentPlayers.includes(state.currentData?.currentHost)
+      ? state.currentData.currentHost
+      : (currentPlayers[0] || '');
+    const remainingPlayers = currentPlayers.filter((player) => player !== pName);
+    const nextHost = currentHost === pName || !remainingPlayers.includes(currentHost)
+      ? (remainingPlayers[0] || '')
+      : currentHost;
+
+    await updateDoc(state.roomRef, {
+      players: arrayRemove(pName),
+      spectators: arrayRemove(pName),
+      currentHost: nextHost
+    });
   }
 };
