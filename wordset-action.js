@@ -7,6 +7,7 @@ import { splitWords, normalizeIcon } from './wordset-utils.js';
 import { renderAll } from './wordset-render.js';
 import {
   deleteWordSetSecurely, saveWordSetSecurely, userFacingError,
+  verifyWordSetPassword,
 } from './wordset-auth.js';
 
 // 編集を始める時に入力した現在のパスワードは、画面を閉じるまでメモリ内だけに保持する。
@@ -110,13 +111,21 @@ window.saveWordSet = async function () {
 
 async function requestPassword(target) {
   if (!target.hasPassword) return { ok: true, password: null };
-  const password = prompt(`🔒「${target.name}」はパスワード付きセットです。\n編集・削除するにはパスワードを入力してください。`);
+  const password = prompt(`🔒「${target.name}」はパスワード付きセットです。\n編集するには、作成時のパスワードを入力してください。`);
   if (password === null) return { ok: false };
   if (!password) {
     alert('パスワードを入力してください。');
     return { ok: false };
   }
-  return { ok: true, password };
+  try {
+    // 編集画面を開く前に実際のサーバー照合を行う。
+    await verifyWordSetPassword({ id: target.id, currentPassword: password });
+    return { ok: true, password };
+  } catch (error) {
+    console.error(error);
+    alert(userFacingError(error));
+    return { ok: false };
+  }
 }
 
 window.editWordSet = async function (id) {
