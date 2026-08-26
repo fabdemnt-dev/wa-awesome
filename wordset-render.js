@@ -134,6 +134,7 @@ function renderPoemList() {
           <div class="set-actions">
             <button class="btn-view" onclick="toggleWordSetDetail('${s.id}')">${isOpen ? '📖 閉じる' : '📖 のぞく'}</button>
             <button class="btn-edit" onclick="editWordSet('${s.id}')">✏️ 編集</button>
+            <button class="btn-view" onclick="copyWordSet('${s.id}')">📋 コピー</button>
             <button class="btn-delete" onclick="deleteWordSet('${s.id}')">🗑 削除</button>
           </div>
         </div>
@@ -173,6 +174,7 @@ function renderHaikuList() {
           <div class="set-actions">
             <button class="btn-view" onclick="toggleWordSetDetail('${s.id}')">${isOpen ? '📖 閉じる' : '📖 のぞく'}</button>
             <button class="btn-edit" onclick="editWordSet('${s.id}')">✏️ 編集</button>
+            <button class="btn-view" onclick="copyWordSet('${s.id}')">📋 コピー</button>
             <button class="btn-delete" onclick="deleteWordSet('${s.id}')">🗑 削除</button>
           </div>
         </div>

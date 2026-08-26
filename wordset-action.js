@@ -152,6 +152,33 @@ window.toggleWordSetDetail = function (id) {
   renderAll();
 };
 
+// 元のセットを変更せず、パスワードなしの新しいセットとしてフォームへコピーする。
+window.copyWordSet = function (id) {
+  const mode = state.mode;
+  const target = state.sets[mode].find((set) => set.id === id);
+  if (!target) return;
+
+  state.editingId[mode] = null;
+  const copiedName = `${target.name}（コピー）`.slice(0, 20);
+  const base = {
+    creatorName: '',
+    hasPassword: false,
+    password: '',
+    icon: target.icon || '',
+  };
+  state.forms[mode] = mode === 'poem'
+    ? { name: copiedName, words: (target.words || []).join('\\n'), ...base }
+    : {
+      name: copiedName,
+      words5: (target.words5 || []).join('\\n'),
+      words7: (target.words7 || []).join('\\n'),
+      ...base,
+    };
+  renderAll();
+  document.getElementById(`panel-${mode}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  alert('内容をコピーしました。パスワードなしの新しいセットとして保存できます。');
+};
+
 window.deleteWordSet = async function (id) {
   const mode = state.mode;
   const target = state.sets[mode].find((set) => set.id === id);
