@@ -60,6 +60,8 @@ function sanitizeWordSet(input) {
     type,
     name: requireText(input.name, 'セットのなまえ', 20),
     hasPassword: input.hasPassword === true,
+    // 旧データに項目がない場合は、従来どおりコピー可能として扱う。
+    copyAllowed: input.copyAllowed !== false,
     icon: optionalText(input.icon, 16),
   };
 
