@@ -2,6 +2,7 @@ import { updateDoc, increment } from "https://www.gstatic.com/firebasejs/10.8.0/
 import state from './poem-state.js';
 import { renderHand } from './poem-render.js';
 import { exportPoemText, exportPoemCSV } from './poem-export.js';
+import { getParticipantStorageKey } from './participant-utils.js';
 
 export function setupAutoResize() {
   const textarea = document.getElementById('poem-input-area');
@@ -27,7 +28,8 @@ function resizeTextarea() {
 
 window.onCardClick = function(idx) {
   if (state.isSpectator) return;
-  const myHands = state.currentData.hands?.[state.myName] || [];
+  const storageKey = getParticipantStorageKey(state.currentData, state.myUid, state.myName);
+  const myHands = state.currentData.hands?.[storageKey] || [];
   const item = myHands[idx];
   const textarea = document.getElementById('poem-input-area');
   if (!textarea || !item) return;
@@ -74,7 +76,8 @@ window.submitPoem = async function() {
   const poemText = textarea.value.trim();
   if (!poemText) return alert('ポエムを入力してください');
 
-  const myHands = state.currentData.hands?.[state.myName] || [];
+  const storageKey = getParticipantStorageKey(state.currentData, state.myUid, state.myName);
+  const myHands = state.currentData.hands?.[storageKey] || [];
   const usedHands = [];
   state.selectedHandIndices.forEach(idx => {
     if (myHands[idx]) usedHands.push(myHands[idx]);

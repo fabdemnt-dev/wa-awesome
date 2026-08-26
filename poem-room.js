@@ -1,6 +1,6 @@
 import { db } from "./firebase-config.js";
 import { doc, getDoc, setDoc, onSnapshot, updateDoc, runTransaction, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-import { normalizeParticipantName, setParticipantRole, normalizeParticipantRoles } from './participant-utils.js';
+import { normalizeParticipantName, setParticipantRole, normalizeParticipantRoles, getParticipantStorageKey } from './participant-utils.js';
 import state from './poem-state.js';
 import { escapeHTML, escapeJS, renderInputFields, renderHand, renderBoards } from './poem-render.js';
 import { setupAutoResize } from './poem-action.js';
@@ -294,6 +294,7 @@ window.joinRoom = async function() {
     return alert('入力フォームの要素が見つかりません');
   }
 
+  state.myUid = currentUser.uid;
   state.myName = nameInput.value.trim();
   state.roomId = roomInput.value.trim();
   const specCheck = document.getElementById('spectator-check');

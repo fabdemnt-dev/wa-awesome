@@ -4,6 +4,7 @@ import state from './poem-state.js';
 import { defaultWords } from './poem-default-words.js';
 import { getWordSetById } from './poem-wordsets.js';
 import { saveWordSetSecurely, userFacingError } from './wordset-auth.js';
+import { getParticipantUidByName } from './participant-utils.js';
 
 window.addWords = async function() {
   if (state.isSpectator) return alert('見学モードでは素材投稿はできません');
@@ -76,7 +77,10 @@ window.startGame = async function() {
 
   const shuffledWords = [...words].sort(() => Math.random() - 0.5);
   const newHands = {};
-  players.forEach(p => { newHands[p] = shuffledWords.splice(0, handCount); });
+  players.forEach(p => {
+    const storageKey = getParticipantUidByName(state.currentData, p) || p;
+    newHands[storageKey] = shuffledWords.splice(0, handCount);
+  });
 
   state.selectedHandIndices.clear();
   await updateDoc(state.roomRef, { 

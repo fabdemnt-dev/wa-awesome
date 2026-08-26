@@ -7,7 +7,7 @@ import { subscribeRoomHistory } from './room-history.js';
 import { ensureSignedIn } from './wordset-auth.js';
 import { showGameError } from './game-error.js';
 import { defaultWords5, defaultWords7 } from './haiku-default-words.js';
-import { normalizeParticipantName, setParticipantRole, normalizeParticipantRoles } from './participant-utils.js';
+import { normalizeParticipantName, setParticipantRole, normalizeParticipantRoles, getParticipantStorageKey } from './participant-utils.js';
 
 async function saveParticipantRole(role) {
   await runTransaction(db, async (transaction) => {
@@ -241,8 +241,9 @@ function applyRoomData(data) {
   } else if (state.currentData.status === 'playing') {
     if (document.getElementById('lobby-sec')) document.getElementById('lobby-sec').style.display = 'none';
     if (document.getElementById('game-sec')) document.getElementById('game-sec').style.display = 'block';
-    if (state.currentData.hands5?.[state.myName]) state.myHand5 = state.currentData.hands5[state.myName];
-    if (state.currentData.hands7?.[state.myName]) state.myHand7 = state.currentData.hands7[state.myName];
+    const storageKey = getParticipantStorageKey(state.currentData, state.myUid, state.myName);
+    if (state.currentData.hands5?.[storageKey]) state.myHand5 = state.currentData.hands5[storageKey];
+    if (state.currentData.hands7?.[storageKey]) state.myHand7 = state.currentData.hands7[storageKey];
     renderHand();
     renderBoards();
   }
@@ -406,6 +407,7 @@ window.joinRoom = async function() {
     return alert('認証に失敗しました。ページを再読み込みしてください: ' + e.message);
   }
 
+  state.myUid = currentUser.uid;
   state.myName = document.getElementById('player-name')?.value.trim() || "";
   state.roomId = document.getElementById('room-id')?.value.trim() || "";
   const specCheck = document.getElementById('spectator-check');

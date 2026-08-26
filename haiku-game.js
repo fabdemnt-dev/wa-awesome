@@ -7,6 +7,7 @@ import { renderInputFields } from './haiku-render.js';
 import { defaultWords5, defaultWords7 } from './haiku-default-words.js';
 import { getWordSetById } from './haiku-wordsets.js';
 import { saveWordSetSecurely, userFacingError } from './wordset-auth.js';
+import { getParticipantUidByName, getParticipantStorageKey } from './participant-utils.js';
 
 window.addWords = async function() {
   if (!state.currentData || state.isSpectator) return;
@@ -104,7 +105,11 @@ window.startGame = async function() {
   const s5 = [...w5].sort(() => Math.random() - 0.5);
   const s7 = [...w7].sort(() => Math.random() - 0.5);
   const h5 = {}, h7 = {};
-  players.forEach(p => { h5[p] = s5.splice(0, st.hand5); h7[p] = s7.splice(0, st.hand7); });
+  players.forEach(p => {
+    const storageKey = getParticipantUidByName(state.currentData, p) || p;
+    h5[storageKey] = s5.splice(0, st.hand5);
+    h7[storageKey] = s7.splice(0, st.hand7);
+  });
 
   // 手札を配り終わって残った分を、引き直し用の「山札」として保存する
   const deck5 = s5;
@@ -125,8 +130,9 @@ window.redrawHand = async function() {
     return alert('すでに句を披露した後は手札を引き直せません。');
   }
 
+  const storageKey = getParticipantStorageKey(state.currentData, state.myUid, state.myName);
   const redraws = state.currentData.redraws || {};
-  if (redraws[state.myName]) {
+  if (redraws[storageKey]) {
     return alert('手札の引き直しは1節につき1回までです。');
   }
 
@@ -156,10 +162,11 @@ window.redrawHand = async function() {
       const data = snapshot.data() || {};
       if (data.status !== 'playing') return { ok: false, reason: 'playing-ended' };
       if ((data.phrases || {})[state.myName]) return { ok: false, reason: 'already-revealed' };
-      if ((data.redraws || {})[state.myName]) return { ok: false, reason: 'already-redrawn' };
+      const storageKey = getParticipantStorageKey(data, state.myUid, state.myName);
+      if ((data.redraws || {})[storageKey]) return { ok: false, reason: 'already-redrawn' };
 
-      const latestHand5 = data.hands5?.[state.myName] || [];
-      const latestHand7 = data.hands7?.[state.myName] || [];
+      const latestHand5 = data.hands5?.[storageKey] || [];
+      const latestHand7 = data.hands7?.[storageKey] || [];
       const latestDeck5 = data.deck5 || [];
       const latestDeck7 = data.deck7 || [];
       if (latestDeck5.length < selectedCount5 || latestDeck7.length < selectedCount7) {
@@ -181,11 +188,11 @@ window.redrawHand = async function() {
       const newDeck7 = latestDeck7.filter(w => !drawnIds7.has(w.id));
 
       transaction.update(state.roomRef, {
-        [`hands5.${state.myName}`]: newHand5,
-        [`hands7.${state.myName}`]: newHand7,
+        [`hands5.${storageKey}`]: newHand5,
+        [`hands7.${storageKey}`]: newHand7,
         deck5: newDeck5,
         deck7: newDeck7,
-        [`redraws.${state.myName}`]: true
+        [`redraws.${storageKey}`]: true
       });
       return { ok: true };
     });
