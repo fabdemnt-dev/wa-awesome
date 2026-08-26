@@ -47,6 +47,8 @@ function renderPoemForm() {
   if (cb && cb.checked !== !!f.hasPassword) cb.checked = !!f.hasPassword;
   const pwBox = document.getElementById('poem-password-box');
   if (pwBox) pwBox.style.display = f.hasPassword ? 'block' : 'none';
+  const copyCb = document.getElementById('poem-copy-allowed');
+  if (copyCb) copyCb.checked = f.copyAllowed !== false;
   setInputValue('poem-icon-input', f.icon);
 
   setText('poem-name-counter', `${f.name.length}/20`);
@@ -74,6 +76,8 @@ function renderHaikuForm() {
   if (cb && cb.checked !== !!f.hasPassword) cb.checked = !!f.hasPassword;
   const pwBox = document.getElementById('haiku-password-box');
   if (pwBox) pwBox.style.display = f.hasPassword ? 'block' : 'none';
+  const copyCb = document.getElementById('haiku-copy-allowed');
+  if (copyCb) copyCb.checked = f.copyAllowed !== false;
   setInputValue('haiku-icon-input', f.icon);
 
   setText('haiku-name-counter', `${f.name.length}/20`);
@@ -134,7 +138,7 @@ function renderPoemList() {
           <div class="set-actions">
             <button class="btn-view" onclick="toggleWordSetDetail('${s.id}')">${isOpen ? '📖 閉じる' : '📖 のぞく'}</button>
             <button class="btn-edit" onclick="editWordSet('${s.id}')">✏️ 編集</button>
-            <button class="btn-view" onclick="copyWordSet('${s.id}')">📋 コピー</button>
+            ${s.copyAllowed !== false ? `<button class="btn-view" onclick="copyWordSet('${s.id}')">📋 コピー</button>` : '<span class="form-hint">コピー不可</span>'}
             <button class="btn-delete" onclick="deleteWordSet('${s.id}')">🗑 削除</button>
           </div>
         </div>
@@ -174,7 +178,7 @@ function renderHaikuList() {
           <div class="set-actions">
             <button class="btn-view" onclick="toggleWordSetDetail('${s.id}')">${isOpen ? '📖 閉じる' : '📖 のぞく'}</button>
             <button class="btn-edit" onclick="editWordSet('${s.id}')">✏️ 編集</button>
-            <button class="btn-view" onclick="copyWordSet('${s.id}')">📋 コピー</button>
+            ${s.copyAllowed !== false ? `<button class="btn-view" onclick="copyWordSet('${s.id}')">📋 コピー</button>` : '<span class="form-hint">コピー不可</span>'}
             <button class="btn-delete" onclick="deleteWordSet('${s.id}')">🗑 削除</button>
           </div>
         </div>

@@ -23,8 +23,8 @@ window.startNewWordSet = function () {
   const mode = state.mode;
   state.editingId[mode] = null;
   state.forms[mode] = mode === 'poem'
-    ? { name: '', words: '', creatorName: '', hasPassword: false, password: '', icon: '' }
-    : { name: '', words5: '', words7: '', creatorName: '', hasPassword: false, password: '', icon: '' };
+    ? { name: '', words: '', creatorName: '', hasPassword: false, password: '', icon: '', copyAllowed: true }
+    : { name: '', words5: '', words7: '', creatorName: '', hasPassword: false, password: '', icon: '', copyAllowed: true };
   renderAll();
 };
 
@@ -37,6 +37,7 @@ window.onWordSetFormInput = function () {
     state.forms.poem.icon = document.getElementById('poem-icon-input')?.value || '';
     state.forms.poem.hasPassword = document.getElementById('poem-has-password')?.checked || false;
     state.forms.poem.password = document.getElementById('poem-password')?.value || '';
+    state.forms.poem.copyAllowed = document.getElementById('poem-copy-allowed')?.checked !== false;
   } else {
     state.forms.haiku.name = document.getElementById('haiku-set-name')?.value || '';
     state.forms.haiku.words5 = document.getElementById('haiku-words5-input')?.value || '';
@@ -45,6 +46,7 @@ window.onWordSetFormInput = function () {
     state.forms.haiku.icon = document.getElementById('haiku-icon-input')?.value || '';
     state.forms.haiku.hasPassword = document.getElementById('haiku-has-password')?.checked || false;
     state.forms.haiku.password = document.getElementById('haiku-password')?.value || '';
+    state.forms.haiku.copyAllowed = document.getElementById('haiku-copy-allowed')?.checked !== false;
   }
   renderAll();
 };
@@ -65,6 +67,7 @@ function buildWordSet(form, mode) {
     type: mode,
     name,
     hasPassword: !!form.hasPassword,
+    copyAllowed: form.copyAllowed !== false,
     icon: normalizeIcon(form.icon),
   };
 
@@ -138,7 +141,13 @@ window.editWordSet = async function (id) {
   unlockedPasswords.set(id, { password: auth.password });
 
   state.editingId[mode] = id;
-  const base = { creatorName: '', hasPassword: !!target.hasPassword, password: '', icon: target.icon || '' };
+  const base = {
+    creatorName: '',
+    hasPassword: !!target.hasPassword,
+    password: '',
+    icon: target.icon || '',
+    copyAllowed: target.copyAllowed !== false,
+  };
   state.forms[mode] = mode === 'poem'
     ? { name: target.name, words: (target.words || []).join('\n'), ...base }
     : { name: target.name, words5: (target.words5 || []).join('\n'), words7: (target.words7 || []).join('\n'), ...base };
@@ -157,6 +166,10 @@ window.copyWordSet = function (id) {
   const mode = state.mode;
   const target = state.sets[mode].find((set) => set.id === id);
   if (!target) return;
+  if (target.copyAllowed === false) {
+    alert('このワードセットはコピーできない設定です。');
+    return;
+  }
 
   state.editingId[mode] = null;
   const copiedName = `${target.name}（コピー）`.slice(0, 20);
@@ -165,13 +178,14 @@ window.copyWordSet = function (id) {
     hasPassword: false,
     password: '',
     icon: target.icon || '',
+    copyAllowed: true,
   };
   state.forms[mode] = mode === 'poem'
-    ? { name: copiedName, words: (target.words || []).join('\\n'), ...base }
+    ? { name: copiedName, words: (target.words || []).join('\n'), ...base }
     : {
       name: copiedName,
-      words5: (target.words5 || []).join('\\n'),
-      words7: (target.words7 || []).join('\\n'),
+      words5: (target.words5 || []).join('\n'),
+      words7: (target.words7 || []).join('\n'),
       ...base,
     };
   renderAll();
