@@ -8,6 +8,7 @@ import { ensureSignedIn } from './wordset-auth.js';
 import { showGameError } from './game-error.js';
 import { defaultWords5, defaultWords7 } from './haiku-default-words.js';
 import { normalizeParticipantName, setParticipantRole, normalizeParticipantRoles, getParticipantStorageKey, canClaimHost } from './participant-utils.js';
+import { changeHaikuRole } from './haiku-functions.js';
 
 async function saveParticipantRole(role) {
   await runTransaction(db, async (transaction) => {
@@ -550,14 +551,7 @@ window.toggleRole = async function() {
       // 配った札は山札から取り除き、残りは途中参加者・既存プレイヤーの引き直しに使う。
       const newDeck5 = deck5.filter(w => !drawnIds5.has(w.id));
       const newDeck7 = deck7.filter(w => !drawnIds7.has(w.id));
-      await updateDoc(state.roomRef, {
-        spectators: arrayRemove(state.myName),
-        players: arrayUnion(state.myName),
-        [`hands5.${state.myName}`]: newHand5,
-        [`hands7.${state.myName}`]: newHand7,
-        deck5: newDeck5,
-        deck7: newDeck7
-      });
+      await changeHaikuRole(state.roomId, 'player', add5, add7);
       state.isSpectator = false;
       const addedMessage = (add5.length || add7.length)
         ? `\nデフォルト素材を五音${add5.length}個・七音${add7.length}個、山札へ補充しました。`
@@ -566,7 +560,11 @@ window.toggleRole = async function() {
       return;
     }
 
-    await saveParticipantRole('player');
+    if (state.currentData?.schemaVersion === 2) {
+      await changeHaikuRole(state.roomId, 'player');
+    } else {
+      await saveParticipantRole('player');
+    }
     state.isSpectator = false;
     alert("プレイヤーとして参加しました！");
   } else {
@@ -579,7 +577,11 @@ window.toggleRole = async function() {
       }
     }
 
-    await saveParticipantRole('spectator');
+    if (state.currentData?.schemaVersion === 2) {
+      await changeHaikuRole(state.roomId, 'spectator');
+    } else {
+      await saveParticipantRole('spectator');
+    }
     state.isSpectator = true;
     alert("見学モードに切り替えました！");
   }

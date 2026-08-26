@@ -251,6 +251,71 @@ function requirePlayingParticipant(room, uid) {
   return result;
 }
 
+function requireRole(value) {
+  if (value !== 'player' && value !== 'spectator') fail('invalid-argument', '役割が正しくありません。');
+  return value;
+}
+
+function requireSupplementWords(value, label) {
+  if (!Array.isArray(value) || value.length > 100) fail('invalid-argument', `${label}が正しくありません。`);
+  return value.map((item) => {
+    if (!isPlainObject(item)) fail('invalid-argument', `${label}が正しくありません。`);
+    return { id: requireText(item.id, '素材ID', 200), text: requireText(item.text, '素材', 200), author: optionalText(item.author, 200) || '🎴お題ぶくろ' };
+  });
+}
+
+exports.changeHaikuRole = onCall(callableOptions, async (request) => {
+  const uid = requireAuthenticated(request);
+  const roomId = requireText(request.data?.roomId, 'ルームID', 150);
+  const role = requireRole(request.data?.role);
+  const supplied5 = requireSupplementWords(request.data?.supplement5 || [], '五音補充素材');
+  const supplied7 = requireSupplementWords(request.data?.supplement7 || [], '七音補充素材');
+  const roomRef = db.collection('rooms').doc(`haiku_${roomId}`);
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(roomRef);
+    if (!snapshot.exists) fail('not-found', 'ルームが見つかりません。');
+    const room = snapshot.data() || {};
+    if (room.schemaVersion !== 2) fail('failed-precondition', '新形式のルームだけ役割変更Callableを利用できます。');
+    const participants = participantsByUid(room);
+    const name = participants.get(uid);
+    if (!name) fail('permission-denied', '参加者だけが役割変更できます。');
+    const currentHost = room.currentHost || '';
+    if (room.status === 'playing' && role === 'spectator' && name === currentHost) {
+      fail('failed-precondition', '親はラウンド中に見学者へ切り替えられません。');
+    }
+    const players = (room.players || []).filter((item) => item !== name);
+    const spectators = (room.spectators || []).filter((item) => item !== name);
+    const nextPlayers = role === 'player' ? [...players, name] : players;
+    const nextSpectators = role === 'spectator' ? [...spectators, name] : spectators;
+    const participantUids = Object.fromEntries([...participants.entries()].filter(([participantUid, participantName]) => participantName !== name || participantUid === uid));
+    participantUids[uid] = name;
+    const update = { players: nextPlayers, spectators: nextSpectators, participantUids };
+    if (!room.currentHost && role === 'player') {
+      update.currentHost = name;
+      update.currentHostUid = uid;
+    }
+    if (room.status === 'playing' && role === 'player') {
+      const settings = room.settings || { hand5: 5, hand7: 3 };
+      const deck5 = Array.isArray(room.deck5) ? [...room.deck5] : [];
+      const deck7 = Array.isArray(room.deck7) ? [...room.deck7] : [];
+      const pool5 = Array.isArray(room.supplementPool5) && room.supplementPool5.length ? room.supplementPool5 : supplied5;
+      const pool7 = Array.isArray(room.supplementPool7) && room.supplementPool7.length ? room.supplementPool7 : supplied7;
+      if (deck5.length < settings.hand5) deck5.push(...supplied5);
+      if (deck7.length < settings.hand7) deck7.push(...supplied7);
+      if (deck5.length < settings.hand5 || deck7.length < settings.hand7) fail('failed-precondition', '途中参加者へ配る山札が不足しています。');
+      const hand5 = deck5.splice(0, settings.hand5);
+      const hand7 = deck7.splice(0, settings.hand7);
+      transaction.set(roomRef.collection('hands').doc(uid), { hand5, hand7, redrawUsed: false, round: room.roundCount || 1, updatedAt: FieldValue.serverTimestamp() });
+      update.deck5 = deck5;
+      update.deck7 = deck7;
+      update.supplementPool5 = pool5;
+      update.supplementPool7 = pool7;
+    }
+    transaction.update(roomRef, update);
+  });
+  return { ok: true };
+});
+
 function requirePhraseDetails(value) {
   if (!Array.isArray(value) || value.length !== 3) fail('invalid-argument', '句の素材が正しくありません。');
   return value.map((item) => {
