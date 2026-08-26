@@ -48,6 +48,11 @@ button:disabled { background-color: #94a3b8; cursor: not-allowed; }
 /* 素材カード */
 .word-list { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  box-sizing: border-box;
   background: #f1f5f9;
   border: 2px solid #cbd5e1;
   border-radius: 8px;
@@ -64,7 +69,8 @@ button:disabled { background-color: #94a3b8; cursor: not-allowed; }
 .redraw-toggle-btn {
   width: auto;
   min-width: 0;
-  margin-left: 6px;
+  flex: 0 0 auto;
+  margin-left: auto;
   padding: 2px 6px;
   font-size: 12px;
   border-radius: 6px;
