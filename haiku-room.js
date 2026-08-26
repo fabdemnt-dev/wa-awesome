@@ -8,7 +8,7 @@ import { ensureSignedIn } from './wordset-auth.js';
 import { showGameError } from './game-error.js';
 import { defaultWords5, defaultWords7 } from './haiku-default-words.js';
 import { normalizeParticipantName, setParticipantRole, normalizeParticipantRoles, getParticipantStorageKey, canClaimHost } from './participant-utils.js';
-import { changeHaikuRole, removeHaikuWord, updateHaikuSettings } from './haiku-functions.js';
+import { changeHaikuRole, removeHaikuWord, updateHaikuSettings, removePlayer as removePlayerSecure, claimHost as claimHostSecure } from './haiku-functions.js';
 
 async function saveParticipantRole(role) {
   await runTransaction(db, async (transaction) => {
@@ -76,29 +76,19 @@ window.claimHost = async function() {
   if (!confirm('親が不在・操作不能になったことを確認しましたか？\n引き継ぐと、あなたが新しい親になり、次の節へ進めるようになります。')) return;
 
   try {
+    if (state.currentData?.schemaVersion === 2) {
+      await claimHostSecure(state.roomId);
+      alert('あなたが新しい親になりました。');
+      return;
+    }
     const claimed = await runTransaction(db, async (transaction) => {
       const snapshot = await transaction.get(state.roomRef);
       const data = snapshot.data() || {};
-      if (!canClaimHost(data, state.myName, state.isSpectator)) {
-        return false;
-      }
-
-      const nextHost = state.myName;
-      if (!nextHost) return false;
-      const nextHostUid = Object.entries(data.participantUids || {})
-        .find(([, name]) => name === nextHost)?.[0] || '';
-      transaction.update(state.roomRef, {
-        currentHost: nextHost,
-        ...(data.schemaVersion === 2 ? { currentHostUid: nextHostUid } : {})
-      });
-      return nextHost === state.myName;
+      if (!canClaimHost(data, state.myName, state.isSpectator)) return false;
+      transaction.update(state.roomRef, { currentHost: state.myName });
+      return true;
     });
-
-    if (claimed) {
-      alert('あなたが新しい親になりました。');
-    } else {
-      alert('別の参加者が先に親を引き継いだか、親が復帰しました。画面を更新してください。');
-    }
+    alert(claimed ? 'あなたが新しい親になりました。' : '別の参加者が先に親を引き継いだか、親が復帰しました。画面を更新してください。');
   } catch (error) {
     debugRecordError(error, 'claim-host');
     showGameError(error, '親の引き継ぎ');
@@ -602,7 +592,17 @@ window.updateSettings = async function() {
   }
 };
 window.removePlayer = async function(pName) {
-  if (confirm(`${pName} さんを退出させますか？`)) {
-    await updateDoc(state.roomRef, { players: arrayRemove(pName), spectators: arrayRemove(pName) });
+  if (!confirm(`${pName} さんを退出させますか？`)) return;
+  try {
+    if (state.currentData?.schemaVersion === 2) {
+      const targetUid = Object.entries(state.currentData.participantUids || {}).find(([, name]) => name === pName)?.[0];
+      if (!targetUid) throw new Error('対象プレイヤーのUIDが見つかりません。');
+      await removePlayerSecure(state.roomId, targetUid);
+    } else {
+      await updateDoc(state.roomRef, { players: arrayRemove(pName), spectators: arrayRemove(pName) });
+    }
+  } catch (error) {
+    debugRecordError(error, 'remove-player');
+    showGameError(error, '鯖落ち');
   }
 };

@@ -1,10 +1,10 @@
 import { db } from "./firebase-config.js";
 import { doc, getDoc, setDoc, onSnapshot, updateDoc, runTransaction, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-import { normalizeParticipantName, setParticipantRole, normalizeParticipantRoles, getParticipantStorageKey } from './participant-utils.js';
+import { normalizeParticipantName, setParticipantRole, normalizeParticipantRoles, getParticipantStorageKey, canClaimHost } from './participant-utils.js';
 import state from './poem-state.js';
 import { escapeHTML, escapeJS, renderInputFields, renderHand, renderBoards } from './poem-render.js';
 import { setupAutoResize } from './poem-action.js';
-import { removePoemWord, updatePoemSettings } from './poem-functions.js';
+import { removePoemWord, updatePoemSettings, removePlayer as removePlayerSecure, claimHost as claimHostSecure, changePoemRole } from './poem-functions.js';
 import { subscribeRoomHistory } from './room-history.js';
 import { ensureSignedIn } from './wordset-auth.js';
 import { showGameError } from './game-error.js';
@@ -85,6 +85,15 @@ function applyRoomData(data) {
     startBtn.innerText = state.isSpectator ? '👀 見学者は開始できません' : 'ポエム作りを開始';
   }
   const nextBtn = document.getElementById('next-game-btn');
+  const hostRecoveryBtn = document.getElementById('host-recovery-btn');
+  if (hostRecoveryBtn) {
+    const canTakeover = canClaimHost(state.currentData, state.myName, state.isSpectator);
+    hostRecoveryBtn.style.display = state.currentData.status === 'playing' ? 'block' : 'none';
+    hostRecoveryBtn.disabled = !canTakeover;
+    hostRecoveryBtn.style.opacity = canTakeover ? '1' : '0.55';
+    hostRecoveryBtn.style.cursor = canTakeover ? 'pointer' : 'not-allowed';
+  }
+
   if (nextBtn) {
     nextBtn.disabled = state.isSpectator;
     nextBtn.style.opacity = state.isSpectator ? '0.5' : '1';
@@ -319,6 +328,8 @@ if (!roomSnapshot.exists()) {
     settings: { handCount: 5 },
     players: [],
     spectators: [],
+    currentHost: state.isSpectator ? null : state.myName,
+    currentHostUid: state.isSpectator ? null : currentUser.uid,
     participantUids: { [currentUser.uid]: state.myName }
   };
 
@@ -408,46 +419,17 @@ window.removeSubmittedWord = async function(wordId) {
 window.toggleRole = async function() {
   if (!state.roomRef) return;
   if (state.isSpectator) {
-    // ゲーム中の途中参戦は、まず余っている素材を使い、足りない分だけデフォルトのお題（SAMPLE_PHRASES）で自動補充する
-    if (state.currentData?.status === 'playing') {
+    // ゲーム中の途中参戦も、役割変更と手札配布をサーバー側で一括検証する。
+    if (state.currentData?.schemaVersion === 2) {
       const st = state.currentData.settings || { handCount: 5 };
-      const words = state.currentData.words || [];
-      const hands = state.currentData.hands || {};
-
-      // 自分の古い手札も含めた「今どこかに配られている素材」のIDを集める
-      // （↓この後で自分の手札は新しいものに上書きされるので、古い分は自然に余りへ戻る）
-      const assignedIds = new Set(Object.values(hands).flat().map(w => w.id));
-      const leftover = words.filter(w => !assignedIds.has(w.id));
-
-      // ①まず余っている素材を使う
-      const fromLeftover = [...leftover].sort(() => Math.random() - 0.5).slice(0, st.handCount);
-
-      // ②余りだけでは手札枚数に足りない分を、SAMPLE_PHRASESからランダムに補充する
-      const shortfall = st.handCount - fromLeftover.length;
-      const filled = [];
-      if (shortfall > 0) {
-        const shuffledSamples = [...SAMPLE_PHRASES].sort(() => Math.random() - 0.5);
-        for (let i = 0; i < shortfall; i++) {
-          filled.push({
-            text: shuffledSamples[i % shuffledSamples.length],
-            author: "🎴お題ぶくろ",
-            id: Date.now() + "_" + Math.random().toString(36).substring(2, 9)
-          });
-        }
-      }
-
-      // ③合計が手札枚数になった状態で配る
-      const newHand = [...fromLeftover, ...filled];
-
-      await updateDoc(state.roomRef, {
-        spectators: arrayRemove(state.myName),
-        players: arrayUnion(state.myName),
-        [`hands.${state.myName}`]: newHand
-      });
+      const supplementalWords = SAMPLE_PHRASES.slice(0, st.handCount).map((text, index) => ({
+        text,
+        author: '🎴お題ぶくろ',
+        id: `supplement_${Date.now()}_${index}`
+      }));
+      await changePoemRole(state.roomId, 'player', supplementalWords);
       state.isSpectator = false;
-      alert(shortfall > 0
-        ? `素材の余り${fromLeftover.length}枚＋お題ぶくろから${shortfall}枚を手札として配りました！プレイヤーとして参加しました！`
-        : "素材の余りから手札を配りました！プレイヤーとして参加しました！");
+      alert('余っている素材を優先して手札を配り、プレイヤーとして参加しました！');
       return;
     }
 
@@ -455,18 +437,41 @@ window.toggleRole = async function() {
     state.isSpectator = false;
     alert("プレイヤーとして参加しました！");
   } else {
-    await saveParticipantRole('spectator');
+    if (state.currentData?.schemaVersion === 2) {
+      await changePoemRole(state.roomId, 'spectator');
+    } else {
+      await saveParticipantRole('spectator');
+    }
     state.isSpectator = true;
     alert("見学モードに切り替えました！");
   }
 };
 
+window.claimHost = async function() {
+  if (!state.roomRef || state.isSpectator || state.currentData?.schemaVersion !== 2) return;
+  if (!confirm('親が不在・操作不能になったことを確認しましたか？\\n引き継ぐと、あなたが新しい親になります。')) return;
+  try {
+    await claimHostSecure(state.roomId);
+    alert('あなたが新しい親になりました。');
+  } catch (error) {
+    debugRecordError(error, 'claim-host');
+    showGameError(error, '親の引き継ぎ');
+  }
+};
+
 window.removePlayer = async function(pName) {
-  if (confirm(`${pName} さんを退出させますか？`)) {
-    await updateDoc(state.roomRef, { 
-      players: arrayRemove(pName), 
-      spectators: arrayRemove(pName) 
-    });
+  if (!confirm(`${pName} さんを退出させますか？`)) return;
+  try {
+    if (state.currentData?.schemaVersion === 2) {
+      const targetUid = Object.entries(state.currentData.participantUids || {}).find(([, name]) => name === pName)?.[0];
+      if (!targetUid) throw new Error('対象プレイヤーのUIDが見つかりません。');
+      await removePlayerSecure(state.roomId, targetUid);
+    } else {
+      await updateDoc(state.roomRef, { players: arrayRemove(pName), spectators: arrayRemove(pName) });
+    }
+  } catch (error) {
+    debugRecordError(error, 'remove-player');
+    showGameError(error, '鯖落ち');
   }
 };
 

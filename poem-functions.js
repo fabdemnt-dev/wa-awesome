@@ -9,6 +9,9 @@ const submitPoemWordsCallable = httpsCallable(functions, 'submitPoemWords');
 const removePoemWordCallable = httpsCallable(functions, 'removePoemWord');
 const updatePoemSettingsCallable = httpsCallable(functions, 'updatePoemSettings');
 const dealPoemHandsCallable = httpsCallable(functions, 'dealPoemHands');
+const removePlayerCallable = httpsCallable(functions, 'removePlayer');
+const claimHostCallable = httpsCallable(functions, 'claimHost');
+const changePoemRoleCallable = httpsCallable(functions, 'changePoemRole');
 
 function requireRoomId(roomId) {
   if (typeof roomId !== 'string' || !roomId.trim()) throw new Error('ルームIDがありません。');
@@ -17,6 +20,21 @@ function requireRoomId(roomId) {
 
 export async function dealPoemHands(roomId) {
   const result = await dealPoemHandsCallable({ roomId: requireRoomId(roomId) });
+  return result.data;
+}
+
+export async function changePoemRole(roomId, role, supplementWords = []) {
+  const result = await changePoemRoleCallable({ roomId: requireRoomId(roomId), role, supplementWords: Array.isArray(supplementWords) ? supplementWords : [] });
+  return result.data;
+}
+
+export async function removePlayer(roomId, targetUid) {
+  const result = await removePlayerCallable({ roomId: requireRoomId(roomId), game: 'poem', targetUid });
+  return result.data;
+}
+
+export async function claimHost(roomId) {
+  const result = await claimHostCallable({ roomId: requireRoomId(roomId), game: 'poem' });
   return result.data;
 }
 
