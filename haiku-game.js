@@ -7,7 +7,7 @@ import { defaultWords5, defaultWords7 } from './haiku-default-words.js';
 import { getWordSetById } from './haiku-wordsets.js';
 import { saveWordSetSecurely, userFacingError } from './wordset-auth.js';
 import { getParticipantUidByName, getParticipantStorageKey, getParticipantNameByUid } from './participant-utils.js';
-import { dealHaikuHands, redrawHaikuHand } from './haiku-functions.js';
+import { dealHaikuHands, redrawHaikuHand, submitHaikuWords } from './haiku-functions.js';
 
 window.addWords = async function() {
   if (!state.currentData || state.isSpectator) return;
@@ -32,7 +32,11 @@ window.addWords = async function() {
   const new7 = getWords('7', st.hand7);
   if (new5.length === 0 && new7.length === 0) return alert('少なくとも1つ素材を入力してください');
 
-  await updateDoc(state.roomRef, { words5: arrayUnion(...new5), words7: arrayUnion(...new7) });
+  if (state.currentData.schemaVersion === 2) {
+    await submitHaikuWords(state.roomId, new5, new7);
+  } else {
+    await updateDoc(state.roomRef, { words5: arrayUnion(...new5), words7: arrayUnion(...new7) });
+  }
   renderInputFields(st.hand5, st.hand7);
   const addBtn = document.getElementById('add-word-btn');
   if (addBtn) addBtn.innerText = "✅ 追加完了！";

@@ -4,6 +4,7 @@ import { normalizeParticipantName, setParticipantRole, normalizeParticipantRoles
 import state from './poem-state.js';
 import { escapeHTML, escapeJS, renderInputFields, renderHand, renderBoards } from './poem-render.js';
 import { setupAutoResize } from './poem-action.js';
+import { removePoemWord } from './poem-functions.js';
 import { subscribeRoomHistory } from './room-history.js';
 import { ensureSignedIn } from './wordset-auth.js';
 import { showGameError } from './game-error.js';
@@ -389,7 +390,11 @@ window.removeSubmittedWord = async function(wordId) {
   if (!target) return alert('この素材は取り消せません');
   if (!confirm(`「${target.text}」を取り消しますか？`)) return;
   try {
-    await updateDoc(state.roomRef, { words: arrayRemove(target) });
+    if (state.currentData.schemaVersion === 2) {
+      await removePoemWord(state.roomId, wordId);
+    } else {
+      await updateDoc(state.roomRef, { words: arrayRemove(target) });
+    }
   } catch (e) {
     debugRecordError(e, 'remove-submitted-word');
     showGameError(e, '素材の取り消し');

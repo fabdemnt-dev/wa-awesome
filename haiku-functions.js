@@ -4,6 +4,8 @@ import { app } from './firebase-config.js';
 const functions = getFunctions(app, 'asia-northeast1');
 const dealHaikuHandsCallable = httpsCallable(functions, 'dealHaikuHands');
 const changeHaikuRoleCallable = httpsCallable(functions, 'changeHaikuRole');
+const submitHaikuWordsCallable = httpsCallable(functions, 'submitHaikuWords');
+const removeHaikuWordCallable = httpsCallable(functions, 'removeHaikuWord');
 const redrawHaikuHandCallable = httpsCallable(functions, 'redrawHaikuHand');
 const submitHaikuPhraseCallable = httpsCallable(functions, 'submitHaikuPhrase');
 const revealHaikuPhraseCallable = httpsCallable(functions, 'revealHaikuPhrase');
@@ -13,6 +15,16 @@ const submitHaikuVoteCallable = httpsCallable(functions, 'submitHaikuVote');
 function requireRoomId(roomId) {
   if (typeof roomId !== 'string' || !roomId.trim()) throw new Error('ルームIDがありません。');
   return roomId.trim();
+}
+
+export async function submitHaikuWords(roomId, words5, words7) {
+  const result = await submitHaikuWordsCallable({ roomId: requireRoomId(roomId), words5, words7 });
+  return result.data;
+}
+
+export async function removeHaikuWord(roomId, type, wordId) {
+  const result = await removeHaikuWordCallable({ roomId: requireRoomId(roomId), type, wordId });
+  return result.data;
 }
 
 export async function changeHaikuRole(roomId, role, supplement5 = [], supplement7 = []) {
