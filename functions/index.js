@@ -529,6 +529,32 @@ exports.selfPraiseHaikuPhrase = onCall(callableOptions, async (request) => {
 const haikuVoteKeys = new Set(['okashi', 'aware', 'wabisabi', 'ayashi', 'kuruoshi', 'medurashi', 'yugen', 'tae', 'kanpu']);
 const haikuVotePoints = { okashi: 1, aware: 1, wabisabi: 1, ayashi: 1, kuruoshi: 1, medurashi: 1, yugen: 1 };
 
+exports.dealPoemHands = onCall(callableOptions, async (request) => {
+  const uid = requireAuthenticated(request);
+  const roomId = requireText(request.data?.roomId, 'ルームID', 150);
+  const roomRef = db.collection('rooms').doc(`poem_${roomId}`);
+  let result;
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(roomRef);
+    if (!snapshot.exists) fail('not-found', 'ルームが見つかりません。');
+    const room = snapshot.data() || {};
+    if (room.schemaVersion !== 2) fail('failed-precondition', '新形式のルームだけ配札Callableを利用できます。');
+    const participants = participantsByUid(room);
+    requireHostUid(room, uid, participants);
+    if (room.status !== 'lobby') fail('failed-precondition', 'ロビー状態のルームだけ配札できます。');
+    const playerUids = validatePlayerUids(room, participants);
+    const count = handCount(room, 'handCount', 5);
+    const words = Array.isArray(room.words) ? room.words : [];
+    if (words.length < playerUids.length * count) fail('failed-precondition', '配札用の素材が不足しています。');
+    const shuffled = shuffle(words);
+    const hands = {};
+    playerUids.forEach((playerUid) => { hands[playerUid] = shuffled.splice(0, count); });
+    transaction.update(roomRef, { status: 'playing', hands, poems: {} });
+    result = { ok: true, hands: playerUids.length, handCount: count };
+  });
+  return result;
+});
+
 exports.advanceHaikuRound = onCall(callableOptions, async (request) => {
   const uid = requireAuthenticated(request);
   const roomId = requireText(request.data?.roomId, 'ルームID', 150);

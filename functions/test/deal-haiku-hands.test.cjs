@@ -19,6 +19,7 @@ const {
   updateHaikuSettings,
   updatePoemSettings,
   advanceHaikuRound,
+  dealPoemHands,
 } = require('../index.js');
 
 const db = getFirestore();
@@ -61,6 +62,27 @@ async function seedRoom(roomId) {
     hands7: { legacy: ['古い手札'] },
   });
 }
+
+test('Poem配札Callableは親だけがUID別手札へ配札できる', async () => {
+  await poemRoomRef('poem-deal').set({
+    schemaVersion: 2, status: 'lobby', roundCount: 1, currentHost: '親', currentHostUid: 'uid-host',
+    players: ['親', '参加者'], spectators: [], participantUids: { 'uid-host': '親', 'uid-player': '参加者' },
+    settings: { handCount: 2 }, words: [
+      { id: 'p1', text: '一', author: '親' }, { id: 'p2', text: '二', author: '参加者' },
+      { id: 'p3', text: '三', author: '親' }, { id: 'p4', text: '四', author: '参加者' },
+    ], poems: {},
+  });
+  await assert.rejects(
+    dealPoemHands.run({ data: { roomId: 'poem-deal' }, auth: { uid: 'uid-player' } }),
+    (error) => error.code === 'permission-denied',
+  );
+  const result = await dealPoemHands.run({ data: { roomId: 'poem-deal' }, auth: { uid: 'uid-host' } });
+  const room = (await poemRoomRef('poem-deal').get()).data();
+  assert.equal(result.handCount, 2);
+  assert.equal(room.status, 'playing');
+  assert.equal(room.hands['uid-host'].length, 2);
+  assert.equal(room.hands['uid-player'].length, 2);
+});
 
 test('Haiku次節Callableは得点・履歴・親交代・素材持越しを一括処理する', async () => {
   await roomRef('advance-round').set({
