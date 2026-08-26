@@ -5,7 +5,7 @@ import { defaultWords } from './poem-default-words.js';
 import { getWordSetById } from './poem-wordsets.js';
 import { saveWordSetSecurely, userFacingError } from './wordset-auth.js';
 import { getParticipantUidByName } from './participant-utils.js';
-import { submitPoemWords } from './poem-functions.js';
+import { submitPoemWords, dealPoemHands } from './poem-functions.js';
 
 window.addWords = async function() {
   if (state.isSpectator) return alert('見学モードでは素材投稿はできません');
@@ -70,6 +70,17 @@ window.startGame = async function() {
   if (!state.currentData) return;
   if (state.isSpectator) return alert('見学モードではポエム作りを開始できません');
   if (!confirm('全員の素材が集まりましたか？\nポエム作りを開始します。')) return;
+
+  if (state.currentData.schemaVersion === 2) {
+    try {
+      await dealPoemHands(state.roomId);
+      alert('ポエム作りを開始します！');
+    } catch (e) {
+      console.error(e);
+      alert('開始に失敗しました: ' + (e.message || 'サーバーエラー'));
+    }
+    return;
+  }
 
   const players = state.currentData.players || [];
   const words = state.currentData.words || [];
