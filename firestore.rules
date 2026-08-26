@@ -19,7 +19,7 @@ service cloud.firestore {
     // 2) ゲームの部屋 rooms/haiku_○○○ と rooms/poem_○○○
     // ============================================================
     match /rooms/{roomId} {
-      allow read: if true;
+      allow read: if request.auth != null;
       // 参加者は匿名認証ユーザー。ルームのゲーム状態はクライアント間で共有更新する。
       // 複雑なデータ形式検査は既存データとの互換性を壊していたため、
       // ドキュメント容量だけを上限として、認証済みユーザーの作成・更新を許可する。
@@ -31,7 +31,7 @@ service cloud.firestore {
 
     // ルームの過去ラウンド履歴。現在状態とは別ドキュメントに保存する。
     match /rooms/{roomId}/history/{entryId} {
-      allow read, create: if true;
+      allow read, create: if request.auth != null;
       allow update, delete: if false;
     }
 
