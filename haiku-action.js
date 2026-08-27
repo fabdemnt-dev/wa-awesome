@@ -39,6 +39,7 @@ window.submitPhrase = async function() {
   const phrase = `${state.selectedHand[0].text} ${state.selectedHand[1].text} ${state.selectedHand[2].text}`;
   if (state.currentData.schemaVersion === 2) {
     await submitHaikuPhrase(state.roomId, phrase, state.selectedHand);
+    if (typeof window.resyncHaikuRoom === 'function') await window.resyncHaikuRoom();
   } else {
     await updateDoc(state.roomRef, {
       [`phrases.${storageKey}`]: phrase,
