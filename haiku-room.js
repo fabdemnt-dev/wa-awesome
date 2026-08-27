@@ -24,7 +24,14 @@ async function saveParticipantRole(role) {
   });
 }
 
-let previousStatus = null; // 直前のstatusを記録し、「lobbyに遷移した瞬間」だけ入力欄をクリアするために使う
+let previousStatus = null; // 直前のstatusを記録し、画面遷移と入力リセットの判定に使う
+
+function scrollToStatusSection(status) {
+  const sectionId = status === 'playing' ? 'game-sec' : 'lobby-sec';
+  requestAnimationFrame(() => {
+    document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+}
 
 function updatePhaseStatus(data) {
   const lobbyText = data?.status === 'lobby' ? '開始待ち・素材準備中' : '';
@@ -239,6 +246,7 @@ let lastAppliedRoomUpdateSequence = 0;
 function applyRoomData(data, sequence = ++roomUpdateSequence) {
   if (sequence < lastAppliedRoomUpdateSequence) return;
   lastAppliedRoomUpdateSequence = sequence;
+  const statusBeforeUpdate = previousStatus;
   const normalizedRoles = normalizeParticipantRoles(data);
   data = { ...data, ...normalizedRoles };
   const embeddedHistory = Array.isArray(data?.history)
@@ -381,7 +389,11 @@ function applyRoomData(data, sequence = ++roomUpdateSequence) {
     renderBoards();
   }
 
+  const statusChanged = statusBeforeUpdate === null || statusBeforeUpdate !== state.currentData.status;
   previousStatus = state.currentData.status;
+  if (statusChanged && (state.currentData.status === 'lobby' || state.currentData.status === 'playing')) {
+    scrollToStatusSection(state.currentData.status);
+  }
 }
 
 // ブラウザがバックグラウンドから復帰したタイミングで、Firestoreの最新データを再取得して画面に反映する。

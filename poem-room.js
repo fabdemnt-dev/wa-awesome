@@ -76,12 +76,21 @@ async function saveParticipantRole(role) {
 
 // Firestoreの部屋データを受け取り、画面表示を最新状態へ反映する。
 // onSnapshotでの受信時と、Chrome復帰時のvisibilitychange再取得時の両方から呼ばれる共通処理。
+let previousStatus = null;
 let roomUpdateSequence = 0;
 let lastAppliedRoomUpdateSequence = 0;
+
+function scrollToStatusSection(status) {
+  const sectionId = status === 'playing' ? 'game-sec' : 'lobby-sec';
+  requestAnimationFrame(() => {
+    document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+}
 
 function applyRoomData(data, sequence = ++roomUpdateSequence) {
   if (sequence < lastAppliedRoomUpdateSequence) return;
   lastAppliedRoomUpdateSequence = sequence;
+  const statusBeforeUpdate = previousStatus;
   const normalizedRoles = normalizeParticipantRoles(data);
   data = { ...data, ...normalizedRoles };
   const embeddedHistory = Array.isArray(data?.history)
@@ -197,6 +206,12 @@ function applyRoomData(data, sequence = ++roomUpdateSequence) {
     renderHand();
     renderBoards();
     setupAutoResize();
+  }
+
+  const statusChanged = statusBeforeUpdate === null || statusBeforeUpdate !== state.currentData.status;
+  previousStatus = state.currentData.status;
+  if (statusChanged && (state.currentData.status === 'lobby' || state.currentData.status === 'playing')) {
+    scrollToStatusSection(state.currentData.status);
   }
 }
 
