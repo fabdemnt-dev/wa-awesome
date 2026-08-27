@@ -36,6 +36,15 @@ export function isValidParticipantName(name) {
 
 // ラウンド中に、現在の親とは別のプレイヤーだけが親を引き継げる。
 // 親が players から既に消えている状態は、ロビー側の自動親確定に任せるため対象外とする。
+export function getCurrentHostName(data) {
+  const players = Array.isArray(data?.players) ? data.players.map(normalizeParticipantName).filter(Boolean) : [];
+  const hostUid = String(data?.currentHostUid ?? '');
+  const uidName = normalizeParticipantName(data?.participantUids?.[hostUid]);
+  if (uidName && players.includes(uidName)) return uidName;
+  const currentHost = normalizeParticipantName(data?.currentHost);
+  return players.includes(currentHost) ? currentHost : (players[0] || '');
+}
+
 export function canClaimHost(data, name, isSpectator = false) {
   const participantName = normalizeParticipantName(name);
   const players = Array.isArray(data?.players) ? data.players.map(normalizeParticipantName).filter(Boolean) : [];
