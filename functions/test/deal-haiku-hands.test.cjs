@@ -104,6 +104,11 @@ test('Haiku次節Callableは得点・履歴・親交代・素材持越しを一�
   assert.equal(room.scores['参加者'], 10);
   assert.deepEqual(room.words5.map((word) => word.id), ['user-word']);
   assert.equal(history.size, 1);
+  const historyEntry = history.docs[0].data();
+  assert.deepEqual(historyEntry.scoreDeltas, { '参加者': 10 });
+  assert.deepEqual(historyEntry.scoresAfter, { '参加者': 10 });
+  assert.deepEqual(historyEntry.playerNames, ['親', '参加者']);
+  assert.deepEqual(historyEntry.spectatorNames, ['見学者']);
 });
 
 test('設定Callableは親限定と入力範囲を検証する', async () => {

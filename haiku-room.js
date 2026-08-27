@@ -89,6 +89,54 @@ function updateScoreboard(data) {
   el.innerHTML = `<div class="scoreboard-title">累計得点ランキング</div><div class="scoreboard-list">${ranking.map((name, index) => `<div class="score-row"><span>${index + 1}位　${escapeHTML(name)}</span><strong>${Number(scores[name]) || 0} 誉</strong></div>`).join('')}</div>`;
 }
 
+function updateScoreHistory(data) {
+  const el = document.getElementById('score-history');
+  if (!el) return;
+  const history = Array.isArray(data?.history)
+    ? data.history.filter(entry => Number.isFinite(Number(entry?.round)))
+    : [];
+  if (history.length === 0) {
+    el.innerHTML = '';
+    return;
+  }
+
+  const rounds = [...history].sort((a, b) => Number(a.round) - Number(b.round));
+  const renderScores = (scores) => Object.entries(scores || {})
+    .filter(([, value]) => Number.isFinite(Number(value)))
+    .sort(([, a], [, b]) => Number(b) - Number(a))
+    .map(([name, score], index) => `<div class="score-history-total"><span>${index + 1}位　${escapeHTML(name)}</span><strong>${Number(score)} 誉</strong></div>`)
+    .join('');
+
+  const roundHtml = rounds.map((entry) => {
+    const deltas = Object.entries(entry.scoreDeltas || {})
+      .filter(([, value]) => Number(value) > 0)
+      .sort(([, a], [, b]) => Number(b) - Number(a));
+    const hasScoreDetails = entry.scoreDeltas && entry.scoresAfter;
+    const deltaHtml = hasScoreDetails
+      ? (deltas.length > 0
+        ? `<div class="score-history-deltas">${deltas.map(([name, points]) => `<span class="score-history-delta">${escapeHTML(name)} <strong>+${Number(points)} 誉</strong></span>`).join('')}</div>`
+        : '<div class="score-history-empty">この節の得点はありません</div>')
+      : '<div class="score-history-empty">この節は旧形式の履歴のため、得点の詳細は表示できません</div>';
+    const totalsHtml = hasScoreDetails ? renderScores(entry.scoresAfter) : '';
+    return `
+      <section class="score-history-round">
+        <div class="score-history-round-title"><strong>第${Number(entry.round)}節</strong><span>選者：${escapeHTML(entry.host || '未設定')}</span></div>
+        <div class="score-history-label">この節の加点</div>
+        ${deltaHtml}
+        ${totalsHtml ? `<div class="score-history-label">節終了時の累計</div><div class="score-history-totals">${totalsHtml}</div>` : ''}
+      </section>
+    `;
+  }).join('');
+
+  el.innerHTML = `
+    <details class="score-history-details">
+      <summary>得点履歴（${rounds.length}節）</summary>
+      <p class="score-history-note">各節の御印による加点と、その節を終えた時点の累計です。</p>
+      ${roundHtml}
+    </details>
+  `;
+}
+
 function updateRoleHelp(data) {
   const isHost = data?.currentHostUid && state.myUid
     ? data.currentHostUid === state.myUid
@@ -200,6 +248,7 @@ function applyRoomData(data) {
   updateRoundResult(state.currentData);
   updateSubmissionStatus(state.currentData);
   updateScoreboard(state.currentData);
+  updateScoreHistory(state.currentData);
   const players = state.currentData.players || [];
   const spectators = state.currentData.spectators || [];
 

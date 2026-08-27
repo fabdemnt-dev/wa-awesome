@@ -727,6 +727,7 @@ exports.advanceHaikuRound = onCall(callableOptions, async (request) => {
     const phraseDetails = isPlainObject(room.phraseDetails) ? room.phraseDetails : {};
     const scores = isPlainObject(room.scores) ? room.scores : {};
     const nextScores = { ...scores };
+    const scoreDeltas = {};
     const taePoints = Math.max(10, players.length * 2);
     const taeWinners = new Set();
     for (const [voterUid, voterVotes] of Object.entries(votes)) {
@@ -740,6 +741,7 @@ exports.advanceHaikuRound = onCall(callableOptions, async (request) => {
           if (key === 'tae') taeWinners.add(targetName);
           const points = key === 'tae' ? taePoints : (haikuVotePoints[key] || 0);
           nextScores[targetName] = (nextScores[targetName] || 0) + points;
+          scoreDeltas[targetName] = (scoreDeltas[targetName] || 0) + points;
         }
       }
     }
@@ -754,7 +756,20 @@ exports.advanceHaikuRound = onCall(callableOptions, async (request) => {
       lastRoundResult: { round: currentRound, taeWinners: [...taeWinners], taePoints },
       hands5: {}, hands7: {}, deck5: [], deck7: [], phrases: {}, phraseDetails: {}, votes: {}, revealedPhrases: {}, selfPraise: {}, redraws: {},
     });
-    transaction.set(historyRef, { round: currentRound, phrases, phraseDetails, votes, participantUids: room.participantUids || {}, host: currentHost, createdAt: FieldValue.serverTimestamp() });
+    transaction.set(historyRef, {
+      round: currentRound,
+      phrases,
+      phraseDetails,
+      votes,
+      participantUids: room.participantUids || {},
+      host: currentHost,
+      playerNames: players,
+      spectatorNames: spectators,
+      taePoints,
+      scoreDeltas,
+      scoresAfter: nextScores,
+      createdAt: FieldValue.serverTimestamp(),
+    });
     result = { ok: true, nextRound: currentRound + 1, nextHost, taeWinners: [...taeWinners] };
   });
   return result;
