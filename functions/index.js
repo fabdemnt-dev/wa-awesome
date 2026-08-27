@@ -751,6 +751,7 @@ exports.advanceHaikuRound = onCall(callableOptions, async (request) => {
     transaction.update(roomRef, {
       status: 'lobby', currentHost: nextHost, currentHostUid: nextHostUid, roundCount: currentRound + 1,
       scores: nextScores, words5: carriedWords5, words7: carriedWords7,
+      lastRoundResult: { round: currentRound, taeWinners: [...taeWinners], taePoints },
       hands5: {}, hands7: {}, deck5: [], deck7: [], phrases: {}, phraseDetails: {}, votes: {}, revealedPhrases: {}, selfPraise: {}, redraws: {},
     });
     transaction.set(historyRef, { round: currentRound, phrases, phraseDetails, votes, participantUids: room.participantUids || {}, host: currentHost, createdAt: FieldValue.serverTimestamp() });

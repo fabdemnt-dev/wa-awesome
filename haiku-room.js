@@ -65,6 +65,21 @@ function updateSubmissionStatus(data) {
   render('submission-status-game', '句の提出状況', phraseFor);
 }
 
+function updateRoundResult(data) {
+  const el = document.getElementById('round-result-lobby');
+  if (!el) return;
+  const result = data?.lastRoundResult;
+  const winners = Array.isArray(result?.taeWinners) ? result.taeWinners.filter(Boolean) : [];
+  if (!winners.length) {
+    el.innerHTML = '';
+    el.style.display = 'none';
+    return;
+  }
+  const points = Number(result.taePoints) || 10;
+  el.innerHTML = `🪭 <strong>妙なり、おめでとうございます！</strong><br>${winners.map(name => `${escapeHTML(name)}さん（+${points}誉）`).join('、')}`;
+  el.style.display = 'block';
+}
+
 function updateScoreboard(data) {
   const el = document.getElementById('scoreboard');
   if (!el) return;
@@ -182,6 +197,7 @@ function applyRoomData(data) {
   if (!state.currentData) return;
 
   updatePhaseStatus(state.currentData);
+  updateRoundResult(state.currentData);
   updateSubmissionStatus(state.currentData);
   updateScoreboard(state.currentData);
   const players = state.currentData.players || [];
