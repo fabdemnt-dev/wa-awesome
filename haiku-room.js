@@ -6,14 +6,12 @@ import { renderInputFields, renderHand, renderBoards } from './haiku-render.js';
 import { subscribeRoomHistory } from './room-history.js';
 import { ensureSignedIn } from './wordset-auth.js';
 import { showGameError } from './game-error.js';
-import { diagState, diagLog } from './diagnostic-log.js';
 import { defaultWords5, defaultWords7 } from './haiku-default-words.js';
 
 const initialRoomId = new URLSearchParams(window.location.search).get('room')?.trim() || '';
 document.addEventListener('DOMContentLoaded', () => {
   const roomInput = document.getElementById('room-id');
   if (roomInput && initialRoomId && !roomInput.value) roomInput.value = initialRoomId;
-  if (initialRoomId) diagLog('haiku-room-query', { roomId: initialRoomId });
 });
 import { normalizeParticipantName, setParticipantRole, normalizeParticipantRoles, getParticipantStorageKey, canClaimHost, getCurrentHostName } from './participant-utils.js';
 import { changeHaikuRole, removeHaikuWord, updateHaikuSettings, removePlayer as removePlayerSecure, claimHost as claimHostSecure } from './haiku-functions.js';
@@ -120,7 +118,6 @@ function applyRoomData(data) {
     history: [...embeddedHistory, ...(state.roomHistory || [])],
   };
   if (!state.currentData) return;
-  diagState(state, 'haiku-room-state');
 
   const players = state.currentData.players || [];
   const spectators = state.currentData.spectators || [];
@@ -259,25 +256,14 @@ async function resyncRoomFromFirestore() {
   if (isResyncingRoom) return;
 
   isResyncingRoom = true;
-  diagLog('haiku-room-resync:start', { roomId: state.roomId });
   try {
     const snapshot = await getDocFromServer(state.roomRef);
     if (snapshot.exists()) {
       const data = snapshot.data();
-      diagLog('haiku-room-resync:success', {
-        roomId: state.roomId,
-        words5Count: Array.isArray(data.words5) ? data.words5.length : 0,
-        words7Count: Array.isArray(data.words7) ? data.words7.length : 0,
-        participantUidCount: Object.keys(data.participantUids || {}).length,
-        revealedPhraseUidCount: Object.values(data.revealedPhrases || {}).filter(Boolean).length,
-        phraseUidCount: Object.keys(data.phrases || {}).length,
-      });
       applyRoomData(data);
     } else {
-      diagLog('haiku-room-resync:not-found', { roomId: state.roomId });
     }
   } catch (e) {
-    diagLog('haiku-room-resync:error', { roomId: state.roomId, code: e?.code, message: e?.message });
     // 復帰時の再取得に失敗しても、既存のonSnapshot監視やゲーム操作は壊さない
     console.warn('復帰時の再同期に失敗しました:', e);
   } finally {
@@ -333,7 +319,6 @@ window.joinRoom = async function() {
   state.roomId = document.getElementById('room-id')?.value.trim() || "";
   const specCheck = document.getElementById('spectator-check');
   state.isSpectator = specCheck ? specCheck.checked : false;
-  diagLog('haiku-join-input', { roomId: state.roomId, myUid: state.myUid, myName: state.myName, isSpectator: state.isSpectator });
 
   if (!state.myName || !state.roomId) return alert('名前とルームIDを入力してください');
 
