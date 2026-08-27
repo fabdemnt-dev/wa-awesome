@@ -52,6 +52,8 @@ export function diagState(state, source = 'state') {
     players: state.currentData?.players,
     spectators: state.currentData?.spectators,
     participantUidCount: Object.keys(state.currentData?.participantUids || {}).length,
+    words5Count: Array.isArray(state.currentData?.words5) ? state.currentData.words5.length : 0,
+    words7Count: Array.isArray(state.currentData?.words7) ? state.currentData.words7.length : 0,
   });
 }
 

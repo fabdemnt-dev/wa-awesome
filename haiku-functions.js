@@ -23,13 +23,30 @@ function requireRoomId(roomId) {
 }
 
 async function callWithDiag(name, callable, data) {
-  diagLog(`${name}:start`, { roomId: data?.roomId, targetUid: data?.targetUid });
+  diagLog(`${name}:start`, {
+    roomId: data?.roomId,
+    targetUid: data?.targetUid,
+    words5Count: Array.isArray(data?.words5) ? data.words5.length : undefined,
+    words7Count: Array.isArray(data?.words7) ? data.words7.length : undefined,
+  });
   try {
     const result = await callable(data);
-    diagLog(`${name}:success`, { roomId: data?.roomId, targetUid: data?.targetUid });
+    diagLog(`${name}:success`, {
+      roomId: data?.roomId,
+      targetUid: data?.targetUid,
+      words5Count: Array.isArray(data?.words5) ? data.words5.length : undefined,
+      words7Count: Array.isArray(data?.words7) ? data.words7.length : undefined,
+    });
     return result.data;
   } catch (error) {
-    diagLog(`${name}:error`, { roomId: data?.roomId, targetUid: data?.targetUid, code: error?.code, message: error?.message });
+    diagLog(`${name}:error`, {
+      roomId: data?.roomId,
+      targetUid: data?.targetUid,
+      words5Count: Array.isArray(data?.words5) ? data.words5.length : undefined,
+      words7Count: Array.isArray(data?.words7) ? data.words7.length : undefined,
+      code: error?.code,
+      message: error?.message,
+    });
     throw error;
   }
 }
@@ -53,8 +70,11 @@ export async function updateHaikuSettings(roomId, hand5, hand7, carryOver) {
 }
 
 export async function submitHaikuWords(roomId, words5, words7) {
-  const result = await submitHaikuWordsCallable({ roomId: requireRoomId(roomId), words5, words7 });
-  return result.data;
+  return callWithDiag('submitHaikuWords', submitHaikuWordsCallable, {
+    roomId: requireRoomId(roomId),
+    words5: Array.isArray(words5) ? words5 : [],
+    words7: Array.isArray(words7) ? words7 : [],
+  });
 }
 
 export async function removeHaikuWord(roomId, type, wordId) {
