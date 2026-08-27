@@ -82,9 +82,20 @@ function getCurrentHostUid(room, participants) {
 }
 
 function requireHostUid(room, uid, participants) {
-  const hostUid = getCurrentHostUid(room, participants);
+  let hostUid = getCurrentHostUid(room, participants);
+  const callerName = participants.get(uid);
+  const currentHostName = room.currentHost;
+  const currentHostUidIsPlaying = hostUid && participants.has(hostUid)
+    && Array.isArray(room.players) && room.players.includes(participants.get(hostUid));
+
+  // 役割変更・旧クライアント再接続でcurrentHostUidだけが古く残った場合は、
+  // currentHost名と現在のプレイヤーUIDが一致する呼び出し元に限って安全に救済する。
+  if ((!currentHostUidIsPlaying || !hostUid) && callerName && callerName === currentHostName
+      && Array.isArray(room.players) && room.players.includes(callerName)) {
+    hostUid = uid;
+  }
   if (!hostUid || hostUid !== uid || !participants.has(hostUid)) {
-    fail('permission-denied', '親だけが配札できます。');
+    fail('permission-denied', 'プレイヤーの親だけが配札できます。');
   }
   const hostName = participants.get(hostUid);
   if (!Array.isArray(room.players) || !room.players.includes(hostName)) {
@@ -163,6 +174,7 @@ exports.dealHaikuHands = onCall(callableOptions, async (request) => {
     transaction.update(roomRef, {
       schemaVersion: 2,
       status: 'playing',
+      currentHostUid: uid,
       deck5: words5,
       deck7: words7,
       hands5: FieldValue.delete(),
