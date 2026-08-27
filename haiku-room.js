@@ -65,6 +65,15 @@ function updateSubmissionStatus(data) {
   render('submission-status-game', '句の提出状況', phraseFor);
 }
 
+function updateScoreboard(data) {
+  const el = document.getElementById('scoreboard');
+  if (!el) return;
+  const players = data?.players || [];
+  const scores = data?.scores || {};
+  const ranking = [...players].sort((a, b) => (Number(scores[b]) || 0) - (Number(scores[a]) || 0));
+  el.innerHTML = `<div class="scoreboard-title">累計得点ランキング</div><div class="scoreboard-list">${ranking.map((name, index) => `<div class="score-row"><span>${index + 1}位　${escapeHTML(name)}</span><strong>${Number(scores[name]) || 0} 誉</strong></div>`).join('')}</div>`;
+}
+
 function updateRoleHelp(data) {
   const isHost = data?.currentHostUid && state.myUid
     ? data.currentHostUid === state.myUid
@@ -174,6 +183,7 @@ function applyRoomData(data) {
 
   updatePhaseStatus(state.currentData);
   updateSubmissionStatus(state.currentData);
+  updateScoreboard(state.currentData);
   const players = state.currentData.players || [];
   const spectators = state.currentData.spectators || [];
 
