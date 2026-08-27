@@ -1,6 +1,6 @@
 import { db } from './firebase-config.js';
 import { collection, query, where, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-import { normalizeWordSet } from './wordset-utils.js';
+import { normalizeWordSet, getIconById, iconForId } from './wordset-utils.js';
 
 let cachedSets = [];
 
@@ -12,12 +12,19 @@ function escapeOpt(str) {
   return String(str).replace(/[<>&"]/g, m => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[m]));
 }
 
+function iconForSet(set) {
+  const legacyIcon = getIconById(set.icon);
+  if (legacyIcon) return legacyIcon.emoji;
+  if (typeof set.icon === 'string' && set.icon.trim()) return set.icon.trim();
+  return iconForId(set.id).emoji;
+}
+
 function renderOptions() {
   const sel = document.getElementById('wordset-select');
   if (!sel) return;
   const current = sel.value;
   sel.innerHTML = '<option value="builtin">🎲 標準セット（おまかせ）</option>' +
-    cachedSets.map(s => `<option value="${s.id}">📗 ${escapeOpt(s.name)}（${(s.words || []).length}こ）</option>`).join('');
+    cachedSets.map(s => `<option value="${s.id}">${escapeOpt(iconForSet(s))} ${escapeOpt(s.name)}（${(s.words || []).length}こ）</option>`).join('');
   if ([...sel.options].some(o => o.value === current)) sel.value = current;
 }
 
