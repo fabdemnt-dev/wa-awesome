@@ -10,7 +10,6 @@ const removePoemWordCallable = httpsCallable(functions, 'removePoemWord');
 const updatePoemSettingsCallable = httpsCallable(functions, 'updatePoemSettings');
 const dealPoemHandsCallable = httpsCallable(functions, 'dealPoemHands');
 const removePlayerCallable = httpsCallable(functions, 'removePlayer');
-const claimHostCallable = httpsCallable(functions, 'claimHost');
 const changePoemRoleCallable = httpsCallable(functions, 'changePoemRole');
 
 function requireRoomId(roomId) {
@@ -35,10 +34,6 @@ export async function changePoemRole(roomId, role, supplementWords = []) {
 export async function removePlayer(roomId, targetUid) {
   const result = await removePlayerCallable({ roomId: requireRoomId(roomId), game: 'poem', targetUid });
   return result.data;
-}
-
-export async function claimHost(roomId) {
-  return callCallable(claimHostCallable, { roomId: requireRoomId(roomId), game: 'poem' });
 }
 
 export async function updatePoemSettings(roomId, handCount) {
