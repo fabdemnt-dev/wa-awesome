@@ -306,7 +306,7 @@ body {
   .btn-new { width: 100%; min-height: 42px; }
   .set-item {
     display: grid;
-    grid-template-columns: 40px minmax(0, 1fr);
+    grid-template-columns: 40px minmax(0, 1fr) auto;
     align-items: start;
     gap: 8px 10px;
     padding: 10px;
@@ -315,13 +315,14 @@ body {
   .set-name { overflow-wrap: anywhere; }
   .set-preview { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   .set-actions {
-    grid-column: 1 / -1;
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 6px;
-    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+    width: auto;
+    min-width: 76px;
   }
-  .set-actions button { width: 100%; min-height: 40px; padding: 8px 5px; }
+  .set-actions button { width: auto; min-height: 36px; padding: 6px 7px; }
   .set-detail { grid-column: 1 / -1; width: 100%; box-sizing: border-box; }
   .grid-2col { gap: 10px; }
   .form-block { margin-bottom: 14px; }
