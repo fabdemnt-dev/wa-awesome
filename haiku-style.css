@@ -236,6 +236,9 @@ button:disabled { background-color: #94a3b8; cursor: not-allowed; }
   margin-bottom: 12px;
 }
 
+/* 現在のゲームフェーズ */
+.phase-status { background:#eff6ff; border:1px solid #93c5fd; color:#1e40af; padding:8px 12px; border-radius:8px; margin-bottom:10px; text-align:center; font-size:13px; font-weight:800; }
+
 /* 選者表示 */
 .host-banner {
   background: #fffbeb;

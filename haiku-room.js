@@ -25,6 +25,25 @@ async function saveParticipantRole(role) {
 }
 
 let previousStatus = null; // 直前のstatusを記録し、「lobbyに遷移した瞬間」だけ入力欄をクリアするために使う
+
+function updatePhaseStatus(data) {
+  const lobbyText = data?.status === 'lobby' ? '開始待ち・素材準備中' : '';
+  let gameText = '';
+  if (data?.status === 'playing') {
+    const players = data.players || [];
+    const submitted = Object.keys(data.phrases || {}).length;
+    const revealed = Object.values(data.revealedPhrases || {}).filter(Boolean).length;
+    if (submitted < players.length) gameText = `句を作成中（${submitted}/${players.length}人提出済み）`;
+    else if (revealed < submitted) gameText = `句を披露中（${revealed}/${submitted}句披露済み）`;
+    else gameText = '御印受付中';
+  }
+  const setStatus = (id, text) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text ? `現在のフェーズ：${text}` : '';
+  };
+  setStatus('phase-status-lobby', lobbyText);
+  setStatus('phase-status-game', gameText);
+}
 let handUnsubscribe = null;
 let handSubscriptionKey = '';
 
@@ -119,6 +138,7 @@ function applyRoomData(data) {
   };
   if (!state.currentData) return;
 
+  updatePhaseStatus(state.currentData);
   const players = state.currentData.players || [];
   const spectators = state.currentData.spectators || [];
 

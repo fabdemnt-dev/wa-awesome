@@ -9,6 +9,26 @@ import { subscribeRoomHistory } from './room-history.js';
 import { ensureSignedIn } from './wordset-auth.js';
 import { showGameError } from './game-error.js';
 
+function updatePhaseStatus(data) {
+  const lobbyText = data?.status === 'lobby' ? '開始待ち・素材準備中' : '';
+  let gameText = '';
+  if (data?.status === 'playing') {
+    const players = data.players || [];
+    const poems = data.poems || {};
+    const submitted = Object.keys(poems).length;
+    const unrevealed = Object.values(poems).filter(poem => !poem?.revealed).length;
+    if (submitted < players.length) gameText = `ポエムを作成中（${submitted}/${players.length}人投稿済み）`;
+    else if (unrevealed > 0) gameText = `作品を披露中（${submitted - unrevealed}/${submitted}作品披露済み）`;
+    else gameText = '作品を鑑賞中';
+  }
+  const setStatus = (id, text) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text ? `現在のフェーズ：${text}` : '';
+  };
+  setStatus('phase-status-lobby', lobbyText);
+  setStatus('phase-status-game', gameText);
+}
+
 const initialRoomId = new URLSearchParams(window.location.search).get('room')?.trim() || '';
 document.addEventListener('DOMContentLoaded', () => {
   const roomInput = document.getElementById('room-id');
@@ -38,6 +58,7 @@ function applyRoomData(data) {
   };
   if (!state.currentData) return;
 
+  updatePhaseStatus(state.currentData);
   const players = state.currentData.players || [];
   const spectators = state.currentData.spectators || [];
 
