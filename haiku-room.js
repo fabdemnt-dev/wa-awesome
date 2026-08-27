@@ -1,5 +1,5 @@
 import { db } from "./firebase-config.js";
-import { doc, getDoc, setDoc, onSnapshot, updateDoc, runTransaction, serverTimestamp, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { doc, getDocFromServer, setDoc, onSnapshot, updateDoc, runTransaction, serverTimestamp, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import state from './haiku-state.js';
 import { escapeHTML, escapeJS } from './haiku-utils.js';
 import { renderInputFields, renderHand, renderBoards } from './haiku-render.js';
@@ -260,7 +260,7 @@ async function resyncRoomFromFirestore() {
   isResyncingRoom = true;
   diagLog('haiku-room-resync:start', { roomId: state.roomId });
   try {
-    const snapshot = await getDoc(state.roomRef);
+    const snapshot = await getDocFromServer(state.roomRef);
     if (snapshot.exists()) {
       const data = snapshot.data();
       diagLog('haiku-room-resync:success', {
