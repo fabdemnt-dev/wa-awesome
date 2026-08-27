@@ -29,6 +29,26 @@ function updatePhaseStatus(data) {
   setStatus('phase-status-game', gameText);
 }
 
+function updateSubmissionStatus(data) {
+  const players = data?.players || [];
+  const participantUids = data?.participantUids || {};
+  const uidFor = name => Object.entries(participantUids).find(([, value]) => value === name)?.[0];
+  const wordsFor = name => (data?.words || []).some(word => word?.author === name);
+  const poemFor = name => {
+    const uid = uidFor(name);
+    const poems = data?.poems || {};
+    return (uid && poems[uid] !== undefined) || poems[name] !== undefined;
+  };
+  const render = (id, label, doneFor) => {
+    const el = document.getElementById(id);
+    if (!el || !players.length) return;
+    const items = players.map(name => `<span class="submission-person ${doneFor(name) ? 'is-done' : ''}">${doneFor(name) ? '✅' : '⏳'} ${escapeHTML(name)}：${doneFor(name) ? '提出済み' : '未提出'}</span>`).join('');
+    el.innerHTML = `<div class="submission-title">${label}</div><div class="submission-people">${items}</div>`;
+  };
+  render('submission-status-lobby', '素材の提出状況', wordsFor);
+  render('submission-status-game', '作品の提出状況', poemFor);
+}
+
 const initialRoomId = new URLSearchParams(window.location.search).get('room')?.trim() || '';
 document.addEventListener('DOMContentLoaded', () => {
   const roomInput = document.getElementById('room-id');
@@ -59,6 +79,7 @@ function applyRoomData(data) {
   if (!state.currentData) return;
 
   updatePhaseStatus(state.currentData);
+  updateSubmissionStatus(state.currentData);
   const players = state.currentData.players || [];
   const spectators = state.currentData.spectators || [];
 

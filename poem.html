@@ -60,6 +60,7 @@
     <div style="margin-top: 20px;">
       <h3>参加メンバー</h3>
       <div id="player-list"></div>
+      <div id="submission-status-lobby" class="submission-status" aria-live="polite"></div>
       <div id="material-count">📦 集まった素材：0 / 0個</div>
     </div>
     
@@ -69,6 +70,7 @@
   <!-- 3. ゲーム画面 -->
   <div id="game-sec" class="card-panel" style="display:none;">
     <div id="phase-status-game" class="phase-status" role="status" aria-live="polite"></div>
+    <div id="submission-status-game" class="submission-status" aria-live="polite"></div>
     <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
       <button id="role-toggle-btn-game" onclick="toggleRole()" style="background-color: #64748b;">👀 見学モードに切り替える</button>
       <button id="manual-resync-btn-game" onclick="manualResync('game')" style="background-color: #64748b;">🔄 最新の状態に更新</button>
