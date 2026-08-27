@@ -55,6 +55,7 @@ export function diagState(state, source = 'state') {
     words5Count: Array.isArray(state.currentData?.words5) ? state.currentData.words5.length : 0,
     words7Count: Array.isArray(state.currentData?.words7) ? state.currentData.words7.length : 0,
     revealedPhraseUidCount: Object.values(state.currentData?.revealedPhrases || {}).filter(Boolean).length,
+    phraseUidCount: Object.keys(state.currentData?.phrases || {}).length,
   });
 }
 

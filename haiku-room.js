@@ -269,6 +269,7 @@ async function resyncRoomFromFirestore() {
         words7Count: Array.isArray(data.words7) ? data.words7.length : 0,
         participantUidCount: Object.keys(data.participantUids || {}).length,
         revealedPhraseUidCount: Object.values(data.revealedPhrases || {}).filter(Boolean).length,
+        phraseUidCount: Object.keys(data.phrases || {}).length,
       });
       applyRoomData(data);
     } else {
