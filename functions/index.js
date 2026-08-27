@@ -625,8 +625,17 @@ exports.revealHaikuPhrase = onCall(callableOptions, async (request) => {
     if (!participants.has(targetUid) || room.phrases?.[targetUid] === undefined) fail('not-found', '対象の句が見つかりません。');
     const hostUid = getCurrentHostUid(room, participants);
     if (uid !== targetUid && uid !== hostUid) fail('permission-denied', '自分または親の句だけ披露できます。');
-    transaction.update(roomRef, { [`revealedPhrases.${targetUid}`]: true });
+    const nextRevealedPhrases = {
+      ...(isPlainObject(room.revealedPhrases) ? room.revealedPhrases : {}),
+      [targetUid]: true,
+    };
+    transaction.set(roomRef, { revealedPhrases: nextRevealedPhrases }, { merge: true });
   });
+  const savedSnapshot = await roomRef.get();
+  const savedRevealedPhrases = savedSnapshot.data()?.revealedPhrases || {};
+  if (savedRevealedPhrases[targetUid] !== true) {
+    fail('internal', '披露状態の保存を確認できませんでした。もう一度お試しください。');
+  }
   return { ok: true };
 });
 
