@@ -82,8 +82,15 @@ window.submitVote = async function(targetPlayer, forcedKey, selectId) {
     if (!targetUid) return alert('対象の句が見つかりません');
     try {
       await submitHaikuVote(state.roomId, targetUid, evalKey);
-      if (typeof window.resyncHaikuRoom === 'function') await window.resyncHaikuRoom();
-      alert('御印を贈りました！');
+      if (typeof window.resyncHaikuRoom === 'function') {
+        try {
+          await window.resyncHaikuRoom({ requireSuccess: true });
+        } catch {
+          alert('御印はサーバーに保存されましたが、画面への反映確認に失敗しました。最新の状態に更新してください。');
+          return;
+        }
+      }
+      alert('御印を贈りました！画面への反映も確認しました。');
     } catch (e) {
       alert('御印の送信に失敗しました: ' + (e.message || 'サーバーエラー'));
     }
