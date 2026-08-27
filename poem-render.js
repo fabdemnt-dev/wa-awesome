@@ -1,6 +1,6 @@
 import state from './poem-state.js';
 import { speakPoem } from './poem-audio.js';
-import { getParticipantStorageKey } from './participant-utils.js';
+import { getParticipantStorageKey, getParticipantNameByUid } from './participant-utils.js';
 
 export function escapeHTML(str) {
   if (typeof str !== 'string') return '';
