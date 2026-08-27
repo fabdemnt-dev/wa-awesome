@@ -90,8 +90,10 @@ function requireHostUid(room, uid, participants) {
 
   // 役割変更・旧クライアント再接続でcurrentHostUidだけが古く残った場合は、
   // currentHost名と現在のプレイヤーUIDが一致する呼び出し元に限って安全に救済する。
-  if ((!currentHostUidIsPlaying || !hostUid) && callerName && callerName === currentHostName
+  if (callerName && callerName === currentHostName
       && Array.isArray(room.players) && room.players.includes(callerName)) {
+    // currentHostUidが別UIDを指していても、表示名・プレイヤー所属・認証UIDが
+    // 同じ参加者を指している場合は、旧クライアント由来のUID不整合を修復する。
     hostUid = uid;
   }
   if (!hostUid || hostUid !== uid || !participants.has(hostUid)) {
