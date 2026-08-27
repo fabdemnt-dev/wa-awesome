@@ -10,6 +10,13 @@ import { ensureSignedIn } from './wordset-auth.js';
 import { showGameError } from './game-error.js';
 import { diagState, diagLog } from './diagnostic-log.js';
 
+const initialRoomId = new URLSearchParams(window.location.search).get('room')?.trim() || '';
+document.addEventListener('DOMContentLoaded', () => {
+  const roomInput = document.getElementById('room-id');
+  if (roomInput && initialRoomId && !roomInput.value) roomInput.value = initialRoomId;
+  if (initialRoomId) diagLog('poem-room-query', { roomId: initialRoomId });
+});
+
 async function saveParticipantRole(role) {
   await runTransaction(db, async (transaction) => {
     const snapshot = await transaction.get(state.roomRef);
