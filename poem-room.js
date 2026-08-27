@@ -1,10 +1,10 @@
 import { db } from "./firebase-config.js";
 import { doc, getDocFromServer, setDoc, onSnapshot, updateDoc, runTransaction, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-import { normalizeParticipantName, setParticipantRole, normalizeParticipantRoles, getParticipantStorageKey, canClaimHost } from './participant-utils.js';
+import { normalizeParticipantName, setParticipantRole, normalizeParticipantRoles, getParticipantStorageKey } from './participant-utils.js';
 import state from './poem-state.js';
 import { escapeHTML, escapeJS, renderInputFields, renderHand, renderBoards } from './poem-render.js';
 import { setupAutoResize } from './poem-action.js';
-import { removePoemWord, updatePoemSettings, removePlayer as removePlayerSecure, claimHost as claimHostSecure, changePoemRole } from './poem-functions.js';
+import { removePoemWord, updatePoemSettings, removePlayer as removePlayerSecure, changePoemRole } from './poem-functions.js';
 import { subscribeRoomHistory } from './room-history.js';
 import { ensureSignedIn } from './wordset-auth.js';
 import { showGameError } from './game-error.js';
@@ -147,16 +147,7 @@ function applyRoomData(data) {
     startBtn.style.cursor = state.isSpectator ? 'not-allowed' : 'pointer';
     startBtn.innerText = state.isSpectator ? '👀 見学者は開始できません' : 'ポエム作りを開始';
   }
-  const nextBtn = document.getElementById('next-game-btn');
-  const hostRecoveryBtn = document.getElementById('host-recovery-btn');
-  if (hostRecoveryBtn) {
-    const canTakeover = canClaimHost(state.currentData, state.myName, state.isSpectator);
-    hostRecoveryBtn.style.display = state.currentData.status === 'playing' ? 'block' : 'none';
-    hostRecoveryBtn.disabled = !canTakeover;
-    hostRecoveryBtn.style.opacity = canTakeover ? '1' : '0.55';
-    hostRecoveryBtn.style.cursor = canTakeover ? 'pointer' : 'not-allowed';
-  }
-
+    const nextBtn = document.getElementById('next-game-btn');
   if (nextBtn) {
     nextBtn.disabled = state.isSpectator;
     nextBtn.style.opacity = state.isSpectator ? '0.5' : '1';
@@ -433,18 +424,6 @@ window.toggleRole = async function() {
     }
     state.isSpectator = true;
     alert("見学モードに切り替えました！");
-  }
-};
-
-window.claimHost = async function() {
-  if (!state.roomRef || state.isSpectator || state.currentData?.schemaVersion !== 2) return;
-  if (!confirm('親が不在・操作不能になったことを確認しましたか？\\n引き継ぐと、あなたが新しい親になります。')) return;
-  try {
-    await claimHostSecure(state.roomId);
-    alert('あなたが新しい親になりました。');
-  } catch (error) {
-    console.error('[claim-host]', error);
-    showGameError(error, '親の引き継ぎ');
   }
 };
 
