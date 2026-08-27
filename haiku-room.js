@@ -6,6 +6,7 @@ import { renderInputFields, renderHand, renderBoards } from './haiku-render.js';
 import { subscribeRoomHistory } from './room-history.js';
 import { ensureSignedIn } from './wordset-auth.js';
 import { showGameError } from './game-error.js';
+import { diagState, diagLog } from './diagnostic-log.js';
 import { defaultWords5, defaultWords7 } from './haiku-default-words.js';
 import { normalizeParticipantName, setParticipantRole, normalizeParticipantRoles, getParticipantStorageKey, canClaimHost, getCurrentHostName } from './participant-utils.js';
 import { changeHaikuRole, removeHaikuWord, updateHaikuSettings, removePlayer as removePlayerSecure, claimHost as claimHostSecure } from './haiku-functions.js';
@@ -112,6 +113,7 @@ function applyRoomData(data) {
     history: [...embeddedHistory, ...(state.roomHistory || [])],
   };
   if (!state.currentData) return;
+  diagState(state, 'haiku-room-state');
 
   const players = state.currentData.players || [];
   const spectators = state.currentData.spectators || [];
@@ -299,6 +301,7 @@ window.joinRoom = async function() {
   state.roomId = document.getElementById('room-id')?.value.trim() || "";
   const specCheck = document.getElementById('spectator-check');
   state.isSpectator = specCheck ? specCheck.checked : false;
+  diagLog('haiku-join-input', { roomId: state.roomId, myUid: state.myUid, myName: state.myName, isSpectator: state.isSpectator });
 
   if (!state.myName || !state.roomId) return alert('名前とルームIDを入力してください');
 

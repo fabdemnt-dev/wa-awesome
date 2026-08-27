@@ -1,5 +1,6 @@
 import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-functions.js";
 import { app } from './firebase-config.js';
+import { diagLog } from './diagnostic-log.js';
 
 const functions = getFunctions(app, 'asia-northeast1');
 const dealHaikuHandsCallable = httpsCallable(functions, 'dealHaikuHands');
@@ -21,19 +22,29 @@ function requireRoomId(roomId) {
   return roomId.trim();
 }
 
+async function callWithDiag(name, callable, data) {
+  diagLog(`${name}:start`, { roomId: data?.roomId, targetUid: data?.targetUid });
+  try {
+    const result = await callable(data);
+    diagLog(`${name}:success`, { roomId: data?.roomId, targetUid: data?.targetUid });
+    return result.data;
+  } catch (error) {
+    diagLog(`${name}:error`, { roomId: data?.roomId, targetUid: data?.targetUid, code: error?.code, message: error?.message });
+    throw error;
+  }
+}
+
 export async function removePlayer(roomId, targetUid) {
   const result = await removePlayerCallable({ roomId: requireRoomId(roomId), game: 'haiku', targetUid });
   return result.data;
 }
 
 export async function claimHost(roomId) {
-  const result = await claimHostCallable({ roomId: requireRoomId(roomId), game: 'haiku' });
-  return result.data;
+  return callWithDiag('claimHost', claimHostCallable, { roomId: requireRoomId(roomId), game: 'haiku' });
 }
 
 export async function advanceHaikuRound(roomId) {
-  const result = await advanceHaikuRoundCallable({ roomId: requireRoomId(roomId) });
-  return result.data;
+  return callWithDiag('advanceHaikuRound', advanceHaikuRoundCallable, { roomId: requireRoomId(roomId) });
 }
 
 export async function updateHaikuSettings(roomId, hand5, hand7, carryOver) {
@@ -62,8 +73,7 @@ export async function changeHaikuRole(roomId, role, supplement5 = [], supplement
 }
 
 export async function dealHaikuHands(roomId) {
-  const result = await dealHaikuHandsCallable({ roomId: requireRoomId(roomId) });
-  return result.data;
+  return callWithDiag('dealHaikuHands', dealHaikuHandsCallable, { roomId: requireRoomId(roomId) });
 }
 
 export async function redrawHaikuHand(roomId, selectedIds5, selectedIds7) {
@@ -76,13 +86,11 @@ export async function redrawHaikuHand(roomId, selectedIds5, selectedIds7) {
 }
 
 export async function submitHaikuPhrase(roomId, phrase, phraseDetails) {
-  const result = await submitHaikuPhraseCallable({ roomId: requireRoomId(roomId), phrase, phraseDetails });
-  return result.data;
+  return callWithDiag('submitHaikuPhrase', submitHaikuPhraseCallable, { roomId: requireRoomId(roomId), phrase, phraseDetails });
 }
 
 export async function revealHaikuPhrase(roomId, targetUid) {
-  const result = await revealHaikuPhraseCallable({ roomId: requireRoomId(roomId), targetUid });
-  return result.data;
+  return callWithDiag('revealHaikuPhrase', revealHaikuPhraseCallable, { roomId: requireRoomId(roomId), targetUid });
 }
 
 export async function selfPraiseHaikuPhrase(roomId) {
