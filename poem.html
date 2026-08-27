@@ -23,6 +23,7 @@
 
   <!-- 2. ロビー & 素材登録 -->
   <div id="lobby-sec" class="card-panel" style="display:none;">
+    <div id="phase-status-lobby" class="phase-status" role="status" aria-live="polite"></div>
     <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
       <button id="role-toggle-btn-lobby" onclick="toggleRole()" style="background-color: #64748b;">👀 見学モードに切り替える</button>
       <button id="manual-resync-btn-lobby" onclick="manualResync('lobby')" style="background-color: #64748b;">🔄 最新の状態に更新</button>
@@ -67,6 +68,7 @@
 
   <!-- 3. ゲーム画面 -->
   <div id="game-sec" class="card-panel" style="display:none;">
+    <div id="phase-status-game" class="phase-status" role="status" aria-live="polite"></div>
     <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
       <button id="role-toggle-btn-game" onclick="toggleRole()" style="background-color: #64748b;">👀 見学モードに切り替える</button>
       <button id="manual-resync-btn-game" onclick="manualResync('game')" style="background-color: #64748b;">🔄 最新の状態に更新</button>

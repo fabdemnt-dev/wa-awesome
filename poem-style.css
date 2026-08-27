@@ -88,6 +88,9 @@ button:active {
   background-color: #fafafa;
 }
 
+/* 現在のゲームフェーズ */
+.phase-status { background:#eef2ff; border:1px solid #a5b4fc; color:#3730a3; padding:8px 12px; border-radius:8px; margin-bottom:10px; text-align:center; font-size:13px; font-weight:800; }
+
 /* 各セクションの小見出し */
 .section-title {
   font-size: 14px;
