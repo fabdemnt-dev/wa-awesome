@@ -320,6 +320,7 @@ window.nextRound = async function() {
     const players = state.currentData.players || [];
     const spectators = state.currentData.spectators || [];
     const newScores = { ...scores };
+    const scoreDeltas = {};
 
     let taeWinners = [];
     const taePoints = Math.max(10, players.length * 2);
@@ -341,6 +342,7 @@ window.nextRound = async function() {
           const opt = evalOptionsMaster[k];
           const pts = (k === 'tae') ? taePoints : (opt ? opt.pts : 0);
           newScores[targetName] = (newScores[targetName] || 0) + pts;
+          scoreDeltas[targetName] = (scoreDeltas[targetName] || 0) + pts;
         });
       });
     });
@@ -363,7 +365,12 @@ window.nextRound = async function() {
       phraseDetails: state.currentData.phraseDetails || {}, 
       votes,
       participantUids: state.currentData.participantUids || {},
-      host: currentHost
+      host: currentHost,
+      playerNames: players,
+      spectatorNames: spectators,
+      taePoints,
+      scoreDeltas,
+      scoresAfter: newScores
     };
 
     // プレイヤーが入力した素材は、使われたかどうかに関わらず、設定がONなら次の節に持ち越す
