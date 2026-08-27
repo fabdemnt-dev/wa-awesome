@@ -877,10 +877,11 @@ exports.reactPoemSecure = onCall(callableOptions, async (request) => {
       fail('failed-precondition', '披露済みの作品だけリアクションできます。');
     }
     const reactionField = type === 'like' ? 'likes' : 'emos';
-    // 件数に加えて送信者UIDも記録する。UIDを保存し、表示時にparticipantUidsから名前へ変換する。
+    // Poemのリアクションは匿名仕様のため、集計件数だけを保存する。
     transaction.update(roomRef, {
       [`poems.${targetUid}.${reactionField}`]: FieldValue.increment(1),
-      [`poems.${targetUid}.reactionVoters.${type}.${uid}`]: true,
+      // PR97で追加された旧reactionVotersも、次回更新時に削除して匿名状態へ戻す。
+      [`poems.${targetUid}.reactionVoters`]: FieldValue.delete(),
     });
   });
   return { ok: true };

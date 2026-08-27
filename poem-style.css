@@ -236,15 +236,7 @@ button:active {
   color: #9a3412;
 }
 .reaction-summary-item strong { font-size: 13px; }
-.reaction-senders {
-  flex-basis: 100%;
-  color: #64748b;
-  font-size: 10px;
-  overflow-wrap: anywhere;
-}
-
 @media (max-width: 560px) {
   .reaction-summary-items { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .reaction-summary-item { justify-content: center; border-radius: 8px; text-align: center; }
-  .reaction-senders { line-height: 1.4; }
 }
