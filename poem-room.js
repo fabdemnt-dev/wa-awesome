@@ -49,6 +49,20 @@ function updateSubmissionStatus(data) {
   render('submission-status-game', '作品の提出状況', poemFor);
 }
 
+function updateRoleHelp(data) {
+  const isHost = data?.currentHostUid && state.myUid
+    ? data.currentHostUid === state.myUid
+    : data?.currentHost === state.myName;
+  const role = state.isSpectator ? '見学者' : (isHost ? '親・進行役' : 'プレイヤー');
+  const text = data?.status === 'lobby'
+    ? (state.isSpectator ? '見学者：参加者の準備状況を確認できます。素材投稿や開始操作はできません。' : (isHost ? '親・進行役：素材を確認し、準備ができたら「ポエム作りを開始」を押します。' : 'プレイヤー：素材を投稿し、親が開始するまで待ちます。'))
+    : (state.isSpectator ? '見学者：作品の披露とリアクションを楽しめます。進行操作はできません。' : (isHost ? '親・進行役：作品の披露状況を確認し、必要に応じて次のポエムへ進めます。' : 'プレイヤー：ポエムを投稿し、作品の披露と親の進行を待ちます。'));
+  ['role-help-lobby', 'role-help-game'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = `<strong>あなたの役割：${role}</strong><br>${text}`;
+  });
+}
+
 const initialRoomId = new URLSearchParams(window.location.search).get('room')?.trim() || '';
 document.addEventListener('DOMContentLoaded', () => {
   const roomInput = document.getElementById('room-id');
@@ -85,6 +99,7 @@ function applyRoomData(data) {
 
   if (spectators.includes(state.myName)) state.isSpectator = true;
   if (players.includes(state.myName)) state.isSpectator = false;
+  updateRoleHelp(state.currentData);
 
   const st = state.currentData.settings || { handCount: 5 };
   const handInput = document.getElementById('set-hand-count');
