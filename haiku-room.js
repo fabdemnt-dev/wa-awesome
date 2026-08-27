@@ -268,6 +268,7 @@ async function resyncRoomFromFirestore() {
         words5Count: Array.isArray(data.words5) ? data.words5.length : 0,
         words7Count: Array.isArray(data.words7) ? data.words7.length : 0,
         participantUidCount: Object.keys(data.participantUids || {}).length,
+        revealedPhraseUidCount: Object.values(data.revealedPhrases || {}).filter(Boolean).length,
       });
       applyRoomData(data);
     } else {
@@ -298,6 +299,8 @@ window.addEventListener('pageshow', (event) => {
 // 手動更新ボタン: 電波状況などでリアルタイム反映が遅れているときに、
 // ユーザーがボタンを押した瞬間にFirestoreから最新状態を取得して画面に反映する。
 // resyncRoomFromFirestoreと同じ処理を使うため、書き込みは一切行わない。
+window.resyncHaikuRoom = resyncRoomFromFirestore;
+
 window.manualResync = async function(where) {
   const btn = document.getElementById(where === 'game' ? 'manual-resync-btn-game' : 'manual-resync-btn-lobby');
   if (btn) { btn.disabled = true; btn.innerText = '🔄 更新中…'; }
