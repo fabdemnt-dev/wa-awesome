@@ -7,7 +7,7 @@ import { subscribeRoomHistory } from './room-history.js';
 import { ensureSignedIn } from './wordset-auth.js';
 import { showGameError } from './game-error.js';
 import { defaultWords5, defaultWords7 } from './haiku-default-words.js';
-import { normalizeParticipantName, setParticipantRole, normalizeParticipantRoles, getParticipantStorageKey, canClaimHost } from './participant-utils.js';
+import { normalizeParticipantName, setParticipantRole, normalizeParticipantRoles, getParticipantStorageKey, canClaimHost, getCurrentHostName } from './participant-utils.js';
 import { changeHaikuRole, removeHaikuWord, updateHaikuSettings, removePlayer as removePlayerSecure, claimHost as claimHostSecure } from './haiku-functions.js';
 
 async function saveParticipantRole(role) {
@@ -47,7 +47,7 @@ function subscribeOwnHand(data) {
 function refreshHostRecoveryUI() {
   const data = state.currentData;
   const players = data?.players || [];
-  const currentHost = players.includes(data?.currentHost) ? data.currentHost : (players[0] || '');
+  const currentHost = getCurrentHostName(data);
   const isPlaying = data?.status === 'playing';
   const canTakeover = canClaimHost(data, state.myName, state.isSpectator);
   const hostRecoveryBtn = document.getElementById('host-recovery-btn');
@@ -121,7 +121,7 @@ function applyRoomData(data) {
 
   subscribeOwnHand(state.currentData);
 
-  const currentHost = players.includes(state.currentData.currentHost) ? state.currentData.currentHost : (players[0] || '未設定');
+  const currentHost = getCurrentHostName(state.currentData) || '未設定';
   const hostText = `👑 今節の選者（親）: <strong>${escapeHTML(currentHost)}</strong> ${currentHost === state.myName ? '（あなた）' : ''}`;
 
 
@@ -476,7 +476,7 @@ window.toggleRole = async function() {
     // ラウンド中に選者本人が見学モードへ切り替わると、進行が止まってしまうため、選者本人の切り替えを禁止する
     if (state.currentData?.status === 'playing') {
       const players = state.currentData.players || [];
-      const currentHost = players.includes(state.currentData.currentHost) ? state.currentData.currentHost : (players[0] || '');
+      const currentHost = getCurrentHostName(state.currentData);
       if (state.myName === currentHost) {
         return alert('今節の選者（親）はラウンド中に見学モードへ切り替えられません。\n次の節に進んでから切り替えてください。');
       }

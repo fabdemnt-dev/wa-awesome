@@ -1,5 +1,5 @@
 import state from './haiku-state.js';
-import { getParticipantStorageKey, getParticipantUidByName } from './participant-utils.js';
+import { getParticipantStorageKey, getParticipantUidByName, getCurrentHostName } from './participant-utils.js';
 import { escapeHTML, escapeJS, evalOptionsMaster, hostOptionKeys, childOptionKeys, spectatorOptionKeys, colorPalette } from './haiku-utils.js';
 
 export function getAuthorStyle(authorName) {
@@ -146,9 +146,11 @@ export function renderBoards() {
   const revealedPhrases = state.currentData.revealedPhrases || {};
   const selfPraiseData = state.currentData.selfPraise || {};
   const players = state.currentData.players || [];
-  const currentHost = players.includes(state.currentData.currentHost) ? state.currentData.currentHost : (players[0] || '');
-  const isHost = state.currentData.schemaVersion === 2 && state.myUid && state.currentData.currentHostUid
-    ? state.myUid === state.currentData.currentHostUid
+  const currentHost = getCurrentHostName(state.currentData);
+  const hostUid = String(state.currentData.currentHostUid ?? '');
+  const hostNameUid = getParticipantUidByName(state.currentData, currentHost);
+  const isHost = state.currentData.schemaVersion === 2
+    ? Boolean(state.myUid && ((hostUid && state.myUid === hostUid) || (!hostUid && hostNameUid && state.myUid === hostNameUid)))
     : state.myName === currentHost;
   const availableKeys = state.isSpectator ? spectatorOptionKeys : (isHost ? hostOptionKeys : childOptionKeys);
 
