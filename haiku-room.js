@@ -101,6 +101,7 @@ function updateScoreHistory(data) {
   }
 
   const rounds = [...history].sort((a, b) => Number(a.round) - Number(b.round));
+  const wasOpen = el.querySelector('.score-history-details')?.open === true;
   const renderScores = (scores) => Object.entries(scores || {})
     .filter(([, value]) => Number.isFinite(Number(value)))
     .sort(([, a], [, b]) => Number(b) - Number(a))
@@ -129,7 +130,7 @@ function updateScoreHistory(data) {
   }).join('');
 
   el.innerHTML = `
-    <details class="score-history-details">
+    <details class="score-history-details"${wasOpen ? ' open' : ''}>
       <summary>得点履歴（${rounds.length}節）</summary>
       <p class="score-history-note">各節の御印による加点と、その節を終えた時点の累計です。</p>
       ${roundHtml}
