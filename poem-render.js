@@ -117,9 +117,34 @@ export function renderBoards() {
 
     const isRevealed = poemData.revealed;
     const hands = poemData.hands || [];
-    const likes = poemData.likes || 0;
-    const emos = poemData.emos || 0;
+    const likes = Number(poemData.likes) || 0;
+    const emos = Number(poemData.emos) || 0;
     const userColor = getColorFromName(pName);
+    const reactionNames = (type) => {
+      const voters = poemData.reactionVoters?.[type];
+      const voterUids = Array.isArray(voters)
+        ? voters
+        : (voters && typeof voters === 'object' ? Object.keys(voters).filter(uid => voters[uid]) : []);
+      return voterUids
+        .map(uid => getParticipantNameByUid(state.currentData, uid))
+        .filter(Boolean);
+    };
+    const reactionItem = (type, icon, label, count) => {
+      const names = reactionNames(type);
+      const senderText = names.length > 0
+        ? `<span class="reaction-senders">${names.map(name => escapeHTML(name)).join('、')}</span>`
+        : '';
+      return `<span class="reaction-summary-item ${count > 0 ? 'has-reactions' : ''}">${icon} ${label} <strong>${count}</strong>${senderText}</span>`;
+    };
+    const reactionSummaryHtml = `
+      <div class="reaction-summary" aria-label="リアクション集計">
+        <div class="reaction-summary-title">みんなの反応</div>
+        <div class="reaction-summary-items">
+          ${reactionItem('like', '👍', 'いいね', likes)}
+          ${reactionItem('emo', '💖', 'エモい', emos)}
+        </div>
+      </div>
+    `;
 
     const handsHtml = hands.map(h => {
       const authorColor = getColorFromName(h.author);
@@ -154,6 +179,7 @@ export function renderBoards() {
           `}
         </div>
 
+        ${reactionSummaryHtml}
         <div class="reaction-actions" style="display: flex; gap: 16px; margin-top: 12px; align-items: center;">
           <button onclick="addReaction('${jsPName}', 'like')" style="background: none; border: none; color: #334155; width: auto; padding: 6px 8px; font-size: 14px; cursor: pointer;">
             👍 いいね (${likes})

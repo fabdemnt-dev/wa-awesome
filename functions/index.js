@@ -876,7 +876,12 @@ exports.reactPoemSecure = onCall(callableOptions, async (request) => {
     if (room.schemaVersion !== 2 || room.status !== 'playing' || room.poems?.[targetUid] === undefined || room.poems?.[targetUid]?.revealed !== true) {
       fail('failed-precondition', '披露済みの作品だけリアクションできます。');
     }
-    transaction.update(roomRef, { [`poems.${targetUid}.${type === 'like' ? 'likes' : 'emos'}`]: FieldValue.increment(1) });
+    const reactionField = type === 'like' ? 'likes' : 'emos';
+    // 件数に加えて送信者UIDも記録する。UIDを保存し、表示時にparticipantUidsから名前へ変換する。
+    transaction.update(roomRef, {
+      [`poems.${targetUid}.${reactionField}`]: FieldValue.increment(1),
+      [`poems.${targetUid}.reactionVoters.${type}.${uid}`]: true,
+    });
   });
   return { ok: true };
 });

@@ -391,3 +391,54 @@ button:disabled { background-color: #94a3b8; cursor: not-allowed; }
   .section-title { font-size: 13px; }
   .vote-submit-btn, .vote-select { font-size: 12px; }
 }
+
+/* 句ごとの御印集計 */
+.eval-summary {
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+.eval-summary-title {
+  margin-bottom: 5px;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 800;
+}
+.eval-summary-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.eval-summary-item {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 3px;
+  padding: 4px 7px;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #1e40af;
+  font-size: 11px;
+}
+.eval-summary-item.is-tae {
+  background: #fef3c7;
+  color: #92400e;
+}
+.eval-summary-item strong { font-size: 12px; }
+.eval-summary-item small {
+  flex-basis: 100%;
+  color: #64748b;
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+.eval-summary.is-empty {
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+@media (max-width: 560px) {
+  .eval-summary-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .eval-summary-item { justify-content: center; text-align: center; }
+}

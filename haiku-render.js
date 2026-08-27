@@ -185,7 +185,8 @@ export function renderBoards() {
       return `<span class="word-tag" style="background:${s.bg}; color:${s.text}; border-color:${s.border};">${escapeHTML(d.text)}<span class="author-label">(${escapeHTML(d.author)})</span></span>`;
     }).join(' ') : `<strong>${escapeHTML(phrases[actualPhraseKey] ?? phrases[pName])}</strong>`;
 
-    let evalBadgesHtml = '';
+    const evalCounts = {};
+    const evalVoters = {};
     const allVoters = [...players, ...(state.currentData.spectators || [])];
     allVoters.forEach(voter => {
       const voterKey = getParticipantUidByName(state.currentData, voter) || voter;
@@ -194,11 +195,23 @@ export function renderBoards() {
         const keys = Array.isArray(vData) ? vData : [vData];
         keys.forEach(k => {
           if (evalOptionsMaster[k]) {
-            evalBadgesHtml += `<span style="font-size:12px;">${evalOptionsMaster[k].icon}</span>`;
+            evalCounts[k] = (evalCounts[k] || 0) + 1;
+            if (!evalVoters[k]) evalVoters[k] = [];
+            evalVoters[k].push(voter);
           }
         });
       }
     });
+    const evalSummaryHtml = Object.keys(evalCounts).length
+      ? `<div class="eval-summary" aria-label="御印の集計">
+          <div class="eval-summary-title">📜 御印の集計</div>
+          <div class="eval-summary-list">${Object.entries(evalCounts).map(([key, count]) => {
+            const option = evalOptionsMaster[key];
+            const senders = [...new Set(evalVoters[key] || [])].map(name => escapeHTML(name)).join('、');
+            return `<span class="eval-summary-item ${key === 'tae' ? 'is-tae' : ''}">${option.label} <strong>×${count}</strong>${senders ? `<small>${senders}</small>` : ''}</span>`;
+          }).join('')}</div>
+        </div>`
+      : '<div class="eval-summary is-empty">📜 まだ御印はありません</div>';
 
     const hasAlreadyVotedAsChild = !isHost && (myVotes[actualPhraseKey] != null || myVotes[pName] != null || hasVotedAnywhereAsChild);
 
@@ -224,7 +237,7 @@ export function renderBoards() {
           </div>
         </div>
         <div style="margin-top: 6px;">${phraseHtml}</div>
-        <div style="margin-top:6px;">${evalBadgesHtml}</div>
+        ${evalSummaryHtml}
         ${pName !== state.myName ? `
           <div class="vote-select-group" style="margin-top:8px;">
             ${hasAlreadyVotedAsChild ? `

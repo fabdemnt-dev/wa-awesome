@@ -199,3 +199,52 @@ button:active {
   .card-panel { padding: 12px; }
   .reaction-actions button { font-size: 12px !important; }
 }
+
+/* 作品ごとのリアクション集計 */
+.reaction-summary {
+  margin-top: 12px;
+  padding: 9px 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+.reaction-summary-title {
+  margin-bottom: 6px;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 800;
+}
+.reaction-summary-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.reaction-summary-item {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 3px;
+  min-width: 0;
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #64748b;
+  font-size: 12px;
+}
+.reaction-summary-item.has-reactions {
+  background: #fff7ed;
+  color: #9a3412;
+}
+.reaction-summary-item strong { font-size: 13px; }
+.reaction-senders {
+  flex-basis: 100%;
+  color: #64748b;
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 560px) {
+  .reaction-summary-items { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .reaction-summary-item { justify-content: center; border-radius: 8px; text-align: center; }
+  .reaction-senders { line-height: 1.4; }
+}
