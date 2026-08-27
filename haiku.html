@@ -57,7 +57,7 @@
         </label>
         <div style="font-size:11px; color:#94a3b8; margin-top:2px;">※プレイヤーが入力した素材は、使われたかどうかに関わらず全部持ち越されます。ワードセット/デフォルト補充で埋めた分（🎴マーク）は対象外です。</div>
 
-        <button onclick="updateSettings()" class="btn-secondary" style="margin-top:10px;">設定を保存</button>
+        <button onclick="updateSettings()" class="btn-primary" style="margin-top:10px;">設定を保存</button>
       </div>
 
       <div class="lobby-actions" style="margin-top:15px; display:flex; gap:8px; flex-wrap:wrap;">
@@ -124,7 +124,7 @@
           <span id="phrase-3">（選択してください）</span>
         </div>
         <div class="phrase-actions" style="margin-top:10px;">
-          <button onclick="swap5Cards()" class="btn-secondary">五音の位置を入れ替える</button>
+          <button onclick="swap5Cards()" class="btn-support">五音の位置を入れ替える</button>
           <button onclick="clearPhrase()" class="btn-secondary">やり直す</button>
           <button onclick="submitPhrase()" class="btn-primary">一句披露する！</button>
         </div>
@@ -165,11 +165,11 @@
       <button id="host-recovery-btn" onclick="claimHost()" style="display:none; margin:0 0 10px; background:#f59e0b; color:#1e293b;">親が不在のときだけ、親を引き継ぐ</button>
       <div class="export-actions" style="margin-top:20px; display:flex; gap:10px;">
         <button id="next-round-btn" onclick="nextRound()" class="btn-success" style="flex:2;">次の節に進む</button>
-        <button onclick="exportText()" style="flex:1; background-color: #5865F2;">📋 コピー (Discord用)</button>
-        <button onclick="exportCSV()" style="flex:1; background-color: #059669;">📥 CSV保存</button>
+        <button class="btn-copy" onclick="exportText()" style="flex:1;">📋 コピー (Discord用)</button>
+        <button class="btn-csv" onclick="exportCSV()" style="flex:1;">📥 CSV保存</button>
       </div>
 
-      <button onclick="saveGameAsWordSet()" class="btn-secondary" style="margin-top:10px; width:100%;">🎴 今日の素材をワードセットとして保存する</button>
+      <button onclick="saveGameAsWordSet()" class="btn-primary" style="margin-top:10px; width:100%;">🎴 今日の素材をワードセットとして保存する</button>
       <div style="font-size:11px; color:#94a3b8; margin-top:4px;">※プレイヤーが入力した素材だけが保存されます（ワードセット/デフォルト補充分は含みません）</div>
 
     </div>

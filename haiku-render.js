@@ -258,7 +258,7 @@ export function renderBoards() {
         <div class="board-header phrase-board-header" style="display: flex; justify-content: space-between; align-items: center;">
           <strong>${safePName} の句</strong>
           <div class="board-actions" style="display: flex; align-items: center; gap: 6px;">
-            <button onclick="speakPhrase('${escapeJS(phrases[actualPhraseKey] ?? phrases[pName])}')" style="font-size:11px; padding:3px 8px; background:#0284c7; color:white; border:none; border-radius:10px; cursor:pointer; width:auto; margin-top:0;">🔊 読み上げ</button>
+            <button class="btn-audio" onclick="speakPhrase('${escapeJS(phrases[actualPhraseKey] ?? phrases[pName])}')" style="font-size:11px; padding:3px 8px; border:none; border-radius:10px; cursor:pointer; width:auto; margin-top:0;">🔊 読み上げ</button>
             ${selfPraiseHtml}
           </div>
         </div>

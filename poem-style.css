@@ -41,7 +41,7 @@ button {
   padding: 12px;
   border-radius: 8px;
   border: none;
-  background-color: #4f46e5;
+  background-color: #2563eb;
   color: white;
   cursor: pointer;
   transition: opacity 0.2s;
@@ -50,6 +50,15 @@ button {
 button:active {
   opacity: 0.8;
 }
+
+/* Haikuと共通の意味別カラー。既存のサイズ・配置ルールは変更しない。 */
+.btn-primary { background-color: #2563eb; color: white; }
+.btn-secondary { background-color: #64748b; color: white; }
+.btn-success { background-color: #16a34a; color: white; }
+.btn-danger { background-color: #dc2626; color: white; }
+.btn-audio { background-color: #0284c7; color: white; }
+.btn-copy { background-color: #5865f2; color: white; }
+.btn-csv { background-color: #059669; color: white; }
 
 /* 素材(ことば)入力欄の並び */
 .word-list {

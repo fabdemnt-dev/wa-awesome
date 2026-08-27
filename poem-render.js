@@ -108,7 +108,7 @@ export function renderBoards() {
         <div class="player-board" style="margin-bottom: 20px; padding: 16px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff;">
           <div class="poem-board-header" style="display: flex; justify-content: space-between; align-items: center;">
             <strong>${safePName} の作品</strong>
-            <button onclick="speakPoem('${escapeJS(poemData)}')" style="width: auto; margin-top: 0; padding: 4px 10px; font-size: 12px; background-color: #0284c7;">🔊 読み上げ</button>
+            <button class="btn-audio" onclick="speakPoem('${escapeJS(poemData)}')" style="width: auto; margin-top: 0; padding: 4px 10px; font-size: 12px;">🔊 読み上げ</button>
           </div>
           <div style="margin-top: 8px; padding: 12px; background: #f8fafc; border-left: 4px solid #4f46e5; border-radius: 4px;">
             <p style="font-size: 15px; line-height: 1.5; white-space: pre-wrap; margin: 0;">${escapeHTML(poemData)}</p>
@@ -136,7 +136,7 @@ export function renderBoards() {
       <div class="player-board" style="margin-bottom: 20px; padding: 16px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff;">
         <div class="poem-board-header" style="display: flex; justify-content: space-between; align-items: center;">
           <strong>${safePName} の作品</strong>
-          ${isRevealed ? `<button onclick="speakPoem('${escapeJS(poemData.text)}')" style="width: auto; margin-top: 0; padding: 4px 10px; font-size: 12px; background-color: #0284c7;">🔊 読み上げ</button>` : ''}
+          ${isRevealed ? `<button class="btn-audio" onclick="speakPoem('${escapeJS(poemData.text)}')" style="width: auto; margin-top: 0; padding: 4px 10px; font-size: 12px;">🔊 読み上げ</button>` : ''}
         </div>
         
         <div style="margin-top: 8px;">
@@ -146,7 +146,7 @@ export function renderBoards() {
 
         <div style="margin-top: 12px;">
           ${!isRevealed ? `
-            <button onclick="revealPoem('${jsPName}')" style="background-color: #4f46e5; width: 100%; padding: 12px; font-size: 15px;">
+            <button class="btn-primary" onclick="revealPoem('${jsPName}')" style="width: 100%; padding: 12px; font-size: 15px;">
               🎁 タップして作品を開く
             </button>
           ` : `
