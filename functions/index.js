@@ -786,8 +786,19 @@ exports.submitHaikuVote = onCall(callableOptions, async (request) => {
     }
     const current = voterVotes[targetUid];
     const next = isHost ? [...(Array.isArray(current) ? current : current ? [current] : []), evalKey] : evalKey;
-    transaction.update(roomRef, { [`votes.${uid}.${targetUid}`]: next });
+    const nextVotes = {
+      ...(isPlainObject(room.votes) ? room.votes : {}),
+      [uid]: {
+        ...(isPlainObject(voterVotes) ? voterVotes : {}),
+        [targetUid]: next,
+      },
+    };
+    transaction.set(roomRef, { votes: nextVotes }, { merge: true });
   });
+  const savedSnapshot = await roomRef.get();
+  const savedVotes = savedSnapshot.data()?.votes?.[uid]?.[targetUid];
+  const persisted = isHost ? Array.isArray(savedVotes) && savedVotes.includes(evalKey) : savedVotes === evalKey;
+  if (!persisted) fail('internal', '御印の保存を確認できませんでした。もう一度お試しください。');
   return { ok: true };
 });
 
