@@ -245,12 +245,12 @@ export function renderBoards() {
     let selfPraiseHtml = '';
     if (pName === state.myName) {
       if (isSelfPraised) {
-        selfPraiseHtml = `<span style="font-size:13px; background:#fef3c7; color:#d97706; padding:2px 8px; border-radius:12px; border:1px solid #f59e0b; font-weight:bold;">🪞 自画自賛 🪞</span>`;
+        selfPraiseHtml = `<span class="self-praise-badge">🪞 自画自賛 🪞</span>`;
       } else {
-        selfPraiseHtml = `<button onclick="doSelfPraise()" style="font-size:11px; padding:3px 8px; background:#f59e0b; color:white; border:none; border-radius:10px; cursor:pointer;">自画自賛する</button>`;
+        selfPraiseHtml = `<button class="self-praise-btn" onclick="doSelfPraise()">自画自賛する</button>`;
       }
     } else if (isSelfPraised) {
-      selfPraiseHtml = `<span style="font-size:13px; background:#fef3c7; color:#d97706; padding:2px 8px; border-radius:12px; border:1px solid #f59e0b; font-weight:bold;">🪞 自画自賛 🪞</span>`;
+      selfPraiseHtml = `<span class="self-praise-badge">🪞 自画自賛 🪞</span>`;
     }
 
     return `
@@ -258,7 +258,7 @@ export function renderBoards() {
         <div class="board-header phrase-board-header" style="display: flex; justify-content: space-between; align-items: center;">
           <strong>${safePName} の句</strong>
           <div class="board-actions" style="display: flex; align-items: center; gap: 6px;">
-            <button class="btn-audio" onclick="speakPhrase('${escapeJS(phrases[actualPhraseKey] ?? phrases[pName])}')" style="font-size:11px; padding:3px 8px; border:none; border-radius:10px; cursor:pointer; width:auto; margin-top:0;">🔊 読み上げ</button>
+            <button class="btn-audio" onclick="speakPhrase('${escapeJS(phrases[actualPhraseKey] ?? phrases[pName])}')">🔊 読み上げ</button>
             ${selfPraiseHtml}
           </div>
         </div>

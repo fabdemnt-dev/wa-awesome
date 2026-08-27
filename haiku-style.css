@@ -429,6 +429,49 @@ button:disabled { background-color: #94a3b8; cursor: not-allowed; }
   .score-row { gap: 8px; }
 }
 
+/* 句カード上部の読み上げ・自画自賛を同じ高さで揃える */
+.phrase-board-header .board-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.phrase-board-header .board-actions > .btn-audio,
+.phrase-board-header .board-actions > .self-praise-btn,
+.phrase-board-header .board-actions > .self-praise-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: auto;
+  height: 24px;
+  min-height: 24px;
+  margin: 0;
+  padding: 3px 8px;
+  line-height: 1;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.phrase-board-header .board-actions > .btn-audio {
+  font-size: 11px;
+  border-radius: 10px;
+}
+.self-praise-btn {
+  font-size: 11px;
+  background: #f59e0b;
+  color: white;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.self-praise-badge {
+  font-size: 13px;
+  background: #fef3c7;
+  color: #d97706;
+  border: 1px solid #f59e0b;
+  border-radius: 12px;
+  font-weight: bold;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; }
 }
