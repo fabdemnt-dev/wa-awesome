@@ -19,13 +19,16 @@ window.switchMode = function (mode) {
   renderAll();
 };
 
-window.startNewWordSet = function () {
+window.startNewWordSet = function (shouldScroll = false) {
   const mode = state.mode;
   state.editingId[mode] = null;
   state.forms[mode] = mode === 'poem'
     ? { name: '', words: '', creatorName: '', hasPassword: false, password: '', icon: '', copyAllowed: true }
     : { name: '', words5: '', words7: '', creatorName: '', hasPassword: false, password: '', icon: '', copyAllowed: true };
   renderAll();
+  if (shouldScroll) {
+    document.getElementById(`panel-${mode}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
 };
 
 window.onWordSetFormInput = function () {
