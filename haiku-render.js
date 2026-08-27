@@ -196,33 +196,48 @@ export function renderBoards() {
       return `<span class="word-tag" style="background:${s.bg}; color:${s.text}; border-color:${s.border};">${escapeHTML(d.text)}<span class="author-label">(${escapeHTML(d.author)})</span></span>`;
     }).join(' ') : `<strong>${escapeHTML(phrases[actualPhraseKey] ?? phrases[pName])}</strong>`;
 
-    const evalCounts = {};
-    const evalVoters = {};
-    const allVoters = [...players, ...(state.currentData.spectators || [])];
+    const spectators = state.currentData.spectators || [];
+    const participantUid = (name) => getParticipantUidByName(state.currentData, name);
+    const playerUids = new Set(players.map(participantUid).filter(Boolean));
+    const spectatorUids = new Set(spectators.map(participantUid).filter(Boolean));
+    const currentHostUid = String(state.currentData.currentHostUid || '') || participantUid(currentHost);
+    const roleOfVoter = (name, uid) => {
+      if ((currentHostUid && uid === currentHostUid) || (!currentHostUid && name === currentHost)) return 'host';
+      if ((uid && spectatorUids.has(uid)) || (!uid && spectators.includes(name))) return 'spectator';
+      if ((uid && playerUids.has(uid)) || (!uid && players.includes(name))) return 'child';
+      return null;
+    };
+    const allVoters = [...players, ...spectators];
+    const voteEntries = [];
     allVoters.forEach(voter => {
-      const voterKey = getParticipantUidByName(state.currentData, voter) || voter;
+      const voterUid = participantUid(voter);
+      const voterKey = voterUid || voter;
       const vData = votes[voterKey]?.[actualPhraseKey] ?? votes[voterKey]?.[pName] ?? votes[voter]?.[pName];
-      if (vData) {
-        const keys = Array.isArray(vData) ? vData : [vData];
-        keys.forEach(k => {
-          if (evalOptionsMaster[k]) {
-            evalCounts[k] = (evalCounts[k] || 0) + 1;
-            if (!evalVoters[k]) evalVoters[k] = [];
-            evalVoters[k].push(voter);
-          }
-        });
-      }
+      if (!vData) return;
+      const role = roleOfVoter(voter, voterUid);
+      if (!role) return;
+      const keys = Array.isArray(vData) ? vData : [vData];
+      keys.forEach(key => {
+        if (evalOptionsMaster[key]) voteEntries.push({ key, name: voter, role });
+      });
     });
-    const evalSummaryHtml = Object.keys(evalCounts).length
-      ? `<div class="eval-summary" aria-label="御印の集計">
-          <div class="eval-summary-title">📜 御印の集計</div>
-          <div class="eval-summary-list">${Object.entries(evalCounts).map(([key, count]) => {
-            const option = evalOptionsMaster[key];
-            const senders = [...new Set(evalVoters[key] || [])].map(name => escapeHTML(name)).join('、');
-            return `<span class="eval-summary-item ${key === 'tae' ? 'is-tae' : ''}">${option.label} <strong>×${count}</strong>${senders ? `<small>${senders}</small>` : ''}</span>`;
-          }).join('')}</div>
+    const renderVoteIcon = (key) => {
+      const option = evalOptionsMaster[key];
+      return `<span class="eval-vote-icon" title="${escapeHTML(option.label)}" aria-label="${escapeHTML(option.label)}">${escapeHTML(option.icon)}</span>`;
+    };
+    const renderNamedVote = ({ key, name }) =>
+      `<span class="eval-vote-entry">${renderVoteIcon(key)}<span class="eval-vote-name">${escapeHTML(name)}</span></span>`;
+    const renderVoteRow = (label, items) => items.length
+      ? `<div class="eval-vote-row"><span class="eval-vote-role">${label}</span><div class="eval-vote-items">${items.join('')}</div></div>`
+      : '';
+    const evalSummaryHtml = voteEntries.length
+      ? `<div class="eval-votes" aria-label="御印">
+          <div class="eval-vote-title">御印</div>
+          ${renderVoteRow('親', voteEntries.filter(entry => entry.role === 'host').map(entry => renderVoteIcon(entry.key)))}
+          ${renderVoteRow('子', voteEntries.filter(entry => entry.role === 'child').map(renderNamedVote))}
+          ${renderVoteRow('見学', voteEntries.filter(entry => entry.role === 'spectator').map(renderNamedVote))}
         </div>`
-      : '<div class="eval-summary is-empty">📜 まだ御印はありません</div>';
+      : '';
 
     const hasAlreadyVotedAsChild = !isHost && (myVotes[actualPhraseKey] != null || myVotes[pName] != null || hasVotedAnywhereAsChild);
 

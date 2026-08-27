@@ -412,53 +412,61 @@ button:disabled { background-color: #94a3b8; cursor: not-allowed; }
   .vote-submit-btn, .vote-select { font-size: 12px; }
 }
 
-/* 句ごとの御印集計 */
-.eval-summary {
-  margin-top: 8px;
-  padding: 8px 10px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-}
-.eval-summary-title {
-  margin-bottom: 5px;
+/* 句の下に自然に収まる、役割別のコンパクトな御印表示 */
+.eval-votes {
+  margin-top: 6px;
   color: #475569;
   font-size: 12px;
+  line-height: 1.5;
+}
+.eval-vote-title {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 800;
+  margin-bottom: 2px;
+}
+.eval-vote-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.eval-vote-role {
+  flex: 0 0 2.7em;
+  color: #64748b;
   font-weight: 800;
 }
-.eval-summary-list {
+.eval-vote-items {
   display: flex;
+  align-items: center;
+  flex: 1 1 0;
   flex-wrap: wrap;
-  gap: 5px;
+  gap: 3px 7px;
+  min-width: 0;
 }
-.eval-summary-item {
+.eval-vote-icon {
   display: inline-flex;
-  flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
+  font-size: 17px;
+  line-height: 1.2;
+}
+.eval-vote-entry {
+  display: inline-flex;
+  align-items: center;
   gap: 3px;
-  padding: 4px 7px;
-  border-radius: 8px;
-  background: #eff6ff;
-  color: #1e40af;
-  font-size: 11px;
+  max-width: 100%;
+  color: #475569;
+  white-space: nowrap;
 }
-.eval-summary-item.is-tae {
-  background: #fef3c7;
-  color: #92400e;
-}
-.eval-summary-item strong { font-size: 12px; }
-.eval-summary-item small {
-  flex-basis: 100%;
-  color: #64748b;
-  font-size: 10px;
+.eval-vote-name {
+  max-width: 18em;
   overflow-wrap: anywhere;
-}
-.eval-summary.is-empty {
-  color: #94a3b8;
-  font-size: 11px;
 }
 
 @media (max-width: 560px) {
-  .eval-summary-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .eval-summary-item { justify-content: center; text-align: center; }
+  .eval-vote-row { gap: 4px; }
+  .eval-vote-items { gap: 2px 6px; }
+  .eval-vote-icon { font-size: 16px; }
+  .eval-vote-name { max-width: 12em; }
 }
