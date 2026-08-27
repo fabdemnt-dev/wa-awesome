@@ -279,6 +279,8 @@ body {
   cursor: pointer;
 }
 .btn-view { background: #fef9c3; color: #a16207; }
+.btn-preview { background: #fef9c3; color: #a16207; }
+.btn-copy { background: #dbeafe; color: #1d4ed8; }
 .btn-edit { background: #e2e8f0; color: #1e293b; }
 .btn-delete { background: #fee2e2; color: #b91c1c; }
 

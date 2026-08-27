@@ -136,9 +136,9 @@ function renderPoemList() {
             <div class="set-preview">${escapeHTML(previewLine(words))}</div>
           </div>
           <div class="set-actions">
-            <button class="btn-view" onclick="toggleWordSetDetail('${s.id}')">${isOpen ? '📖 閉じる' : '📖 のぞく'}</button>
+            <button class="btn-view btn-preview" onclick="toggleWordSetDetail('${s.id}')">${isOpen ? '📖 閉じる' : '📖 のぞく'}</button>
             <button class="btn-edit" onclick="editWordSet('${s.id}')">✏️ 編集</button>
-            ${s.copyAllowed !== false ? `<button class="btn-view" onclick="copyWordSet('${s.id}')">📋 コピー</button>` : '<span class="form-hint">コピー不可</span>'}
+            ${s.copyAllowed !== false ? `<button class="btn-view btn-copy" onclick="copyWordSet('${s.id}')">📋 コピー</button>` : '<span class="form-hint">コピー不可</span>'}
             <button class="btn-delete" onclick="deleteWordSet('${s.id}')">🗑 削除</button>
           </div>
         </div>
@@ -176,9 +176,9 @@ function renderHaikuList() {
             <div class="set-preview">${escapeHTML(previewLine([...words5, ...words7]))}</div>
           </div>
           <div class="set-actions">
-            <button class="btn-view" onclick="toggleWordSetDetail('${s.id}')">${isOpen ? '📖 閉じる' : '📖 のぞく'}</button>
+            <button class="btn-view btn-preview" onclick="toggleWordSetDetail('${s.id}')">${isOpen ? '📖 閉じる' : '📖 のぞく'}</button>
             <button class="btn-edit" onclick="editWordSet('${s.id}')">✏️ 編集</button>
-            ${s.copyAllowed !== false ? `<button class="btn-view" onclick="copyWordSet('${s.id}')">📋 コピー</button>` : '<span class="form-hint">コピー不可</span>'}
+            ${s.copyAllowed !== false ? `<button class="btn-view btn-copy" onclick="copyWordSet('${s.id}')">📋 コピー</button>` : '<span class="form-hint">コピー不可</span>'}
             <button class="btn-delete" onclick="deleteWordSet('${s.id}')">🗑 削除</button>
           </div>
         </div>
