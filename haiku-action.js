@@ -51,6 +51,7 @@ window.revealPhrase = async function(pName) {
   const targetKey = getParticipantUidByName(state.currentData, pName) || pName;
   if (state.currentData.schemaVersion === 2) {
     await revealHaikuPhrase(state.roomId, targetKey);
+    if (typeof window.resyncHaikuRoom === 'function') await window.resyncHaikuRoom();
   } else {
     await updateDoc(state.roomRef, { [`revealedPhrases.${targetKey}`]: true });
   }
