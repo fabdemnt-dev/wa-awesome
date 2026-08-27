@@ -169,6 +169,9 @@ export function renderBoards() {
     
     const safePName = escapeHTML(pName);
     const jsPName = escapeJS(pName);
+    // 表示名には記号や日本語が含まれる可能性があるため、selectのIDはURLエンコードした句キーで作る。
+    // onclickに渡す表示名のエスケープ結果とDOMのIDを混同しないようにする。
+    const voteSelectId = `vote-select-${encodeURIComponent(actualPhraseKey)}`;
 
     if (!isRevealed) {
       return `
@@ -245,11 +248,11 @@ export function renderBoards() {
             ` : state.isSpectator ? `
               <button class="vote-submit-btn" onclick="submitVote('${jsPName}', '${spectatorOptionKeys[0]}')">${evalOptionsMaster[spectatorOptionKeys[0]].label}</button>
             ` : `
-              <select class="vote-select" id="vote-select-${jsPName}">
+              <select class="vote-select" id="${escapeHTML(voteSelectId)}">
                 <option value="">-- 御印を選択 --</option>
                 ${availableKeys.map(k => `<option value="${k}">${evalOptionsMaster[k].label}</option>`).join('')}
               </select>
-              <button class="vote-submit-btn" onclick="submitVote('${jsPName}')">御印を贈る</button>
+              <button class="vote-submit-btn" onclick="submitVote('${jsPName}', null, '${escapeJS(voteSelectId)}')">御印を贈る</button>
             `}
             ${state.isSpectator ? '<div style="font-size:11px; color:#94a3b8; margin-top:4px;">👀 見学者の御印はお楽しみ用（得点には反映されません）</div>' : ''}
           </div>
