@@ -82,6 +82,7 @@ window.submitVote = async function(targetPlayer, forcedKey) {
     if (!targetUid) return alert('対象の句が見つかりません');
     try {
       await submitHaikuVote(state.roomId, targetUid, evalKey);
+      if (typeof window.resyncHaikuRoom === 'function') await window.resyncHaikuRoom();
       alert('御印を贈りました！');
     } catch (e) {
       alert('御印の送信に失敗しました: ' + (e.message || 'サーバーエラー'));

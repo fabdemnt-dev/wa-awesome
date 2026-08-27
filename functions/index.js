@@ -766,6 +766,7 @@ exports.submitHaikuVote = onCall(callableOptions, async (request) => {
   const evalKey = requireText(request.data?.evalKey, '御印', 30);
   if (!haikuVoteKeys.has(evalKey)) fail('invalid-argument', '御印が正しくありません。');
   const roomRef = db.collection('rooms').doc(`haiku_${roomId}`);
+  let actorIsHost = false;
   await db.runTransaction(async (transaction) => {
     const snapshot = await transaction.get(roomRef);
     if (!snapshot.exists) fail('not-found', 'ルームが見つかりません。');
@@ -777,6 +778,7 @@ exports.submitHaikuVote = onCall(callableOptions, async (request) => {
     }
     const hostUid = getCurrentHostUid(room, participants);
     const isHost = uid === hostUid;
+    actorIsHost = isHost;
     const isSpectator = Array.isArray(room.spectators) && room.spectators.includes(name);
     const allowed = isSpectator ? evalKey === 'kanpu' : isHost ? evalKey !== 'kanpu' : ['okashi', 'aware', 'wabisabi'].includes(evalKey);
     if (!allowed) fail('permission-denied', 'この御印は選べません。');
@@ -786,8 +788,19 @@ exports.submitHaikuVote = onCall(callableOptions, async (request) => {
     }
     const current = voterVotes[targetUid];
     const next = isHost ? [...(Array.isArray(current) ? current : current ? [current] : []), evalKey] : evalKey;
-    transaction.update(roomRef, { [`votes.${uid}.${targetUid}`]: next });
+    const nextVotes = {
+      ...(isPlainObject(room.votes) ? room.votes : {}),
+      [uid]: {
+        ...(isPlainObject(voterVotes) ? voterVotes : {}),
+        [targetUid]: next,
+      },
+    };
+    transaction.set(roomRef, { votes: nextVotes }, { merge: true });
   });
+  const savedSnapshot = await roomRef.get();
+  const savedVotes = savedSnapshot.data()?.votes?.[uid]?.[targetUid];
+  const persisted = actorIsHost ? Array.isArray(savedVotes) && savedVotes.includes(evalKey) : savedVotes === evalKey;
+  if (!persisted) fail('internal', '御印の保存を確認できませんでした。もう一度お試しください。');
   return { ok: true };
 });
 
