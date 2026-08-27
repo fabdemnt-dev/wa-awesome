@@ -8,7 +8,8 @@ body {
   color: #1e293b;
 }
 h1, h2, h3 { text-align: center; margin-top: 0; }
-.card-panel {
+.card-panel,
+.card-sec {
   background: white;
   border-radius: 12px;
   padding: 20px;
@@ -368,20 +369,24 @@ button:disabled { background-color: #94a3b8; cursor: not-allowed; }
 
 @media (max-width: 560px) {
   body { padding: 10px; }
-  .card-panel { padding: 14px; border-radius: 10px; }
+  .card-panel, .card-sec { padding: 14px; border-radius: 10px; }
   h1 { font-size: 22px; }
   h2 { font-size: 20px; }
   h3 { font-size: 17px; }
   .lobby-actions, .room-actions { gap: 6px !important; }
   .lobby-actions > button, .room-actions > button {
-    flex-basis: 100%;
-    min-height: 42px;
-    padding: 10px 8px;
+    flex: 1 1 calc(50% - 3px);
+    min-height: 38px;
+    padding: 8px 6px;
   }
   .phrase-actions { grid-template-columns: 1fr; gap: 6px; }
   .phrase-actions button:last-child { grid-column: auto; }
-  .export-actions { grid-template-columns: 1fr !important; }
-  .export-actions button { min-height: 42px; }
+  .export-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 6px;
+  }
+  .export-actions #next-round-btn { grid-column: 1 / -1; }
+  .export-actions button { min-height: 38px; padding: 8px 5px; }
   .phrase-board-header {
     align-items: center !important;
     flex-wrap: nowrap;
@@ -419,7 +424,7 @@ button:disabled { background-color: #94a3b8; cursor: not-allowed; }
 }
 
 @media (max-width: 380px) {
-  .card-panel { padding: 12px; }
+  .card-panel, .card-sec { padding: 12px; }
   .section-title { font-size: 13px; }
   .vote-submit-btn, .vote-select { font-size: 12px; }
 }

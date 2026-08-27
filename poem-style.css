@@ -160,17 +160,17 @@ button:active {
   h3 { font-size: 17px; }
   .room-actions { gap: 6px !important; }
   .room-actions > button {
-    flex-basis: 100%;
-    min-height: 42px;
-    padding: 10px 8px;
+    flex: 1 1 calc(50% - 3px);
+    min-height: 38px;
+    padding: 8px 6px;
   }
   .poem-submit-actions,
   .export-actions {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px;
   }
   .poem-submit-actions button,
-  .export-actions button { min-height: 42px; }
+  .export-actions button { min-height: 38px; padding: 8px 5px; }
   .poem-board-header {
     align-items: flex-start !important;
     flex-wrap: wrap;
@@ -184,8 +184,8 @@ button:active {
   }
   .reaction-actions button {
     width: 100%;
-    min-height: 42px;
-    padding: 8px 4px !important;
+    min-height: 36px;
+    padding: 6px 4px !important;
     font-size: 13px !important;
   }
   .card { overflow-wrap: anywhere; }
