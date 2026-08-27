@@ -8,6 +8,13 @@ import { ensureSignedIn } from './wordset-auth.js';
 import { showGameError } from './game-error.js';
 import { diagState, diagLog } from './diagnostic-log.js';
 import { defaultWords5, defaultWords7 } from './haiku-default-words.js';
+
+const initialRoomId = new URLSearchParams(window.location.search).get('room')?.trim() || '';
+document.addEventListener('DOMContentLoaded', () => {
+  const roomInput = document.getElementById('room-id');
+  if (roomInput && initialRoomId && !roomInput.value) roomInput.value = initialRoomId;
+  if (initialRoomId) diagLog('haiku-room-query', { roomId: initialRoomId });
+});
 import { normalizeParticipantName, setParticipantRole, normalizeParticipantRoles, getParticipantStorageKey, canClaimHost, getCurrentHostName } from './participant-utils.js';
 import { changeHaikuRole, removeHaikuWord, updateHaikuSettings, removePlayer as removePlayerSecure, claimHost as claimHostSecure } from './haiku-functions.js';
 
