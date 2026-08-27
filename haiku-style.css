@@ -36,6 +36,16 @@ button {
 }
 button:disabled { background-color: #94a3b8; cursor: not-allowed; }
 
+/* 操作の意味に応じた共通色。サイズ・配置は既存ルールを維持する。 */
+.btn-primary { background-color: #2563eb; color: white; }
+.btn-secondary { background-color: #64748b; color: white; }
+.btn-success { background-color: #16a34a; color: white; }
+.btn-danger { background-color: #dc2626; color: white; }
+.btn-audio,
+.btn-support { background-color: #0284c7; color: white; }
+.btn-copy { background-color: #5865f2; color: white; }
+.btn-csv { background-color: #059669; color: white; }
+
 /* セクション見出し */
 .section-title {
   font-size: 14px;
