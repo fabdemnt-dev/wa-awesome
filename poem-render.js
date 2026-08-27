@@ -25,6 +25,7 @@ export function renderInputFields(count, SAMPLE_PHRASES) {
   }
 
   if (container.children.length !== count) {
+    const previousValues = [...container.querySelectorAll('input')].map(input => input.value);
     container.innerHTML = '';
     const shuffledSamples = [...SAMPLE_PHRASES].sort(() => Math.random() - 0.5);
 
@@ -37,6 +38,7 @@ export function renderInputFields(count, SAMPLE_PHRASES) {
       inp.style.display = 'block';
       inp.style.width = '100%';
       inp.style.padding = '8px';
+      inp.value = previousValues[i - 1] || '';
       inp.style.boxSizing = 'border-box';
       container.appendChild(inp);
     }

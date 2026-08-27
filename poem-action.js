@@ -86,6 +86,10 @@ window.submitPoem = async function() {
 
   if (state.currentData.schemaVersion === 2) {
     await submitPoemSecure(state.roomId, poemText, usedHands);
+    if (typeof window.resyncPoemRoom === 'function') {
+      const result = await window.resyncPoemRoom();
+      if (!result?.ok) throw result.error || new Error('投稿の画面反映を確認できませんでした。');
+    }
   } else {
     await updateDoc(state.roomRef, {
       [`poems.${getParticipantStorageKey(state.currentData, state.myUid, state.myName)}`]: {
@@ -97,9 +101,15 @@ window.submitPoem = async function() {
       }
     });
   }
-  
+
   sessionStorage.removeItem('poemDraft');
-  alert('ポエムを投稿しました！');
+  if (textarea) {
+    textarea.value = '';
+    textarea.style.height = 'auto';
+  }
+  state.selectedHandIndices.clear();
+  renderHand();
+  alert('ポエムを投稿しました。画面への反映も確認しました！');
 };
 
 window.revealPoem = async function(pName) {
@@ -122,6 +132,10 @@ window.addReaction = async function(pName, type) {
   // increment()でサーバー側に加算させることで、同時押しでもカウントが失われないようにする
   if (state.currentData.schemaVersion === 2) {
     await reactPoemSecure(state.roomId, targetUid, type);
+    if (typeof window.resyncPoemRoom === 'function') {
+      const result = await window.resyncPoemRoom();
+      if (!result?.ok) throw result.error || new Error('リアクションの画面反映を確認できませんでした。');
+    }
   } else {
     await updateDoc(state.roomRef, {
       [`poems.${pName}.${type === 'like' ? 'likes' : 'emos'}`]: increment(1)

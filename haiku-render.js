@@ -41,11 +41,13 @@ export function renderInputFields(c5, c7) {
     }
     const count = type === '5' ? c5 : c7;
     if (spectatorChanged || container.children.length !== count) {
+      const previousValues = [...container.querySelectorAll('input')].map(input => input.value);
       container.innerHTML = '';
       for (let i = 1; i <= count; i++) {
         const inp = document.createElement('input');
         inp.type = 'text'; inp.id = `word-${type}-input-${i}`;
         inp.placeholder = `${type === '5' ? '五' : '七'}音の素材 ${i}`;
+        inp.value = previousValues[i - 1] || '';
         container.appendChild(inp);
       }
     }
