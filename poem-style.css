@@ -130,3 +130,72 @@ button:active {
 .participant-kick:hover { background:#fecaca; }
 .participant-empty { padding:10px; color:#94a3b8; font-size:12px; }
 @media (max-width:560px) { .participant-roster-header { align-items:flex-start; flex-direction:column; gap:3px; } .participant-grid { grid-template-columns:1fr; } }
+
+/* レスポンシブ操作行 */
+.room-actions > button {
+  width: auto;
+  flex: 1 1 180px;
+  margin-top: 0;
+  min-width: 0;
+}
+.poem-submit-actions,
+.export-actions {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.poem-submit-actions button,
+.export-actions button {
+  width: auto;
+  min-width: 0;
+}
+.poem-board-header { min-width: 0; }
+.reaction-actions button { min-width: 0; }
+
+@media (max-width: 560px) {
+  body { padding: 10px; }
+  .card-panel { padding: 14px; border-radius: 10px; }
+  h1 { font-size: 22px; }
+  h2 { font-size: 20px; }
+  h3 { font-size: 17px; }
+  .room-actions { gap: 6px !important; }
+  .room-actions > button {
+    flex-basis: 100%;
+    min-height: 42px;
+    padding: 10px 8px;
+  }
+  .poem-submit-actions,
+  .export-actions {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+  .poem-submit-actions button,
+  .export-actions button { min-height: 42px; }
+  .poem-board-header {
+    align-items: flex-start !important;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .poem-board-header > button { margin-left: auto; }
+  .reaction-actions {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px !important;
+  }
+  .reaction-actions button {
+    width: 100%;
+    min-height: 42px;
+    padding: 8px 4px !important;
+    font-size: 13px !important;
+  }
+  .card { overflow-wrap: anywhere; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; }
+}
+
+@media (max-width: 380px) {
+  .card-panel { padding: 12px; }
+  .reaction-actions button { font-size: 12px !important; }
+}

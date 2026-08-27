@@ -25,7 +25,7 @@
   <div id="lobby-sec" class="card-panel" style="display:none;">
     <div id="phase-status-lobby" class="phase-status" role="status" aria-live="polite"></div>
     <div id="role-help-lobby" class="role-help" role="note"></div>
-    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
+    <div class="room-actions" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
       <button id="role-toggle-btn-lobby" onclick="toggleRole()" style="background-color: #64748b;">👀 見学モードに切り替える</button>
       <button id="manual-resync-btn-lobby" onclick="manualResync('lobby')" style="background-color: #64748b;">🔄 最新の状態に更新</button>
     </div>
@@ -73,7 +73,7 @@
     <div id="phase-status-game" class="phase-status" role="status" aria-live="polite"></div>
     <div id="role-help-game" class="role-help" role="note"></div>
     <div id="submission-status-game" class="submission-status" aria-live="polite"></div>
-    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
+    <div class="room-actions" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
       <button id="role-toggle-btn-game" onclick="toggleRole()" style="background-color: #64748b;">👀 見学モードに切り替える</button>
       <button id="manual-resync-btn-game" onclick="manualResync('game')" style="background-color: #64748b;">🔄 最新の状態に更新</button>
     </div>
@@ -88,7 +88,7 @@
     <!-- rows="1" と resize: none, overflow: hidden で自動拡張に対応 -->
     <textarea id="poem-input-area" rows="1" placeholder="手札を元に自由にポエムを入力してね♪" style="width: 100%; padding: 8px; font-size: 15px; border: 1px solid #cbd5e1; border-radius: 4px; box-sizing: border-box; margin-top: 6px; resize: none; overflow: hidden; line-height: 1.5;"></textarea>
 
-    <div style="display: flex; gap: 8px;">
+    <div class="poem-submit-actions" style="display: flex; gap: 8px;">
       <button onclick="clearPoem()" style="background-color: #dc2626; margin-top: 12px;">リセット</button>
       <button onclick="submitPoem()" style="background-color: #2563eb; margin-top: 12px;">ポエムを投稿</button>
     </div>
@@ -107,7 +107,7 @@
         <input type="checkbox" id="export-all-check" checked> 過去の履歴もすべて含めて出力する
       </label>
 
-      <div style="display: flex; gap: 8px;">
+      <div class="export-actions" style="display: flex; gap: 8px;">
         <button onclick="exportText()" style="background-color: #5865F2;">📋 コピー (Discord用)</button>
         <button onclick="exportCSV()" style="background-color: #059669;">📥 CSV保存</button>
       </div>

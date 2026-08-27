@@ -104,7 +104,7 @@ export function renderBoards() {
     if (typeof poemData === 'string') {
       return `
         <div class="player-board" style="margin-bottom: 20px; padding: 16px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff;">
-          <div style="display: flex; justify-content: space-between; align-items: center;">
+          <div class="poem-board-header" style="display: flex; justify-content: space-between; align-items: center;">
             <strong>${safePName} の作品</strong>
             <button onclick="speakPoem('${escapeJS(poemData)}')" style="width: auto; margin-top: 0; padding: 4px 10px; font-size: 12px; background-color: #0284c7;">🔊 読み上げ</button>
           </div>
@@ -132,7 +132,7 @@ export function renderBoards() {
 
     return `
       <div class="player-board" style="margin-bottom: 20px; padding: 16px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff;">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div class="poem-board-header" style="display: flex; justify-content: space-between; align-items: center;">
           <strong>${safePName} の作品</strong>
           ${isRevealed ? `<button onclick="speakPoem('${escapeJS(poemData.text)}')" style="width: auto; margin-top: 0; padding: 4px 10px; font-size: 12px; background-color: #0284c7;">🔊 読み上げ</button>` : ''}
         </div>
@@ -154,7 +154,7 @@ export function renderBoards() {
           `}
         </div>
 
-        <div style="display: flex; gap: 16px; margin-top: 12px; align-items: center;">
+        <div class="reaction-actions" style="display: flex; gap: 16px; margin-top: 12px; align-items: center;">
           <button onclick="addReaction('${jsPName}', 'like')" style="background: none; border: none; color: #334155; width: auto; padding: 6px 8px; font-size: 14px; cursor: pointer;">
             👍 いいね (${likes})
           </button>

@@ -60,7 +60,7 @@
         <button onclick="updateSettings()" class="btn-secondary" style="margin-top:10px;">設定を保存</button>
       </div>
 
-      <div style="margin-top:15px; display:flex; gap:8px; flex-wrap:wrap;">
+      <div class="lobby-actions" style="margin-top:15px; display:flex; gap:8px; flex-wrap:wrap;">
         <button id="role-toggle-btn-lobby" onclick="toggleRole()" class="btn-secondary">モード切替</button>
         <button id="manual-resync-btn-lobby" onclick="manualResync('lobby')" class="btn-secondary">🔄 最新の状態に更新</button>
       </div>
@@ -98,7 +98,7 @@
       <div id="role-help-game" class="role-help" role="note"></div>
       <div id="host-info-game" class="info-banner"></div>
       <div id="submission-status-game" class="submission-status" aria-live="polite"></div>
-      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
+      <div class="room-actions" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
         <button id="role-toggle-btn-game" onclick="toggleRole()" class="btn-secondary">モード切替</button>
         <button id="manual-resync-btn-game" onclick="manualResync('game')" class="btn-secondary">🔄 最新の状態に更新</button>
       </div>
@@ -123,7 +123,7 @@
           <span id="phrase-2">（選択してください）</span>
           <span id="phrase-3">（選択してください）</span>
         </div>
-        <div style="margin-top:10px;">
+        <div class="phrase-actions" style="margin-top:10px;">
           <button onclick="swap5Cards()" class="btn-secondary">五音の位置を入れ替える</button>
           <button onclick="clearPhrase()" class="btn-secondary">やり直す</button>
           <button onclick="submitPhrase()" class="btn-primary">一句披露する！</button>
@@ -162,7 +162,7 @@
 
       <div id="next-round-hint" style="display:none; font-size:12px; color:#94a3b8; margin-bottom:6px;">※「次の節に進む」は今節の選者（親）だけが押せます</div>
       <button id="host-recovery-btn" onclick="claimHost()" style="display:none; margin:0 0 10px; background:#f59e0b; color:#1e293b;">親が不在のときだけ、親を引き継ぐ</button>
-      <div style="margin-top:20px; display:flex; gap:10px;">
+      <div class="export-actions" style="margin-top:20px; display:flex; gap:10px;">
         <button id="next-round-btn" onclick="nextRound()" class="btn-success" style="flex:2;">次の節に進む</button>
         <button onclick="exportText()" style="flex:1; background-color: #5865F2;">📋 コピー (Discord用)</button>
         <button onclick="exportCSV()" style="flex:1; background-color: #059669;">📥 CSV保存</button>
