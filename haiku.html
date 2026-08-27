@@ -65,6 +65,7 @@
 
       <h3>参列者一覧</h3>
       <div id="player-list"></div>
+      <div id="submission-status-lobby" class="submission-status" aria-live="polite"></div>
 
       <hr>
 
@@ -93,6 +94,7 @@
     <div id="game-sec" class="card-sec" style="display:none;">
       <div id="phase-status-game" class="phase-status" role="status" aria-live="polite"></div>
       <div id="host-info-game" class="info-banner"></div>
+      <div id="submission-status-game" class="submission-status" aria-live="polite"></div>
       <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
         <button id="role-toggle-btn-game" onclick="toggleRole()" class="btn-secondary">モード切替</button>
         <button id="manual-resync-btn-game" onclick="manualResync('game')" class="btn-secondary">🔄 最新の状態に更新</button>

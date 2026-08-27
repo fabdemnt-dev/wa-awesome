@@ -44,6 +44,26 @@ function updatePhaseStatus(data) {
   setStatus('phase-status-lobby', lobbyText);
   setStatus('phase-status-game', gameText);
 }
+
+function updateSubmissionStatus(data) {
+  const players = data?.players || [];
+  const participantUids = data?.participantUids || {};
+  const uidFor = name => Object.entries(participantUids).find(([, value]) => value === name)?.[0];
+  const submittedFor = (name, type) => (data?.[type] || []).some(word => word?.author === name);
+  const phraseFor = name => {
+    const uid = uidFor(name);
+    const phrases = data?.phrases || {};
+    return (uid && phrases[uid] !== undefined) || phrases[name] !== undefined;
+  };
+  const render = (id, label, doneFor) => {
+    const el = document.getElementById(id);
+    if (!el || !players.length) return;
+    const items = players.map(name => `<span class="submission-person ${doneFor(name) ? 'is-done' : ''}">${doneFor(name) ? '✅' : '⏳'} ${escapeHTML(name)}：${doneFor(name) ? '提出済み' : '未提出'}</span>`).join('');
+    el.innerHTML = `<div class="submission-title">${label}</div><div class="submission-people">${items}</div>`;
+  };
+  render('submission-status-lobby', '素材の提出状況', name => submittedFor(name, 'words5') || submittedFor(name, 'words7'));
+  render('submission-status-game', '句の提出状況', phraseFor);
+}
 let handUnsubscribe = null;
 let handSubscriptionKey = '';
 
@@ -139,6 +159,7 @@ function applyRoomData(data) {
   if (!state.currentData) return;
 
   updatePhaseStatus(state.currentData);
+  updateSubmissionStatus(state.currentData);
   const players = state.currentData.players || [];
   const spectators = state.currentData.spectators || [];
 
