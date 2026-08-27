@@ -76,7 +76,12 @@ async function saveParticipantRole(role) {
 
 // Firestoreの部屋データを受け取り、画面表示を最新状態へ反映する。
 // onSnapshotでの受信時と、Chrome復帰時のvisibilitychange再取得時の両方から呼ばれる共通処理。
-function applyRoomData(data) {
+let roomUpdateSequence = 0;
+let lastAppliedRoomUpdateSequence = 0;
+
+function applyRoomData(data, sequence = ++roomUpdateSequence) {
+  if (sequence < lastAppliedRoomUpdateSequence) return;
+  lastAppliedRoomUpdateSequence = sequence;
   const normalizedRoles = normalizeParticipantRoles(data);
   data = { ...data, ...normalizedRoles };
   const embeddedHistory = Array.isArray(data?.history)
@@ -196,27 +201,41 @@ function applyRoomData(data) {
 }
 
 // ブラウザがバックグラウンドから復帰したタイミングで、Firestoreの最新データを再取得して画面に反映する。
-// visibilitychangeとpageshowがほぼ同時に発火する可能性があるため、isResyncingRoomで二重実行を防ぐ。
+// visibilitychangeとpageshowがほぼ同時に発火しても、同じ取得を共有する。
 // ここでは読み取りと再描画のみを行い、ゲーム状態を変更する書き込みは一切行わない。
-let isResyncingRoom = false;
+let roomResyncPromise = null;
 let roomResyncInterval = null;
 async function resyncRoomFromFirestore() {
-  if (!state.roomRef) return;
-  if (isResyncingRoom) return;
+  if (!state.roomRef) return { ok: false, error: new Error('ルームが未接続です。') };
+  if (roomResyncPromise) {
+    await roomResyncPromise;
+    // 待機中に投稿・披露などの更新が完了している可能性があるため、
+    // 既存取得の結果を使わず、サーバーからもう一度取得する。
+    return resyncRoomFromFirestore();
+  }
 
-  isResyncingRoom = true;
-  try {
-    const snapshot = await getDocFromServer(state.roomRef);
-    if (snapshot.exists()) {
-      applyRoomData(snapshot.data());
+  const sequence = ++roomUpdateSequence;
+  roomResyncPromise = (async () => {
+    try {
+      const snapshot = await getDocFromServer(state.roomRef);
+      if (!snapshot.exists()) throw new Error('ルームが見つかりません。');
+      applyRoomData(snapshot.data(), sequence);
+      return { ok: true };
+    } catch (e) {
+      // 再取得に失敗しても、既存のonSnapshot監視やゲーム操作は壊さない
+      console.warn('サーバーからの再同期に失敗しました:', e);
+      return { ok: false, error: e };
     }
-  } catch (e) {
-    // 再取得に失敗しても、既存のonSnapshot監視やゲーム操作は壊さない
-    console.warn('サーバーからの再同期に失敗しました:', e);
+  })();
+
+  try {
+    return await roomResyncPromise;
   } finally {
-    isResyncingRoom = false;
+    roomResyncPromise = null;
   }
 }
+
+window.resyncPoemRoom = resyncRoomFromFirestore;
 
 // 一部ブラウザでonSnapshotが一時停止したり、キャッシュ値が残ったりしても、
 // 参加者の投稿を取りこぼさないため、表示中はサーバーから定期的に再取得する。
@@ -339,7 +358,7 @@ if (!roomSnapshot.exists()) {
       // キャッシュ由来の古い値で、サーバー取得済みの最新状態を巻き戻さない。
       // 最新値は5秒ポーリングのgetDocFromServerで補完する。
       if (snapshot.metadata?.fromCache) return;
-      applyRoomData(snapshot.data());
+      applyRoomData(snapshot.data(), ++roomUpdateSequence);
     }, (error) => {
       console.error('[room-onSnapshot]', error);
       resyncRoomFromFirestore();

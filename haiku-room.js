@@ -1,5 +1,5 @@
 import { db } from "./firebase-config.js";
-import { doc, getDoc, getDocFromServer, setDoc, onSnapshot, updateDoc, runTransaction, serverTimestamp, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { doc, getDocFromServer, onSnapshot, updateDoc, runTransaction, serverTimestamp, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import state from './haiku-state.js';
 import { escapeHTML, escapeJS } from './haiku-utils.js';
 import { renderInputFields, renderHand, renderBoards } from './haiku-render.js';
@@ -96,7 +96,8 @@ function updateScoreHistory(data) {
     ? data.history.filter(entry => Number.isFinite(Number(entry?.round)))
     : [];
   if (history.length === 0) {
-    el.innerHTML = '';
+    // 履歴購読の一時的な空スナップショットで、表示済みの履歴を消さない。
+    if (!el.querySelector('.score-history-details')) el.innerHTML = '';
     return;
   }
 
@@ -232,7 +233,12 @@ window.claimHost = async function() {
 
 // Firestoreの部屋データを受け取り、画面表示を最新状態へ反映する。
 // onSnapshotでの受信時と、Chrome復帰時のvisibilitychange再取得時の両方から呼ばれる共通処理。
-function applyRoomData(data) {
+let roomUpdateSequence = 0;
+let lastAppliedRoomUpdateSequence = 0;
+
+function applyRoomData(data, sequence = ++roomUpdateSequence) {
+  if (sequence < lastAppliedRoomUpdateSequence) return;
+  lastAppliedRoomUpdateSequence = sequence;
   const normalizedRoles = normalizeParticipantRoles(data);
   data = { ...data, ...normalizedRoles };
   const embeddedHistory = Array.isArray(data?.history)
@@ -401,12 +407,13 @@ async function resyncRoomFromFirestore(options = {}) {
     return result;
   }
 
+  const sequence = ++roomUpdateSequence;
   roomResyncPromise = (async () => {
     try {
       const snapshot = await getDocFromServer(state.roomRef);
       if (snapshot.exists()) {
         const data = snapshot.data();
-        applyRoomData(data);
+        applyRoomData(data, sequence);
       }
       return { ok: true };
     } catch (e) {
@@ -482,67 +489,57 @@ window.joinRoom = async function() {
   try {
     state.roomRef = doc(db, "rooms", "haiku_" + state.roomId);
 
-const roomSnapshot = await getDoc(state.roomRef);
-
-if (!roomSnapshot.exists()) {
+    const role = state.isSpectator ? 'spectator' : 'player';
     const initialData = {
       schemaVersion: 2,
-      status: "lobby",
+      status: 'lobby',
       currentHost: state.isSpectator ? '' : state.myName,
       currentHostUid: state.isSpectator ? '' : currentUser.uid,
-    roundCount: 1,
-    words5: [],
-    words7: [],
-    hands5: {},
-    hands7: {},
-    phrases: {},
-    phraseDetails: {},
-    votes: {},
-    scores: {},
-    selfPraise: {},
-    settings: {
-      hand5: 5,
-      hand7: 3,
-      carryOver: true
-    },
-    players: [],
-    spectators: [],
-    redraws: {},
-    participantUids: { [currentUser.uid]: state.myName }
-  };
+      roundCount: 1,
+      words5: [],
+      words7: [],
+      hands5: {},
+      hands7: {},
+      phrases: {},
+      phraseDetails: {},
+      votes: {},
+      scores: {},
+      selfPraise: {},
+      settings: { hand5: 5, hand7: 3, carryOver: true },
+      players: state.isSpectator ? [] : [state.myName],
+      spectators: state.isSpectator ? [state.myName] : [],
+      redraws: {},
+      participantUids: { [currentUser.uid]: state.myName },
+    };
 
-  if (state.isSpectator) {
-    initialData.spectators = [state.myName];
-  } else {
-    initialData.players = [state.myName];
-  }
-
-  await setDoc(state.roomRef, initialData);
-} else {
-  const role = state.isSpectator ? 'spectator' : 'player';
-  await runTransaction(db, async (transaction) => {
-    const snapshot = await transaction.get(state.roomRef);
-    if (!snapshot.exists()) throw new Error('ルームが見つかりません');
-    const data = snapshot.data() || {};
-    const roles = setParticipantRole(data, state.myName, role);
-    const update = { ...roles };
-    if (data.participantUids && typeof data.participantUids === 'object') {
-      const participantUids = Object.fromEntries(
-        Object.entries(data.participantUids).filter(([uid, name]) => name !== state.myName || uid === currentUser.uid)
-      );
-      participantUids[currentUser.uid] = state.myName;
-      update.participantUids = participantUids;
-      if (data.schemaVersion === 2 && data.currentHost === state.myName) {
-        update.currentHostUid = currentUser.uid;
+    // 入室判定と新規ルーム作成を同じサーバー側トランザクションで行う。
+    // キャッシュ上の「存在しない」を根拠に既存ルームをsetDocで上書きしない。
+    await runTransaction(db, async (transaction) => {
+      const snapshot = await transaction.get(state.roomRef);
+      if (!snapshot.exists()) {
+        transaction.set(state.roomRef, initialData);
+        return;
       }
-    }
-    if (role === 'player' && !data.currentHost) {
-      update.currentHost = state.myName;
-      if (data.schemaVersion === 2) update.currentHostUid = currentUser.uid;
-    }
-    transaction.update(state.roomRef, update);
-  });
-}
+
+      const data = snapshot.data() || {};
+      const roles = setParticipantRole(data, state.myName, role);
+      const update = { ...roles };
+      if (data.participantUids && typeof data.participantUids === 'object') {
+        const participantUids = Object.fromEntries(
+          Object.entries(data.participantUids).filter(([uid, name]) => name !== state.myName || uid === currentUser.uid)
+        );
+        participantUids[currentUser.uid] = state.myName;
+        update.participantUids = participantUids;
+        if (data.schemaVersion === 2 && data.currentHost === state.myName) {
+          update.currentHostUid = currentUser.uid;
+        }
+      }
+      if (role === 'player' && !data.currentHost) {
+        update.currentHost = state.myName;
+        if (data.schemaVersion === 2) update.currentHostUid = currentUser.uid;
+      }
+      transaction.update(state.roomRef, update);
+    });
 
     document.getElementById('login-sec').style.display = 'none';
     document.getElementById('lobby-sec').style.display = 'block';
@@ -551,7 +548,7 @@ if (!roomSnapshot.exists()) {
       // キャッシュ由来の古いスナップショットで、サーバー取得済みの最新状態を巻き戻さない。
       // 最新値は5秒ポーリングのgetDocFromServerで補完する。
       if (snapshot.metadata?.fromCache) return;
-      applyRoomData(snapshot.data());
+      applyRoomData(snapshot.data(), ++roomUpdateSequence);
     }, (error) => {
       console.error('[room-onSnapshot]', error);
       resyncRoomFromFirestore();
