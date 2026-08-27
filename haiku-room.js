@@ -258,12 +258,23 @@ async function resyncRoomFromFirestore() {
   if (isResyncingRoom) return;
 
   isResyncingRoom = true;
+  diagLog('haiku-room-resync:start', { roomId: state.roomId });
   try {
     const snapshot = await getDoc(state.roomRef);
     if (snapshot.exists()) {
-      applyRoomData(snapshot.data());
+      const data = snapshot.data();
+      diagLog('haiku-room-resync:success', {
+        roomId: state.roomId,
+        words5Count: Array.isArray(data.words5) ? data.words5.length : 0,
+        words7Count: Array.isArray(data.words7) ? data.words7.length : 0,
+        participantUidCount: Object.keys(data.participantUids || {}).length,
+      });
+      applyRoomData(data);
+    } else {
+      diagLog('haiku-room-resync:not-found', { roomId: state.roomId });
     }
   } catch (e) {
+    diagLog('haiku-room-resync:error', { roomId: state.roomId, code: e?.code, message: e?.message });
     // 復帰時の再取得に失敗しても、既存のonSnapshot監視やゲーム操作は壊さない
     console.warn('復帰時の再同期に失敗しました:', e);
   } finally {
