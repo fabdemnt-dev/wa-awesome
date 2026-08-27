@@ -50,13 +50,10 @@ function updateSubmissionStatus(data) {
 }
 
 function updateRoleHelp(data) {
-  const isHost = data?.currentHostUid && state.myUid
-    ? data.currentHostUid === state.myUid
-    : data?.currentHost === state.myName;
-  const role = state.isSpectator ? '見学者' : (isHost ? '親・進行役' : 'プレイヤー');
+  const role = state.isSpectator ? '見学者' : 'プレイヤー';
   const text = data?.status === 'lobby'
-    ? (state.isSpectator ? '見学者：参加者の準備状況を確認できます。素材投稿や開始操作はできません。' : (isHost ? '親・進行役：素材を確認し、準備ができたら「ポエム作りを開始」を押します。' : 'プレイヤー：素材を投稿し、親が開始するまで待ちます。'))
-    : (state.isSpectator ? '見学者：作品の披露とリアクションを楽しめます。進行操作はできません。' : (isHost ? '親・進行役：作品の披露状況を確認し、必要に応じて次のポエムへ進めます。' : 'プレイヤー：ポエムを投稿し、作品の披露と親の進行を待ちます。'));
+    ? (state.isSpectator ? '見学者：参加者の準備状況を確認できます。素材投稿や開始操作はできません。' : 'プレイヤー：素材を投稿し、全員の準備が整ったらポエム作りを開始できます。')
+    : (state.isSpectator ? '見学者：作品の披露とリアクションを楽しめます。ゲーム操作はできません。' : 'プレイヤー：ポエムを投稿し、みんなの作品を鑑賞できます。');
   ['role-help-lobby', 'role-help-game'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.innerHTML = `<strong>あなたの役割：${role}</strong><br>${text}`;
@@ -156,16 +153,15 @@ function applyRoomData(data) {
   }
 
   const participantCard = (name, role) => {
-    const isHost = role === 'player' && name === state.currentData.currentHost;
     const isMe = name === state.myName;
-    const label = role === 'spectator' ? '見学者' : (isHost ? '親' : 'プレイヤー');
+    const label = role === 'spectator' ? '見学者' : 'プレイヤー';
     const initial = escapeHTML((name || '？').slice(0, 1));
     return `
-      <div class="participant-card participant-card-${role}${isHost ? ' participant-card-host' : ''}${isMe ? ' participant-card-me' : ''}">
+      <div class="participant-card participant-card-${role}${isMe ? ' participant-card-me' : ''}">
         <div class="participant-avatar" aria-hidden="true">${initial}</div>
         <div class="participant-main">
           <div class="participant-name">${escapeHTML(name)}${isMe ? '<span class="participant-self">あなた</span>' : ''}</div>
-          <div class="participant-role">${label}${isHost ? ' · 進行役' : ''}</div>
+          <div class="participant-role">${label}</div>
         </div>
         ${role === 'player' ? `<button class="participant-kick" onclick="removePlayer('${escapeJS(name)}')">鯖落ち</button>` : ''}
       </div>`;
