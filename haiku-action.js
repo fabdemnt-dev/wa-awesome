@@ -73,8 +73,8 @@ window.doSelfPraise = async function() {
     state.isSubmittingSelfPraise = false;
   }
 };
-window.submitVote = async function(targetPlayer, forcedKey) {
-  const evalKey = forcedKey || document.getElementById(`vote-select-${targetPlayer}`)?.value;
+window.submitVote = async function(targetPlayer, forcedKey, selectId) {
+  const evalKey = forcedKey || document.getElementById(selectId || `vote-select-${targetPlayer}`)?.value;
   if (!evalKey) return alert('御印を選択してください');
 
   if (state.currentData.schemaVersion === 2) {
