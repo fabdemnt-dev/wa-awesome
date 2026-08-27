@@ -8,13 +8,11 @@ import { removePoemWord, updatePoemSettings, removePlayer as removePlayerSecure,
 import { subscribeRoomHistory } from './room-history.js';
 import { ensureSignedIn } from './wordset-auth.js';
 import { showGameError } from './game-error.js';
-import { diagState, diagLog } from './diagnostic-log.js';
 
 const initialRoomId = new URLSearchParams(window.location.search).get('room')?.trim() || '';
 document.addEventListener('DOMContentLoaded', () => {
   const roomInput = document.getElementById('room-id');
   if (roomInput && initialRoomId && !roomInput.value) roomInput.value = initialRoomId;
-  if (initialRoomId) diagLog('poem-room-query', { roomId: initialRoomId });
 });
 
 async function saveParticipantRole(role) {
@@ -39,7 +37,6 @@ function applyRoomData(data) {
     history: [...embeddedHistory, ...(state.roomHistory || [])],
   };
   if (!state.currentData) return;
-  diagState(state, 'poem-room-state');
 
   const players = state.currentData.players || [];
   const spectators = state.currentData.spectators || [];
@@ -230,7 +227,6 @@ window.joinRoom = async function() {
   state.roomId = roomInput.value.trim();
   const specCheck = document.getElementById('spectator-check');
   state.isSpectator = specCheck ? specCheck.checked : false;
-  diagLog('poem-join-input', { roomId: state.roomId, myUid: state.myUid, myName: state.myName, isSpectator: state.isSpectator });
 
   if (!state.myName || !state.roomId) return alert('名前とルームIDを入力してください');
 

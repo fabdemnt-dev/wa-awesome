@@ -1,6 +1,5 @@
 import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-functions.js";
 import { app } from './firebase-config.js';
-import { diagLog } from './diagnostic-log.js';
 
 const functions = getFunctions(app, 'asia-northeast1');
 const submitPoemSecureCallable = httpsCallable(functions, 'submitPoemSecure');
@@ -19,20 +18,13 @@ function requireRoomId(roomId) {
   return roomId.trim();
 }
 
-async function callWithDiag(name, callable, data) {
-  diagLog(`${name}:start`, { roomId: data?.roomId, targetUid: data?.targetUid });
-  try {
-    const result = await callable(data);
-    diagLog(`${name}:success`, { roomId: data?.roomId, targetUid: data?.targetUid });
-    return result.data;
-  } catch (error) {
-    diagLog(`${name}:error`, { roomId: data?.roomId, targetUid: data?.targetUid, code: error?.code, message: error?.message });
-    throw error;
-  }
+async function callCallable(callable, data) {
+  const result = await callable(data);
+  return result.data;
 }
 
 export async function dealPoemHands(roomId) {
-  return callWithDiag('dealPoemHands', dealPoemHandsCallable, { roomId: requireRoomId(roomId) });
+  return callCallable(dealPoemHandsCallable, { roomId: requireRoomId(roomId) });
 }
 
 export async function changePoemRole(roomId, role, supplementWords = []) {
@@ -46,7 +38,7 @@ export async function removePlayer(roomId, targetUid) {
 }
 
 export async function claimHost(roomId) {
-  return callWithDiag('claimHost', claimHostCallable, { roomId: requireRoomId(roomId), game: 'poem' });
+  return callCallable(claimHostCallable, { roomId: requireRoomId(roomId), game: 'poem' });
 }
 
 export async function updatePoemSettings(roomId, handCount) {
@@ -65,18 +57,15 @@ export async function removePoemWord(roomId, wordId) {
 }
 
 export async function submitPoemSecure(roomId, text, usedHands) {
-  return callWithDiag('submitPoemSecure', submitPoemSecureCallable, { roomId: requireRoomId(roomId), text, usedHands });
+  return callCallable(submitPoemSecureCallable, { roomId: requireRoomId(roomId), text, usedHands });
 }
 
 export async function revealPoemSecure(roomId, targetUid) {
-  return callWithDiag('revealPoemSecure', revealPoemSecureCallable, { roomId: requireRoomId(roomId), targetUid });
+  return callCallable(revealPoemSecureCallable, { roomId: requireRoomId(roomId), targetUid });
 }
 
 export async function reactPoemSecure(roomId, targetUid, type) {
-  return callWithDiag('reactPoemSecure', reactPoemSecureCallable, { roomId: requireRoomId(roomId), targetUid, type });
+  return callCallable(reactPoemSecureCallable, { roomId: requireRoomId(roomId), targetUid, type });
 }
 
 export { requireRoomId };
-
-// Poem Secure Callable client wrapper
-// Existing rooms continue to use their legacy direct-update path.
