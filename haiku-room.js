@@ -406,6 +406,9 @@ if (!roomSnapshot.exists()) {
     document.getElementById('lobby-sec').style.display = 'block';
 
     onSnapshot(state.roomRef, (snapshot) => {
+      // キャッシュ由来の古いスナップショットで、サーバー取得済みの最新状態を巻き戻さない。
+      // 最新値は5秒ポーリングのgetDocFromServerで補完する。
+      if (snapshot.metadata?.fromCache) return;
       applyRoomData(snapshot.data());
     }, (error) => {
       console.error('[room-onSnapshot]', error);
