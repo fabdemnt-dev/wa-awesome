@@ -601,13 +601,22 @@ exports.submitHaikuPhrase = onCall(callableOptions, async (request) => {
       fail('permission-denied', '自分の手札にない素材は句に使えません。');
     }
     if (room.phrases?.[uid] !== undefined) fail('failed-precondition', '句は1節につき1つまでです。');
-    transaction.update(roomRef, {
-      [`phrases.${uid}`]: phrase,
-      [`phraseDetails.${uid}`]: phraseDetails,
-      [`revealedPhrases.${uid}`]: false,
-      [`selfPraise.${uid}`]: false,
-    });
+    const nextPhrases = { ...(isPlainObject(room.phrases) ? room.phrases : {}), [uid]: phrase };
+    const nextPhraseDetails = { ...(isPlainObject(room.phraseDetails) ? room.phraseDetails : {}), [uid]: phraseDetails };
+    const nextRevealedPhrases = { ...(isPlainObject(room.revealedPhrases) ? room.revealedPhrases : {}), [uid]: false };
+    const nextSelfPraise = { ...(isPlainObject(room.selfPraise) ? room.selfPraise : {}), [uid]: false };
+    transaction.set(roomRef, {
+      phrases: nextPhrases,
+      phraseDetails: nextPhraseDetails,
+      revealedPhrases: nextRevealedPhrases,
+      selfPraise: nextSelfPraise,
+    }, { merge: true });
   });
+  const savedSnapshot = await roomRef.get();
+  const savedData = savedSnapshot.data() || {};
+  if (savedData.phrases?.[uid] !== phrase) {
+    fail('internal', '句の保存を確認できませんでした。もう一度お試しください。');
+  }
   return { ok: true };
 });
 
