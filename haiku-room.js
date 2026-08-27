@@ -253,6 +253,7 @@ function applyRoomData(data) {
 // visibilitychangeとpageshowがほぼ同時に発火する可能性があるため、isResyncingRoomで二重実行を防ぐ。
 // ここでは読み取りと再描画のみを行い、ゲーム状態を変更する書き込みは一切行わない。
 let isResyncingRoom = false;
+let roomResyncInterval = null;
 async function resyncRoomFromFirestore() {
   if (!state.roomRef) return;
   if (isResyncingRoom) return;
@@ -301,6 +302,15 @@ window.addEventListener('pageshow', (event) => {
 // ユーザーがボタンを押した瞬間にFirestoreから最新状態を取得して画面に反映する。
 // resyncRoomFromFirestoreと同じ処理を使うため、書き込みは一切行わない。
 window.resyncHaikuRoom = resyncRoomFromFirestore;
+
+// 一部ブラウザでonSnapshotが一時停止しても、他参加者の開始・提出・投票を取りこぼさないための保険。
+// 画面表示中だけサーバーから定期取得し、古い状態を検知したら共通処理で再描画する。
+function startRoomResyncPolling() {
+  if (roomResyncInterval) clearInterval(roomResyncInterval);
+  roomResyncInterval = setInterval(() => {
+    if (document.visibilityState === 'visible' && state.roomRef) resyncRoomFromFirestore();
+  }, 5000);
+}
 
 window.manualResync = async function(where) {
   const btn = document.getElementById(where === 'game' ? 'manual-resync-btn-game' : 'manual-resync-btn-lobby');
@@ -399,7 +409,9 @@ if (!roomSnapshot.exists()) {
       applyRoomData(snapshot.data());
     }, (error) => {
       console.error('[room-onSnapshot]', error);
+      resyncRoomFromFirestore();
     });
+    startRoomResyncPolling();
     state.roomHistory = [];
     state.legacyHistory = [];
     subscribeRoomHistory(state.roomRef, (history) => {
