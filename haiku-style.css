@@ -382,18 +382,30 @@ button:disabled { background-color: #94a3b8; cursor: not-allowed; }
   .phrase-actions button:last-child { grid-column: auto; }
   .export-actions { grid-template-columns: 1fr !important; }
   .export-actions button { min-height: 42px; }
-  .phrase-board-header, .board-header {
-    align-items: flex-start !important;
-    flex-wrap: wrap;
-    gap: 8px;
+  .phrase-board-header {
+    align-items: center !important;
+    flex-wrap: nowrap;
+    gap: 6px;
   }
-  .board-actions {
-    width: 100%;
+  .phrase-board-header > strong {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .phrase-board-header .board-actions {
+    width: auto;
+    flex: 0 0 auto;
     display: flex;
-    flex-wrap: wrap;
-    justify-content: flex-start;
-    gap: 6px !important;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+    gap: 4px !important;
   }
+  .phrase-board-header .board-actions button {
+    min-height: 0;
+    padding: 3px 6px;
+    white-space: nowrap;
+  }
+  .board-actions { min-width: 0; }
   .board-actions button { min-height: 40px; }
   .vote-select { flex-basis: 100%; width: 100%; }
   .vote-submit-btn { min-height: 42px; }
