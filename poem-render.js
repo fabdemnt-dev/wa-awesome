@@ -120,16 +120,6 @@ export function renderBoards() {
     const likes = Number(poemData.likes) || 0;
     const emos = Number(poemData.emos) || 0;
     const userColor = getColorFromName(pName);
-    // Poemのリアクションは匿名仕様。件数だけを表示し、送信者名は表示しない。
-    const reactionSummaryHtml = `
-      <div class="reaction-summary" aria-label="リアクション集計">
-        <div class="reaction-summary-title">みんなの反応（匿名）</div>
-        <div class="reaction-summary-items">
-          <span class="reaction-summary-item ${likes > 0 ? 'has-reactions' : ''}">👍 いいね <strong>${likes}</strong></span>
-          <span class="reaction-summary-item ${emos > 0 ? 'has-reactions' : ''}">💖 エモい <strong>${emos}</strong></span>
-        </div>
-      </div>
-    `;
 
     const handsHtml = hands.map(h => {
       const authorColor = getColorFromName(h.author);
@@ -164,14 +154,13 @@ export function renderBoards() {
           `}
         </div>
 
-        ${isRevealed ? reactionSummaryHtml : ''}
         ${isRevealed ? `
           <div class="reaction-actions" style="display: flex; gap: 16px; margin-top: 12px; align-items: center;">
             <button onclick="addReaction('${jsPName}', 'like')" aria-label="いいねを送る" style="background: none; border: none; color: #334155; width: auto; padding: 6px 8px; font-size: 14px; cursor: pointer;">
-              👍 いいねする
+              👍 いいね (${likes})
             </button>
             <button onclick="addReaction('${jsPName}', 'emo')" aria-label="エモいを送る" style="background: none; border: none; color: #334155; width: auto; padding: 6px 8px; font-size: 14px; cursor: pointer;">
-              💖 エモいを送る
+              💖 エモい (${emos})
             </button>
           </div>
         ` : ''}
