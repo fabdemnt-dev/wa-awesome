@@ -77,3 +77,19 @@ UIDやルームIDは診断画面で末尾だけ表示される。パスワード
 ## 診断完了の条件
 
 開始・句提出・披露・親引き継ぎ・次節進行について、各ブラウザの`start`と`success`が対応し、`currentHostUid`と実際の親の`myUid`が一致していることを確認できれば、診断は完了とする。診断が終了したら、URLから`diag=1`を外して通常画面へ戻す。
+
+## 診断テスト用URL
+
+Haiku用
+
+```text
+https://fabdemnt-dev.github.io/wa-awesome/haiku.html?room=ROOM_ID&diag=1
+```
+
+Poem用
+
+```text
+https://fabdemnt-dev.github.io/wa-awesome/poem.html?room=ROOM_ID&diag=1
+```
+
+`ROOM_ID`の部分だけ、実際に使用するルームIDへ置き換える。
