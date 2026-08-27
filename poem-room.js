@@ -1,5 +1,5 @@
 import { db } from "./firebase-config.js";
-import { doc, getDoc, setDoc, onSnapshot, updateDoc, runTransaction, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { doc, getDocFromServer, setDoc, onSnapshot, updateDoc, runTransaction, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { normalizeParticipantName, setParticipantRole, normalizeParticipantRoles, getParticipantStorageKey, canClaimHost } from './participant-utils.js';
 import state from './poem-state.js';
 import { escapeHTML, escapeJS, renderInputFields, renderHand, renderBoards } from './poem-render.js';
@@ -212,22 +212,32 @@ function applyRoomData(data) {
 // visibilitychangeとpageshowがほぼ同時に発火する可能性があるため、isResyncingRoomで二重実行を防ぐ。
 // ここでは読み取りと再描画のみを行い、ゲーム状態を変更する書き込みは一切行わない。
 let isResyncingRoom = false;
+let roomResyncInterval = null;
 async function resyncRoomFromFirestore() {
   if (!state.roomRef) return;
   if (isResyncingRoom) return;
 
   isResyncingRoom = true;
   try {
-    const snapshot = await getDoc(state.roomRef);
+    const snapshot = await getDocFromServer(state.roomRef);
     if (snapshot.exists()) {
       applyRoomData(snapshot.data());
     }
   } catch (e) {
-    // 復帰時の再取得に失敗しても、既存のonSnapshot監視やゲーム操作は壊さない
-    console.warn('復帰時の再同期に失敗しました:', e);
+    // 再取得に失敗しても、既存のonSnapshot監視やゲーム操作は壊さない
+    console.warn('サーバーからの再同期に失敗しました:', e);
   } finally {
     isResyncingRoom = false;
   }
+}
+
+// 一部ブラウザでonSnapshotが一時停止したり、キャッシュ値が残ったりしても、
+// 参加者の投稿を取りこぼさないため、表示中はサーバーから定期的に再取得する。
+function startRoomResyncPolling() {
+  if (roomResyncInterval) clearInterval(roomResyncInterval);
+  roomResyncInterval = setInterval(() => {
+    if (document.visibilityState === 'visible' && state.roomRef) resyncRoomFromFirestore();
+  }, 5000);
 }
 
 // メイン: タブ/アプリの表示・非表示切替を検知する標準API
@@ -290,7 +300,7 @@ window.joinRoom = async function() {
   try {
     state.roomRef = doc(db, "rooms", "poem_" + state.roomId);
 
-const roomSnapshot = await getDoc(state.roomRef);
+    const roomSnapshot = await getDocFromServer(state.roomRef);
 
 if (!roomSnapshot.exists()) {
           const initialData = {
@@ -339,10 +349,15 @@ if (!roomSnapshot.exists()) {
     document.getElementById('lobby-sec').style.display = 'block';
 
     onSnapshot(state.roomRef, (snapshot) => {
+      // キャッシュ由来の古い値で、サーバー取得済みの最新状態を巻き戻さない。
+      // 最新値は5秒ポーリングのgetDocFromServerで補完する。
+      if (snapshot.metadata?.fromCache) return;
       applyRoomData(snapshot.data());
     }, (error) => {
       console.error('[room-onSnapshot]', error);
+      resyncRoomFromFirestore();
     });
+    startRoomResyncPolling();
     state.roomHistory = [];
     state.legacyHistory = [];
     subscribeRoomHistory(state.roomRef, (history) => {
