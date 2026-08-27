@@ -313,3 +313,81 @@ button:disabled { background-color: #94a3b8; cursor: not-allowed; }
 .participant-kick:hover { background:#fecaca; }
 .participant-empty { padding:10px; color:#94a3b8; font-size:12px; }
 @media (max-width:560px) { .participant-roster-header { align-items:flex-start; flex-direction:column; gap:3px; } .participant-grid { grid-template-columns:1fr; } }
+
+/* レスポンシブ操作行 */
+.lobby-actions > button,
+.room-actions > button {
+  width: auto;
+  flex: 1 1 180px;
+  margin-top: 0;
+  min-width: 0;
+}
+.phrase-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.phrase-actions button {
+  margin-top: 0;
+  min-width: 0;
+}
+.phrase-actions button:last-child { grid-column: 1 / -1; }
+.export-actions {
+  display: grid !important;
+  grid-template-columns: 2fr 1fr 1fr;
+  gap: 8px;
+}
+.export-actions button {
+  width: auto;
+  min-width: 0;
+  margin-top: 0;
+}
+.board-actions { min-width: 0; }
+.vote-select-group { flex-wrap: wrap; }
+.vote-select { min-width: 0; flex: 1 1 180px; }
+
+@media (max-width: 560px) {
+  body { padding: 10px; }
+  .card-panel { padding: 14px; border-radius: 10px; }
+  h1 { font-size: 22px; }
+  h2 { font-size: 20px; }
+  h3 { font-size: 17px; }
+  .lobby-actions, .room-actions { gap: 6px !important; }
+  .lobby-actions > button, .room-actions > button {
+    flex-basis: 100%;
+    min-height: 42px;
+    padding: 10px 8px;
+  }
+  .phrase-actions { grid-template-columns: 1fr; gap: 6px; }
+  .phrase-actions button:last-child { grid-column: auto; }
+  .export-actions { grid-template-columns: 1fr !important; }
+  .export-actions button { min-height: 42px; }
+  .phrase-board-header, .board-header {
+    align-items: flex-start !important;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .board-actions {
+    width: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 6px !important;
+  }
+  .board-actions button { min-height: 40px; }
+  .vote-select { flex-basis: 100%; width: 100%; }
+  .vote-submit-btn { min-height: 42px; }
+  .display-line { flex-wrap: wrap; overflow-wrap: anywhere; }
+  .word-tag { max-width: 100%; overflow-wrap: anywhere; }
+  .score-row { gap: 8px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; }
+}
+
+@media (max-width: 380px) {
+  .card-panel { padding: 12px; }
+  .section-title { font-size: 13px; }
+  .vote-submit-btn, .vote-select { font-size: 12px; }
+}
