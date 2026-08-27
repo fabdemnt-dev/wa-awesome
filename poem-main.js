@@ -1,4 +1,3 @@
-import './diagnostic-log.js';
 import './firebase-config.js';
 import './poem-state.js';
 import './poem-audio.js';
