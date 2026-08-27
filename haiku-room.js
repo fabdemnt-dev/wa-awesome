@@ -379,29 +379,54 @@ function applyRoomData(data) {
 }
 
 // ブラウザがバックグラウンドから復帰したタイミングで、Firestoreの最新データを再取得して画面に反映する。
-// visibilitychangeとpageshowがほぼ同時に発火する可能性があるため、isResyncingRoomで二重実行を防ぐ。
+// visibilitychangeとpageshowがほぼ同時に発火する可能性があるため、roomResyncPromiseで二重実行を防ぐ。
 // ここでは読み取りと再描画のみを行い、ゲーム状態を変更する書き込みは一切行わない。
-let isResyncingRoom = false;
+let roomResyncPromise = null;
+let resyncRequestedWhileBusy = false;
 let roomResyncInterval = null;
-async function resyncRoomFromFirestore() {
-  if (!state.roomRef) return;
-  if (isResyncingRoom) return;
+async function resyncRoomFromFirestore(options = {}) {
+  const requireSuccess = options.requireSuccess === true;
+  if (!state.roomRef) return { ok: false, error: new Error('ルームが未接続です。') };
 
-  isResyncingRoom = true;
-  try {
-    const snapshot = await getDocFromServer(state.roomRef);
-    if (snapshot.exists()) {
-      const data = snapshot.data();
-      applyRoomData(data);
-    } else {
+  // 送信直後に定期同期と重なっても、現在の取得が終わった後にもう一度
+  // サーバーから取得する。これにより、送信前のスナップショットで成功表示しない。
+  if (roomResyncPromise) {
+    resyncRequestedWhileBusy = true;
+    const result = await roomResyncPromise;
+    if (resyncRequestedWhileBusy) {
+      resyncRequestedWhileBusy = false;
+      return resyncRoomFromFirestore(options);
     }
-  } catch (e) {
-    // 復帰時の再取得に失敗しても、既存のonSnapshot監視やゲーム操作は壊さない
-    console.warn('復帰時の再同期に失敗しました:', e);
-  } finally {
-    isResyncingRoom = false;
+    if (requireSuccess && !result.ok) throw result.error;
+    return result;
   }
+
+  roomResyncPromise = (async () => {
+    try {
+      const snapshot = await getDocFromServer(state.roomRef);
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        applyRoomData(data);
+      }
+      return { ok: true };
+    } catch (e) {
+      // 通常の定期同期に失敗しても、既存のonSnapshot監視やゲーム操作は壊さない。
+      // 送信直後のrequireSuccessでは呼び出し側へエラーを返す。
+      console.warn('サーバーからの再同期に失敗しました:', e);
+      return { ok: false, error: e };
+    }
+  })();
+
+  let result;
+  try {
+    result = await roomResyncPromise;
+  } finally {
+    roomResyncPromise = null;
+  }
+  if (requireSuccess && !result.ok) throw result.error;
+  return result;
 }
+
 
 // メイン: タブ/アプリの表示・非表示切替を検知する標準API
 document.addEventListener('visibilitychange', () => {
