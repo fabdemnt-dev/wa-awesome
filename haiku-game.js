@@ -300,8 +300,10 @@ window.nextRound = async function() {
   if (state.currentData.schemaVersion === 2) {
     state.isProcessingNextRound = true;
     try {
-      const result = await advanceHaikuRound(state.roomId);
-      alert(result.taeWinners?.length ? `🪭 妙なりが出ました！${result.taeWinners.join(', ')} さん！\n次の節に進みます！` : '次の節に進みます！');
+      await advanceHaikuRound(state.roomId);
+      // 妙なりを含む前節結果はルーム状態に保存し、全員のロビーに表示する。
+      // ここでは結果を先に消してしまうアラートを出さない。
+      alert('次の節に進みます！前節の結果をロビーで確認できます。');
     } catch (e) {
       console.error(e);
       alert('次の節への移行に失敗しました: ' + (e.message || 'サーバーエラー'));
@@ -344,9 +346,6 @@ window.nextRound = async function() {
     });
 
     let alertMessage = '次の節に進みます！';
-    if (taeWinners.length > 0) {
-      alertMessage = `🪭 妙なりが出ました！今節の最高功労者: ${taeWinners.join(', ')} さん！(+${taePoints}誉)\n` + alertMessage;
-    }
 
     const nextRoundNum = (state.currentData.roundCount || 1) + 1;
 
@@ -398,7 +397,8 @@ window.nextRound = async function() {
       currentHost: nextHost,
       ...(state.currentData.schemaVersion === 2 ? { currentHostUid: nextHostUid } : {}),
       roundCount: nextRoundNum,
-      scores: newScores, 
+      scores: newScores,
+      lastRoundResult: { round: state.currentData.roundCount || 1, taeWinners, taePoints },
       words5: carriedWords5, words7: carriedWords7, hands5: {}, hands7: {}, deck5: [], deck7: [], phrases: {}, phraseDetails: {}, votes: {}, revealedPhrases: {}, selfPraise: {}, redraws: {}
     });
     batch.set(doc(collection(state.roomRef, 'history')), currentRoundHistory);

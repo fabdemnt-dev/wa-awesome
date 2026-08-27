@@ -247,6 +247,7 @@ button:disabled { background-color: #94a3b8; cursor: not-allowed; }
 .submission-people { display:flex; flex-wrap:wrap; gap:5px; }
 .submission-person { display:inline-block; padding:3px 7px; border-radius:999px; background:#fff7ed; color:#9a3412; font-size:11px; }
 .submission-person.is-done { background:#ecfdf5; color:#047857; }
+.round-result { margin:0 0 12px; padding:10px 12px; background:#fef3c7; border:1px solid #f59e0b; border-radius:8px; color:#92400e; text-align:center; line-height:1.6; font-size:13px; }
 .scoreboard { margin-top:14px; padding:10px 12px; background:#fffbeb; border:1px solid #fcd34d; border-radius:8px; }
 .scoreboard-title { color:#92400e; font-size:13px; font-weight:800; margin-bottom:6px; }
 .scoreboard-list { display:flex; flex-direction:column; gap:4px; }
