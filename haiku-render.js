@@ -140,6 +140,12 @@ export function renderBoards() {
   const boardList = document.getElementById('board-list');
   if (!boardList || !state.currentData) return;
 
+  // ルーム更新や5秒ごとの再同期でboardList全体を描画し直すため、
+  // 入力途中の御印が消えないよう、再描画前のselect値を一時退避する。
+  const selectedVoteValues = new Map(
+    [...boardList.querySelectorAll('select.vote-select')].map(select => [select.id, select.value])
+  );
+
   const phrases = state.currentData.phrases || {};
   const phraseDetails = state.currentData.phraseDetails || {};
   const votes = state.currentData.votes || {};
@@ -259,9 +265,18 @@ export function renderBoards() {
         ` : ''}
       </div>
     `;
-  }).join('');
+    }).join('');
+
+  // 同じ句のselectが再生成されていれば、退避していた選択値を復元する。
+  selectedVoteValues.forEach((value, id) => {
+    const select = document.getElementById(id);
+    if (select && [...select.options].some(option => option.value === value)) {
+      select.value = value;
+    }
+  });
 
   // 「次の節に進む」は選者（親）だけが押せるようにする
+
   const nextBtn = document.getElementById('next-round-btn');
   const nextHint = document.getElementById('next-round-hint');
   if (nextBtn) {
