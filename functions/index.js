@@ -1,6 +1,7 @@
 const { initializeApp } = require('firebase-admin/app');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
+const { defineSecret } = require('firebase-functions/params');
 const bcrypt = require('bcryptjs');
 
 initializeApp();
@@ -26,6 +27,12 @@ const DEFAULT_WORDS_7 = [
 const callableOptions = {
   region: 'asia-northeast1',
   cors: ['https://fabdemnt-dev.github.io'],
+};
+
+const openAiApiKey = defineSecret('OPENAI_API_KEY');
+const openAiTestOptions = {
+  ...callableOptions,
+  secrets: [openAiApiKey],
 };
 
 function fail(code, message) {
@@ -1278,6 +1285,47 @@ exports.saveWordSet = onCall(callableOptions, async (request) => {
   await batch.commit();
 
   return { id: ref.id, hasPassword: wordSet.hasPassword };
+});
+
+exports.testOpenAIConnection = onCall(openAiTestOptions, async (request) => {
+  requireAuthenticated(request);
+
+  const apiKey = openAiApiKey.value();
+  if (!apiKey) fail('failed-precondition', 'OpenAI接続用のSecretが設定されていません。');
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20_000);
+  try {
+    const response = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-5.6-luna',
+        input: 'Reply with exactly: OK',
+        max_output_tokens: 8,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      fail('internal', `OpenAI接続テストに失敗しました（HTTP ${response.status}）。`);
+    }
+    const result = await response.json();
+    return {
+      ok: true,
+      model: result.model || 'gpt-5.6-luna',
+      responseId: result.id || null,
+      output: result.output_text || null,
+    };
+  } catch (error) {
+    if (error instanceof HttpsError) throw error;
+    fail('internal', 'OpenAI接続テストに失敗しました。');
+  } finally {
+    clearTimeout(timeout);
+  }
 });
 
 exports.deleteWordSet = onCall(callableOptions, async (request) => {
