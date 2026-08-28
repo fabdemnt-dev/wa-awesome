@@ -17,6 +17,7 @@ const state = {
   currentData: null,
 
   isSubmittingSelfPraise: false,
+  isSubmittingVote: false,
   isProcessingNextRound: false,
 
   // 「選んだ札だけ引き直す」機能用：引き直し対象として選んでいる札のid一覧
