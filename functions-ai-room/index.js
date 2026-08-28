@@ -1,7 +1,9 @@
+const crypto = require('node:crypto');
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { defineSecret } = require('firebase-functions/params');
 
 const openAiApiKey = defineSecret('OPENAI_API_KEY');
+const AI_ROOM_ACCESS_CODE_SHA256 = 'a4248a853ffadc372dfa4d1b468b76ff8bd744d94c3ae4dadf7e46000e796156';
 
 const callableOptions = {
   region: 'asia-northeast1',
@@ -16,6 +18,17 @@ function fail(code, message) {
 function requireAuthenticated(request) {
   if (!request.auth?.uid) {
     fail('unauthenticated', 'AI会議室を利用するにはアプリへの接続が必要です。ページを再読み込みして、もう一度お試しください。');
+  }
+}
+
+function requireAccessCode(value) {
+  if (typeof value !== 'string' || !value) {
+    fail('permission-denied', 'AI会議室のアクセスコードを入力してください。');
+  }
+  const actual = crypto.createHash('sha256').update(value).digest();
+  const expected = Buffer.from(AI_ROOM_ACCESS_CODE_SHA256, 'hex');
+  if (actual.length !== expected.length || !crypto.timingSafeEqual(actual, expected)) {
+    fail('permission-denied', 'AI会議室のアクセスコードが正しくありません。');
   }
 }
 
@@ -46,6 +59,7 @@ function extractOutputText(body) {
 
 exports.askAiRoomOpenAI = onCall(callableOptions, async (request) => {
   requireAuthenticated(request);
+  requireAccessCode(request.data?.accessCode);
   const message = requireMessage(request.data?.message);
 
   const apiKey = openAiApiKey.value();
