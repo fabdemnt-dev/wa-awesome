@@ -371,6 +371,181 @@ function requireSupplementWords(value, label) {
   });
 }
 
+async function applyHaikuRoleChange(transaction, roomRef, room, uid, role, supplied5 = [], supplied7 = []) {
+  if (room.schemaVersion !== 2) fail('failed-precondition', '新形式のルームだけ役割変更Callableを利用できます。');
+  const participants = participantsByUid(room);
+  const name = participants.get(uid);
+  if (!name) fail('permission-denied', '参加者だけが役割変更できます。');
+  const previousUids = [...participants.entries()]
+    .filter(([participantUid, participantName]) => participantName === name && participantUid !== uid)
+    .map(([participantUid]) => participantUid);
+  const currentHost = room.currentHost || '';
+  if (room.status === 'playing' && role === 'spectator' && name === currentHost) {
+    fail('failed-precondition', '親はラウンド中に見学者へ切り替えられません。');
+  }
+  const players = (room.players || []).filter((item) => item !== name);
+  const spectators = (room.spectators || []).filter((item) => item !== name);
+  const nextPlayers = role === 'player' ? [...players, name] : players;
+  const nextSpectators = role === 'spectator' ? [...spectators, name] : spectators;
+  const participantUids = Object.fromEntries([...participants.entries()].filter(([participantUid, participantName]) => participantName !== name || participantUid === uid));
+  participantUids[uid] = name;
+  const update = { players: nextPlayers, spectators: nextSpectators, participantUids };
+  if (room.currentHost === name && room.currentHostUid !== uid) {
+    update.currentHostUid = uid;
+  }
+  if (!room.currentHost && role === 'player') {
+    update.currentHost = name;
+    update.currentHostUid = uid;
+  }
+
+  let joinedRound = false;
+  if (room.status === 'playing') {
+    let roundPlayerUids = getRoundPlayerUids(room, participants);
+    const hadPreviousRoundUid = previousUids.some((previousUid) => roundPlayerUids.includes(previousUid));
+    const roundPlayerNames = isPlainObject(room.roundPlayerNames) ? { ...room.roundPlayerNames } : {};
+    let currentHandSnapshot = null;
+    const previousHandSnapshots = new Map();
+    if (previousUids.length && hadPreviousRoundUid) {
+      const handUids = [...new Set([...previousUids, uid])];
+      const handSnapshots = await Promise.all(handUids.map((handUid) => transaction.get(roomRef.collection('hands').doc(handUid))));
+      handUids.forEach((handUid, index) => {
+        if (handUid === uid) currentHandSnapshot = handSnapshots[index];
+        else previousHandSnapshots.set(handUid, handSnapshots[index]);
+      });
+    }
+    previousUids.forEach((previousUid) => {
+      if (!roundPlayerUids.includes(previousUid)) return;
+      roundPlayerUids = roundPlayerUids.map((roundUid) => roundUid === previousUid ? uid : roundUid);
+      if (roundPlayerNames[previousUid] && !roundPlayerNames[uid]) roundPlayerNames[uid] = roundPlayerNames[previousUid];
+      delete roundPlayerNames[previousUid];
+    });
+    roundPlayerUids = [...new Set(roundPlayerUids)];
+    roundPlayerUids.forEach((roundUid) => {
+      if (!roundPlayerNames[roundUid] && participants.get(roundUid)) roundPlayerNames[roundUid] = participants.get(roundUid);
+    });
+    if (previousUids.length) {
+      const migratedFields = {};
+      ['phrases', 'phraseDetails', 'revealedPhrases', 'selfPraise', 'redraws'].forEach((field) => {
+        let value = room[field];
+        previousUids.forEach((previousUid) => { value = migrateUidMap(value, previousUid, uid); });
+        migratedFields[field] = value;
+      });
+      let migratedVotes = room.votes;
+      previousUids.forEach((previousUid) => { migratedVotes = migrateVotesByUid(migratedVotes, previousUid, uid); });
+      let migratedVoteRoles = room.voteRoles;
+      previousUids.forEach((previousUid) => { migratedVoteRoles = migrateUidMap(migratedVoteRoles, previousUid, uid); });
+      Object.assign(update, migratedFields, { votes: migratedVotes, voteRoles: migratedVoteRoles });
+    }
+    if (role === 'player' && !roundPlayerUids.includes(uid)) {
+      joinedRound = true;
+      roundPlayerUids.push(uid);
+      roundPlayerNames[uid] = name;
+    }
+    update.roundPlayerUids = roundPlayerUids;
+    update.roundPlayerNames = roundPlayerNames;
+    if (hadPreviousRoundUid) {
+      if (!currentHandSnapshot || !currentHandSnapshot.exists) {
+        const previousHand = previousUids
+          .map((previousUid) => previousHandSnapshots.get(previousUid))
+          .find((snapshot) => snapshot?.exists);
+        if (previousHand) transaction.set(roomRef.collection('hands').doc(uid), previousHand.data());
+      }
+      previousUids.forEach((previousUid) => {
+        const previousHand = previousHandSnapshots.get(previousUid);
+        if (previousHand?.exists) transaction.delete(roomRef.collection('hands').doc(previousUid));
+      });
+    }
+  }
+
+  if (room.status === 'playing' && role === 'player' && joinedRound) {
+    const settings = room.settings || { hand5: 5, hand7: 3 };
+    const deck5 = Array.isArray(room.deck5) ? [...room.deck5] : [];
+    const deck7 = Array.isArray(room.deck7) ? [...room.deck7] : [];
+    const pool5 = Array.isArray(room.supplementPool5) && room.supplementPool5.length ? room.supplementPool5 : DEFAULT_WORDS_5;
+    const pool7 = Array.isArray(room.supplementPool7) && room.supplementPool7.length ? room.supplementPool7 : DEFAULT_WORDS_7;
+    const supplementAuthorLabel = optionalText(room.supplementAuthorLabel, 100) || '🎴お題ぶくろ';
+    const missing5 = Math.max(0, settings.hand5 - deck5.length);
+    const missing7 = Math.max(0, settings.hand7 - deck7.length);
+    deck5.push(...makeSupplementCards(pool5, missing5, supplementAuthorLabel));
+    deck7.push(...makeSupplementCards(pool7, missing7, supplementAuthorLabel));
+    if (deck5.length < settings.hand5 || deck7.length < settings.hand7) fail('failed-precondition', '途中参加者へ配る山札が不足しています。');
+    const hand5 = deck5.splice(0, settings.hand5);
+    const hand7 = deck7.splice(0, settings.hand7);
+    transaction.set(roomRef.collection('hands').doc(uid), { hand5, hand7, redrawUsed: false, round: room.roundCount || 1, updatedAt: FieldValue.serverTimestamp() });
+    update.deck5 = deck5;
+    update.deck7 = deck7;
+    update.supplementPool5 = pool5;
+    update.supplementPool7 = pool7;
+  }
+
+  transaction.update(roomRef, update);
+  return { joinedRound };
+}
+
+exports.joinHaikuRoom = onCall(callableOptions, async (request) => {
+  const uid = requireAuthenticated(request);
+  const roomId = requireText(request.data?.roomId, 'ルームID', 150);
+  const name = requireText(request.data?.name, '名前', 200);
+  const role = requireRole(request.data?.role);
+  const roomRef = db.collection('rooms').doc(`haiku_${roomId}`);
+  const result = await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(roomRef);
+    if (!snapshot.exists) {
+      transaction.set(roomRef, {
+        schemaVersion: 2,
+        status: 'lobby',
+        currentHost: role === 'player' ? name : '',
+        currentHostUid: role === 'player' ? uid : '',
+        roundCount: 1,
+        words5: [],
+        words7: [],
+        hands5: {},
+        hands7: {},
+        deck5: [],
+        deck7: [],
+        phrases: {},
+        phraseDetails: {},
+        revealedPhrases: {},
+        votes: {},
+        voteRoles: {},
+        scores: {},
+        scoreHistory: [],
+        selfPraise: {},
+        settings: { hand5: 5, hand7: 3, carryOver: true },
+        players: role === 'player' ? [name] : [],
+        spectators: role === 'spectator' ? [name] : [],
+        redraws: {},
+        participantUids: { [uid]: name },
+      });
+      return { created: true, joinedRound: false };
+    }
+
+    const room = snapshot.data() || {};
+    if (room.schemaVersion !== 2) fail('failed-precondition', '旧形式のルームです。');
+    const participants = participantsByUid(room);
+    const existingName = participants.get(uid);
+    if (existingName && existingName !== name) {
+      fail('permission-denied', '参加者名を変更して再接続することはできません。');
+    }
+    const conflictingUid = [...participants.entries()]
+      .find(([participantUid, participantName]) => participantUid !== uid && participantName === name)?.[0];
+    if (!existingName && conflictingUid) {
+      fail('already-exists', '同じ名前の参加者がすでに存在します。');
+    }
+    const participantUids = Object.fromEntries(participants.entries());
+    participantUids[uid] = name;
+    const roleResult = await applyHaikuRoleChange(
+      transaction,
+      roomRef,
+      { ...room, participantUids },
+      uid,
+      role,
+    );
+    return { created: false, joinedRound: roleResult.joinedRound };
+  });
+  return { ok: true, created: result.created === true, joinedRound: result.joinedRound === true };
+});
+
 exports.changeHaikuRole = onCall(callableOptions, async (request) => {
   const uid = requireAuthenticated(request);
   const roomId = requireText(request.data?.roomId, 'ルームID', 150);
@@ -379,117 +554,9 @@ exports.changeHaikuRole = onCall(callableOptions, async (request) => {
   const supplied7 = requireSupplementWords(request.data?.supplement7 || [], '七音補充素材');
   const roomRef = db.collection('rooms').doc(`haiku_${roomId}`);
   const result = await db.runTransaction(async (transaction) => {
-    let joinedRound = false;
     const snapshot = await transaction.get(roomRef);
     if (!snapshot.exists) fail('not-found', 'ルームが見つかりません。');
-    const room = snapshot.data() || {};
-    if (room.schemaVersion !== 2) fail('failed-precondition', '新形式のルームだけ役割変更Callableを利用できます。');
-    const participants = participantsByUid(room);
-    const name = participants.get(uid);
-    if (!name) fail('permission-denied', '参加者だけが役割変更できます。');
-    const previousUids = [...participants.entries()]
-      .filter(([participantUid, participantName]) => participantName === name && participantUid !== uid)
-      .map(([participantUid]) => participantUid);
-    const currentHost = room.currentHost || '';
-    if (room.status === 'playing' && role === 'spectator' && name === currentHost) {
-      fail('failed-precondition', '親はラウンド中に見学者へ切り替えられません。');
-    }
-    const players = (room.players || []).filter((item) => item !== name);
-    const spectators = (room.spectators || []).filter((item) => item !== name);
-    const nextPlayers = role === 'player' ? [...players, name] : players;
-    const nextSpectators = role === 'spectator' ? [...spectators, name] : spectators;
-    const participantUids = Object.fromEntries([...participants.entries()].filter(([participantUid, participantName]) => participantName !== name || participantUid === uid));
-    participantUids[uid] = name;
-    const update = { players: nextPlayers, spectators: nextSpectators, participantUids };
-    if (!room.currentHost && role === 'player') {
-      update.currentHost = name;
-      update.currentHostUid = uid;
-    }
-
-    if (room.status === 'playing') {
-      let roundPlayerUids = getRoundPlayerUids(room, participants);
-      const hadPreviousRoundUid = previousUids.some((previousUid) => roundPlayerUids.includes(previousUid));
-      const roundPlayerNames = isPlainObject(room.roundPlayerNames) ? { ...room.roundPlayerNames } : {};
-      let currentHandSnapshot = null;
-      const previousHandSnapshots = new Map();
-      if (previousUids.length && hadPreviousRoundUid) {
-        const handUids = [...new Set([...previousUids, uid])];
-        const handSnapshots = await Promise.all(handUids.map((handUid) => transaction.get(roomRef.collection('hands').doc(handUid))));
-        handUids.forEach((handUid, index) => {
-          if (handUid === uid) currentHandSnapshot = handSnapshots[index];
-          else previousHandSnapshots.set(handUid, handSnapshots[index]);
-        });
-      }
-      previousUids.forEach((previousUid) => {
-        if (!roundPlayerUids.includes(previousUid)) return;
-        roundPlayerUids = roundPlayerUids.map((roundUid) => roundUid === previousUid ? uid : roundUid);
-        if (roundPlayerNames[previousUid] && !roundPlayerNames[uid]) roundPlayerNames[uid] = roundPlayerNames[previousUid];
-        delete roundPlayerNames[previousUid];
-      });
-      roundPlayerUids = [...new Set(roundPlayerUids)];
-      roundPlayerUids.forEach((roundUid) => {
-        if (!roundPlayerNames[roundUid] && participants.get(roundUid)) roundPlayerNames[roundUid] = participants.get(roundUid);
-      });
-      if (previousUids.length) {
-        const migratedFields = {};
-        ['phrases', 'phraseDetails', 'revealedPhrases', 'selfPraise', 'redraws'].forEach((field) => {
-          let value = room[field];
-          previousUids.forEach((previousUid) => { value = migrateUidMap(value, previousUid, uid); });
-          migratedFields[field] = value;
-        });
-        let migratedVotes = room.votes;
-        previousUids.forEach((previousUid) => { migratedVotes = migrateVotesByUid(migratedVotes, previousUid, uid); });
-        let migratedVoteRoles = room.voteRoles;
-        previousUids.forEach((previousUid) => { migratedVoteRoles = migrateUidMap(migratedVoteRoles, previousUid, uid); });
-        Object.assign(update, migratedFields, { votes: migratedVotes, voteRoles: migratedVoteRoles });
-      }
-      if (role === 'player' && !roundPlayerUids.includes(uid)) {
-        // 本当に今節へ初参加した人だけを記録し、手札を配る。
-        joinedRound = true;
-        roundPlayerUids.push(uid);
-        roundPlayerNames[uid] = name;
-      }
-      // 見学へ移っても、また戻っても今節の参加実績は削除しない。
-      update.roundPlayerUids = roundPlayerUids;
-      update.roundPlayerNames = roundPlayerNames;
-      if (hadPreviousRoundUid) {
-        if (!currentHandSnapshot || !currentHandSnapshot.exists) {
-          const previousHand = previousUids
-            .map((previousUid) => previousHandSnapshots.get(previousUid))
-            .find((snapshot) => snapshot?.exists);
-          if (previousHand) {
-            transaction.set(roomRef.collection('hands').doc(uid), previousHand.data());
-          }
-        }
-        previousUids.forEach((previousUid) => {
-          const previousHand = previousHandSnapshots.get(previousUid);
-          if (previousHand?.exists) transaction.delete(roomRef.collection('hands').doc(previousUid));
-        });
-      }
-    }
-
-    if (room.status === 'playing' && role === 'player' && joinedRound) {
-      const settings = room.settings || { hand5: 5, hand7: 3 };
-      const deck5 = Array.isArray(room.deck5) ? [...room.deck5] : [];
-      const deck7 = Array.isArray(room.deck7) ? [...room.deck7] : [];
-      const pool5 = Array.isArray(room.supplementPool5) && room.supplementPool5.length ? room.supplementPool5 : DEFAULT_WORDS_5;
-      const pool7 = Array.isArray(room.supplementPool7) && room.supplementPool7.length ? room.supplementPool7 : DEFAULT_WORDS_7;
-      const supplementAuthorLabel = optionalText(room.supplementAuthorLabel, 100) || '🎴お題ぶくろ';
-      const missing5 = Math.max(0, settings.hand5 - deck5.length);
-      const missing7 = Math.max(0, settings.hand7 - deck7.length);
-      deck5.push(...makeSupplementCards(pool5, missing5, supplementAuthorLabel));
-      deck7.push(...makeSupplementCards(pool7, missing7, supplementAuthorLabel));
-      if (deck5.length < settings.hand5 || deck7.length < settings.hand7) fail('failed-precondition', '途中参加者へ配る山札が不足しています。');
-      const hand5 = deck5.splice(0, settings.hand5);
-      const hand7 = deck7.splice(0, settings.hand7);
-      transaction.set(roomRef.collection('hands').doc(uid), { hand5, hand7, redrawUsed: false, round: room.roundCount || 1, updatedAt: FieldValue.serverTimestamp() });
-      update.deck5 = deck5;
-      update.deck7 = deck7;
-      update.supplementPool5 = pool5;
-      update.supplementPool7 = pool7;
-    }
-    transaction.update(roomRef, update);
-    return { joinedRound };
+    return applyHaikuRoleChange(transaction, roomRef, snapshot.data() || {}, uid, role, supplied5, supplied7);
   });
   return { ok: true, joinedRound: result.joinedRound === true };
 });
@@ -639,7 +706,7 @@ exports.changePoemRole = onCall(callableOptions, async (request) => {
 });
 
 function requireSettingInteger(value, label, fallback, max = 20) {
-  const number = Number(value ?? fallback);
+  const number = value ?? fallback;
   if (!Number.isInteger(number) || number < 1 || number > max) fail('invalid-argument', `${label}は1〜${max}の整数で指定してください。`);
   return number;
 }
@@ -659,7 +726,11 @@ async function updateGameSettings(request, prefix, fields) {
     const currentSettings = isPlainObject(room.settings) ? room.settings : {};
     const settings = { ...currentSettings };
     for (const [key, spec] of Object.entries(fields)) settings[key] = requireSettingInteger(request.data?.[key], spec.label, spec.fallback, spec.max);
-    if (prefix === 'haiku') settings.carryOver = request.data?.carryOver !== false;
+    if (prefix === 'haiku') {
+      const carryOver = request.data?.carryOver;
+      if (carryOver !== undefined && typeof carryOver !== 'boolean') fail('invalid-argument', '素材持越し設定が正しくありません。');
+      settings.carryOver = carryOver === undefined ? currentSettings.carryOver !== false : carryOver;
+    }
     transaction.update(roomRef, { settings });
   });
   return { ok: true };

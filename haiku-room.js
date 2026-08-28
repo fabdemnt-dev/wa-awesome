@@ -13,7 +13,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (roomInput && initialRoomId && !roomInput.value) roomInput.value = initialRoomId;
 });
 import { normalizeParticipantName, setParticipantRole, normalizeParticipantRoles, getParticipantStorageKey, canClaimHost, getCurrentHostName, getRoundParticipantNames, getRoundParticipantEntries } from './participant-utils.js';
-import { changeHaikuRole, removeHaikuWord, updateHaikuSettings, removePlayer as removePlayerSecure, claimHost as claimHostSecure } from './haiku-functions.js';
+import { joinHaikuRoom, changeHaikuRole, removeHaikuWord, updateHaikuSettings, removePlayer as removePlayerSecure, claimHost as claimHostSecure } from './haiku-functions.js';
 
 async function saveParticipantRole(role) {
   await runTransaction(db, async (transaction) => {
@@ -544,56 +544,31 @@ window.joinRoom = async function() {
     state.roomRef = doc(db, "rooms", "haiku_" + state.roomId);
 
     const role = state.isSpectator ? 'spectator' : 'player';
-    const initialData = {
-      schemaVersion: 2,
-      status: 'lobby',
-      currentHost: state.isSpectator ? '' : state.myName,
-      currentHostUid: state.isSpectator ? '' : currentUser.uid,
-      roundCount: 1,
-      words5: [],
-      words7: [],
-      hands5: {},
-      hands7: {},
-      phrases: {},
-      phraseDetails: {},
-      votes: {},
-      scores: {},
-      selfPraise: {},
-      settings: { hand5: 5, hand7: 3, carryOver: true },
-      players: state.isSpectator ? [] : [state.myName],
-      spectators: state.isSpectator ? [state.myName] : [],
-      redraws: {},
-      participantUids: { [currentUser.uid]: state.myName },
-    };
+    const existingSnapshot = await getDocFromServer(state.roomRef);
+    const existingData = existingSnapshot.exists() ? existingSnapshot.data() || {} : null;
 
-    // 入室判定と新規ルーム作成を同じサーバー側トランザクションで行う。
-    // キャッシュ上の「存在しない」を根拠に既存ルームをsetDocで上書きしない。
-    await runTransaction(db, async (transaction) => {
-      const snapshot = await transaction.get(state.roomRef);
-      if (!snapshot.exists()) {
-        transaction.set(state.roomRef, initialData);
-        return;
-      }
-
-      const data = snapshot.data() || {};
-      const roles = setParticipantRole(data, state.myName, role);
-      const update = { ...roles };
-      if (data.participantUids && typeof data.participantUids === 'object') {
-        const participantUids = Object.fromEntries(
-          Object.entries(data.participantUids).filter(([uid, name]) => name !== state.myName || uid === currentUser.uid)
-        );
-        participantUids[currentUser.uid] = state.myName;
-        update.participantUids = participantUids;
-        if (data.schemaVersion === 2 && data.currentHost === state.myName) {
-          update.currentHostUid = currentUser.uid;
+    if (!existingData || existingData.schemaVersion === 2) {
+      // v2の作成・入室・再接続は、参加者・親情報を検証するCallableへ集約する。
+      await joinHaikuRoom(state.roomId, state.myName, role);
+    } else {
+      // v1ルームは従来互換の直接更新を維持する。
+      await runTransaction(db, async (transaction) => {
+        const snapshot = await transaction.get(state.roomRef);
+        if (!snapshot.exists()) throw new Error('ルームが見つかりません');
+        const data = snapshot.data() || {};
+        const roles = setParticipantRole(data, state.myName, role);
+        const update = { ...roles };
+        if (data.participantUids && typeof data.participantUids === 'object') {
+          const participantUids = Object.fromEntries(
+            Object.entries(data.participantUids).filter(([uid, name]) => name !== state.myName || uid === currentUser.uid)
+          );
+          participantUids[currentUser.uid] = state.myName;
+          update.participantUids = participantUids;
         }
-      }
-      if (role === 'player' && !data.currentHost) {
-        update.currentHost = state.myName;
-        if (data.schemaVersion === 2) update.currentHostUid = currentUser.uid;
-      }
-      transaction.update(state.roomRef, update);
-    });
+        if (role === 'player' && !data.currentHost) update.currentHost = state.myName;
+        transaction.update(state.roomRef, update);
+      });
+    }
 
     document.getElementById('login-sec').style.display = 'none';
     document.getElementById('lobby-sec').style.display = 'block';

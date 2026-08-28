@@ -200,3 +200,114 @@ test('句投稿成功後に再同期だけ失敗しても再投稿可能には�
   assert.equal(harness.state.submittedPhraseKey, 'room:1');
   assert.deepEqual(harness.alerts, ['句は投稿されましたが、画面への反映を確認できませんでした。最新の状態に更新してください。']);
 });
+
+
+async function loadPhraseButtonHarness(stateOverrides = {}) {
+  const source = await fs.readFile(new URL('../haiku-render.js', import.meta.url), 'utf8');
+  const extracted = extractBetween(source, 'export function refreshPhraseSubmitButton', '\nexport function refreshRoleBasedControls');
+  const implementation = extracted.replace('export function refreshPhraseSubmitButton', 'function refreshPhraseSubmitButton');
+  const button = {
+    disabled: false,
+    innerText: '整いました！',
+    style: {},
+    attributes: {},
+    setAttribute(name, value) { this.attributes[name] = value; },
+  };
+  const state = {
+    currentData: { schemaVersion: 2, roundCount: 1, phrases: {} },
+    selectedHand: [null, null, null],
+    isSpectator: false,
+    isSubmittingPhrase: false,
+    submittedPhraseKey: '',
+    myUid: 'uid-player',
+    myName: '参加者',
+    roomId: 'room',
+    ...stateOverrides,
+  };
+  const document = { getElementById: (id) => id === 'submit-phrase-btn' ? button : null };
+  const install = new Function(
+    'state', 'document', 'getParticipantStorageKey',
+    `${implementation}\nreturn refreshPhraseSubmitButton;`,
+  );
+  const refreshPhraseSubmitButton = install(state, document, (_data, uid, name) => uid || name);
+  return { state, button, refreshPhraseSubmitButton };
+}
+
+test('句投稿ボタンは未完成・投稿中・投稿済みで無効になり、次節で再び有効になる', async () => {
+  const harness = await loadPhraseButtonHarness();
+  harness.refreshPhraseSubmitButton();
+  assert.equal(harness.button.disabled, true);
+  assert.equal(harness.button.innerText, '整いました！');
+
+  harness.state.selectedHand = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+  harness.refreshPhraseSubmitButton();
+  assert.equal(harness.button.disabled, false);
+
+  harness.state.isSubmittingPhrase = true;
+  harness.refreshPhraseSubmitButton();
+  assert.equal(harness.button.disabled, true);
+  assert.equal(harness.button.innerText, '投稿中…');
+
+  harness.state.isSubmittingPhrase = false;
+  harness.state.submittedPhraseKey = 'room:1';
+  harness.refreshPhraseSubmitButton();
+  assert.equal(harness.button.disabled, true);
+  assert.equal(harness.button.innerText, '投稿済み');
+
+  harness.state.currentData = { ...harness.state.currentData, roundCount: 2 };
+  harness.refreshPhraseSubmitButton();
+  assert.equal(harness.button.disabled, false);
+  assert.equal(harness.button.innerText, '整いました！');
+});
+
+test('v2俳句の作成・入室・再接続はCallableを使い、v1だけ直接更新へフォールバックする', async () => {
+  const source = await fs.readFile(new URL('../haiku-room.js', import.meta.url), 'utf8');
+  const implementation = extractBetween(source, 'window.joinRoom =', '\nwindow.removeSubmittedWord');
+  assert.match(source, /import \{ joinHaikuRoom,/);
+  assert.match(implementation, /if \(!existingData \|\| existingData\.schemaVersion === 2\)/);
+  assert.match(implementation, /await joinHaikuRoom\(state\.roomId, state\.myName, role\)/);
+  assert.match(implementation, /v1ルームは従来互換の直接更新を維持する/);
+  assert.doesNotMatch(implementation, /const initialData =/);
+  assert.doesNotMatch(implementation, /transaction\.set\(state\.roomRef/);
+});
+
+
+test('空文字・空白だけの素材はCallableへ送信しない', async () => {
+  let calls = 0;
+  const harness = await loadAddWordsHarness({
+    submitImpl: async () => { calls += 1; },
+  });
+  harness.inputs.get('word-5-input-1').value = '   ';
+  harness.inputs.get('word-7-input-1').value = '';
+
+  await harness.window.addWords();
+  assert.equal(calls, 0);
+  assert.equal(harness.state.isSubmittingWords, false);
+  assert.deepEqual(harness.alerts, ['少なくとも1つ素材を入力してください']);
+});
+
+test('完了後は同一文字列の素材を再度送信できる', async () => {
+  let calls = 0;
+  const harness = await loadAddWordsHarness({
+    submitImpl: async () => { calls += 1; },
+  });
+
+  await harness.window.addWords();
+  await harness.window.addWords();
+  assert.equal(calls, 2);
+  assert.equal(harness.state.isSubmittingWords, false);
+  assert.equal(harness.button.disabled, false);
+});
+
+test('句投稿の一般エラー後は送信中フラグを解除して再操作可能に戻す', async () => {
+  const harness = await loadSubmitPhraseHarness({
+    submitImpl: async () => {
+      throw Object.assign(new Error('internal detail'), { code: 'functions/permission-denied' });
+    },
+  });
+
+  await harness.window.submitPhrase();
+  assert.equal(harness.state.isSubmittingPhrase, false);
+  assert.equal(harness.state.submittedPhraseKey, '');
+  assert.deepEqual(harness.alerts, ['句の投稿に失敗しました。入力内容を確認して、もう一度お試しください。']);
+});

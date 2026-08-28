@@ -74,7 +74,10 @@ export function refreshPhraseSubmitButton() {
     || (state.myName && phrases[state.myName] !== undefined)
     || state.submittedPhraseKey === `${state.roomId}:${currentRound}`
   );
-  const disabled = state.isSpectator || state.isSubmittingPhrase || hasSubmitted;
+  const hasCompletePhrase = Array.isArray(state.selectedHand)
+    && state.selectedHand.length === 3
+    && state.selectedHand.every(Boolean);
+  const disabled = state.isSpectator || state.isSubmittingPhrase || hasSubmitted || !hasCompletePhrase;
 
   button.disabled = disabled;
   button.style.opacity = disabled ? '0.5' : '1';

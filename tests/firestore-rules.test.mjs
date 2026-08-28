@@ -1,5 +1,4 @@
 import test, { after, before } from 'node:test';
-import assert from 'node:assert/strict';
 import {
   assertFails,
   assertSucceeds,
@@ -34,13 +33,51 @@ after(async () => {
   await testEnv.cleanup();
 });
 
+async function seedV2HaikuRoom(roomId, overrides = {}) {
+  const data = {
+    schemaVersion: 2,
+    status: 'lobby',
+    roundCount: 1,
+    currentHost: '親',
+    currentHostUid: 'uid-owner',
+    players: ['親', '参加者'],
+    spectators: ['見学者'],
+    participantUids: {
+      'uid-owner': '親',
+      'uid-player': '参加者',
+      'uid-spectator': '見学者',
+    },
+    settings: { hand5: 5, hand7: 3, carryOver: true },
+    words5: [],
+    words7: [],
+    hands5: {},
+    hands7: {},
+    deck5: [],
+    deck7: [],
+    phrases: {},
+    phraseDetails: {},
+    revealedPhrases: {},
+    selfPraise: {},
+    votes: {},
+    voteRoles: {},
+    scores: {},
+    scoreHistory: [],
+    redraws: {},
+    ...overrides,
+  };
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), `rooms/haiku_${roomId}`), data);
+  });
+  return data;
+}
+
 test('未認証ユーザーはルームを読み書きできない', async () => {
   const room = doc(testEnv.unauthenticatedContext().firestore(), 'rooms/rule-test-unauth');
   await assertFails(getDoc(room));
   await assertFails(setDoc(room, { status: 'lobby' }));
 });
 
-test('認証済みユーザーはルームを作成・更新・読み取りできる', async () => {
+test('認証済みユーザーはv1互換ルームを作成・更新・読み取りできる', async () => {
   const room = doc(testEnv.authenticatedContext({ uid: 'user-a' }).firestore(), 'rooms/rule-test-auth');
   await assertSucceeds(setDoc(room, { status: 'lobby', players: ['あ'] }));
   await assertSucceeds(updateDoc(room, { status: 'playing' }));
@@ -69,100 +106,129 @@ test('UID別手札は他人・未認証ユーザーが読めず、クライア�
   await assertFails(updateDoc(hand, { redrawUsed: true }));
 });
 
-test('v2俳句ルームは空のロビー状態だけを新規作成できる', async () => {
+test('v2俳句ルームは安全な空ロビーを含めてクライアントから直接作成できない', async () => {
   const owner = testEnv.authenticatedContext({ uid: 'uid-owner' }).firestore();
-  const safeRoom = doc(owner, 'rooms/haiku_rule-test-safe-create');
-  await assertSucceeds(setDoc(safeRoom, {
+  const base = {
     schemaVersion: 2,
     status: 'lobby',
     roundCount: 1,
-    players: ['あ'],
+    players: ['親'],
     spectators: [],
-    participantUids: { 'uid-owner': 'あ' },
+    participantUids: { 'uid-owner': '親' },
+    currentHost: '親',
+    currentHostUid: 'uid-owner',
+    settings: { hand5: 5, hand7: 3, carryOver: true },
     words5: [],
     words7: [],
-    hands5: {},
-    hands7: {},
     phrases: {},
-    phraseDetails: {},
-    votes: {},
     scores: {},
-    selfPraise: {},
-    redraws: {},
-  }));
-
-  await assertFails(setDoc(doc(owner, 'rooms/haiku_rule-test-playing-create'), {
-    schemaVersion: 2,
-    status: 'playing',
-    roundCount: 1,
-    words5: [],
-    words7: [],
-  }));
-  await assertFails(setDoc(doc(owner, 'rooms/haiku_rule-test-result-create'), {
-    schemaVersion: 2,
-    status: 'lobby',
-    roundCount: 1,
-    words5: [],
-    words7: [],
-    phrases: { 'uid-owner': '持込み句' },
-  }));
+  };
+  const cases = [
+    base,
+    { ...base, status: 'playing' },
+    { ...base, roundCount: 2 },
+    { ...base, words5: [{ id: 'w5', text: '持込み', author: '親' }] },
+    { ...base, words7: [{ id: 'w7', text: '持込み', author: '親' }] },
+    { ...base, phrases: { 'uid-owner': '持込み句' } },
+    { ...base, scores: { '親': 999 } },
+  ];
+  for (const [index, data] of cases.entries()) {
+    await assertFails(setDoc(doc(owner, `rooms/haiku_rule-test-create-${index}`), data));
+  }
 });
 
-test('v2俳句ルームは参加・再接続情報を更新できるがゲーム状態を直接更新できない', async () => {
-  const owner = testEnv.authenticatedContext({ uid: 'uid-v2-owner' }).firestore();
-  const room = doc(owner, 'rooms/haiku_rule-test-v2');
-  await assertSucceeds(setDoc(room, {
-    schemaVersion: 2,
-    status: 'lobby',
-    roundCount: 1,
-    currentHost: 'あ',
-    currentHostUid: 'uid-v2-owner',
-    players: ['あ'],
-    spectators: [],
-    participantUids: { 'uid-v2-owner': 'あ' },
-    words5: [],
-    words7: [],
-    hands5: {},
-    hands7: {},
-    phrases: {},
-    phraseDetails: {},
-    revealedPhrases: {},
-    selfPraise: {},
-    votes: {},
-    voteRoles: {},
-    scores: {},
-    scoreHistory: [],
-    redraws: {},
-  }));
-
-  await assertSucceeds(updateDoc(room, {
-    players: ['あ', 'い'],
-    participantUids: { 'uid-v2-owner': 'あ', 'uid-v2-player': 'い' },
-  }));
+test('v2俳句ルームのゲーム状態はすべてクライアント直接更新を拒否する', async () => {
+  const roomId = 'rule-test-game-state';
+  await seedV2HaikuRoom(roomId);
+  const room = doc(testEnv.authenticatedContext({ uid: 'uid-owner' }).firestore(), `rooms/haiku_${roomId}`);
+  await assertSucceeds(getDoc(room));
 
   const protectedUpdates = {
-    words5: [{ id: 'w5', text: '改変', author: 'あ' }],
-    words7: [{ id: 'w7', text: '改変', author: 'あ' }],
-    hands5: { 'uid-v2-owner': [] },
-    hands7: { 'uid-v2-owner': [] },
-    deck5: [],
-    deck7: [],
-    phrases: { 'uid-v2-owner': '不正な句' },
-    phraseDetails: { 'uid-v2-owner': [] },
-    revealedPhrases: { 'uid-v2-owner': true },
-    selfPraise: { 'uid-v2-owner': true },
-    votes: { 'uid-v2-owner': {} },
-    voteRoles: { 'uid-v2-owner': 'host' },
-    scores: { 'あ': 999 },
+    words5: [{ id: 'w5', text: '改変', author: '親' }],
+    words7: [{ id: 'w7', text: '改変', author: '親' }],
+    hands5: { 'uid-owner': [] },
+    hands7: { 'uid-owner': [] },
+    deck5: [{ id: 'd5', text: '改変', author: '親' }],
+    deck7: [{ id: 'd7', text: '改変', author: '親' }],
+    phrases: { 'uid-owner': '不正な句' },
+    phraseDetails: { 'uid-owner': [] },
+    revealedPhrases: { 'uid-owner': true },
+    selfPraise: { 'uid-owner': true },
+    votes: { 'uid-owner': {} },
+    voteRoles: { 'uid-owner': 'host' },
+    scores: { '親': 999 },
     scoreHistory: [{ round: 1 }],
-    redraws: { 'uid-v2-owner': true },
+    redraws: { 'uid-owner': true },
     roundCount: 2,
     status: 'playing',
   };
   for (const [field, value] of Object.entries(protectedUpdates)) {
     await assertFails(updateDoc(room, { [field]: value }));
   }
-  await assertFails(updateDoc(room, { schemaVersion: 1, status: 'playing' }));
+});
+
+test('v2俳句ルームの参加者情報は正常値を含めてクライアント直接更新を拒否する', async () => {
+  const roomId = 'rule-test-participants';
+  const original = await seedV2HaikuRoom(roomId);
+  const room = doc(testEnv.authenticatedContext({ uid: 'uid-owner' }).firestore(), `rooms/haiku_${roomId}`);
+  const updates = [
+    { participantUids: { ...original.participantUids, 'uid-other': '他人' } },
+    { participantUids: { ...original.participantUids, 'uid-player': '改名' } },
+    { participantUids: { 'uid-owner': '親', 'uid-spectator': '見学者' } },
+    { participantUids: { ...original.participantUids, '   ': '空白UID' } },
+    { participantUids: { ...original.participantUids, 'uid-empty': '' } },
+    { players: [...original.players, '任意名'] },
+    { players: ['親'] },
+    { spectators: [...original.spectators, '任意名'] },
+    { spectators: [] },
+    { players: ['親', '参加者', '見学者'], spectators: ['見学者'] },
+    { players: ['親', '存在しない参加者'] },
+    { spectators: ['存在しない見学者'] },
+    { players: ['親', '参加者'], spectators: ['見学者'], participantUids: original.participantUids },
+  ];
+  for (const update of updates) await assertFails(updateDoc(room, update));
+});
+
+test('v2俳句ルームの親情報はクライアントから直接変更できない', async () => {
+  const lobbyId = 'rule-test-host-lobby';
+  await seedV2HaikuRoom(lobbyId);
+  const lobbyRoom = doc(testEnv.authenticatedContext({ uid: 'uid-player' }).firestore(), `rooms/haiku_${lobbyId}`);
+  for (const update of [
+    { currentHost: '参加者' },
+    { currentHostUid: 'uid-player' },
+    { currentHost: '参加者', currentHostUid: 'uid-owner' },
+    { currentHostUid: 'uid-missing' },
+    { currentHost: '見学者', currentHostUid: 'uid-spectator' },
+  ]) await assertFails(updateDoc(lobbyRoom, update));
+
+  const playingId = 'rule-test-host-playing';
+  await seedV2HaikuRoom(playingId, { status: 'playing' });
+  const playingRoom = doc(testEnv.authenticatedContext({ uid: 'uid-player' }).firestore(), `rooms/haiku_${playingId}`);
+  await assertFails(updateDoc(playingRoom, { currentHost: '参加者', currentHostUid: 'uid-player' }));
+});
+
+test('v2俳句ルームの設定とschemaVersionはクライアントから直接変更できない', async () => {
+  const lobbyId = 'rule-test-settings-lobby';
+  await seedV2HaikuRoom(lobbyId);
+  const lobbyRoom = doc(testEnv.authenticatedContext({ uid: 'uid-owner' }).firestore(), `rooms/haiku_${lobbyId}`);
+  const settingsCases = [
+    { hand5: 0, hand7: 3, carryOver: true },
+    { hand5: -1, hand7: 3, carryOver: true },
+    { hand5: 21, hand7: 3, carryOver: true },
+    { hand5: 5, hand7: 0, carryOver: true },
+    { hand5: 5, hand7: -1, carryOver: true },
+    { hand5: 5, hand7: 21, carryOver: true },
+    { hand5: 5, hand7: 3, carryOver: 'true' },
+    { hand5: 4, hand7: 2, carryOver: false },
+  ];
+  for (const settings of settingsCases) await assertFails(updateDoc(lobbyRoom, { settings }));
+  await assertFails(updateDoc(lobbyRoom, { schemaVersion: 1 }));
+  await assertFails(updateDoc(lobbyRoom, { schemaVersion: 1, status: 'playing' }));
+
+  const playingId = 'rule-test-settings-playing';
+  await seedV2HaikuRoom(playingId, { status: 'playing' });
+  const playingRoom = doc(testEnv.authenticatedContext({ uid: 'uid-owner' }).firestore(), `rooms/haiku_${playingId}`);
+  await assertFails(updateDoc(playingRoom, { settings: { hand5: 4, hand7: 2, carryOver: false } }));
 });
 
 test('v1俳句ルームとv2 Poemルームの従来更新互換を維持する', async () => {

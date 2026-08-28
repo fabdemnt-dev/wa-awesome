@@ -27,47 +27,13 @@ service cloud.firestore {
         return roomId.matches('^haiku_.*') && data.get('schemaVersion', 1) == 2;
       }
 
-      function hasSafeInitialHaikuState() {
-        return request.resource.data.status == 'lobby'
-          && request.resource.data.roundCount == 1
-          && request.resource.data.get('words5', []).size() == 0
-          && request.resource.data.get('words7', []).size() == 0
-          && request.resource.data.get('hands5', {}).size() == 0
-          && request.resource.data.get('hands7', {}).size() == 0
-          && request.resource.data.get('deck5', []).size() == 0
-          && request.resource.data.get('deck7', []).size() == 0
-          && request.resource.data.get('phrases', {}).size() == 0
-          && request.resource.data.get('phraseDetails', {}).size() == 0
-          && request.resource.data.get('revealedPhrases', {}).size() == 0
-          && request.resource.data.get('selfPraise', {}).size() == 0
-          && request.resource.data.get('votes', {}).size() == 0
-          && request.resource.data.get('voteRoles', {}).size() == 0
-          && request.resource.data.get('scores', {}).size() == 0
-          && request.resource.data.get('scoreHistory', []).size() == 0
-          && request.resource.data.get('redraws', {}).size() == 0;
-      }
-
-      function keepsV2HaikuGameStateProtected() {
-        return !request.resource.data.diff(resource.data).affectedKeys().hasAny([
-          'words5', 'words7', 'hands5', 'hands7', 'deck5', 'deck7',
-          'phrases', 'phraseDetails', 'revealedPhrases', 'selfPraise',
-          'votes', 'voteRoles', 'scores', 'scoreHistory', 'redraws',
-          'roundCount', 'status'
-        ]);
-      }
-
       allow read: if signedIn();
-      // 新規v2俳句ルームは空のロビー状態だけを許可し、ゲーム結果の持込みを防ぐ。
-      // v1・Poemルームは従来互換の作成フローを維持する。
-      allow create: if signedIn()
-        && (!isV2HaikuRoom(request.resource.data) || hasSafeInitialHaikuState());
-      // v2俳句ルームのゲーム状態はCallable Functionsだけが変更する。
-      // 参加者・再接続用フィールドは既存クライアントフローのため更新を許可する。
+      // v2俳句ルームの作成・更新は、参加者・親・設定を含めてCallable Functionsだけが行う。
+      // v1俳句ルームとPoemルームは従来互換のクライアント書込みを維持する。
+      allow create: if signedIn() && !isV2HaikuRoom(request.resource.data);
       allow update: if signedIn()
-        && ((!isV2HaikuRoom(resource.data) && !isV2HaikuRoom(request.resource.data))
-          || (isV2HaikuRoom(resource.data)
-            && isV2HaikuRoom(request.resource.data)
-            && keepsV2HaikuGameStateProtected()));
+        && !isV2HaikuRoom(resource.data)
+        && !isV2HaikuRoom(request.resource.data);
       allow delete: if false;
     }
 
