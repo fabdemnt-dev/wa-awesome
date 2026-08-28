@@ -1,5 +1,6 @@
 {
   "name": "wa-awesome-manus-test-functions",
+  "description": "Read-only Manus connection test Firebase Functions codebase",
   "private": true,
   "engines": {
     "node": "20"
