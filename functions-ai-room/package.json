@@ -1,0 +1,12 @@
+{
+  "name": "wa-awesome-ai-room-functions",
+  "description": "OpenAI callable functions for the AI meeting room",
+  "private": true,
+  "engines": {
+    "node": "22"
+  },
+  "main": "index.js",
+  "dependencies": {
+    "firebase-functions": "^6.1.0"
+  }
+}

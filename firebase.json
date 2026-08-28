@@ -20,6 +20,15 @@
         ".git",
         "firebase-debug.log"
       ]
+    },
+    {
+      "source": "functions-ai-room",
+      "codebase": "ai-room",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log"
+      ]
     }
   ]
 }
