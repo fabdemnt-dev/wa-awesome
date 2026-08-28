@@ -176,7 +176,7 @@ function updateRoleHelp(data) {
     : data?.currentHost === state.myName;
   const role = state.isSpectator ? '見学者' : (isHost ? '親・選者' : 'プレイヤー');
   const text = data?.status === 'lobby'
-    ? (state.isSpectator ? '見学者：参加者の準備状況を確認できます。素材提出や句会開始はできません。' : (isHost ? '親・選者：素材を確認し、準備ができたら「句会を始める！」を押します。' : 'プレイヤー：素材を提出し、句会の開始を待ちます。'))
+    ? (state.isSpectator ? '見学者：参加者の準備状況を確認できます。素材提出や句会開始はできません。' : (isHost ? '親・選者：素材を確認し、準備ができたら「句会を始める！」を押します。' : 'プレイヤー：素材を提出します。句会が始まったら手札から句を作ります。'))
     : (state.isSpectator ? '見学者：句の披露と御印を楽しめます。ゲーム進行の操作はできません。' : (isHost ? '親・選者：他の参加者の句を披露し、確認後に「次の節に進む」を押します。' : 'プレイヤー：手札から句を作って「整いました！」で提出します。'));
   ['role-help-lobby', 'role-help-game'].forEach(id => {
     const el = document.getElementById(id);
