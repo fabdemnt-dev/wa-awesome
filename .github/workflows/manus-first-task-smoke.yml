@@ -1,0 +1,105 @@
+name: Manus first task smoke test
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened]
+
+jobs:
+  smoke:
+    if: github.head_ref == 'test/manus-first-task-20260829'
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Run exactly one Manus task
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          MANUS_API_KEY="$(gcloud secrets versions access latest --secret=MANUS_API_KEY --project=wa-awesome)"
+          echo "::add-mask::$MANUS_API_KEY"
+
+          payload="$(jq -n '{
+            message: {
+              content: [{
+                type: "text",
+                text: "AI会議室への初回接続テストです。「Manus接続テスト成功」とだけ日本語で返答してください。外部サービスへの変更・送信・購入は行わないでください。"
+              }]
+            },
+            locale: "ja",
+            interactive_mode: false,
+            hide_in_task_list: true,
+            share_visibility: "private",
+            agent_profile: "manus-1.6-lite",
+            title: "AI会議室 Manus初回接続テスト"
+          }')"
+
+          create_json="$(curl -sS --fail-with-body \
+            -X POST 'https://api.manus.ai/v2/task.create' \
+            -H 'Content-Type: application/json' \
+            -H "x-manus-api-key: $MANUS_API_KEY" \
+            --data "$payload")"
+
+          task_id="$(jq -r 'if .ok == true then (.task_id // empty) else empty end' <<< "$create_json")"
+          if [[ ! "$task_id" =~ ^[A-Za-z0-9]{22}$ ]]; then
+            echo 'Manus task.create did not return a valid task ID.' >&2
+            exit 1
+          fi
+          echo "Created Manus task: $task_id"
+
+          reply=''
+          final_status='running'
+          for attempt in $(seq 1 36); do
+            messages_json="$(curl -sS --fail-with-body \
+              -H "x-manus-api-key: $MANUS_API_KEY" \
+              "https://api.manus.ai/v2/task.listMessages?task_id=$task_id&order=desc&limit=20")"
+
+            if [[ "$(jq -r '.ok // false' <<< "$messages_json")" != 'true' ]]; then
+              echo 'Manus task.listMessages returned ok=false.' >&2
+              exit 1
+            fi
+
+            final_status="$(jq -r '[.messages[]? | select(.type == "status_update")][0].status_update.agent_status // "running"' <<< "$messages_json")"
+            reply="$(jq -r '[.messages[]? | select(.type == "assistant_message")][0].assistant_message.content // empty' <<< "$messages_json")"
+            echo "Poll $attempt: status=$final_status"
+
+            if [[ "$final_status" == 'stopped' ]]; then
+              [[ -n "$reply" ]] || { echo 'Task stopped without an assistant reply.' >&2; exit 1; }
+              break
+            fi
+            if [[ "$final_status" == 'waiting' || "$final_status" == 'error' ]]; then
+              echo "Unexpected Manus status: $final_status" >&2
+              exit 1
+            fi
+            sleep 5
+          done
+
+          if [[ "$final_status" != 'stopped' ]]; then
+            echo 'Manus smoke test timed out before completion.' >&2
+            exit 1
+          fi
+
+          detail_json="$(curl -sS --fail-with-body \
+            -H "x-manus-api-key: $MANUS_API_KEY" \
+            "https://api.manus.ai/v2/task.detail?task_id=$task_id")"
+          credits="$(jq -r '.task.credit_usage // 0' <<< "$detail_json")"
+          profile="$(jq -r '.task.agent_profile // "unknown"' <<< "$detail_json")"
+
+          echo "Manus reply: $reply"
+          echo "Credit usage: $credits"
+          echo "Agent profile: $profile"
+          {
+            echo '### Manus first task smoke test'
+            echo "- Status: $final_status"
+            echo "- Reply: $reply"
+            echo "- Credit usage: $credits"
+            echo "- Agent profile: $profile"
+          } >> "$GITHUB_STEP_SUMMARY"
