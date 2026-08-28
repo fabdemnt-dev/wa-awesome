@@ -4,6 +4,8 @@ const { defineSecret } = require('firebase-functions/params');
 
 const openAiApiKey = defineSecret('OPENAI_API_KEY');
 const AI_ROOM_ACCESS_CODE_SHA256 = 'a4248a853ffadc372dfa4d1b468b76ff8bd744d94c3ae4dadf7e46000e796156';
+const MAX_HISTORY_ITEMS = 12;
+const MAX_HISTORY_CHARS = 12000;
 
 const callableOptions = {
   region: 'asia-northeast1',
@@ -41,6 +43,27 @@ function requireMessage(value) {
   return message;
 }
 
+function requireHistory(value) {
+  if (value == null) return [];
+  if (!Array.isArray(value) || value.length > MAX_HISTORY_ITEMS) {
+    fail('invalid-argument', '会話履歴が長すぎます。');
+  }
+
+  let totalChars = 0;
+  return value.map((item) => {
+    const role = item?.role;
+    const content = typeof item?.content === 'string' ? item.content.trim() : '';
+    if ((role !== 'user' && role !== 'assistant') || !content || content.length > 4000) {
+      fail('invalid-argument', '会話履歴の形式が正しくありません。');
+    }
+    totalChars += content.length;
+    if (totalChars > MAX_HISTORY_CHARS) {
+      fail('invalid-argument', '会話履歴が長すぎます。');
+    }
+    return { role, content };
+  });
+}
+
 function extractOutputText(body) {
   if (typeof body?.output_text === 'string' && body.output_text.trim()) {
     return body.output_text.trim();
@@ -61,6 +84,7 @@ exports.askAiRoomOpenAI = onCall(callableOptions, async (request) => {
   requireAuthenticated(request);
   requireAccessCode(request.data?.accessCode);
   const message = requireMessage(request.data?.message);
+  const history = requireHistory(request.data?.history);
 
   const apiKey = openAiApiKey.value();
   if (!apiKey) fail('failed-precondition', 'OpenAI接続用のSecretが設定されていません。');
@@ -77,8 +101,8 @@ exports.askAiRoomOpenAI = onCall(callableOptions, async (request) => {
       },
       body: JSON.stringify({
         model: 'gpt-5.6-luna',
-        instructions: 'あなたはAI会議室の参加者です。日本語で、質問に直接答えてください。必要以上に長くせず、会議で読みやすい返答にしてください。',
-        input: message,
+        instructions: 'あなたはAI会議室のChatGPT参加者です。日本語で、直前までの会話を踏まえて質問に直接答えてください。必要以上に長くせず、会議で読みやすい返答にしてください。',
+        input: [...history, { role: 'user', content: message }],
         reasoning: { effort: 'low' },
         text: { verbosity: 'low' },
         max_output_tokens: 800,
