@@ -5,6 +5,7 @@ const functions = getFunctions(app, 'asia-northeast1');
 const dealHaikuHandsCallable = httpsCallable(functions, 'dealHaikuHands');
 const changeHaikuRoleCallable = httpsCallable(functions, 'changeHaikuRole');
 const submitHaikuWordsCallable = httpsCallable(functions, 'submitHaikuWords');
+const supplementHaikuWordsCallable = httpsCallable(functions, 'supplementHaikuWords');
 const removeHaikuWordCallable = httpsCallable(functions, 'removeHaikuWord');
 const updateHaikuSettingsCallable = httpsCallable(functions, 'updateHaikuSettings');
 const advanceHaikuRoundCallable = httpsCallable(functions, 'advanceHaikuRound');
@@ -55,6 +56,14 @@ export async function submitHaikuWords(roomId, words5, words7) {
 export async function removeHaikuWord(roomId, type, wordId) {
   const result = await removeHaikuWordCallable({ roomId: requireRoomId(roomId), type, wordId });
   return result.data;
+}
+
+export async function supplementHaikuWords(roomId, words5, words7) {
+  return callCallable(supplementHaikuWordsCallable, {
+    roomId: requireRoomId(roomId),
+    words5: Array.isArray(words5) ? words5 : [],
+    words7: Array.isArray(words7) ? words7 : [],
+  });
 }
 
 export async function changeHaikuRole(roomId, role, supplement5 = [], supplement7 = []) {

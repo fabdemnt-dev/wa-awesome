@@ -177,7 +177,7 @@ function applyRoomData(data, sequence = ++roomUpdateSequence) {
           <div class="participant-name">${escapeHTML(name)}${isMe ? '<span class="participant-self">あなた</span>' : ''}</div>
           <div class="participant-role">${label}</div>
         </div>
-        ${role === 'player' ? `<button class="participant-kick" onclick="removePlayer('${escapeJS(name)}')">鯖落ち</button>` : ''}
+        <button class="participant-kick" onclick="removePlayer('${escapeJS(name)}')">鯖落ち</button>
       </div>`;
   };
   const playerCards = players.map((name) => participantCard(name, 'player')).join('');

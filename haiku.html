@@ -57,7 +57,7 @@
         </label>
         <div style="font-size:11px; color:#94a3b8; margin-top:2px;">※プレイヤーが入力した素材は、使われたかどうかに関わらず全部持ち越されます。ワードセット/デフォルト補充で埋めた分（🎴マーク）は対象外です。</div>
 
-        <button onclick="updateSettings()" class="btn-primary" style="margin-top:10px;">設定を保存</button>
+        <button id="save-settings-btn" onclick="updateSettings()" class="btn-primary" style="margin-top:10px;">設定を保存</button>
       </div>
 
       <div class="lobby-actions" style="margin-top:15px; display:flex; gap:8px; flex-wrap:wrap;">
@@ -87,9 +87,10 @@
         <div style="font-size:11px; margin-top:4px;"><a href="wordset.html" target="_blank">＋ ワードセットを作る・編集する</a></div>
       </div>
       <button id="fill-default-btn" onclick="fillDefaultWords()" class="btn-secondary" style="margin-top:8px;">🎴 足りない素材をデフォルトで補充</button>
-      <div style="font-size:12px; color:#94a3b8; margin-top:4px;">※誰も素材を入力しなくても、この一発で句会を始められます</div>
+      <div id="fill-default-hint" style="font-size:12px; color:#94a3b8; margin-top:4px;">※誰も素材を入力しなくても、この一発で句会を始められます</div>
 
-      <button onclick="startGame()" class="btn-success" style="margin-top:20px; width:100%; font-size:18px; padding:12px;">句会を始める！</button>
+      <button id="start-game-btn" onclick="startGame()" class="btn-success" style="margin-top:20px; width:100%; font-size:18px; padding:12px;">句会を始める！</button>
+      <div id="start-game-hint" class="role-action-hint" style="display:none;">※句会の開始は今節の親・選者が行います</div>
     </div>
 
     <!-- 3. ゲーム画面 -->
@@ -107,8 +108,8 @@
       <div style="font-size:13px; color:#64748b; margin-bottom:8px;">
         🗻 山札（五音）：残り<span id="deck-5-count">0</span>枚　🗻 山札（七音）：残り<span id="deck-7-count">0</span>枚
       </div>
-      <div style="font-size:12px; color:#94a3b8; margin-bottom:6px;">※カードの🔄ボタンで引き直したい札を選んでから、下のボタンを押してください</div>
-      <div style="margin-bottom:10px;">
+      <div id="redraw-help" style="font-size:12px; color:#94a3b8; margin-bottom:6px;">※カードの🔄ボタンで引き直したい札を選んでから、下のボタンを押してください</div>
+      <div id="redraw-action-wrap" style="margin-bottom:10px;">
         <button id="redraw-hand-btn" onclick="redrawHand()" class="btn-secondary">🔄 札を選んで引き直す（1節1回まで）</button>
       </div>
       <h4>五音</h4>
@@ -116,7 +117,7 @@
       <h4>七音</h4>
       <div id="hand-7-list" class="card-list"></div>
 
-      <div class="phrase-builder">
+      <div id="phrase-builder" class="phrase-builder">
         <h3>作成中の句</h3>
         <div class="display-area">
           <span id="phrase-1">（選択してください）</span>
@@ -169,7 +170,7 @@
         <button class="btn-csv" onclick="exportCSV()" style="flex:1;">📥 CSV保存</button>
       </div>
 
-      <button onclick="saveGameAsWordSet()" class="btn-primary" style="margin-top:10px; width:100%;">🎴 今日の素材をワードセットとして保存する</button>
+      <button id="save-wordset-btn" onclick="saveGameAsWordSet()" class="btn-primary" style="margin-top:10px; width:100%;">🎴 今日の素材をワードセットとして保存する</button>
       <div style="font-size:11px; color:#94a3b8; margin-top:4px;">※プレイヤーが入力した素材だけが保存されます（ワードセット/デフォルト補充分は含みません）</div>
 
     </div>

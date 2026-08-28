@@ -342,6 +342,8 @@ button:disabled { background-color: #94a3b8; cursor: not-allowed; }
 .participant-score { flex:0 0 auto; margin-left:auto; white-space:nowrap; }
 .participant-kick { flex:0 0 auto; width:auto; margin:0; padding:5px 7px; border:0; border-radius:6px; background:#fee2e2; color:#b91c1c; font-size:11px; cursor:pointer; }
 .participant-kick:hover { background:#fecaca; }
+.phrase-pending { color:#94a3b8; font-size:13px; padding:8px 0; }
+.role-action-hint { color:#94a3b8; font-size:12px; margin-top:4px; }
 .participant-empty { padding:10px; color:#94a3b8; font-size:12px; }
 @media (max-width:560px) { .participant-roster-header { align-items:flex-start; flex-direction:column; gap:3px; } .participant-grid { grid-template-columns:1fr; } }
 
