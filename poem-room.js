@@ -10,15 +10,15 @@ import { ensureSignedIn } from './wordset-auth.js';
 import { showGameError } from './game-error.js';
 
 function updatePhaseStatus(data) {
-  const lobbyText = data?.status === 'lobby' ? '開始待ち・素材準備中' : '';
+  const lobbyText = data?.status === 'lobby' ? '素材準備中' : '';
   let gameText = '';
   if (data?.status === 'playing') {
     const players = data.players || [];
     const poems = data.poems || {};
     const submitted = Object.keys(poems).length;
     const unrevealed = Object.values(poems).filter(poem => !poem?.revealed).length;
-    if (submitted < players.length) gameText = `ポエムを作成中（${submitted}/${players.length}人投稿済み）`;
-    else if (unrevealed > 0) gameText = `作品を披露中（${submitted - unrevealed}/${submitted}作品披露済み）`;
+    if (submitted < players.length) gameText = 'ポエムを作成中';
+    else if (unrevealed > 0) gameText = '作品を披露中';
     else gameText = '作品を鑑賞中';
   }
   const setStatus = (id, text) => {
@@ -39,20 +39,20 @@ function updateSubmissionStatus(data) {
     const poems = data?.poems || {};
     return (uid && poems[uid] !== undefined) || poems[name] !== undefined;
   };
-  const render = (id, label, doneFor) => {
+  const render = (id, label, doneText, doneFor) => {
     const el = document.getElementById(id);
     if (!el || !players.length) return;
-    const items = players.map(name => `<span class="submission-person ${doneFor(name) ? 'is-done' : ''}">${doneFor(name) ? '✅' : '⏳'} ${escapeHTML(name)}：${doneFor(name) ? '提出済み' : '未提出'}</span>`).join('');
-    el.innerHTML = `<div class="submission-title">${label}</div><div class="submission-people">${items}</div>`;
+    const submittedCount = players.filter(doneFor).length;
+    el.innerHTML = `<div class="submission-status-line" aria-live="polite">${label}：${submittedCount}/${players.length} ${doneText}</div>`;
   };
-  render('submission-status-lobby', '素材の提出状況', wordsFor);
-  render('submission-status-game', '作品の提出状況', poemFor);
+  render('submission-status-lobby', '素材の提出状況', '提出済み', wordsFor);
+  render('submission-status-game', '作品の提出状況', '投稿済み', poemFor);
 }
 
 function updateRoleHelp(data) {
   const role = state.isSpectator ? '見学者' : 'プレイヤー';
   const text = data?.status === 'lobby'
-    ? (state.isSpectator ? '見学者：参加者の準備状況を確認できます。素材投稿や開始操作はできません。' : 'プレイヤー：素材を投稿し、全員の準備が整ったらポエム作りを開始できます。')
+    ? (state.isSpectator ? '見学者：参加者の準備状況を確認できます。素材投稿や開始操作はできません。' : 'プレイヤー：素材を投稿し、準備ができたらポエム作りを開始できます。')
     : (state.isSpectator ? '見学者：作品の披露とリアクションを楽しめます。ゲーム操作はできません。' : 'プレイヤー：ポエムを投稿し、みんなの作品を鑑賞できます。');
   ['role-help-lobby', 'role-help-game'].forEach(id => {
     const el = document.getElementById(id);
@@ -118,13 +118,10 @@ function applyRoomData(data, sequence = ++roomUpdateSequence) {
     handInput.value = st.handCount;
   }
   const currentWords = (state.currentData.words || []).length;
-  const requiredWords = players.length * st.handCount;
 
   const materialCount = document.getElementById('material-count');
   if (materialCount) {
-    materialCount.textContent =
-      `📦 集まった素材：${currentWords} / ${requiredWords}個` +
-      (requiredWords > 0 && currentWords >= requiredWords ? " ✅" : "");
+    materialCount.textContent = `📦 集まった素材：${currentWords}個`;
   }
   renderInputFields(st.handCount, SAMPLE_PHRASES);
 

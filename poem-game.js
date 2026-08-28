@@ -69,7 +69,7 @@ window.fillDefaultWords = async function() {
 window.startGame = async function() {
   if (!state.currentData) return;
   if (state.isSpectator) return alert('見学モードではポエム作りを開始できません');
-  if (!confirm('全員の素材が集まりましたか？\nポエム作りを開始します。')) return;
+  if (!confirm('ポエム作りを開始しますか？')) return;
 
   if (state.currentData.schemaVersion === 2) {
     try {
