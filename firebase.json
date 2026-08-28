@@ -11,6 +11,15 @@
         ".git",
         "firebase-debug.log"
       ]
+    },
+    {
+      "source": "functions-manus-test",
+      "codebase": "manus-test",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log"
+      ]
     }
   ]
 }
