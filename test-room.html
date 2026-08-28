@@ -90,6 +90,11 @@ function render(list){
  if(bottom)messages.scrollTop=messages.scrollHeight;
  note(status,shown.length+'件 · リアルタイム同期');
 }
+function watch(){
+ stop?.();stop=onSnapshot(ref,{includeMetadataChanges:true},s=>{
+  render(s.exists()?s.data().messages:[]);
+ },e=>note(status,'同期エラー: '+(e.message||e),true));
+}
 async function joinRoom(){
  roomId=room.value.trim();displayName=name.value.trim();
  if(!roomId||!displayName){note(joinStatus,'ルームIDと名前を入力してください。',true);return}
@@ -101,10 +106,7 @@ async function joinRoom(){
   localStorage.setItem('testRoomId',roomId);localStorage.setItem('testRoomName',displayName);
   const u=new URL(location.href);u.searchParams.set('room',roomId);u.searchParams.set('name',displayName);history.replaceState(null,'',u);
   roomLabel.textContent='ルーム: '+roomId;nameLabel.textContent='名前: '+displayName;join.style.display='none';chat.classList.add('on');note(joinStatus,'');
-  stop?.();stop=onSnapshot(ref,s=>{
-   if(s.metadata?.fromCache)return;
-   render(s.exists()?s.data().messages:[]);
-  },e=>note(status,'同期エラー: '+(e.message||e),true));
+  watch();
   text.focus();
  }catch(e){note(joinStatus,'接続できませんでした: '+(e.message||e),true)}finally{joinBtn.disabled=false}
 }
@@ -119,7 +121,7 @@ async function send(){
 }
 async function refresh(){
  if(!ref)return;refreshBtn.disabled=true;note(status,'サーバーから更新中…');
- try{const s=await getDocFromServer(ref);render(s.exists()?s.data().messages:[]);note(status,'サーバーから再取得しました')}catch(e){note(status,'更新できませんでした: '+(e.message||e),true)}finally{refreshBtn.disabled=false}
+ try{const s=await getDocFromServer(ref);render(s.exists()?s.data().messages:[]);watch();note(status,'サーバーから再取得しました')}catch(e){note(status,'更新できませんでした: '+(e.message||e),true)}finally{refreshBtn.disabled=false}
 }
 function leave(){
  stop?.();stop=null;ref=null;chat.classList.remove('on');join.style.display='grid';
