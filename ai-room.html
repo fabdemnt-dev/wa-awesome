@@ -220,7 +220,10 @@ async function waitForManus(code, taskId) {
       const taskStatus = data.status || 'running';
       if (taskStatus === 'stopped') {
         if (typeof data.reply !== 'string' || !data.reply.trim()) throw new Error('Manusの返答が空でした。');
-        return data.reply.trim();
+        return {
+          reply: data.reply.trim(),
+          creditUsage: Number.isFinite(data.creditUsage) ? data.creditUsage : null,
+        };
       }
       if (taskStatus === 'waiting') {
         const error = new Error(data.waitingDescription || 'Manusが確認を待っています。');
@@ -268,11 +271,15 @@ async function sendManus() {
     const taskId = created?.data?.taskId;
     if (typeof taskId !== 'string' || !taskId) throw new Error('ManusタスクIDを取得できませんでした。');
     note('Manusが作業中です…');
-    const cleanReply = await waitForManus(code, taskId);
+    const manusResult = await waitForManus(code, taskId);
+    const cleanReply = manusResult.reply;
     recordTurn(message, 'manus', cleanReply);
     addMessage('Manus', cleanReply, 'manus');
     text.value = '';
-    note('Manusの返答を受け取りました。会話は次の相談にも引き継がれます。');
+    const creditText = Number.isFinite(manusResult.creditUsage)
+      ? ` 使用クレジット: ${manusResult.creditUsage}。`
+      : ' 使用クレジットは取得できませんでした。';
+    note(`Manusの返答を受け取りました。${creditText}会話は次の相談にも引き継がれます。`);
   } catch (error) {
     if (error?.manusWaiting) {
       note(`Manusが確認待ちになりました。自動承認はしません。${error.message}`, true);

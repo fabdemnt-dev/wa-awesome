@@ -154,6 +154,27 @@ function extractOutputText(body) {
   return text;
 }
 
+async function readManusCreditUsage(apiKey, taskId, signal) {
+  const params = new URLSearchParams({ task_id: taskId });
+  try {
+    const response = await fetch(`https://api.manus.ai/v2/task.detail?${params}`, {
+      method: 'GET',
+      headers: {
+        'x-manus-api-key': apiKey,
+      },
+      signal,
+    });
+    if (!response.ok) return null;
+    const body = await response.json();
+    const value = body?.ok === true ? body?.task?.credit_usage : null;
+    return Number.isFinite(value) && value >= 0 ? value : null;
+  } catch (error) {
+    if (error?.name === 'AbortError') throw error;
+    console.warn('Manus credit usage lookup failed', { name: error?.name || 'Error' });
+    return null;
+  }
+}
+
 exports.askAiRoomOpenAI = onCall(openAiCallableOptions, async (request) => {
   requireAuthenticated(request);
   requireAccessCode(request.data?.accessCode);
@@ -296,6 +317,7 @@ exports.getAiRoomManusTask = onCall(manusCallableOptions, async (request) => {
         ok: true,
         status: 'running',
         reply: null,
+        creditUsage: null,
         waitingDescription: null,
         error: null,
       };
@@ -320,10 +342,14 @@ exports.getAiRoomManusTask = onCall(manusCallableOptions, async (request) => {
       event?.type === 'error_message' && typeof event?.error_message?.content === 'string');
 
     const status = statusEvent?.status_update?.agent_status || 'running';
+    const creditUsage = status === 'stopped'
+      ? await readManusCreditUsage(apiKey, taskId, controller.signal)
+      : null;
     return {
       ok: true,
       status,
       reply: assistantEvent?.assistant_message?.content?.trim() || null,
+      creditUsage,
       waitingDescription: status === 'waiting'
         ? statusEvent?.status_update?.status_detail?.waiting_description || 'Manusが確認を待っています。'
         : null,
