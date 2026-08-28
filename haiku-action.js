@@ -149,7 +149,8 @@ window.submitVote = async function(targetPlayer, forcedKey, selectId) {
       if (Object.values(myVotes).some(vote => vote != null)) throw new Error('ALREADY_VOTED');
       tx.update(state.roomRef, { [`votes.${voterKey}.${targetKey}`]: evalKey });
     });
-    if (!await resyncAndVerify()) {
+    const voteVerification = await resyncAndVerify();
+    if (!voteVerification.verified) {
       alert('御印はサーバーに保存されましたが、画面への反映確認に失敗しました。最新の状態に更新してください。');
       return;
     }
