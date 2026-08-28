@@ -74,37 +74,53 @@ window.doSelfPraise = async function() {
   }
 };
 window.submitVote = async function(targetPlayer, forcedKey, selectId) {
+  if (state.isSubmittingVote) return;
   const evalKey = forcedKey || document.getElementById(selectId || `vote-select-${targetPlayer}`)?.value;
   if (!evalKey) return alert('御印を選択してください');
 
-  if (state.currentData.schemaVersion === 2) {
-    const targetUid = getParticipantUidByName(state.currentData, targetPlayer);
-    if (!targetUid) return alert('対象の句が見つかりません');
-    try {
-      await submitHaikuVote(state.roomId, targetUid, evalKey);
-      if (typeof window.resyncHaikuRoom === 'function') {
-        try {
+  state.isSubmittingVote = true;
+  try {
+    const verifyLocalVote = () => {
+      const data = state.currentData || {};
+      const voterKey = getParticipantStorageKey(data, state.myUid, state.myName);
+      const targetKey = getParticipantUidByName(data, targetPlayer) || targetPlayer;
+      const value = data.votes?.[voterKey]?.[targetKey]
+        ?? data.votes?.[voterKey]?.[targetPlayer]
+        ?? data.votes?.[state.myUid]?.[targetKey];
+      return Array.isArray(value) ? value.includes(evalKey) : value === evalKey;
+    };
+    const resyncAndVerify = async () => {
+      try {
+        if (typeof window.resyncHaikuRoom === 'function') {
           await window.resyncHaikuRoom({ requireSuccess: true });
-        } catch {
-          alert('御印はサーバーに保存されましたが、画面への反映確認に失敗しました。最新の状態に更新してください。');
-          return;
         }
+      } catch (error) {
+        // 保存処理は完了済みなので、再同期だけの失敗を送信失敗として扱わない。
+        return { verified: false, resyncFailed: true };
+      }
+      return { verified: verifyLocalVote(), resyncFailed: false };
+    };
+
+    if (state.currentData.schemaVersion === 2) {
+      const targetUid = getParticipantUidByName(state.currentData, targetPlayer);
+      if (!targetUid) return alert('対象の句が見つかりません');
+      await submitHaikuVote(state.roomId, targetUid, evalKey);
+      const voteVerification = await resyncAndVerify();
+      if (!voteVerification.verified) {
+        alert('御印はサーバーに保存されましたが、画面への反映確認に失敗しました。最新の状態に更新してください。');
+        return;
       }
       alert('御印を贈りました！画面への反映も確認しました。');
-    } catch (e) {
-      alert('御印の送信に失敗しました: ' + (e.message || 'サーバーエラー'));
+      return;
     }
-    return;
-  }
 
-  const players = state.currentData.players || [];
-  const currentHost = players.includes(state.currentData.currentHost) ? state.currentData.currentHost : (players[0] || '');
-  const isHost = (state.myName === currentHost);
+    const players = state.currentData.players || [];
+    const currentHost = players.includes(state.currentData.currentHost) ? state.currentData.currentHost : (players[0] || '');
+    const isHost = state.myName === currentHost;
 
-  if (isHost) {
-    // トランザクションでサーバー側に読み込み〜追加をまとめて行うことで、
-    // 連打しても加算が消えず、かつ同じ御印を何個でも贈れる仕様を維持する
-    try {
+    if (isHost) {
+      // トランザクションでサーバー側に読み込み〜追加をまとめて行うことで、
+      // 同じ御印を何個でも贈れる仕様を維持する。
       await runTransaction(db, async (tx) => {
         const snap = await tx.get(state.roomRef);
         const data = snap.data() || {};
@@ -114,35 +130,39 @@ window.submitVote = async function(targetPlayer, forcedKey, selectId) {
         const currentVotesArr = Array.isArray(currentVotes) ? currentVotes : [currentVotes];
         tx.update(state.roomRef, { [`votes.${voterKey}.${targetKey}`]: [...currentVotesArr, evalKey] });
       });
-      alert('御印を追加で贈りました！');
-    } catch (e) {
-      console.error(e);
-      alert('御印の送信に失敗しました: ' + e.message);
-    }
-  } else {
-    // トランザクションでサーバー側から最新のvotesを読んでチェックすることで、
-    // 複数の句をほぼ同時にタップしても「1節1回」の制限をすり抜けられないようにする
-    try {
-      await runTransaction(db, async (tx) => {
-        const snap = await tx.get(state.roomRef);
-        const data = snap.data() || {};
-        const voterKey = getParticipantStorageKey(data, state.myUid, state.myName);
-        const targetKey = getParticipantUidByName(data, targetPlayer) || targetPlayer;
-        const myVotes = data.votes?.[voterKey] || {};
-        const hasVotedAnywhere = Object.values(myVotes).some(vote => vote != null);
-        if (hasVotedAnywhere) {
-          throw new Error('ALREADY_VOTED');
-        }
-        tx.update(state.roomRef, { [`votes.${voterKey}.${targetKey}`]: evalKey });
-      });
-      alert('御印を贈りました！');
-    } catch (e) {
-      if (e.message === 'ALREADY_VOTED') {
-        alert('御印は1節につき1つまでしか贈れません！');
-      } else {
-        console.error(e);
-        alert('御印の送信に失敗しました: ' + e.message);
+      const voteVerification = await resyncAndVerify();
+      if (!voteVerification.verified) {
+        alert('御印はサーバーに保存されましたが、画面への反映確認に失敗しました。最新の状態に更新してください。');
+        return;
       }
+      alert('御印を追加で贈りました！');
+      return;
     }
+
+    // 最新votesをトランザクション内で確認し、子の「1節1回」を維持する。
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(state.roomRef);
+      const data = snap.data() || {};
+      const voterKey = getParticipantStorageKey(data, state.myUid, state.myName);
+      const targetKey = getParticipantUidByName(data, targetPlayer) || targetPlayer;
+      const myVotes = data.votes?.[voterKey] || {};
+      if (Object.values(myVotes).some(vote => vote != null)) throw new Error('ALREADY_VOTED');
+      tx.update(state.roomRef, { [`votes.${voterKey}.${targetKey}`]: evalKey });
+    });
+    const voteVerification = await resyncAndVerify();
+    if (!voteVerification.verified) {
+      alert('御印はサーバーに保存されましたが、画面への反映確認に失敗しました。最新の状態に更新してください。');
+      return;
+    }
+    alert('御印を贈りました！');
+  } catch (e) {
+    if (e.message === 'ALREADY_VOTED') {
+      alert('御印は1節につき1つまでしか贈れません！');
+    } else {
+      console.error(e);
+      alert('御印の送信に失敗しました: ' + (e.message || 'サーバーエラー'));
+    }
+  } finally {
+    state.isSubmittingVote = false;
   }
 };

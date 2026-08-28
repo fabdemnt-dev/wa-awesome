@@ -30,6 +30,25 @@ window.toggleEvalGuide = function() {
 };
 
 let previousIsSpectator = null; // 見学⇔プレイヤーの切り替わりを検知して、そのときは問答無用で入力欄を作り直すため
+let activeVoteSelectId = null;
+let pendingBoardRender = false;
+
+document.addEventListener('focusin', (event) => {
+  if (event.target instanceof HTMLSelectElement && event.target.classList.contains('vote-select')) {
+    activeVoteSelectId = event.target.id;
+  }
+});
+document.addEventListener('focusout', (event) => {
+  if (!(event.target instanceof HTMLSelectElement) || !event.target.classList.contains('vote-select')) return;
+  setTimeout(() => {
+    if (document.activeElement?.id === activeVoteSelectId) return;
+    activeVoteSelectId = null;
+    if (pendingBoardRender) {
+      pendingBoardRender = false;
+      renderBoards();
+    }
+  }, 0);
+});
 
 function setRoleActionState(id, { hidden = false, disabled = false } = {}) {
   const element = document.getElementById(id);
@@ -189,6 +208,12 @@ function updateDeckAndRedrawUI() {
 export function renderBoards() {
   const boardList = document.getElementById('board-list');
   if (!boardList || !state.currentData) return;
+  // 御印選択中は、5秒ごとの再同期やonSnapshotでselectを破棄しない。
+  // フォーカスが外れた時点で最新状態を一度だけ反映する。
+  if (activeVoteSelectId && document.getElementById(activeVoteSelectId)) {
+    pendingBoardRender = true;
+    return;
+  }
 
   // ルーム更新や5秒ごとの再同期でboardList全体を描画し直すため、
   // 入力途中の御印が消えないよう、再描画前のselect値を一時退避する。
@@ -262,6 +287,7 @@ export function renderBoards() {
       ...spectators,
       ...roundEntries.map(({ name }) => name),
     ])];
+    const voteRoles = state.currentData.voteRoles || {};
     const voteEntries = [];
     allVoters.forEach(voter => {
       const voterUid = participantUid(voter);
@@ -271,14 +297,17 @@ export function renderBoards() {
       const keys = Array.isArray(vData) ? vData : [vData];
       keys.forEach(key => {
         if (!evalOptionsMaster[key]) return;
-        // 御印送信時の役割を保存していない旧形式でも、許可されるキーから
-        // 見学者御印（kanpu）とプレイヤー御印を区別し、切替後も表示を安定させる。
-        const role = key === 'kanpu'
-          ? 'spectator'
-          : (voterUid && voterUid === currentHostUid ? 'host'
-            : (voterUid && (playerUids.has(voterUid) || roundParticipantUids.has(voterUid))) || players.includes(voter)
-              ? 'child'
-              : spectatorUids.has(voterUid) || spectators.includes(voter) ? 'spectator' : null);
+        // 保存された送信時点の役割を最優先する。役割変更後も、過去の御印が
+        // 現在の役割へ誤って再分類されないようにする。
+        const storedRole = voteRoles[voterUid] ?? voteRoles[voterKey] ?? voteRoles[voter];
+        const role = storedRole === 'host' || storedRole === 'child' || storedRole === 'spectator'
+          ? storedRole
+          : key === 'kanpu'
+            ? 'spectator'
+            : (voterUid && voterUid === currentHostUid ? 'host'
+              : (voterUid && (playerUids.has(voterUid) || roundParticipantUids.has(voterUid))) || players.includes(voter)
+                ? 'child'
+                : spectatorUids.has(voterUid) || spectators.includes(voter) ? 'spectator' : null);
         if (role) voteEntries.push({ key, name: voter, role });
       });
     });

@@ -279,6 +279,23 @@ button:disabled { background-color: #94a3b8; cursor: not-allowed; }
 .score-history-total { display:flex; justify-content:space-between; gap:8px; padding:4px 6px; border-radius:5px; background:rgba(255,255,255,.72); font-size:11px; }
 .score-history-total strong { color:#b45309; white-space:nowrap; }
 .score-history-empty { margin-top:4px; color:#94a3b8; font-size:11px; }
+.score-history-close {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  padding: 6px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 12px;
+  cursor: pointer;
+}
+.submission-count {
+  color: #475569;
+  font-size: 13px;
+  font-weight: 700;
+}
 @media (max-width:560px) {
   .score-history-details { padding-left:10px; padding-right:10px; }
   .score-history-round-title { align-items:flex-start; flex-direction:column; gap:2px; }

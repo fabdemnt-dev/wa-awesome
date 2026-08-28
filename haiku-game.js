@@ -6,7 +6,7 @@ import { renderInputFields } from './haiku-render.js';
 import { defaultWords5, defaultWords7 } from './haiku-default-words.js';
 import { getWordSetById } from './haiku-wordsets.js';
 import { saveWordSetSecurely, userFacingError } from './wordset-auth.js';
-import { getParticipantUidByName, getParticipantStorageKey, getParticipantNameByUid } from './participant-utils.js';
+import { getParticipantUidByName, getParticipantStorageKey, getParticipantNameByUid, getRoundParticipantEntries } from './participant-utils.js';
 import { dealHaikuHands, redrawHaikuHand, submitHaikuWords, supplementHaikuWords, advanceHaikuRound } from './haiku-functions.js';
 
 window.addWords = async function() {
@@ -290,6 +290,16 @@ window.saveGameAsWordSet = async function() {
 window.nextRound = async function() {
   if (!state.currentData || state.isProcessingNextRound) return;
 
+  // 親が確認する直前の最新ルーム状態を取得し、古いplayers/phrasesで判断しない。
+  if (typeof window.resyncHaikuRoom === 'function') {
+    try {
+      await window.resyncHaikuRoom({ requireSuccess: true });
+    } catch (error) {
+      console.error('[next-round-resync]', error);
+      return alert('最新のルーム状態を取得できませんでした。画面を更新してから、もう一度お試しください。');
+    }
+  }
+
   const players = state.currentData.players || [];
   const currentHost = players.includes(state.currentData.currentHost) ? state.currentData.currentHost : (players[0] || '');
   const isCurrentHost = state.currentData.schemaVersion === 2 && state.myUid && state.currentData.currentHostUid
@@ -299,7 +309,21 @@ window.nextRound = async function() {
     return alert('「次の節に進む」は今節の選者（親）だけが押せます');
   }
 
-  if (!confirm('本当に次の節に進みますか？\n（現在の句は履歴に保存され、新しい節が始まります）')) return;
+  const phrases = state.currentData.phrases || {};
+  const participantUids = state.currentData.participantUids || {};
+  const roundEntries = getRoundParticipantEntries(state.currentData);
+  const uidFor = name => roundEntries.find(entry => entry.name === name)?.uid
+    || Object.entries(participantUids).find(([, value]) => value === name)?.[0]
+    || getParticipantUidByName(state.currentData, name);
+  const hasSubmittedPhrase = name => {
+    const uid = uidFor(name);
+    return (uid && phrases[uid] !== undefined) || phrases[name] !== undefined;
+  };
+  const hasUnsubmittedPlayer = players.some(name => !hasSubmittedPhrase(name));
+  const confirmation = hasUnsubmittedPlayer
+    ? 'まだ句を提出していない参加者がいます。\nこのまま次の節に進みますか？'
+    : '本当に次の節に進みますか？\n（現在の句は履歴に保存され、新しい節が始まります）';
+  if (!confirm(confirmation)) return;
 
   if (state.currentData.schemaVersion === 2) {
     state.isProcessingNextRound = true;
