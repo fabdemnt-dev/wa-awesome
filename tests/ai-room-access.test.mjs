@@ -92,3 +92,18 @@ test('Manus completed tasks report credit usage without creating another task', 
   assert.match(html, /manusResult\.creditUsage/);
   assert.match(html, /使用クレジット:/);
 });
+
+test('ChatGPT responses report token usage and an estimated GPT-5.6 Luna cost', () => {
+  assert.match(backend, /const OPENAI_MODEL = 'gpt-5\.6-luna'/);
+  assert.match(backend, /input: 0\.20/);
+  assert.match(backend, /cachedInput: 0\.02/);
+  assert.match(backend, /cacheWriteInput: 0\.25/);
+  assert.match(backend, /output: 1\.20/);
+  assert.match(backend, /cached_tokens/);
+  assert.match(backend, /cache_write_tokens/);
+  assert.match(backend, /estimatedCostUsd/);
+  assert.match(backend, /return \{ ok: true, reply, usage \}/);
+  assert.match(html, /response\?\.data\?\.usage/);
+  assert.match(html, /概算料金:/);
+  assert.match(html, /入力 \$\{usage\.inputTokens\} tokens \/ 出力 \$\{usage\.outputTokens\} tokens/);
+});

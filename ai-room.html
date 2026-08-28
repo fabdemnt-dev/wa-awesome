@@ -181,6 +181,22 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function formatUsd(value) {
+  if (!Number.isFinite(value) || value < 0) return null;
+  if (value === 0) return '$0';
+  if (value < 0.000001) return '<$0.000001';
+  return `$${value.toFixed(6).replace(/0+$/, '').replace(/\.$/, '')}`;
+}
+
+function openAiUsageText(usage) {
+  if (!usage || !Number.isFinite(usage.inputTokens) || !Number.isFinite(usage.outputTokens)) {
+    return ' 利用量は取得できませんでした。';
+  }
+  const price = formatUsd(usage.estimatedCostUsd);
+  const priceText = price ? ` 概算料金: ${price}。` : '';
+  return `${priceText} 入力 ${usage.inputTokens} tokens / 出力 ${usage.outputTokens} tokens。`;
+}
+
 async function sendChatGPT() {
   if (busy) return;
   const request = readRequest(4000);
@@ -202,7 +218,8 @@ async function sendChatGPT() {
     recordTurn(message, 'chatgpt', cleanReply);
     addMessage('ChatGPT', cleanReply, 'ai');
     text.value = '';
-    note('ChatGPTの返答を受け取りました。会話は次の相談にも引き継がれます。');
+    const usageText = openAiUsageText(response?.data?.usage);
+    note(`ChatGPTの返答を受け取りました。${usageText}会話は次の相談にも引き継がれます。`);
   } catch (error) {
     note(commonError(error, 'ChatGPT'), true);
   } finally {

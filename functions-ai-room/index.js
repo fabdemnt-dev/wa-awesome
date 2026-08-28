@@ -9,6 +9,15 @@ const MAX_HISTORY_ITEMS = 12;
 const MAX_HISTORY_CHARS = 12000;
 const MAX_MANUS_MESSAGE_CHARS = 2500;
 const MAX_MANUS_CONTEXT_CHARS = 1000;
+const OPENAI_MODEL = 'gpt-5.6-luna';
+// Standard text rates for GPT-5.6 Luna as of 2026-08-29.
+// https://developers.openai.com/api/docs/models/gpt-5.6-luna
+const OPENAI_PRICING_USD_PER_MILLION = {
+  input: 0.20,
+  cachedInput: 0.02,
+  cacheWriteInput: 0.25,
+  output: 1.20,
+};
 
 const commonCallableOptions = {
   region: 'asia-northeast1',
@@ -154,6 +163,49 @@ function extractOutputText(body) {
   return text;
 }
 
+function nonNegativeUsageNumber(value) {
+  return Number.isFinite(value) && value >= 0 ? value : 0;
+}
+
+function extractOpenAiUsage(body) {
+  const usage = body?.usage;
+  if (!usage || !Number.isFinite(usage.input_tokens) || !Number.isFinite(usage.output_tokens)) {
+    return null;
+  }
+
+  const inputTokens = nonNegativeUsageNumber(usage.input_tokens);
+  const outputTokens = nonNegativeUsageNumber(usage.output_tokens);
+  const cachedInputTokens = Math.min(
+    inputTokens,
+    nonNegativeUsageNumber(usage.input_tokens_details?.cached_tokens),
+  );
+  const remainingAfterCached = Math.max(0, inputTokens - cachedInputTokens);
+  const cacheWriteInputTokens = Math.min(
+    remainingAfterCached,
+    nonNegativeUsageNumber(usage.input_tokens_details?.cache_write_tokens),
+  );
+  const uncachedInputTokens = Math.max(0, inputTokens - cachedInputTokens - cacheWriteInputTokens);
+  const totalTokens = Number.isFinite(usage.total_tokens) && usage.total_tokens >= 0
+    ? usage.total_tokens
+    : inputTokens + outputTokens;
+  const estimatedCostUsd = (
+    uncachedInputTokens * OPENAI_PRICING_USD_PER_MILLION.input
+    + cachedInputTokens * OPENAI_PRICING_USD_PER_MILLION.cachedInput
+    + cacheWriteInputTokens * OPENAI_PRICING_USD_PER_MILLION.cacheWriteInput
+    + outputTokens * OPENAI_PRICING_USD_PER_MILLION.output
+  ) / 1_000_000;
+
+  return {
+    model: OPENAI_MODEL,
+    inputTokens,
+    cachedInputTokens,
+    cacheWriteInputTokens,
+    outputTokens,
+    totalTokens,
+    estimatedCostUsd,
+  };
+}
+
 async function readManusCreditUsage(apiKey, taskId, signal) {
   const params = new URLSearchParams({ task_id: taskId });
   try {
@@ -195,7 +247,7 @@ exports.askAiRoomOpenAI = onCall(openAiCallableOptions, async (request) => {
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: 'gpt-5.6-luna',
+        model: OPENAI_MODEL,
         instructions: 'あなたはAI会議室のChatGPT参加者です。ユーザーとManusという別のAI参加者がいます。日本語で、直前までの会議を踏まえて質問に直接答えてください。必要以上に長くせず、会議で読みやすい返答にしてください。',
         input: [...toOpenAiHistory(history), { role: 'user', content: message }],
         reasoning: { effort: 'low' },
@@ -218,7 +270,8 @@ exports.askAiRoomOpenAI = onCall(openAiCallableOptions, async (request) => {
       fail('unavailable', 'OpenAIから返答を取得できませんでした。しばらくしてからもう一度お試しください。');
     }
 
-    return { ok: true, reply };
+    const usage = extractOpenAiUsage(body);
+    return { ok: true, reply, usage };
   } catch (error) {
     if (error instanceof HttpsError) throw error;
     if (error?.name === 'AbortError') {
