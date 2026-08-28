@@ -1,12 +1,12 @@
-name: Manus first task smoke test
+name: Manus first task smoke test recovery
 
 on:
   pull_request:
     branches: [main]
-    types: [opened]
+    types: [synchronize]
 
 jobs:
-  smoke:
+  poll:
     if: github.head_ref == 'test/manus-first-task-20260829'
     runs-on: ubuntu-latest
     timeout-minutes: 6
@@ -19,57 +19,44 @@ jobs:
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v3
 
-      - name: Run exactly one Manus task
+      - name: Poll the existing Manus task only
         shell: bash
         run: |
           set -euo pipefail
 
+          task_id='GNyJgr296vP7kPijRG9sjG'
           MANUS_API_KEY="$(gcloud secrets versions access latest --secret=MANUS_API_KEY --project=wa-awesome)"
           echo "::add-mask::$MANUS_API_KEY"
 
-          payload="$(jq -n '{
-            message: {
-              content: [{
-                type: "text",
-                text: "AI会議室への初回接続テストです。「Manus接続テスト成功」とだけ日本語で返答してください。外部サービスへの変更・送信・購入は行わないでください。"
-              }]
-            },
-            locale: "ja",
-            interactive_mode: false,
-            hide_in_task_list: true,
-            share_visibility: "private",
-            agent_profile: "manus-1.6-lite",
-            title: "AI会議室 Manus初回接続テスト"
-          }')"
-
-          create_json="$(curl -sS --fail-with-body \
-            -X POST 'https://api.manus.ai/v2/task.create' \
-            -H 'Content-Type: application/json' \
-            -H "x-manus-api-key: $MANUS_API_KEY" \
-            --data "$payload")"
-
-          task_id="$(jq -r 'if .ok == true then (.task_id // empty) else empty end' <<< "$create_json")"
-          if [[ ! "$task_id" =~ ^[A-Za-z0-9]{22}$ ]]; then
-            echo 'Manus task.create did not return a valid task ID.' >&2
-            exit 1
-          fi
-          echo "Created Manus task: $task_id"
-
           reply=''
           final_status='running'
+          credits='0'
+          profile='unknown'
+
           for attempt in $(seq 1 36); do
-            messages_json="$(curl -sS --fail-with-body \
+            detail_code="$(curl -sS -o /tmp/detail.json -w '%{http_code}' \
+              -H "x-manus-api-key: $MANUS_API_KEY" \
+              "https://api.manus.ai/v2/task.detail?task_id=$task_id")"
+
+            if [[ "$detail_code" == '200' ]] && [[ "$(jq -r '.ok // false' /tmp/detail.json)" == 'true' ]]; then
+              final_status="$(jq -r '.task.status // "running"' /tmp/detail.json)"
+              credits="$(jq -r '.task.credit_usage // 0' /tmp/detail.json)"
+              profile="$(jq -r '.task.agent_profile // "unknown"' /tmp/detail.json)"
+            else
+              echo "Poll $attempt: task.detail HTTP $detail_code; waiting for task visibility"
+              sleep 5
+              continue
+            fi
+
+            messages_code="$(curl -sS -o /tmp/messages.json -w '%{http_code}' \
               -H "x-manus-api-key: $MANUS_API_KEY" \
               "https://api.manus.ai/v2/task.listMessages?task_id=$task_id&order=desc&limit=20")"
 
-            if [[ "$(jq -r '.ok // false' <<< "$messages_json")" != 'true' ]]; then
-              echo 'Manus task.listMessages returned ok=false.' >&2
-              exit 1
+            if [[ "$messages_code" == '200' ]] && [[ "$(jq -r '.ok // false' /tmp/messages.json)" == 'true' ]]; then
+              reply="$(jq -r '[.messages[]? | select(.type == "assistant_message")][0].assistant_message.content // empty' /tmp/messages.json)"
             fi
 
-            final_status="$(jq -r '[.messages[]? | select(.type == "status_update")][0].status_update.agent_status // "running"' <<< "$messages_json")"
-            reply="$(jq -r '[.messages[]? | select(.type == "assistant_message")][0].assistant_message.content // empty' <<< "$messages_json")"
-            echo "Poll $attempt: status=$final_status"
+            echo "Poll $attempt: status=$final_status credit_usage=$credits messages_http=$messages_code"
 
             if [[ "$final_status" == 'stopped' ]]; then
               [[ -n "$reply" ]] || { echo 'Task stopped without an assistant reply.' >&2; exit 1; }
@@ -83,15 +70,9 @@ jobs:
           done
 
           if [[ "$final_status" != 'stopped' ]]; then
-            echo 'Manus smoke test timed out before completion.' >&2
+            echo 'Existing Manus smoke-test task did not finish before timeout.' >&2
             exit 1
           fi
-
-          detail_json="$(curl -sS --fail-with-body \
-            -H "x-manus-api-key: $MANUS_API_KEY" \
-            "https://api.manus.ai/v2/task.detail?task_id=$task_id")"
-          credits="$(jq -r '.task.credit_usage // 0' <<< "$detail_json")"
-          profile="$(jq -r '.task.agent_profile // "unknown"' <<< "$detail_json")"
 
           echo "Manus reply: $reply"
           echo "Credit usage: $credits"
