@@ -3,14 +3,24 @@ const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { defineSecret } = require('firebase-functions/params');
 
 const openAiApiKey = defineSecret('OPENAI_API_KEY');
+const manusApiKey = defineSecret('MANUS_API_KEY');
 const AI_ROOM_ACCESS_CODE_SHA256 = 'a4248a853ffadc372dfa4d1b468b76ff8bd744d94c3ae4dadf7e46000e796156';
 const MAX_HISTORY_ITEMS = 12;
 const MAX_HISTORY_CHARS = 12000;
+const MAX_MANUS_MESSAGE_CHARS = 2500;
+const MAX_MANUS_CONTEXT_CHARS = 1000;
 
-const callableOptions = {
+const commonCallableOptions = {
   region: 'asia-northeast1',
   cors: ['https://fabdemnt-dev.github.io'],
+};
+const openAiCallableOptions = {
+  ...commonCallableOptions,
   secrets: [openAiApiKey],
+};
+const manusCallableOptions = {
+  ...commonCallableOptions,
+  secrets: [manusApiKey],
 };
 
 function fail(code, message) {
@@ -43,6 +53,15 @@ function requireMessage(value) {
   return message;
 }
 
+function requireManusMessage(value) {
+  if (typeof value !== 'string') fail('invalid-argument', 'Manusへの依頼を入力してください。');
+  const message = value.trim();
+  if (!message || message.length > MAX_MANUS_MESSAGE_CHARS) {
+    fail('invalid-argument', `Manusへの依頼は1〜${MAX_MANUS_MESSAGE_CHARS}文字で入力してください。`);
+  }
+  return message;
+}
+
 function requireHistory(value) {
   if (value == null) return [];
   if (!Array.isArray(value) || value.length > MAX_HISTORY_ITEMS) {
@@ -64,6 +83,35 @@ function requireHistory(value) {
   });
 }
 
+function requireTaskId(value) {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9]{22}$/.test(value)) {
+    fail('invalid-argument', 'ManusタスクIDの形式が正しくありません。');
+  }
+  return value;
+}
+
+function buildManusPrompt(history, message) {
+  const rawContext = history
+    .slice(-6)
+    .map((item) => `${item.role === 'user' ? 'ユーザー' : 'ChatGPT'}: ${item.content}`)
+    .join('\n');
+  const context = rawContext.length > MAX_MANUS_CONTEXT_CHARS
+    ? rawContext.slice(-MAX_MANUS_CONTEXT_CHARS)
+    : rawContext;
+
+  return [
+    'あなたはAI会議室のManus参加者です。',
+    '必要に応じて調査・整理・分析を行い、会議で読みやすい日本語の回答を返してください。',
+    '外部サービスで変更・送信・購入など副作用のある操作は行わず、調査と回答だけを行ってください。',
+    '',
+    '直前の会議文脈:',
+    context || '（なし）',
+    '',
+    '今回の依頼:',
+    message,
+  ].join('\n');
+}
+
 function extractOutputText(body) {
   if (typeof body?.output_text === 'string' && body.output_text.trim()) {
     return body.output_text.trim();
@@ -80,7 +128,7 @@ function extractOutputText(body) {
   return text;
 }
 
-exports.askAiRoomOpenAI = onCall(callableOptions, async (request) => {
+exports.askAiRoomOpenAI = onCall(openAiCallableOptions, async (request) => {
   requireAuthenticated(request);
   requireAccessCode(request.data?.accessCode);
   const message = requireMessage(request.data?.message);
@@ -131,6 +179,129 @@ exports.askAiRoomOpenAI = onCall(callableOptions, async (request) => {
     }
     console.error('OpenAI AI room request error', { name: error?.name || 'Error' });
     fail('unavailable', 'OpenAIとの通信に失敗しました。しばらくしてからもう一度お試しください。');
+  } finally {
+    clearTimeout(timeout);
+  }
+});
+
+exports.createAiRoomManusTask = onCall(manusCallableOptions, async (request) => {
+  requireAuthenticated(request);
+  requireAccessCode(request.data?.accessCode);
+  const message = requireManusMessage(request.data?.message);
+  const history = requireHistory(request.data?.history);
+
+  const apiKey = manusApiKey.value();
+  if (!apiKey) fail('failed-precondition', 'Manus接続用のSecretが設定されていません。');
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20_000);
+  try {
+    const response = await fetch('https://api.manus.ai/v2/task.create', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-manus-api-key': apiKey,
+      },
+      body: JSON.stringify({
+        message: {
+          content: [{ type: 'text', text: buildManusPrompt(history, message) }],
+        },
+        locale: 'ja',
+        interactive_mode: false,
+        hide_in_task_list: false,
+        share_visibility: 'private',
+        agent_profile: 'manus-1.6-lite',
+        title: 'AI会議室の相談',
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      console.error('Manus AI room task create failed', { status: response.status });
+      fail('unavailable', 'Manusタスクを開始できませんでした。しばらくしてからもう一度お試しください。');
+    }
+
+    const body = await response.json();
+    if (body?.ok !== true || typeof body?.task_id !== 'string') {
+      fail('unavailable', 'Manusタスクを開始できませんでした。しばらくしてからもう一度お試しください。');
+    }
+
+    return {
+      ok: true,
+      taskId: body.task_id,
+      taskTitle: typeof body.task_title === 'string' ? body.task_title : 'AI会議室の相談',
+      taskUrl: typeof body.task_url === 'string' ? body.task_url : null,
+      status: 'running',
+    };
+  } catch (error) {
+    if (error instanceof HttpsError) throw error;
+    if (error?.name === 'AbortError') {
+      fail('deadline-exceeded', 'Manusへの接続がタイムアウトしました。もう一度お試しください。');
+    }
+    console.error('Manus AI room task create error', { name: error?.name || 'Error' });
+    fail('unavailable', 'Manusとの通信に失敗しました。しばらくしてからもう一度お試しください。');
+  } finally {
+    clearTimeout(timeout);
+  }
+});
+
+exports.getAiRoomManusTask = onCall(manusCallableOptions, async (request) => {
+  requireAuthenticated(request);
+  requireAccessCode(request.data?.accessCode);
+  const taskId = requireTaskId(request.data?.taskId);
+
+  const apiKey = manusApiKey.value();
+  if (!apiKey) fail('failed-precondition', 'Manus接続用のSecretが設定されていません。');
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20_000);
+  try {
+    const params = new URLSearchParams({ task_id: taskId, order: 'desc', limit: '20' });
+    const response = await fetch(`https://api.manus.ai/v2/task.listMessages?${params}`, {
+      method: 'GET',
+      headers: {
+        'x-manus-api-key': apiKey,
+      },
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      console.error('Manus AI room task poll failed', { status: response.status });
+      fail('unavailable', 'Manusの進行状況を取得できませんでした。');
+    }
+
+    const body = await response.json();
+    if (body?.ok !== true || !Array.isArray(body?.messages)) {
+      fail('unavailable', 'Manusの進行状況を取得できませんでした。');
+    }
+
+    const events = body.messages;
+    const statusEvent = events.find((event) =>
+      event?.type === 'status_update' && typeof event?.status_update?.agent_status === 'string');
+    const assistantEvent = events.find((event) =>
+      event?.type === 'assistant_message' && typeof event?.assistant_message?.content === 'string');
+    const errorEvent = events.find((event) =>
+      event?.type === 'error_message' && typeof event?.error_message?.content === 'string');
+
+    const status = statusEvent?.status_update?.agent_status || 'running';
+    return {
+      ok: true,
+      status,
+      reply: assistantEvent?.assistant_message?.content?.trim() || null,
+      waitingDescription: status === 'waiting'
+        ? statusEvent?.status_update?.status_detail?.waiting_description || 'Manusが確認を待っています。'
+        : null,
+      error: status === 'error'
+        ? errorEvent?.error_message?.content || 'Manusタスクでエラーが発生しました。'
+        : null,
+    };
+  } catch (error) {
+    if (error instanceof HttpsError) throw error;
+    if (error?.name === 'AbortError') {
+      fail('deadline-exceeded', 'Manusの進行状況確認がタイムアウトしました。');
+    }
+    console.error('Manus AI room task poll error', { name: error?.name || 'Error' });
+    fail('unavailable', 'Manusとの通信に失敗しました。');
   } finally {
     clearTimeout(timeout);
   }
