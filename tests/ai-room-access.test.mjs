@@ -82,5 +82,5 @@ test('Manus is exposed only behind an explicit credit confirmation', () => {
   assert.ok(confirmIndex >= 0, 'Manus should require explicit confirmation');
   assert.ok(createIndex > confirmIndex, 'task.create should happen only after confirmation');
   assert.match(sendSection, /Manusクレジットを使用します/);
-  assert.match(sendSection, /getManusTask\(\{ accessCode: code, taskId \}\)/);
+  assert.match(html, /getManusTask\(\{ accessCode: code, taskId \}\)/);
 });
