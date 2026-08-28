@@ -283,6 +283,12 @@ function applyRoomData(data, sequence = ++roomUpdateSequence) {
   };
   if (!state.currentData) return;
 
+  const roomIdText = state.roomId ? `ルーム：${state.roomId}` : '';
+  ['room-id-display-lobby', 'room-id-display-game'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = roomIdText;
+  });
+
   updatePhaseStatus(state.currentData);
   updateRoundResult(state.currentData);
   updateSubmissionStatus(state.currentData);
@@ -444,15 +450,17 @@ async function resyncRoomFromFirestore(options = {}) {
     return result;
   }
 
-  const sequence = ++roomUpdateSequence;
   roomResyncPromise = (async () => {
     try {
       const snapshot = await getDocFromServer(state.roomRef);
       if (snapshot.exists()) {
         const data = snapshot.data();
-        applyRoomData(data, sequence);
+        // サーバー取得中に入った描画より新しい順序番号を発行し、
+        // 手動更新の最新データが古い更新として破棄されないようにする。
+        applyRoomData(data, ++roomUpdateSequence);
+        return { ok: true };
       }
-      return { ok: true };
+      return { ok: false, error: new Error('ルームが見つかりません。') };
     } catch (e) {
       // 通常の定期同期に失敗しても、既存のonSnapshot監視やゲーム操作は壊さない。
       // 送信直後のrequireSuccessでは呼び出し側へエラーを返す。
@@ -502,8 +510,17 @@ function startRoomResyncPolling() {
 window.manualResync = async function(where) {
   const btn = document.getElementById(where === 'game' ? 'manual-resync-btn-game' : 'manual-resync-btn-lobby');
   if (btn) { btn.disabled = true; btn.innerText = '🔄 更新中…'; }
-  await resyncRoomFromFirestore();
-  if (btn) { btn.disabled = false; btn.innerText = '🔄 最新の状態に更新'; }
+  try {
+    const result = await resyncRoomFromFirestore();
+    if (!result?.ok) {
+      throw result?.error || new Error('最新の状態を取得できませんでした。');
+    }
+  } catch (error) {
+    console.warn('手動更新に失敗しました:', error);
+    alert('最新の状態に更新できませんでした。通信状態を確認して、もう一度お試しください。');
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerText = '🔄 最新の状態に更新'; }
+  }
 };
 
 
