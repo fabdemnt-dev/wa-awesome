@@ -10,6 +10,17 @@ on:
       - 'functions-manus-test/**'
       - 'functions-ai-room/**'
   workflow_dispatch:
+    inputs:
+      deploy_rules:
+        description: 'Deploy Firestore Rules after the client is live'
+        required: false
+        default: true
+        type: boolean
+      wait_for_client:
+        description: 'Wait for the new GitHub Pages client before Rules deployment'
+        required: false
+        default: true
+        type: boolean
 
 jobs:
   deploy:
@@ -45,5 +56,26 @@ jobs:
       - name: Configure Functions artifact cleanup
         run: firebase functions:artifacts:setpolicy --days 7 --project wa-awesome
 
-      - name: Deploy Firestore Rules and Functions
-        run: firebase deploy --only firestore:rules,functions --project wa-awesome --force
+      - name: Deploy Cloud Functions first
+        run: firebase deploy --only functions --project wa-awesome --force
+
+      - name: Wait for the new client to be publicly available
+        if: github.event_name == 'push' || (inputs.deploy_rules && inputs.wait_for_client)
+        env:
+          CLIENT_URL: https://fabdemnt-dev.github.io/wa-awesome/haiku-room.js
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent --show-error "$CLIENT_URL" | grep -q 'joinHaikuRoom'; then
+              echo 'New client is publicly available.'
+              exit 0
+            fi
+            echo "Waiting for GitHub Pages deployment ($attempt/60)..."
+            sleep 10
+          done
+          echo 'Timed out waiting for the new client.' >&2
+          exit 1
+
+      - name: Deploy Firestore Rules after the client is live
+        if: github.event_name == 'push' || inputs.deploy_rules
+        run: firebase deploy --only firestore:rules --project wa-awesome --force
