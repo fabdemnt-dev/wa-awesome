@@ -232,7 +232,7 @@ export function renderBoards() {
       return `
         <div class="player-board" style="text-align: center; padding: 20px;">
           ${canReveal
-            ? `<button onclick="revealPhrase('${jsPName}')" style="font-size: 16px; padding: 10px 20px; background-color: #3bab46; color: white; border: none; border-radius: 8px; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">📜 ${safePName} の句を披露する（タップ）</button>`
+            ? `<button onclick="revealPhrase('${jsPName}')" style="font-size: 16px; padding: 10px 20px; background-color: #3bab46; color: white; border: none; border-radius: 8px; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">📜 ${safePName}の句を披露する</button>`
             : `<div class="phrase-pending" aria-live="polite">📜 ${safePName} の句は披露待ち</div>`}
         </div>
       `;
