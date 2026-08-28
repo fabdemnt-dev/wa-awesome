@@ -16,6 +16,9 @@ const state = {
 
   currentData: null,
 
+  isSubmittingWords: false,
+  isSubmittingPhrase: false,
+  submittedPhraseKey: "",
   isSubmittingSelfPraise: false,
   isSubmittingVote: false,
   isProcessingNextRound: false,

@@ -2,7 +2,7 @@ import { updateDoc, runTransaction } from "https://www.gstatic.com/firebasejs/10
 import { db } from './firebase-config.js';
 import { getParticipantStorageKey, getParticipantUidByName } from './participant-utils.js';
 import state from './haiku-state.js';
-import { renderHand } from './haiku-render.js';
+import { renderHand, refreshPhraseSubmitButton } from './haiku-render.js';
 import { submitHaikuPhrase, revealHaikuPhrase, selfPraiseHaikuPhrase, submitHaikuVote } from './haiku-functions.js';
 
 window.selectCard = function(type, idx) {
@@ -32,19 +32,86 @@ window.toggleRedrawCard = function(type, idx) {
   renderHand();
 };
 window.clearPhrase = function() { if (!state.isSpectator) { state.selectedHand = [null, null, null]; renderHand(); } };
-window.submitPhrase = async function() {
-  if (state.isSpectator) return alert('見学モードでは句の投稿はできません');
-  if (!state.selectedHand[0] || !state.selectedHand[1] || !state.selectedHand[2]) return alert('すべて選択してください');
+
+function hasSubmittedCurrentPhrase() {
+  if (!state.currentData) return false;
   const storageKey = getParticipantStorageKey(state.currentData, state.myUid, state.myName);
+  const phrases = state.currentData.phrases || {};
+  return (storageKey && phrases[storageKey] !== undefined)
+    || (state.myName && phrases[state.myName] !== undefined)
+    || state.submittedPhraseKey === `${state.roomId}:${state.currentData.roundCount || 1}`;
+}
+
+function isDuplicatePhraseError(error) {
+  const code = String(error?.code || '');
+  const message = String(error?.message || '');
+  return code.includes('failed-precondition') && message.includes('句は1節につき1つまで');
+}
+
+window.submitPhrase = async function() {
+  if (!state.currentData || state.isSubmittingPhrase) return;
+  if (state.isSpectator) return alert('見学モードでは句の投稿はできません');
+  if (hasSubmittedCurrentPhrase()) return alert('この節では、すでに句を投稿済みです。');
+  if (!state.selectedHand[0] || !state.selectedHand[1] || !state.selectedHand[2]) return alert('すべて選択してください');
+
+  const storageKey = getParticipantStorageKey(state.currentData, state.myUid, state.myName);
+  const round = state.currentData.roundCount || 1;
+  const submissionKey = `${state.roomId}:${round}`;
   const phrase = `${state.selectedHand[0].text} ${state.selectedHand[1].text} ${state.selectedHand[2].text}`;
-  if (state.currentData.schemaVersion === 2) {
-    await submitHaikuPhrase(state.roomId, phrase, state.selectedHand);
-    if (typeof window.resyncHaikuRoom === 'function') await window.resyncHaikuRoom();
-  } else {
-    await updateDoc(state.roomRef, {
-      [`phrases.${storageKey}`]: phrase,
-      [`phraseDetails.${storageKey}`]: state.selectedHand
-    });
+  state.isSubmittingPhrase = true;
+  refreshPhraseSubmitButton();
+
+  try {
+    if (state.currentData.schemaVersion === 2) {
+      await submitHaikuPhrase(state.roomId, phrase, state.selectedHand);
+    } else {
+      await updateDoc(state.roomRef, {
+        [`phrases.${storageKey}`]: phrase,
+        [`phraseDetails.${storageKey}`]: state.selectedHand
+      });
+    }
+
+    // Callableが成功した時点でサーバー保存済みとして扱い、再同期だけの失敗で再投稿可能に戻さない。
+    state.submittedPhraseKey = submissionKey;
+    if (typeof window.resyncHaikuRoom === 'function') {
+      try {
+        await window.resyncHaikuRoom({ requireSuccess: true });
+      } catch (resyncError) {
+        console.error('[submit-phrase-resync]', resyncError);
+        alert('句は投稿されましたが、画面への反映を確認できませんでした。最新の状態に更新してください。');
+      }
+    }
+  } catch (error) {
+    console.error('[submit-phrase]', error);
+    if (isDuplicatePhraseError(error)) {
+      state.submittedPhraseKey = submissionKey;
+      alert('この節では、すでに句を投稿済みです。');
+    } else {
+      let savedAfterError = false;
+      if (typeof window.resyncHaikuRoom === 'function') {
+        try {
+          await window.resyncHaikuRoom({ requireSuccess: true });
+          savedAfterError = hasSubmittedCurrentPhrase();
+        } catch (resyncError) {
+          console.error('[submit-phrase-error-resync]', resyncError);
+        }
+      }
+
+      if (savedAfterError) {
+        state.submittedPhraseKey = submissionKey;
+        alert('句は投稿されましたが、送信結果の確認中にエラーが発生しました。最新の状態に更新してください。');
+      } else {
+        const code = String(error?.code || '');
+        if (code.includes('unavailable') || code.includes('deadline-exceeded') || code.includes('internal')) {
+          alert('句を投稿できませんでした。通信状態を確認して、もう一度お試しください。');
+        } else {
+          alert('句の投稿に失敗しました。入力内容を確認して、もう一度お試しください。');
+        }
+      }
+    }
+  } finally {
+    state.isSubmittingPhrase = false;
+    refreshPhraseSubmitButton();
   }
 };
 window.revealPhrase = async function(pName) {

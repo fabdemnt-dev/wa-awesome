@@ -75,7 +75,7 @@
       <h3>素材の提出</h3>
       <div id="inputs-5-container"></div>
       <div id="inputs-7-container" style="margin-top:10px;"></div>
-      <button id="add-word-btn" onclick="addWords()" class="btn-primary" style="margin-top:10px;">素材を提出する</button>
+      <button id="add-word-btn" onclick="addWords()" class="btn-primary" style="margin-top:10px;" data-no-busy-feedback="true">素材を提出する</button>
 
       <div style="margin-top:10px; font-size:14px; color:#64748b;">
         集まった素材: 五音 <span id="total-words-5">0</span> 個 / 七音 <span id="total-words-7">0</span> 個
@@ -129,7 +129,7 @@
         <div class="phrase-actions" style="margin-top:10px;">
           <button onclick="swap5Cards()" class="btn-support">五音の位置を入れ替える</button>
           <button onclick="clearPhrase()" class="btn-secondary">やり直す</button>
-          <button onclick="submitPhrase()" class="btn-primary">整いました！</button>
+          <button id="submit-phrase-btn" onclick="submitPhrase()" class="btn-primary" data-no-busy-feedback="true">整いました！</button>
         </div>
       </div>
 

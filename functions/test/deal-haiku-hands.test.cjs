@@ -594,3 +594,195 @@ test('本人の引き直しは成功し、他人の札と二重実行は拒否�
     (error) => error.code === 'failed-precondition',
   );
 });
+
+
+test('Haiku素材投稿は入力・権限・状態を検証し、記号と同一文字列を許可する', async () => {
+  const roomId = 'material-regression';
+  await roomRef(roomId).set({
+    schemaVersion: 2,
+    status: 'lobby',
+    players: ['親', '参加者'],
+    spectators: ['見学者'],
+    participantUids: {
+      'uid-host': '親',
+      'uid-player': '参加者',
+      'uid-spectator': '見学者',
+    },
+    words5: [],
+    words7: [],
+  });
+
+  const validRequest = {
+    data: {
+      roomId,
+      words5: [{ id: 'symbol-1', text: '☆!?ーんっゃABC', author: '参加者' }],
+      words7: [],
+    },
+    auth: { uid: 'uid-player' },
+  };
+
+  await assert.rejects(
+    submitHaikuWords.run({ ...validRequest, auth: null }),
+    (error) => error.code === 'unauthenticated',
+  );
+  await assert.rejects(
+    submitHaikuWords.run({ ...validRequest, auth: { uid: 'uid-outsider' } }),
+    (error) => error.code === 'permission-denied',
+  );
+  await assert.rejects(
+    submitHaikuWords.run({ ...validRequest, auth: { uid: 'uid-spectator' } }),
+    (error) => error.code === 'permission-denied',
+  );
+
+  for (const invalidWord of [
+    { id: 'blank', text: '   ', author: '参加者' },
+    { id: 'null', text: null, author: '参加者' },
+    { id: 'type', text: 123, author: '参加者' },
+    { id: '   ', text: '素材', author: '参加者' },
+    { id: 'long', text: '長'.repeat(201), author: '参加者' },
+  ]) {
+    await assert.rejects(
+      submitHaikuWords.run({
+        data: { roomId, words5: [invalidWord], words7: [] },
+        auth: { uid: 'uid-player' },
+      }),
+      (error) => error.code === 'invalid-argument',
+    );
+  }
+
+  await assert.rejects(
+    submitHaikuWords.run({
+      data: { roomId, words5: [], words7: [] },
+      auth: { uid: 'uid-player' },
+    }),
+    (error) => error.code === 'invalid-argument',
+  );
+  await assert.rejects(
+    submitHaikuWords.run({
+      data: { roomId, words5: [{ id: 'spoof', text: '偽装', author: '親' }], words7: [] },
+      auth: { uid: 'uid-player' },
+    }),
+    (error) => error.code === 'permission-denied',
+  );
+
+  await submitHaikuWords.run(validRequest);
+  await submitHaikuWords.run({
+    data: {
+      roomId,
+      words5: [{ id: 'symbol-2', text: '☆!?ーんっゃABC', author: '参加者' }],
+      words7: [],
+    },
+    auth: { uid: 'uid-player' },
+  });
+
+  let room = (await roomRef(roomId).get()).data();
+  assert.deepEqual(room.words5.map((word) => word.id), ['symbol-1', 'symbol-2']);
+  assert.deepEqual(room.words5.map((word) => word.text), ['☆!?ーんっゃABC', '☆!?ーんっゃABC']);
+
+  await roomRef(roomId).update({ status: 'playing' });
+  await assert.rejects(
+    submitHaikuWords.run({
+      data: { roomId, words5: [{ id: 'late', text: '開始後', author: '参加者' }], words7: [] },
+      auth: { uid: 'uid-player' },
+    }),
+    (error) => error.code === 'failed-precondition',
+  );
+  room = (await roomRef(roomId).get()).data();
+  assert.equal(room.words5.length, 2);
+});
+
+test('Haiku句投稿は本人手札・状態・1節1句を検証し、披露後も上書きしない', async () => {
+  const roomId = 'phrase-regression';
+  await seedRoom(roomId);
+  await roomRef(roomId).update({
+    spectators: ['見学者'],
+    participantUids: {
+      'uid-host': '親',
+      'uid-player': '参加者',
+      'uid-spectator': '見学者',
+    },
+  });
+
+  await assert.rejects(
+    submitHaikuPhrase.run({
+      data: { roomId, phrase: '未開始', phraseDetails: [{ id: 'x', text: 'x', author: 'x' }, { id: 'y', text: 'y', author: 'y' }, { id: 'z', text: 'z', author: 'z' }] },
+      auth: { uid: 'uid-player' },
+    }),
+    (error) => error.code === 'failed-precondition',
+  );
+
+  await dealHaikuHands.run({ data: { roomId }, auth: { uid: 'uid-host' } });
+  const hostHand = (await roomRef(roomId).collection('hands').doc('uid-host').get()).data();
+  const playerHand = (await roomRef(roomId).collection('hands').doc('uid-player').get()).data();
+  const details = [playerHand.hand5[0], playerHand.hand7[0], playerHand.hand5[0]];
+  const phrase = '☆五七五ではない ABC ーんっゃ';
+
+  await assert.rejects(
+    submitHaikuPhrase.run({ data: { roomId, phrase, phraseDetails: details }, auth: null }),
+    (error) => error.code === 'unauthenticated',
+  );
+  await assert.rejects(
+    submitHaikuPhrase.run({ data: { roomId, phrase, phraseDetails: details }, auth: { uid: 'uid-spectator' } }),
+    (error) => error.code === 'permission-denied',
+  );
+  await assert.rejects(
+    submitHaikuPhrase.run({ data: { roomId, phrase: '   ', phraseDetails: details }, auth: { uid: 'uid-player' } }),
+    (error) => error.code === 'invalid-argument',
+  );
+  await assert.rejects(
+    submitHaikuPhrase.run({ data: { roomId, phrase: '句'.repeat(601), phraseDetails: details }, auth: { uid: 'uid-player' } }),
+    (error) => error.code === 'invalid-argument',
+  );
+  await assert.rejects(
+    submitHaikuPhrase.run({ data: { roomId, phrase, phraseDetails: details.slice(0, 2) }, auth: { uid: 'uid-player' } }),
+    (error) => error.code === 'invalid-argument',
+  );
+  await assert.rejects(
+    submitHaikuPhrase.run({
+      data: { roomId, phrase: '他人の手札', phraseDetails: [hostHand.hand5[0], hostHand.hand7[0], hostHand.hand5[0]] },
+      auth: { uid: 'uid-player' },
+    }),
+    (error) => error.code === 'permission-denied',
+  );
+
+  await submitHaikuPhrase.run({ data: { roomId, phrase, phraseDetails: details }, auth: { uid: 'uid-player' } });
+  const duplicateAssertion = (error) => error.code === 'failed-precondition'
+    && error.message === '句は1節につき1つまでです。';
+  await assert.rejects(
+    submitHaikuPhrase.run({ data: { roomId, phrase: '上書き句', phraseDetails: details }, auth: { uid: 'uid-player' } }),
+    duplicateAssertion,
+  );
+  await revealHaikuPhrase.run({ data: { roomId, targetUid: 'uid-player' }, auth: { uid: 'uid-host' } });
+  await assert.rejects(
+    submitHaikuPhrase.run({ data: { roomId, phrase: '披露後の上書き句', phraseDetails: details }, auth: { uid: 'uid-player' } }),
+    duplicateAssertion,
+  );
+
+  const room = (await roomRef(roomId).get()).data();
+  assert.equal(room.phrases['uid-player'], phrase);
+  assert.deepEqual(room.phraseDetails['uid-player'], details);
+});
+
+test('Haiku句の同時二重投稿はトランザクションにより1件だけ保存する', async () => {
+  const roomId = 'phrase-concurrency';
+  await seedRoom(roomId);
+  await dealHaikuHands.run({ data: { roomId }, auth: { uid: 'uid-host' } });
+  const hand = (await roomRef(roomId).collection('hands').doc('uid-player').get()).data();
+  const phraseDetails = [hand.hand5[0], hand.hand7[0], hand.hand5[0]];
+  const requests = ['同時投稿A', '同時投稿B'].map((phrase) => submitHaikuPhrase.run({
+    data: { roomId, phrase, phraseDetails },
+    auth: { uid: 'uid-player' },
+  }));
+
+  const results = await Promise.allSettled(requests);
+  assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
+  assert.equal(results.filter((result) => result.status === 'rejected').length, 1);
+  const rejected = results.find((result) => result.status === 'rejected');
+  assert.equal(rejected.reason.code, 'failed-precondition');
+  assert.equal(rejected.reason.message, '句は1節につき1つまでです。');
+
+  const room = (await roomRef(roomId).get()).data();
+  assert.ok(['同時投稿A', '同時投稿B'].includes(room.phrases['uid-player']));
+  assert.deepEqual(room.phraseDetails['uid-player'], phraseDetails);
+  assert.equal(Object.keys(room.phrases).length, 1);
+});
