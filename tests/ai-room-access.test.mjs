@@ -84,3 +84,11 @@ test('Manus is exposed only behind an explicit credit confirmation', () => {
   assert.match(sendSection, /Manusクレジットを使用します/);
   assert.match(html, /getManusTask\(\{ accessCode: code, taskId \}\)/);
 });
+
+test('Manus completed tasks report credit usage without creating another task', () => {
+  assert.match(backend, /task\.detail/);
+  assert.match(backend, /credit_usage/);
+  assert.match(backend, /creditUsage/);
+  assert.match(html, /manusResult\.creditUsage/);
+  assert.match(html, /使用クレジット:/);
+});
