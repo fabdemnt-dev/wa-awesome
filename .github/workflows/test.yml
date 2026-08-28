@@ -26,5 +26,9 @@ jobs:
         run: npm test
       - name: Run Firestore rules emulator tests
         run: npm run test:rules
+      - name: Install additional Functions dependencies
+        run: |
+          npm install --prefix functions-manus-test
+          npm install --prefix functions-ai-room
       - name: Run Functions emulator tests
         run: npm run test:functions
