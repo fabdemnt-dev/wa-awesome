@@ -90,17 +90,23 @@ window.submitVote = async function(targetPlayer, forcedKey, selectId) {
       return Array.isArray(value) ? value.includes(evalKey) : value === evalKey;
     };
     const resyncAndVerify = async () => {
-      if (typeof window.resyncHaikuRoom === 'function') {
-        await window.resyncHaikuRoom({ requireSuccess: true });
+      try {
+        if (typeof window.resyncHaikuRoom === 'function') {
+          await window.resyncHaikuRoom({ requireSuccess: true });
+        }
+      } catch (error) {
+        // 保存処理は完了済みなので、再同期だけの失敗を送信失敗として扱わない。
+        return { verified: false, resyncFailed: true };
       }
-      return verifyLocalVote();
+      return { verified: verifyLocalVote(), resyncFailed: false };
     };
 
     if (state.currentData.schemaVersion === 2) {
       const targetUid = getParticipantUidByName(state.currentData, targetPlayer);
       if (!targetUid) return alert('対象の句が見つかりません');
       await submitHaikuVote(state.roomId, targetUid, evalKey);
-      if (!await resyncAndVerify()) {
+      const voteVerification = await resyncAndVerify();
+      if (!voteVerification.verified) {
         alert('御印はサーバーに保存されましたが、画面への反映確認に失敗しました。最新の状態に更新してください。');
         return;
       }
@@ -124,7 +130,8 @@ window.submitVote = async function(targetPlayer, forcedKey, selectId) {
         const currentVotesArr = Array.isArray(currentVotes) ? currentVotes : [currentVotes];
         tx.update(state.roomRef, { [`votes.${voterKey}.${targetKey}`]: [...currentVotesArr, evalKey] });
       });
-      if (!await resyncAndVerify()) {
+      const voteVerification = await resyncAndVerify();
+      if (!voteVerification.verified) {
         alert('御印はサーバーに保存されましたが、画面への反映確認に失敗しました。最新の状態に更新してください。');
         return;
       }
