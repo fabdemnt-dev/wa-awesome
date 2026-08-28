@@ -62,6 +62,15 @@ function requireManusMessage(value) {
   return message;
 }
 
+function normalizeSpeaker(item) {
+  if (item?.speaker === 'user' || item?.speaker === 'chatgpt' || item?.speaker === 'manus') {
+    return item.speaker;
+  }
+  if (item?.role === 'user') return 'user';
+  if (item?.role === 'assistant') return 'chatgpt';
+  return null;
+}
+
 function requireHistory(value) {
   if (value == null) return [];
   if (!Array.isArray(value) || value.length > MAX_HISTORY_ITEMS) {
@@ -70,16 +79,16 @@ function requireHistory(value) {
 
   let totalChars = 0;
   return value.map((item) => {
-    const role = item?.role;
+    const speaker = normalizeSpeaker(item);
     const content = typeof item?.content === 'string' ? item.content.trim() : '';
-    if ((role !== 'user' && role !== 'assistant') || !content || content.length > 4000) {
+    if (!speaker || !content || content.length > 4000) {
       fail('invalid-argument', '会話履歴の形式が正しくありません。');
     }
     totalChars += content.length;
     if (totalChars > MAX_HISTORY_CHARS) {
       fail('invalid-argument', '会話履歴が長すぎます。');
     }
-    return { role, content };
+    return { speaker, content };
   });
 }
 
@@ -90,10 +99,27 @@ function requireTaskId(value) {
   return value;
 }
 
+function toOpenAiHistory(history) {
+  return history.map((item) => {
+    if (item.speaker === 'chatgpt') {
+      return { role: 'assistant', content: item.content };
+    }
+    if (item.speaker === 'manus') {
+      return { role: 'user', content: `Manus（別のAI参加者）: ${item.content}` };
+    }
+    return { role: 'user', content: item.content };
+  });
+}
+
 function buildManusPrompt(history, message) {
+  const labels = {
+    user: 'ユーザー',
+    chatgpt: 'ChatGPT',
+    manus: 'Manus',
+  };
   const rawContext = history
     .slice(-6)
-    .map((item) => `${item.role === 'user' ? 'ユーザー' : 'ChatGPT'}: ${item.content}`)
+    .map((item) => `${labels[item.speaker]}: ${item.content}`)
     .join('\n');
   const context = rawContext.length > MAX_MANUS_CONTEXT_CHARS
     ? rawContext.slice(-MAX_MANUS_CONTEXT_CHARS)
@@ -149,8 +175,8 @@ exports.askAiRoomOpenAI = onCall(openAiCallableOptions, async (request) => {
       },
       body: JSON.stringify({
         model: 'gpt-5.6-luna',
-        instructions: 'あなたはAI会議室のChatGPT参加者です。日本語で、直前までの会話を踏まえて質問に直接答えてください。必要以上に長くせず、会議で読みやすい返答にしてください。',
-        input: [...history, { role: 'user', content: message }],
+        instructions: 'あなたはAI会議室のChatGPT参加者です。ユーザーとManusという別のAI参加者がいます。日本語で、直前までの会議を踏まえて質問に直接答えてください。必要以上に長くせず、会議で読みやすい返答にしてください。',
+        input: [...toOpenAiHistory(history), { role: 'user', content: message }],
         reasoning: { effort: 'low' },
         text: { verbosity: 'low' },
         max_output_tokens: 800,
@@ -264,6 +290,16 @@ exports.getAiRoomManusTask = onCall(manusCallableOptions, async (request) => {
       },
       signal: controller.signal,
     });
+
+    if (response.status === 404) {
+      return {
+        ok: true,
+        status: 'running',
+        reply: null,
+        waitingDescription: null,
+        error: null,
+      };
+    }
 
     if (!response.ok) {
       console.error('Manus AI room task poll failed', { status: response.status });
