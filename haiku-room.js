@@ -43,7 +43,7 @@ function scrollToStatusSection(status) {
 }
 
 function updatePhaseStatus(data) {
-  const lobbyText = data?.status === 'lobby' ? '開始待ち・素材準備中' : '';
+  const lobbyText = data?.status === 'lobby' ? '素材準備中' : '';
   let gameText = '';
   if (data?.status === 'playing') {
     // 表示上の期待人数は現在のplayersを使う。一方、句データのキーは
@@ -61,8 +61,8 @@ function updatePhaseStatus(data) {
     };
     const submitted = players.filter(name => phrases[phraseKeyFor(name)] !== undefined).length;
     const revealed = players.filter(name => Boolean(revealedPhrases[phraseKeyFor(name)])).length;
-    if (submitted < players.length) gameText = `句を作成中（${submitted}/${players.length}人提出済み）`;
-    else if (revealed < submitted) gameText = `句を披露中（${revealed}/${submitted}句披露済み）`;
+    if (submitted < players.length) gameText = '句を作成中';
+    else if (revealed < submitted) gameText = '句を披露中';
     else gameText = '御印受付中';
   }
   const setStatus = (id, text) => {
@@ -89,7 +89,7 @@ function updateSubmissionStatus(data) {
     const el = document.getElementById(id);
     if (!el || !players.length) return;
     const submittedCount = players.filter(doneFor).length;
-    el.innerHTML = `<div class="submission-title">${label}</div><div class="submission-count" aria-live="polite">${submittedCount}/${players.length} 提出済み</div>`;
+    el.innerHTML = `<div class="submission-status-line" aria-live="polite">${label}：${submittedCount}/${players.length} 提出済み</div>`;
   };
   render('submission-status-lobby', '素材の提出状況', name => submittedFor(name, 'words5') || submittedFor(name, 'words7'));
   render('submission-status-game', '句の提出状況', phraseFor);
@@ -176,8 +176,8 @@ function updateRoleHelp(data) {
     : data?.currentHost === state.myName;
   const role = state.isSpectator ? '見学者' : (isHost ? '親・選者' : 'プレイヤー');
   const text = data?.status === 'lobby'
-    ? (state.isSpectator ? '見学者：参加者の準備状況を確認できます。素材提出や句会開始はできません。' : (isHost ? '親・選者：素材を確認し、準備ができたら「句会を始める！」を押します。' : 'プレイヤー：素材を提出し、親が句会を開始するまで待ちます。'))
-    : (state.isSpectator ? '見学者：句の披露と御印を楽しめます。ゲーム進行の操作はできません。' : (isHost ? '親・選者：他の参加者の句を披露し、確認後に「次の節に進む」を押します。' : 'プレイヤー：手札から句を作って「整いました！」で提出し、親の進行を待ちます。'));
+    ? (state.isSpectator ? '見学者：参加者の準備状況を確認できます。素材提出や句会開始はできません。' : (isHost ? '親・選者：素材を確認し、準備ができたら「句会を始める！」を押します。' : 'プレイヤー：素材を提出します。句会が始まったら手札から句を作ります。'))
+    : (state.isSpectator ? '見学者：句の披露と御印を楽しめます。ゲーム進行の操作はできません。' : (isHost ? '親・選者：他の参加者の句を披露し、確認後に「次の節に進む」を押します。' : 'プレイヤー：手札から句を作って「整いました！」で提出します。'));
   ['role-help-lobby', 'role-help-game'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.innerHTML = `<strong>あなたの役割：${role}</strong><br>${text}`;

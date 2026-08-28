@@ -93,7 +93,7 @@ window.fillDefaultWords = async function() {
 };
 window.startGame = async function() {
   if (state.isSpectator) return alert('見学モードでは句会を開始できません');
-  if (!confirm('全員の素材が集まりましたか？\n句会を始めます。')) return;
+  if (!confirm('句会を始めますか？')) return;
 
   const players = state.currentData?.players || [];
   const st = state.currentData?.settings || { hand5: 5, hand7: 3 };
@@ -315,14 +315,25 @@ window.nextRound = async function() {
   const uidFor = name => roundEntries.find(entry => entry.name === name)?.uid
     || Object.entries(participantUids).find(([, value]) => value === name)?.[0]
     || getParticipantUidByName(state.currentData, name);
+  const revealedPhrases = state.currentData.revealedPhrases || {};
   const hasSubmittedPhrase = name => {
     const uid = uidFor(name);
     return (uid && phrases[uid] !== undefined) || phrases[name] !== undefined;
   };
+  const hasRevealedPhrase = name => {
+    const uid = uidFor(name);
+    return uid && revealedPhrases[uid] !== undefined
+      ? Boolean(revealedPhrases[uid])
+      : Boolean(revealedPhrases[name]);
+  };
   const hasUnsubmittedPlayer = players.some(name => !hasSubmittedPhrase(name));
+  const hasUnrevealedPhrase = !hasUnsubmittedPlayer
+    && players.some(name => !hasRevealedPhrase(name));
   const confirmation = hasUnsubmittedPlayer
-    ? 'まだ句を提出していない参加者がいます。\nこのまま次の節に進みますか？'
-    : '本当に次の節に進みますか？\n（現在の句は履歴に保存され、新しい節が始まります）';
+    ? '未提出の句があります。\nこのまま次の節に進みますか？'
+    : hasUnrevealedPhrase
+      ? 'まだ披露していない句があります。\nこのまま次の節に進みますか？'
+      : '本当に次の節に進みますか？\n（現在の句は履歴に保存され、新しい節が始まります）';
   if (!confirm(confirmation)) return;
 
   if (state.currentData.schemaVersion === 2) {
