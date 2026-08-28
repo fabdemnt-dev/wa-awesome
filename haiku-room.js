@@ -6,14 +6,13 @@ import { renderInputFields, renderHand, renderBoards, refreshRoleBasedControls }
 import { subscribeRoomHistory } from './room-history.js';
 import { ensureSignedIn } from './wordset-auth.js';
 import { showGameError } from './game-error.js';
-import { defaultWords5, defaultWords7 } from './haiku-default-words.js';
 
 const initialRoomId = new URLSearchParams(window.location.search).get('room')?.trim() || '';
 document.addEventListener('DOMContentLoaded', () => {
   const roomInput = document.getElementById('room-id');
   if (roomInput && initialRoomId && !roomInput.value) roomInput.value = initialRoomId;
 });
-import { normalizeParticipantName, setParticipantRole, normalizeParticipantRoles, getParticipantStorageKey, canClaimHost, getCurrentHostName } from './participant-utils.js';
+import { normalizeParticipantName, setParticipantRole, normalizeParticipantRoles, getParticipantStorageKey, canClaimHost, getCurrentHostName, getRoundParticipantNames, getRoundParticipantEntries } from './participant-utils.js';
 import { changeHaikuRole, removeHaikuWord, updateHaikuSettings, removePlayer as removePlayerSecure, claimHost as claimHostSecure } from './haiku-functions.js';
 
 async function saveParticipantRole(role) {
@@ -47,7 +46,7 @@ function updatePhaseStatus(data) {
   const lobbyText = data?.status === 'lobby' ? '開始待ち・素材準備中' : '';
   let gameText = '';
   if (data?.status === 'playing') {
-    const players = data.players || [];
+    const players = getRoundParticipantNames(data);
     const submitted = Object.keys(data.phrases || {}).length;
     const revealed = Object.values(data.revealedPhrases || {}).filter(Boolean).length;
     if (submitted < players.length) gameText = `句を作成中（${submitted}/${players.length}人提出済み）`;
@@ -63,9 +62,11 @@ function updatePhaseStatus(data) {
 }
 
 function updateSubmissionStatus(data) {
-  const players = data?.players || [];
+  const players = data?.status === 'playing' ? getRoundParticipantNames(data) : (data?.players || []);
   const participantUids = data?.participantUids || {};
-  const uidFor = name => Object.entries(participantUids).find(([, value]) => value === name)?.[0];
+  const roundEntries = data?.status === 'playing' ? getRoundParticipantEntries(data) : [];
+  const uidFor = name => roundEntries.find((entry) => entry.name === name)?.uid
+    || Object.entries(participantUids).find(([, value]) => value === name)?.[0];
   const submittedFor = (name, type) => (data?.[type] || []).some(word => word?.author === name);
   const phraseFor = name => {
     const uid = uidFor(name);
@@ -100,7 +101,7 @@ function updateRoundResult(data) {
 function updateScoreboard(data) {
   const el = document.getElementById('scoreboard');
   if (!el) return;
-  const players = data?.players || [];
+  const players = data?.status === 'playing' ? getRoundParticipantNames(data) : (data?.players || []);
   const scores = data?.scores || {};
   const ranking = [...players].sort((a, b) => (Number(scores[b]) || 0) - (Number(scores[a]) || 0));
   el.innerHTML = `<div class="scoreboard-title">累計得点ランキング</div><div class="scoreboard-list">${ranking.map((name, index) => `<div class="score-row"><span>${index + 1}位　${escapeHTML(name)}</span><strong>${Number(scores[name]) || 0} 誉</strong></div>`).join('')}</div>`;
@@ -617,54 +618,17 @@ window.removeSubmittedWord = async function(type, wordId) {
 window.toggleRole = async function() {
   if (!state.roomRef) return;
   if (state.isSpectator) {
-    // ゲーム中の途中参戦は、本人の手札分と引き直し用の予備を山札に確保してから配る。
     if (state.currentData?.status === 'playing') {
-      const st = state.currentData.settings || { hand5: 5, hand7: 3 };
-      const players = state.currentData.players || [];
-      let deck5 = [...(state.currentData.deck5 || [])];
-      let deck7 = [...(state.currentData.deck7 || [])];
-      const selectedPool5 = state.currentData.supplementPool5?.length ? state.currentData.supplementPool5 : defaultWords5;
-      const selectedPool7 = state.currentData.supplementPool7?.length ? state.currentData.supplementPool7 : defaultWords7;
-      const supplementAuthorLabel = state.currentData.supplementAuthorLabel || '🎴お題ぶくろ';
-      const makeDefaultCards = (pool, fallbackPool, count) => {
-        const sourcePool = pool.length ? pool : fallbackPool;
-        if (count <= 0 || sourcePool.length === 0) return [];
-        const shuffled = [...sourcePool].sort(() => Math.random() - 0.5);
-        return Array.from({ length: count }, (_, index) => ({
-          text: shuffled[index % shuffled.length],
-          author: supplementAuthorLabel,
-          id: `${Date.now()}_${Math.random().toString(36).substring(2, 9)}_${index}`
-        }));
-      };
-
-
-
-      // 途中参加後の全プレイヤーが1回、手札を全て引き直しても不足しないようにする。
-      // 配布後に「参加者全員分の手札1回分」が山札に残る必要があるため、
-      // 配布前は「現在のプレイヤー数＋新規参加者＋引き直し分」の量を確保する。
-      const reserve5 = (players.length + 2) * st.hand5;
-      const reserve7 = (players.length + 2) * st.hand7;
-      const add5 = makeDefaultCards(selectedPool5, defaultWords5, Math.max(0, reserve5 - deck5.length));
-      const add7 = makeDefaultCards(selectedPool7, defaultWords7, Math.max(0, reserve7 - deck7.length));
-      deck5.push(...add5);
-      deck7.push(...add7);
-
-      const shuffled5 = [...deck5].sort(() => Math.random() - 0.5);
-      const shuffled7 = [...deck7].sort(() => Math.random() - 0.5);
-      const newHand5 = shuffled5.slice(0, st.hand5);
-      const newHand7 = shuffled7.slice(0, st.hand7);
-      const drawnIds5 = new Set(newHand5.map(w => w.id));
-      const drawnIds7 = new Set(newHand7.map(w => w.id));
-      // 配った札は山札から取り除き、残りは途中参加者・既存プレイヤーの引き直しに使う。
-      const newDeck5 = deck5.filter(w => !drawnIds5.has(w.id));
-      const newDeck7 = deck7.filter(w => !drawnIds7.has(w.id));
-      await changeHaikuRole(state.roomId, 'player', add5, add7);
+      // Callableが、同じUIDの今節参加者か本当の新規途中参加かをトランザクション内で判定する。
+      // 既存参加者の復帰では手札・山札・句・披露状態を変更しない。
+      const result = state.currentData?.schemaVersion === 2
+        ? await changeHaikuRole(state.roomId, 'player')
+        : await saveParticipantRole('player');
       state.isSpectator = false;
       rerenderAfterRoleChange();
-      const addedMessage = (add5.length || add7.length)
-        ? `\nデフォルト素材を五音${add5.length}個・七音${add7.length}個、山札へ補充しました。`
-        : '';
-      alert(`山札から手札を配りました！プレイヤーとして参加しました！${addedMessage}`);
+      alert(result?.joinedRound
+        ? '山札から手札を配り、プレイヤーとして途中参加しました！'
+        : 'プレイヤーとして復帰しました。元の手札・句・披露状態を維持しています。');
       return;
     }
 

@@ -18,7 +18,9 @@ function buildHistory() {
       host: currentHost,
       phrases: currentPhrases,
       votes: state.currentData.votes || {},
-      participantUids: state.currentData.participantUids || {}
+      participantUids: state.currentData.participantUids || {},
+      roundPlayerUids: state.currentData.roundPlayerUids || [],
+      roundPlayerNames: state.currentData.roundPlayerNames || {},
     });
   }
   return historyToExport;

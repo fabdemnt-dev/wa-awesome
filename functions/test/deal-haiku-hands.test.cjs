@@ -245,14 +245,179 @@ test('Haiku途中参加Callableは同名UIDを統合してUID別手札へ配札�
     deck7: [{ id: 'new-7', text: '七', author: '🎴お題ぶくろ' }],
     hands: {},
   });
-  await changeHaikuRole.run({ data: { roomId: 'role-change', role: 'player' }, auth: { uid: 'uid-player' } });
+  const result = await changeHaikuRole.run({ data: { roomId: 'role-change', role: 'player' }, auth: { uid: 'uid-player' } });
   const room = (await roomRef('role-change').get()).data();
   const hand = (await roomRef('role-change').collection('hands').doc('uid-player').get()).data();
+  assert.equal(result.joinedRound, true);
   assert.deepEqual(room.players, ['親', '参加者']);
   assert.deepEqual(room.spectators, []);
   assert.equal(room.participantUids['old-uid'], undefined);
+  assert.deepEqual(room.roundPlayerUids, ['uid-host', 'uid-player']);
   assert.equal(hand.hand5[0].id, 'new-5');
   assert.equal(hand.hand7[0].id, 'new-7');
+});
+
+test('Haiku元プレイヤーの見学者復帰は手札・句・披露・自画自賛・御印を維持する', async () => {
+  await roomRef('role-return').set({
+    schemaVersion: 2,
+    status: 'playing',
+    roundCount: 1,
+    currentHost: '親',
+    currentHostUid: 'uid-host',
+    players: ['親', '参加者'],
+    spectators: [],
+    participantUids: { 'uid-host': '親', 'uid-player': '参加者' },
+    roundPlayerUids: ['uid-host', 'uid-player'],
+    roundPlayerNames: { 'uid-host': '親', 'uid-player': '参加者' },
+    settings: { hand5: 1, hand7: 1 },
+    deck5: [{ id: 'deck-5', text: '山札五', author: '🎴お題ぶくろ' }],
+    deck7: [{ id: 'deck-7', text: '山札七', author: '🎴お題ぶくろ' }],
+    phrases: { 'uid-player': '参加者の句' },
+    phraseDetails: { 'uid-player': [{ id: 'hand-5', text: '五', author: '🎴お題ぶくろ' }] },
+    revealedPhrases: { 'uid-player': true },
+    selfPraise: { 'uid-player': true },
+    votes: { 'uid-host': { 'uid-player': 'okashi' } },
+    voteRoles: { 'uid-host': 'host' },
+  });
+  await roomRef('role-return').collection('hands').doc('uid-player').set({
+    hand5: [{ id: 'hand-5', text: '五', author: '🎴お題ぶくろ' }],
+    hand7: [{ id: 'hand-7', text: '七', author: '🎴お題ぶくろ' }],
+    redrawUsed: true,
+    round: 1,
+  });
+
+  await changeHaikuRole.run({ data: { roomId: 'role-return', role: 'spectator' }, auth: { uid: 'uid-player' } });
+  const spectatorRoom = (await roomRef('role-return').get()).data();
+  assert.deepEqual(spectatorRoom.players, ['親']);
+  assert.deepEqual(spectatorRoom.spectators, ['参加者']);
+  assert.deepEqual(spectatorRoom.roundPlayerUids, ['uid-host', 'uid-player']);
+
+  const result = await changeHaikuRole.run({ data: { roomId: 'role-return', role: 'player' }, auth: { uid: 'uid-player' } });
+  const restoredRoom = (await roomRef('role-return').get()).data();
+  const restoredHand = (await roomRef('role-return').collection('hands').doc('uid-player').get()).data();
+  assert.equal(result.joinedRound, false);
+  assert.deepEqual(restoredRoom.players, ['親', '参加者']);
+  assert.deepEqual(restoredRoom.spectators, []);
+  assert.deepEqual(restoredRoom.deck5, [{ id: 'deck-5', text: '山札五', author: '🎴お題ぶくろ' }]);
+  assert.deepEqual(restoredRoom.deck7, [{ id: 'deck-7', text: '山札七', author: '🎴お題ぶくろ' }]);
+  assert.equal(restoredRoom.phrases['uid-player'], '参加者の句');
+  assert.equal(restoredRoom.revealedPhrases['uid-player'], true);
+  assert.equal(restoredRoom.selfPraise['uid-player'], true);
+  assert.equal(restoredRoom.votes['uid-host']['uid-player'], 'okashi');
+  assert.deepEqual(restoredHand.hand5, [{ id: 'hand-5', text: '五', author: '🎴お題ぶくろ' }]);
+  assert.equal(restoredHand.redrawUsed, true);
+});
+
+test('Haiku同名・別UIDの再接続は旧UIDの今節状態を新UIDへ移行する', async () => {
+  await roomRef('uid-migration').set({
+    schemaVersion: 2,
+    status: 'playing',
+    roundCount: 1,
+    currentHost: '親',
+    currentHostUid: 'uid-host',
+    players: ['親'],
+    spectators: ['参加者'],
+    participantUids: { 'uid-host': '親', 'uid-old': '参加者', 'uid-new': '参加者' },
+    roundPlayerUids: ['uid-host', 'uid-old'],
+    roundPlayerNames: { 'uid-host': '親', 'uid-old': '参加者' },
+    settings: { hand5: 1, hand7: 1 },
+    deck5: [{ id: 'keep-5', text: '残五', author: '🎴お題ぶくろ' }],
+    deck7: [{ id: 'keep-7', text: '残七', author: '🎴お題ぶくろ' }],
+    phrases: { 'uid-old': '旧UIDの句' },
+    phraseDetails: { 'uid-old': [{ id: 'old-detail', text: '五', author: '🎴お題ぶくろ' }] },
+    revealedPhrases: { 'uid-old': true },
+    selfPraise: { 'uid-old': true },
+    votes: { 'uid-host': { 'uid-old': 'okashi' } },
+    voteRoles: { 'uid-host': 'host' },
+  });
+  await roomRef('uid-migration').collection('hands').doc('uid-old').set({
+    hand5: [{ id: 'old-hand-5', text: '旧五', author: '🎴お題ぶくろ' }],
+    hand7: [{ id: 'old-hand-7', text: '旧七', author: '🎴お題ぶくろ' }],
+    redrawUsed: true,
+    round: 1,
+  });
+
+  const result = await changeHaikuRole.run({ data: { roomId: 'uid-migration', role: 'player' }, auth: { uid: 'uid-new' } });
+  const room = (await roomRef('uid-migration').get()).data();
+  const hand = (await roomRef('uid-migration').collection('hands').doc('uid-new').get()).data();
+  const oldHandSnapshot = await roomRef('uid-migration').collection('hands').doc('uid-old').get();
+  assert.equal(result.joinedRound, false);
+  assert.deepEqual(room.roundPlayerUids, ['uid-host', 'uid-new']);
+  assert.equal(room.roundPlayerNames['uid-old'], undefined);
+  assert.equal(room.phrases['uid-old'], undefined);
+  assert.equal(room.phrases['uid-new'], '旧UIDの句');
+  assert.equal(room.votes['uid-host']['uid-new'], 'okashi');
+  assert.deepEqual(room.deck5, [{ id: 'keep-5', text: '残五', author: '🎴お題ぶくろ' }]);
+  assert.deepEqual(hand.hand5, [{ id: 'old-hand-5', text: '旧五', author: '🎴お題ぶくろ' }]);
+  assert.equal(hand.redrawUsed, true);
+  assert.equal(oldHandSnapshot.exists, false);
+});
+
+test('Haiku新規途中参加だけがroundPlayerUidsへ追加され手札を受け取る', async () => {
+  await roomRef('new-round-player').set({
+    schemaVersion: 2,
+    status: 'playing',
+    roundCount: 1,
+    currentHost: '親',
+    currentHostUid: 'uid-host',
+    players: ['親'],
+    spectators: ['新規'],
+    participantUids: { 'uid-host': '親', 'uid-new': '新規' },
+    roundPlayerUids: ['uid-host'],
+    roundPlayerNames: { 'uid-host': '親' },
+    settings: { hand5: 1, hand7: 1 },
+    deck5: [],
+    deck7: [],
+  });
+
+  const result = await changeHaikuRole.run({ data: { roomId: 'new-round-player', role: 'player' }, auth: { uid: 'uid-new' } });
+  const room = (await roomRef('new-round-player').get()).data();
+  const hand = (await roomRef('new-round-player').collection('hands').doc('uid-new').get()).data();
+  assert.equal(result.joinedRound, true);
+  assert.deepEqual(room.roundPlayerUids, ['uid-host', 'uid-new']);
+  assert.equal(room.deck5.length, 0);
+  assert.equal(room.deck7.length, 0);
+  assert.equal(hand.round, 1);
+  assert.equal(hand.hand5[0].author, '🎴お題ぶくろ');
+  assert.equal(hand.hand7[0].author, '🎴お題ぶくろ');
+});
+
+test('Haiku次節Callableは見学へ切り替えた元プレイヤーの得点と履歴を保持する', async () => {
+  await roomRef('advance-with-spectator').set({
+    schemaVersion: 2,
+    status: 'playing',
+    roundCount: 1,
+    currentHost: '親',
+    currentHostUid: 'uid-host',
+    players: ['親'],
+    spectators: ['参加者'],
+    participantUids: { 'uid-host': '親', 'uid-player': '参加者' },
+    roundPlayerUids: ['uid-host', 'uid-player'],
+    roundPlayerNames: { 'uid-host': '親', 'uid-player': '参加者' },
+    settings: { hand5: 1, hand7: 1, carryOver: false },
+    words5: [], words7: [],
+    phrases: { 'uid-player': '参加者の句' },
+    phraseDetails: {},
+    revealedPhrases: { 'uid-player': true },
+    votes: {
+      'uid-host': { 'uid-player': 'okashi' },
+      'uid-player': { 'uid-host': 'kanpu' },
+    },
+    voteRoles: { 'uid-host': 'host', 'uid-player': 'spectator' },
+    scores: {},
+  });
+
+  await advanceHaikuRound.run({ data: { roomId: 'advance-with-spectator' }, auth: { uid: 'uid-host' } });
+  const room = (await roomRef('advance-with-spectator').get()).data();
+  const history = await roomRef('advance-with-spectator').collection('history').get();
+  const historyEntry = history.docs[0].data();
+  assert.equal(room.scores['参加者'], 1);
+  assert.deepEqual(historyEntry.playerNames, ['親', '参加者']);
+  assert.deepEqual(historyEntry.roundPlayerUids, ['uid-host', 'uid-player']);
+  assert.deepEqual(historyEntry.roundPlayerNames, { 'uid-host': '親', 'uid-player': '参加者' });
+  assert.deepEqual(historyEntry.spectatorNames, ['参加者']);
+  assert.equal(room.roundPlayerUids, undefined);
+  assert.equal(room.roundPlayerNames, undefined);
 });
 
 test('Poem作品・披露・リアクションCallableはUIDと状態を検証する', async () => {
@@ -313,6 +478,8 @@ test('親のCallableはUID別に配札し二重配札を拒否する', async () 
 
   const room = (await roomRef('deal-success').get()).data();
   assert.equal(room.status, 'playing');
+  assert.deepEqual(room.roundPlayerUids, ['uid-host', 'uid-player']);
+  assert.deepEqual(room.roundPlayerNames, { 'uid-host': '親', 'uid-player': '参加者' });
   assert.equal(room.hands5, undefined);
   assert.equal(room.hands7, undefined);
   assert.equal((await roomRef('deal-success').collection('hands').doc('uid-host').get()).exists, true);

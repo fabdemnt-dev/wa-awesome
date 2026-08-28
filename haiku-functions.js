@@ -76,8 +76,13 @@ export async function changeHaikuRole(roomId, role, supplement5 = [], supplement
   return result.data;
 }
 
-export async function dealHaikuHands(roomId) {
-  return callCallable(dealHaikuHandsCallable, { roomId: requireRoomId(roomId) });
+export async function dealHaikuHands(roomId, supplementPool5 = [], supplementPool7 = [], supplementAuthorLabel = '🎴お題ぶくろ') {
+  return callCallable(dealHaikuHandsCallable, {
+    roomId: requireRoomId(roomId),
+    supplementPool5: Array.isArray(supplementPool5) ? supplementPool5 : [],
+    supplementPool7: Array.isArray(supplementPool7) ? supplementPool7 : [],
+    supplementAuthorLabel,
+  });
 }
 
 export async function redrawHaikuHand(roomId, selectedIds5, selectedIds7) {

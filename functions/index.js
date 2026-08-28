@@ -6,6 +6,23 @@ const bcrypt = require('bcryptjs');
 initializeApp();
 const db = getFirestore();
 
+const DEFAULT_WORDS_5 = [
+  '春の風', '夏の空', '秋の月', '冬の朝', '花吹雪', '風光る', '星の夜', '水の音',
+  '雲の影', '光る海', 'そよぐ風', '遠い山', '静けさよ', '白い雲', '青い空', '赤い花',
+  '初夏の', '古き道', '時雨かな', '深い森', '高い空', '遠く鳴く', '川の音', '露の朝',
+  '雪の朝', '初霜や', '春霞', '夏の夢', '秋の風', '冬の月', '木漏れ日に', '鳥の声',
+  '波の音', '風の音', '星の数', '月影に', '夕焼けに', '朝露に', '花の色', '遠い海',
+  '白い雪', '青い星',
+];
+const DEFAULT_WORDS_7 = [
+  '遠い記憶の', '涙ひとつぶ', '夢の続きを', 'あの日のままで', '夏の終わりに', '空を見上げて',
+  '星を数えて', '花の香りに', '月を見上げて', '雨が上がれば', '雪が降る日に', '鳥が飛び立つ',
+  '雲のすきまに', '涙あふれて', '心のままに', '夢を見ていた', '思い出の中', '君と歩いた',
+  '夏の陽射しに', '春の光に', '秋の夕暮れ', '冬の足音', '静かな時に', '遠くの汽車の',
+  '蝉の鳴くころ', '風が強い日', '朝の光に', '夜空を見ては', '涙のあとに', '花びらが散る',
+  '雨の匂いに',
+];
+
 const callableOptions = {
   region: 'asia-northeast1',
   cors: ['https://fabdemnt-dev.github.io'],
@@ -57,6 +74,22 @@ function shuffle(values) {
   return result;
 }
 
+function normalizeSupplementPool(value, fallback, label) {
+  if (!Array.isArray(value) || value.length === 0) return fallback;
+  const pool = value.map((word) => requireText(word, label, 200)).filter(Boolean);
+  return pool.length ? [...new Set(pool)] : fallback;
+}
+
+function makeSupplementCards(pool, count, authorLabel) {
+  if (count <= 0 || !pool.length) return [];
+  const shuffled = shuffle(pool);
+  return Array.from({ length: count }, (_, index) => ({
+    text: shuffled[index % shuffled.length],
+    author: authorLabel,
+    id: `server_${Date.now()}_${Math.random().toString(36).slice(2, 11)}_${index}`,
+  }));
+}
+
 function participantsByUid(room) {
   if (!isPlainObject(room.participantUids)) {
     fail('failed-precondition', 'UID対応済みのルームではありません。');
@@ -69,6 +102,27 @@ function participantsByUid(room) {
 
 function latestUidForName(participants, name) {
   return [...participants.entries()].filter(([, participantName]) => participantName === name).at(-1)?.[0];
+}
+
+function migrateUidMap(map, oldUid, newUid) {
+  const result = isPlainObject(map) ? { ...map } : {};
+  if (oldUid in result && !(newUid in result)) result[newUid] = result[oldUid];
+  delete result[oldUid];
+  return result;
+}
+
+function migrateVotesByUid(votes, oldUid, newUid) {
+  const result = isPlainObject(votes) ? { ...votes } : {};
+  if (isPlainObject(result[oldUid]) && !result[newUid]) result[newUid] = result[oldUid];
+  delete result[oldUid];
+  Object.entries(result).forEach(([voterUid, voterVotes]) => {
+    if (!isPlainObject(voterVotes)) return;
+    const nextVoterVotes = { ...voterVotes };
+    if (oldUid in nextVoterVotes && !(newUid in nextVoterVotes)) nextVoterVotes[newUid] = nextVoterVotes[oldUid];
+    delete nextVoterVotes[oldUid];
+    result[voterUid] = nextVoterVotes;
+  });
+  return result;
 }
 
 function getCurrentHostUid(room, participants) {
@@ -125,6 +179,20 @@ function validatePlayerUids(room, participants) {
   return uids;
 }
 
+function getRoundPlayerUids(room, participants) {
+  const stored = Array.isArray(room.roundPlayerUids)
+    ? [...new Set(room.roundPlayerUids.filter((uid) => typeof uid === 'string' && uid))]
+    : [];
+  return stored.length ? stored : validatePlayerUids(room, participants);
+}
+
+function getRoundPlayerNames(room, participants, roundUids = getRoundPlayerUids(room, participants)) {
+  const storedNames = isPlainObject(room.roundPlayerNames) ? room.roundPlayerNames : {};
+  return roundUids
+    .map((uid) => participants.get(uid) || storedNames[uid] || uid)
+    .filter(Boolean);
+}
+
 function validateDealRequest(room, uid) {
   const participants = participantsByUid(room);
   requireHostUid(room, uid, participants);
@@ -145,6 +213,9 @@ function validateDealRequest(room, uid) {
 exports.dealHaikuHands = onCall(callableOptions, async (request) => {
   const uid = requireAuthenticated(request);
   const roomId = requireText(request.data?.roomId, 'ルームID', 150);
+  const supplementPool5 = normalizeSupplementPool(request.data?.supplementPool5, DEFAULT_WORDS_5, '五音補充プール');
+  const supplementPool7 = normalizeSupplementPool(request.data?.supplementPool7, DEFAULT_WORDS_7, '七音補充プール');
+  const supplementAuthorLabel = optionalText(request.data?.supplementAuthorLabel, 100) || '🎴お題ぶくろ';
   const roomRef = db.collection('rooms').doc(`haiku_${roomId}`);
 
   await db.runTransaction(async (transaction) => {
@@ -173,17 +244,26 @@ exports.dealHaikuHands = onCall(callableOptions, async (request) => {
         updatedAt: FieldValue.serverTimestamp(),
       });
     });
+    const roundPlayerNames = Object.fromEntries(
+      playerUids.map((playerUid) => [playerUid, participants.get(playerUid)])
+    );
     transaction.update(roomRef, {
       schemaVersion: 2,
       status: 'playing',
       currentHostUid: uid,
       deck5: words5,
       deck7: words7,
+      roundPlayerUids: playerUids,
+      roundPlayerNames,
+      supplementPool5,
+      supplementPool7,
+      supplementAuthorLabel,
       hands5: FieldValue.delete(),
       hands7: FieldValue.delete(),
       phrases: {},
       phraseDetails: {},
       votes: {},
+      voteRoles: {},
       revealedPhrases: {},
       selfPraise: {},
       redraws: {},
@@ -291,7 +371,8 @@ exports.changeHaikuRole = onCall(callableOptions, async (request) => {
   const supplied5 = requireSupplementWords(request.data?.supplement5 || [], '五音補充素材');
   const supplied7 = requireSupplementWords(request.data?.supplement7 || [], '七音補充素材');
   const roomRef = db.collection('rooms').doc(`haiku_${roomId}`);
-  await db.runTransaction(async (transaction) => {
+  const result = await db.runTransaction(async (transaction) => {
+    let joinedRound = false;
     const snapshot = await transaction.get(roomRef);
     if (!snapshot.exists) fail('not-found', 'ルームが見つかりません。');
     const room = snapshot.data() || {};
@@ -299,6 +380,9 @@ exports.changeHaikuRole = onCall(callableOptions, async (request) => {
     const participants = participantsByUid(room);
     const name = participants.get(uid);
     if (!name) fail('permission-denied', '参加者だけが役割変更できます。');
+    const previousUids = [...participants.entries()]
+      .filter(([participantUid, participantName]) => participantName === name && participantUid !== uid)
+      .map(([participantUid]) => participantUid);
     const currentHost = room.currentHost || '';
     if (room.status === 'playing' && role === 'spectator' && name === currentHost) {
       fail('failed-precondition', '親はラウンド中に見学者へ切り替えられません。');
@@ -314,14 +398,80 @@ exports.changeHaikuRole = onCall(callableOptions, async (request) => {
       update.currentHost = name;
       update.currentHostUid = uid;
     }
-    if (room.status === 'playing' && role === 'player') {
+
+    if (room.status === 'playing') {
+      let roundPlayerUids = getRoundPlayerUids(room, participants);
+      const hadPreviousRoundUid = previousUids.some((previousUid) => roundPlayerUids.includes(previousUid));
+      const roundPlayerNames = isPlainObject(room.roundPlayerNames) ? { ...room.roundPlayerNames } : {};
+      let currentHandSnapshot = null;
+      const previousHandSnapshots = new Map();
+      if (previousUids.length && hadPreviousRoundUid) {
+        const handUids = [...new Set([...previousUids, uid])];
+        const handSnapshots = await Promise.all(handUids.map((handUid) => transaction.get(roomRef.collection('hands').doc(handUid))));
+        handUids.forEach((handUid, index) => {
+          if (handUid === uid) currentHandSnapshot = handSnapshots[index];
+          else previousHandSnapshots.set(handUid, handSnapshots[index]);
+        });
+      }
+      previousUids.forEach((previousUid) => {
+        if (!roundPlayerUids.includes(previousUid)) return;
+        roundPlayerUids = roundPlayerUids.map((roundUid) => roundUid === previousUid ? uid : roundUid);
+        if (roundPlayerNames[previousUid] && !roundPlayerNames[uid]) roundPlayerNames[uid] = roundPlayerNames[previousUid];
+        delete roundPlayerNames[previousUid];
+      });
+      roundPlayerUids = [...new Set(roundPlayerUids)];
+      roundPlayerUids.forEach((roundUid) => {
+        if (!roundPlayerNames[roundUid] && participants.get(roundUid)) roundPlayerNames[roundUid] = participants.get(roundUid);
+      });
+      if (previousUids.length) {
+        const migratedFields = {};
+        ['phrases', 'phraseDetails', 'revealedPhrases', 'selfPraise', 'redraws'].forEach((field) => {
+          let value = room[field];
+          previousUids.forEach((previousUid) => { value = migrateUidMap(value, previousUid, uid); });
+          migratedFields[field] = value;
+        });
+        let migratedVotes = room.votes;
+        previousUids.forEach((previousUid) => { migratedVotes = migrateVotesByUid(migratedVotes, previousUid, uid); });
+        let migratedVoteRoles = room.voteRoles;
+        previousUids.forEach((previousUid) => { migratedVoteRoles = migrateUidMap(migratedVoteRoles, previousUid, uid); });
+        Object.assign(update, migratedFields, { votes: migratedVotes, voteRoles: migratedVoteRoles });
+      }
+      if (role === 'player' && !roundPlayerUids.includes(uid)) {
+        // 本当に今節へ初参加した人だけを記録し、手札を配る。
+        joinedRound = true;
+        roundPlayerUids.push(uid);
+        roundPlayerNames[uid] = name;
+      }
+      // 見学へ移っても、また戻っても今節の参加実績は削除しない。
+      update.roundPlayerUids = roundPlayerUids;
+      update.roundPlayerNames = roundPlayerNames;
+      if (hadPreviousRoundUid) {
+        if (!currentHandSnapshot || !currentHandSnapshot.exists) {
+          const previousHand = previousUids
+            .map((previousUid) => previousHandSnapshots.get(previousUid))
+            .find((snapshot) => snapshot?.exists);
+          if (previousHand) {
+            transaction.set(roomRef.collection('hands').doc(uid), previousHand.data());
+          }
+        }
+        previousUids.forEach((previousUid) => {
+          const previousHand = previousHandSnapshots.get(previousUid);
+          if (previousHand?.exists) transaction.delete(roomRef.collection('hands').doc(previousUid));
+        });
+      }
+    }
+
+    if (room.status === 'playing' && role === 'player' && joinedRound) {
       const settings = room.settings || { hand5: 5, hand7: 3 };
       const deck5 = Array.isArray(room.deck5) ? [...room.deck5] : [];
       const deck7 = Array.isArray(room.deck7) ? [...room.deck7] : [];
-      const pool5 = Array.isArray(room.supplementPool5) && room.supplementPool5.length ? room.supplementPool5 : supplied5;
-      const pool7 = Array.isArray(room.supplementPool7) && room.supplementPool7.length ? room.supplementPool7 : supplied7;
-      if (deck5.length < settings.hand5) deck5.push(...supplied5);
-      if (deck7.length < settings.hand7) deck7.push(...supplied7);
+      const pool5 = Array.isArray(room.supplementPool5) && room.supplementPool5.length ? room.supplementPool5 : DEFAULT_WORDS_5;
+      const pool7 = Array.isArray(room.supplementPool7) && room.supplementPool7.length ? room.supplementPool7 : DEFAULT_WORDS_7;
+      const supplementAuthorLabel = optionalText(room.supplementAuthorLabel, 100) || '🎴お題ぶくろ';
+      const missing5 = Math.max(0, settings.hand5 - deck5.length);
+      const missing7 = Math.max(0, settings.hand7 - deck7.length);
+      deck5.push(...makeSupplementCards(pool5, missing5, supplementAuthorLabel));
+      deck7.push(...makeSupplementCards(pool7, missing7, supplementAuthorLabel));
       if (deck5.length < settings.hand5 || deck7.length < settings.hand7) fail('failed-precondition', '途中参加者へ配る山札が不足しています。');
       const hand5 = deck5.splice(0, settings.hand5);
       const hand7 = deck7.splice(0, settings.hand7);
@@ -332,8 +482,9 @@ exports.changeHaikuRole = onCall(callableOptions, async (request) => {
       update.supplementPool7 = pool7;
     }
     transaction.update(roomRef, update);
+    return { joinedRound };
   });
-  return { ok: true };
+  return { ok: true, joinedRound: result.joinedRound === true };
 });
 
 function roomPrefix(value) {
@@ -760,22 +911,35 @@ exports.advanceHaikuRound = onCall(callableOptions, async (request) => {
     if (room.status !== 'playing') fail('failed-precondition', 'プレイ中のルームだけ次節へ進めます。');
     const players = Array.isArray(room.players) ? room.players : [];
     if (!players.length) fail('failed-precondition', '次節へ進むプレイヤーがいません。');
+    const roundPlayerUids = getRoundPlayerUids(room, participants);
+    const roundPlayerNames = getRoundPlayerNames(room, participants, roundPlayerUids);
+    const roundPlayerNameMap = Object.fromEntries(
+      roundPlayerUids.map((roundUid, index) => [roundUid, roundPlayerNames[index]])
+    );
     const currentHost = room.currentHost || participants.get(uid);
     const currentHostIndex = players.indexOf(currentHost);
     const nextHost = players[(currentHostIndex < 0 ? 0 : currentHostIndex + 1) % players.length];
     const nextHostUid = latestUidForName(participants, nextHost);
     const spectators = Array.isArray(room.spectators) ? room.spectators : [];
     const votes = isPlainObject(room.votes) ? room.votes : {};
+    const voteRoles = isPlainObject(room.voteRoles) ? room.voteRoles : {};
     const phrases = isPlainObject(room.phrases) ? room.phrases : {};
     const phraseDetails = isPlainObject(room.phraseDetails) ? room.phraseDetails : {};
     const scores = isPlainObject(room.scores) ? room.scores : {};
     const nextScores = { ...scores };
     const scoreDeltas = {};
-    const taePoints = Math.max(10, players.length * 2);
+    const taePoints = Math.max(10, roundPlayerUids.length * 2);
     const taeWinners = new Set();
     for (const [voterUid, voterVotes] of Object.entries(votes)) {
       const voterName = participants.get(voterUid) || voterUid;
-      if (spectators.includes(voterName) || !isPlainObject(voterVotes)) continue;
+      const hasPlayerVote = isPlainObject(voterVotes)
+        && Object.values(voterVotes).some((value) => (Array.isArray(value) ? value : [value]).some((key) => key && key !== 'kanpu'));
+      const voterRole = voteRoles[voterUid]
+        || (voterUid === getCurrentHostUid(room, participants) ? 'host'
+          : hasPlayerVote ? 'child'
+            : spectators.includes(voterName) ? 'spectator'
+              : players.includes(voterName) ? 'child' : null);
+      if (voterRole === 'spectator' || !isPlainObject(voterVotes)) continue;
       for (const [targetUid, rawKeys] of Object.entries(voterVotes)) {
         const targetName = participants.get(targetUid) || targetUid;
         const keys = Array.isArray(rawKeys) ? rawKeys : [rawKeys];
@@ -797,7 +961,8 @@ exports.advanceHaikuRound = onCall(callableOptions, async (request) => {
       status: 'lobby', currentHost: nextHost, currentHostUid: nextHostUid, roundCount: currentRound + 1,
       scores: nextScores, words5: carriedWords5, words7: carriedWords7,
       lastRoundResult: { round: currentRound, taeWinners: [...taeWinners], taePoints },
-      hands5: {}, hands7: {}, deck5: [], deck7: [], phrases: {}, phraseDetails: {}, votes: {}, revealedPhrases: {}, selfPraise: {}, redraws: {},
+      hands5: {}, hands7: {}, deck5: [], deck7: [], phrases: {}, phraseDetails: {}, votes: {}, voteRoles: {}, revealedPhrases: {}, selfPraise: {}, redraws: {},
+      roundPlayerUids: FieldValue.delete(), roundPlayerNames: FieldValue.delete(),
     });
     transaction.set(historyRef, {
       round: currentRound,
@@ -805,8 +970,10 @@ exports.advanceHaikuRound = onCall(callableOptions, async (request) => {
       phraseDetails,
       votes,
       participantUids: room.participantUids || {},
+      roundPlayerUids,
+      roundPlayerNames: roundPlayerNameMap,
       host: currentHost,
-      playerNames: players,
+      playerNames: roundPlayerNames,
       spectatorNames: spectators,
       taePoints,
       scoreDeltas,
@@ -839,6 +1006,7 @@ exports.submitHaikuVote = onCall(callableOptions, async (request) => {
     const isHost = uid === hostUid;
     actorIsHost = isHost;
     const isSpectator = Array.isArray(room.spectators) && room.spectators.includes(name);
+    const voterRole = isSpectator ? 'spectator' : isHost ? 'host' : 'child';
     const allowed = isSpectator ? evalKey === 'kanpu' : isHost ? evalKey !== 'kanpu' : ['okashi', 'aware', 'wabisabi'].includes(evalKey);
     if (!allowed) fail('permission-denied', 'この御印は選べません。');
     const voterVotes = room.votes?.[uid] || {};
@@ -854,7 +1022,11 @@ exports.submitHaikuVote = onCall(callableOptions, async (request) => {
         [targetUid]: next,
       },
     };
-    transaction.set(roomRef, { votes: nextVotes }, { merge: true });
+    const nextVoteRoles = {
+      ...(isPlainObject(room.voteRoles) ? room.voteRoles : {}),
+      [uid]: voterRole,
+    };
+    transaction.set(roomRef, { votes: nextVotes, voteRoles: nextVoteRoles }, { merge: true });
   });
   const savedSnapshot = await roomRef.get();
   const savedVotes = savedSnapshot.data()?.votes?.[uid]?.[targetUid];
