@@ -48,7 +48,7 @@ window.submitPhrase = async function() {
   }
 };
 window.revealPhrase = async function(pName) {
-  if (!state.roomRef) return;
+  if (!state.roomRef || !state.currentData || state.isSpectator) return;
   const targetKey = getParticipantUidByName(state.currentData, pName) || pName;
   if (state.currentData.schemaVersion === 2) {
     await revealHaikuPhrase(state.roomId, targetKey);
@@ -58,7 +58,7 @@ window.revealPhrase = async function(pName) {
   }
 };
 window.doSelfPraise = async function() {
-  if (!state.roomRef || state.isSubmittingSelfPraise) return;
+  if (!state.roomRef || state.isSpectator || state.isSubmittingSelfPraise) return;
   state.isSubmittingSelfPraise = true;
   try {
     const storageKey = getParticipantStorageKey(state.currentData, state.myUid, state.myName);

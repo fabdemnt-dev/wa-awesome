@@ -7,7 +7,7 @@ import { defaultWords5, defaultWords7 } from './haiku-default-words.js';
 import { getWordSetById } from './haiku-wordsets.js';
 import { saveWordSetSecurely, userFacingError } from './wordset-auth.js';
 import { getParticipantUidByName, getParticipantStorageKey, getParticipantNameByUid } from './participant-utils.js';
-import { dealHaikuHands, redrawHaikuHand, submitHaikuWords, advanceHaikuRound } from './haiku-functions.js';
+import { dealHaikuHands, redrawHaikuHand, submitHaikuWords, supplementHaikuWords, advanceHaikuRound } from './haiku-functions.js';
 
 window.addWords = async function() {
   if (!state.currentData || state.isSpectator) return;
@@ -42,7 +42,7 @@ window.addWords = async function() {
   if (addBtn) addBtn.innerText = "✅ 追加完了！";
 };
 window.fillDefaultWords = async function() {
-  if (!state.currentData) return;
+  if (!state.currentData || state.isSpectator) return;
 
   const st = state.currentData.settings || { hand5: 5, hand7: 3 };
   const players = state.currentData.players || [];
@@ -83,7 +83,11 @@ window.fillDefaultWords = async function() {
   const add5 = pickWords(pool5, need5);
   const add7 = pickWords(pool7, need7);
 
-  await updateDoc(state.roomRef, { words5: arrayUnion(...add5), words7: arrayUnion(...add7) });
+  if (state.currentData.schemaVersion === 2) {
+    await supplementHaikuWords(state.roomId, add5, add7);
+  } else {
+    await updateDoc(state.roomRef, { words5: arrayUnion(...add5), words7: arrayUnion(...add7) });
+  }
   const setLabel = customSet ? `「${customSet.name}」` : '標準セット';
   alert(`🎴 ${setLabel}から 五音${add5.length}個・七音${add7.length}個 を補充しました！`);
 };
@@ -252,7 +256,7 @@ window.redrawHand = async function() {
   }
 };
 window.saveGameAsWordSet = async function() {
-  if (!state.currentData) return;
+  if (!state.currentData || state.isSpectator) return;
 
   // ワードセット/デフォルト補充で埋めた分（🎴マーク）は除いて、プレイヤーが実際に入力した素材だけを対象にする
   const words5 = (state.currentData.words5 || []).filter(w => !(w.author || '').startsWith('🎴'));

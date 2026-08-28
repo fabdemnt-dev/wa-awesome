@@ -341,6 +341,42 @@ function roomPrefix(value) {
   return value;
 }
 
+exports.supplementHaikuWords = onCall(callableOptions, async (request) => {
+  const uid = requireAuthenticated(request);
+  const roomId = requireText(request.data?.roomId, 'ルームID', 150);
+  const words5 = requireMaterialItems(request.data?.words5 || [], '五音補充素材');
+  const words7 = requireMaterialItems(request.data?.words7 || [], '七音補充素材');
+  const roomRef = db.collection('rooms').doc(`haiku_${roomId}`);
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(roomRef);
+    if (!snapshot.exists) fail('not-found', 'ルームが見つかりません。');
+    const room = snapshot.data() || {};
+    if (room.schemaVersion !== 2) fail('failed-precondition', '新形式のルームだけ補充Callableを利用できます。');
+    requireLobbyPlayer(room, uid);
+    const players = Array.isArray(room.players) ? room.players : [];
+    const hand5 = handCount(room, 'hand5', 5);
+    const hand7 = handCount(room, 'hand7', 3);
+    const currentWords5 = Array.isArray(room.words5) ? room.words5 : [];
+    const currentWords7 = Array.isArray(room.words7) ? room.words7 : [];
+    const need5 = Math.max(0, players.length * hand5 * 2 - currentWords5.length);
+    const need7 = Math.max(0, players.length * hand7 * 2 - currentWords7.length);
+    if (words5.length < need5 || words7.length < need7) {
+      fail('failed-precondition', '句会を開始するための補充素材が不足しています。');
+    }
+    const add5 = words5.slice(0, need5);
+    const add7 = words7.slice(0, need7);
+    if (add5.some((item) => !item.author.startsWith('🎴'))
+        || add7.some((item) => !item.author.startsWith('🎴'))) {
+      fail('permission-denied', '補充素材の作者情報が正しくありません。');
+    }
+    const update = {};
+    if (add5.length) update.words5 = FieldValue.arrayUnion(...add5);
+    if (add7.length) update.words7 = FieldValue.arrayUnion(...add7);
+    if (Object.keys(update).length) transaction.update(roomRef, update);
+  });
+  return { ok: true };
+});
+
 exports.removePlayer = onCall(callableOptions, async (request) => {
   const uid = requireAuthenticated(request);
   const roomId = requireText(request.data?.roomId, 'ルームID', 150);
@@ -353,9 +389,16 @@ exports.removePlayer = onCall(callableOptions, async (request) => {
     const room = snapshot.data() || {};
     if (room.schemaVersion !== 2) fail('failed-precondition', '新形式のルームだけ安全な退室処理を利用できます。');
     const participants = participantsByUid(room);
+    const callerName = participants.get(uid);
+    const callerIsMember = callerName
+      && (Array.isArray(room.players) && room.players.includes(callerName)
+        || Array.isArray(room.spectators) && room.spectators.includes(callerName));
+    if (!callerIsMember) fail('permission-denied', 'ルームに参加しているユーザーだけが退出操作できます。');
     const targetName = participants.get(targetUid);
-    if (!targetName) fail('not-found', '対象プレイヤーが見つかりません。');
-    if (uid !== targetUid) requireHostUid(room, uid, participants);
+    const targetIsMember = targetName
+      && (Array.isArray(room.players) && room.players.includes(targetName)
+        || Array.isArray(room.spectators) && room.spectators.includes(targetName));
+    if (!targetIsMember) fail('not-found', '対象参加者が見つかりません。');
     const removedUids = [...participants.entries()]
       .filter(([, name]) => name === targetName)
       .map(([participantUid]) => participantUid);

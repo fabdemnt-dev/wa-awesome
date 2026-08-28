@@ -2,7 +2,7 @@ import { db } from "./firebase-config.js";
 import { doc, getDocFromServer, onSnapshot, updateDoc, runTransaction, serverTimestamp, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import state from './haiku-state.js';
 import { escapeHTML, escapeJS } from './haiku-utils.js';
-import { renderInputFields, renderHand, renderBoards } from './haiku-render.js';
+import { renderInputFields, renderHand, renderBoards, refreshRoleBasedControls } from './haiku-render.js';
 import { subscribeRoomHistory } from './room-history.js';
 import { ensureSignedIn } from './wordset-auth.js';
 import { showGameError } from './game-error.js';
@@ -25,6 +25,16 @@ async function saveParticipantRole(role) {
 }
 
 let previousStatus = null; // 直前のstatusを記録し、画面遷移と入力リセットの判定に使う
+
+function rerenderAfterRoleChange() {
+  const settings = state.currentData?.settings || { hand5: 5, hand7: 3 };
+  updateRoleHelp(state.currentData);
+  refreshHostRecoveryUI();
+  renderInputFields(settings.hand5, settings.hand7);
+  renderHand();
+  renderBoards();
+  refreshRoleBasedControls();
+}
 
 function scrollToStatusSection(status) {
   const sectionId = status === 'playing' ? 'game-sec' : 'lobby-sec';
@@ -192,7 +202,7 @@ function refreshHostRecoveryUI() {
   const canTakeover = canClaimHost(data, state.myName, state.isSpectator);
   const hostRecoveryBtn = document.getElementById('host-recovery-btn');
   if (hostRecoveryBtn) {
-    hostRecoveryBtn.style.display = isPlaying ? 'block' : 'none';
+    hostRecoveryBtn.style.display = isPlaying && !state.isSpectator ? 'block' : 'none';
     hostRecoveryBtn.disabled = !canTakeover;
     hostRecoveryBtn.style.opacity = canTakeover ? '1' : '0.55';
     hostRecoveryBtn.style.cursor = canTakeover ? 'pointer' : 'not-allowed';
@@ -301,6 +311,7 @@ function applyRoomData(data, sequence = ++roomUpdateSequence) {
   if (document.getElementById('set-carry-over')) document.getElementById('set-carry-over').checked = st.carryOver !== false;
 
   renderInputFields(st.hand5, st.hand7);
+  refreshRoleBasedControls();
   if (document.getElementById('total-words-5')) document.getElementById('total-words-5').innerText = state.currentData.words5?.length || 0;
   if (document.getElementById('total-words-7')) document.getElementById('total-words-7').innerText = state.currentData.words7?.length || 0;
 
@@ -338,7 +349,7 @@ function applyRoomData(data, sequence = ++roomUpdateSequence) {
           <div class="participant-name">${escapeHTML(name)}${isMe ? '<span class="participant-self">あなた</span>' : ''}</div>
           <div class="participant-role">${label}${isHost ? ' · 次の節を進行' : ''}</div>
         </div>
-        ${role === 'player' ? `<span class="score-badge participant-score">${scores[name] || 0} 誉</span><button class="participant-kick" onclick="removePlayer('${escapeJS(name)}')">鯖落ち</button>` : ''}
+        ${role === 'player' ? `<span class="score-badge participant-score">${scores[name] || 0} 誉</span>` : ''}<button class="participant-kick" onclick="removePlayer('${escapeJS(name)}')">鯖落ち</button>
       </div>`;
   };
   const playerCards = players.map((name) => participantCard(name, 'player')).join('');
@@ -585,7 +596,7 @@ window.joinRoom = async function() {
   }
 };
 window.removeSubmittedWord = async function(type, wordId) {
-  if (!state.roomRef || !state.currentData) return;
+  if (!state.roomRef || !state.currentData || state.isSpectator) return;
   if (state.currentData.status !== 'lobby') return alert('素材の取り消しは句会開始前のみできます');
   const field = type === '5' ? 'words5' : 'words7';
   const target = (state.currentData[field] || []).find(w => w.id === wordId && w.author === state.myName);
@@ -649,6 +660,7 @@ window.toggleRole = async function() {
       const newDeck7 = deck7.filter(w => !drawnIds7.has(w.id));
       await changeHaikuRole(state.roomId, 'player', add5, add7);
       state.isSpectator = false;
+      rerenderAfterRoleChange();
       const addedMessage = (add5.length || add7.length)
         ? `\nデフォルト素材を五音${add5.length}個・七音${add7.length}個、山札へ補充しました。`
         : '';
@@ -662,6 +674,7 @@ window.toggleRole = async function() {
       await saveParticipantRole('player');
     }
     state.isSpectator = false;
+    rerenderAfterRoleChange();
     alert("プレイヤーとして参加しました！");
   } else {
     // ラウンド中に選者本人が見学モードへ切り替わると、進行が止まってしまうため、選者本人の切り替えを禁止する
@@ -679,11 +692,18 @@ window.toggleRole = async function() {
       await saveParticipantRole('spectator');
     }
     state.isSpectator = true;
+    rerenderAfterRoleChange();
     alert("見学モードに切り替えました！");
   }
 };
 window.updateSettings = async function() {
-  if (!state.roomRef) return;
+  if (!state.roomRef || !state.currentData || state.isSpectator) return;
+  const hostName = getCurrentHostName(state.currentData);
+  const hostUid = String(state.currentData.currentHostUid || '');
+  const hostNameUid = getParticipantUidByName(state.currentData, hostName);
+  const isHost = Boolean(state.myUid && ((hostUid && state.myUid === hostUid) || (!hostUid && hostNameUid && state.myUid === hostNameUid)))
+    || (!state.myUid && state.myName === hostName);
+  if (!isHost) return;
   const hand5 = parseInt(document.getElementById('set-hand-5').value) || 5;
   const hand7 = parseInt(document.getElementById('set-hand-7').value) || 3;
   const carryOver = document.getElementById('set-carry-over')?.checked ?? true;

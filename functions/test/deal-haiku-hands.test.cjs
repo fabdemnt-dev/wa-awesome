@@ -13,7 +13,9 @@ const {
   reactPoemSecure,
   changeHaikuRole,
   submitHaikuWords,
+  supplementHaikuWords,
   removeHaikuWord,
+  removePlayer,
   submitPoemWords,
   removePoemWord,
   updateHaikuSettings,
@@ -161,6 +163,71 @@ test('素材Callableは本人投稿・他人偽装拒否・本人削除を検証
   await submitPoemWords.run({ data: { roomId: 'material-actions', words: [poemWord] }, auth: { uid: 'uid-player' } });
   await removePoemWord.run({ data: { roomId: 'material-actions', wordId: 'poem-word' }, auth: { uid: 'uid-player' } });
   assert.deepEqual((await poemRoomRef('material-actions').get()).data().words, []);
+});
+
+test('Haiku補充Callableはプレイヤーだけが実行できる', async () => {
+  await roomRef('supplement-actions').set({
+    schemaVersion: 2,
+    status: 'lobby',
+    currentHost: '親',
+    currentHostUid: 'uid-host',
+    players: ['親', '参加者'],
+    spectators: ['見学者'],
+    participantUids: { 'uid-host': '親', 'uid-player': '参加者', 'uid-spectator': '見学者' },
+    settings: { hand5: 1, hand7: 1 },
+    words5: [],
+    words7: [],
+  });
+  const words5 = [1, 2, 3, 4].map((id) => ({ id: `supp-5-${id}`, text: `五${id}`, author: '🎴お題ぶくろ' }));
+  const words7 = [1, 2, 3, 4].map((id) => ({ id: `supp-7-${id}`, text: `七${id}`, author: '🎴お題ぶくろ' }));
+  await assert.rejects(
+    supplementHaikuWords.run({ data: { roomId: 'supplement-actions', words5, words7 }, auth: { uid: 'uid-spectator' } }),
+    (error) => error.code === 'permission-denied',
+  );
+  await supplementHaikuWords.run({ data: { roomId: 'supplement-actions', words5, words7 }, auth: { uid: 'uid-player' } });
+  const room = (await roomRef('supplement-actions').get()).data();
+  assert.equal(room.words5.length, 4);
+  assert.equal(room.words7.length, 4);
+});
+
+test('Haiku鯖落ちはルーム参加中の親・子・見学者がUID指定で実行できる', async () => {
+  await roomRef('remove-member-actions').set({
+    schemaVersion: 2,
+    status: 'lobby',
+    currentHost: '親',
+    currentHostUid: 'uid-host',
+    players: ['親', '参加者'],
+    spectators: ['見学者', '見学2'],
+    participantUids: {
+      'uid-host': '親',
+      'uid-player': '参加者',
+      'uid-spectator': '見学者',
+      'uid-spectator-2': '見学2',
+    },
+  });
+
+  await removePlayer.run({ data: { roomId: 'remove-member-actions', game: 'haiku', targetUid: 'uid-host' }, auth: { uid: 'uid-player' } });
+  let room = (await roomRef('remove-member-actions').get()).data();
+  assert.deepEqual(room.players, ['参加者']);
+  assert.equal(room.currentHost, null);
+  assert.equal(room.currentHostUid, null);
+
+  await removePlayer.run({ data: { roomId: 'remove-member-actions', game: 'haiku', targetUid: 'uid-player' }, auth: { uid: 'uid-spectator' } });
+  room = (await roomRef('remove-member-actions').get()).data();
+  assert.deepEqual(room.players, []);
+
+  await removePlayer.run({ data: { roomId: 'remove-member-actions', game: 'haiku', targetUid: 'uid-spectator' }, auth: { uid: 'uid-spectator-2' } });
+  room = (await roomRef('remove-member-actions').get()).data();
+  assert.deepEqual(room.spectators, ['見学2']);
+
+  await assert.rejects(
+    removePlayer.run({ data: { roomId: 'remove-member-actions', game: 'haiku', targetUid: 'uid-spectator-2' }, auth: { uid: 'uid-outsider' } }),
+    (error) => error.code === 'permission-denied',
+  );
+  await assert.rejects(
+    removePlayer.run({ data: { roomId: 'remove-member-actions', game: 'haiku', targetUid: 'uid-spectator-2' }, auth: null }),
+    (error) => error.code === 'unauthenticated',
+  );
 });
 
 test('Haiku途中参加Callableは同名UIDを統合してUID別手札へ配札する', async () => {

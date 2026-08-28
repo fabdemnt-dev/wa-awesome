@@ -28,6 +28,51 @@ window.toggleEvalGuide = function() {
 
 let previousIsSpectator = null; // 見学⇔プレイヤーの切り替わりを検知して、そのときは問答無用で入力欄を作り直すため
 
+function setRoleActionState(id, { hidden = false, disabled = false } = {}) {
+  const element = document.getElementById(id);
+  if (!element) return;
+  element.style.display = hidden ? 'none' : '';
+  if ('disabled' in element) element.disabled = disabled;
+  if (element.tagName === 'BUTTON') {
+    element.style.opacity = disabled ? '0.5' : '1';
+    element.style.cursor = disabled ? 'not-allowed' : 'pointer';
+  }
+}
+
+export function refreshRoleBasedControls() {
+  const data = state.currentData || {};
+  const hostName = getCurrentHostName(data);
+  const hostUid = String(data.currentHostUid || '');
+  const hostNameUid = getParticipantUidByName(data, hostName);
+  const isSpectator = state.isSpectator === true;
+  const isHost = !isSpectator && (Boolean(state.myUid && ((hostUid && state.myUid === hostUid) || (!hostUid && hostNameUid && state.myUid === hostNameUid)))
+    || (!state.myUid && state.myName === hostName));
+  const isChild = !isSpectator && !isHost;
+
+  // ルーム設定は全員が確認できるが、変更・保存は親だけに限定する。
+  ['set-hand-5', 'set-hand-7', 'set-carry-over', 'save-settings-btn'].forEach(id => {
+    const element = document.getElementById(id);
+    if (element) element.disabled = !isHost;
+  });
+
+  // 素材提出・補充・保存はプレイヤーだけに表示する。
+  setRoleActionState('add-word-btn', { hidden: isSpectator });
+  setRoleActionState('fill-default-btn', { hidden: isSpectator });
+  setRoleActionState('fill-default-hint', { hidden: isSpectator });
+  setRoleActionState('save-wordset-btn', { hidden: isSpectator });
+
+  // 親専用の進行操作は、子にはdisabledで残し、見学者には表示しない。
+  setRoleActionState('start-game-btn', { hidden: isSpectator, disabled: isChild });
+  setRoleActionState('start-game-hint', { hidden: !isChild });
+  setRoleActionState('next-round-btn', { hidden: isSpectator, disabled: isChild });
+  setRoleActionState('next-round-hint', { hidden: !isChild });
+
+  // 作句・引き直しはプレイヤー専用。見学者には閲覧用の手札表示だけを残す。
+  setRoleActionState('redraw-help', { hidden: isSpectator });
+  setRoleActionState('redraw-action-wrap', { hidden: isSpectator });
+  setRoleActionState('phrase-builder', { hidden: isSpectator });
+}
+
 export function renderInputFields(c5, c7) {
   const spectatorChanged = previousIsSpectator !== null && previousIsSpectator !== state.isSpectator;
   previousIsSpectator = state.isSpectator;
@@ -157,10 +202,11 @@ export function renderBoards() {
   const currentHost = getCurrentHostName(state.currentData);
   const hostUid = String(state.currentData.currentHostUid ?? '');
   const hostNameUid = getParticipantUidByName(state.currentData, currentHost);
-  const isHost = state.currentData.schemaVersion === 2
+  const isSpectator = state.isSpectator === true;
+  const isHost = !isSpectator && (state.currentData.schemaVersion === 2
     ? Boolean(state.myUid && ((hostUid && state.myUid === hostUid) || (!hostUid && hostNameUid && state.myUid === hostNameUid)))
-    : state.myName === currentHost;
-  const availableKeys = state.isSpectator ? spectatorOptionKeys : (isHost ? hostOptionKeys : childOptionKeys);
+    : state.myName === currentHost);
+  const availableKeys = isSpectator ? spectatorOptionKeys : (isHost ? hostOptionKeys : childOptionKeys);
 
   // 子方は1節につき1つしか御印を贈れないため、誰かに投票済みなら他の句のボードでも
   // 「投票済み」の表示にする（未投票の句にだけボタンが残るのを防ぐ）
@@ -182,11 +228,12 @@ export function renderBoards() {
     const voteSelectId = `vote-select-${encodeURIComponent(actualPhraseKey)}`;
 
     if (!isRevealed) {
+      const canReveal = !isSpectator && (isHost || pName === state.myName);
       return `
         <div class="player-board" style="text-align: center; padding: 20px;">
-          <button onclick="revealPhrase('${jsPName}')" style="font-size: 16px; padding: 10px 20px; background-color: #3bab46; color: white; border: none; border-radius: 8px; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-            📜 ${safePName} の句を披露する（タップ）
-          </button>
+          ${canReveal
+            ? `<button onclick="revealPhrase('${jsPName}')" style="font-size: 16px; padding: 10px 20px; background-color: #3bab46; color: white; border: none; border-radius: 8px; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">📜 ${safePName} の句を披露する（タップ）</button>`
+            : `<div class="phrase-pending" aria-live="polite">📜 ${safePName} の句は披露待ち</div>`}
         </div>
       `;
     }
@@ -292,21 +339,5 @@ export function renderBoards() {
     }
   });
 
-  // 「次の節に進む」は選者（親）だけが押せるようにする
-
-  const nextBtn = document.getElementById('next-round-btn');
-  const nextHint = document.getElementById('next-round-hint');
-  if (nextBtn) {
-    if (isHost) {
-      nextBtn.disabled = false;
-      nextBtn.style.opacity = '1';
-      nextBtn.style.cursor = 'pointer';
-      if (nextHint) nextHint.style.display = 'none';
-    } else {
-      nextBtn.disabled = true;
-      nextBtn.style.opacity = '0.5';
-      nextBtn.style.cursor = 'not-allowed';
-      if (nextHint) nextHint.style.display = 'block';
-    }
-  }
+  refreshRoleBasedControls();
 }
