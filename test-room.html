@@ -101,7 +101,10 @@ async function joinRoom(){
   localStorage.setItem('testRoomId',roomId);localStorage.setItem('testRoomName',displayName);
   const u=new URL(location.href);u.searchParams.set('room',roomId);u.searchParams.set('name',displayName);history.replaceState(null,'',u);
   roomLabel.textContent='ルーム: '+roomId;nameLabel.textContent='名前: '+displayName;join.style.display='none';chat.classList.add('on');note(joinStatus,'');
-  stop?.();stop=onSnapshot(ref,s=>render(s.exists()?s.data().messages:[]),e=>note(status,'同期エラー: '+(e.message||e),true));
+  stop?.();stop=onSnapshot(ref,s=>{
+   if(s.metadata?.fromCache)return;
+   render(s.exists()?s.data().messages:[]);
+  },e=>note(status,'同期エラー: '+(e.message||e),true));
   text.focus();
  }catch(e){note(joinStatus,'接続できませんでした: '+(e.message||e),true)}finally{joinBtn.disabled=false}
 }
