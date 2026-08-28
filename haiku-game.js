@@ -8,9 +8,10 @@ import { getWordSetById } from './haiku-wordsets.js';
 import { saveWordSetSecurely, userFacingError } from './wordset-auth.js';
 import { getParticipantUidByName, getParticipantStorageKey, getParticipantNameByUid, getRoundParticipantEntries } from './participant-utils.js';
 import { dealHaikuHands, redrawHaikuHand, submitHaikuWords, supplementHaikuWords, advanceHaikuRound } from './haiku-functions.js';
+import { setButtonBusy } from './ui-feedback.js';
 
 window.addWords = async function() {
-  if (!state.currentData || state.isSpectator) return;
+  if (!state.currentData || state.isSpectator || state.isSubmittingWords) return;
   const st = state.currentData.settings || { hand5: 5, hand7: 3 };
 
   const getWords = (type, count) => {
@@ -18,10 +19,10 @@ window.addWords = async function() {
     for (let i = 1; i <= count; i++) {
       const val = document.getElementById(`word-${type}-input-${i}`)?.value.trim();
       if (val) {
-        arr.push({ 
-          text: val, 
+        arr.push({
+          text: val,
           author: state.myName,
-          id: Date.now() + "_" + Math.random().toString(36).substring(2, 9) 
+          id: Date.now() + "_" + Math.random().toString(36).substring(2, 9)
         });
       }
     }
@@ -32,14 +33,31 @@ window.addWords = async function() {
   const new7 = getWords('7', st.hand7);
   if (new5.length === 0 && new7.length === 0) return alert('少なくとも1つ素材を入力してください');
 
-  if (state.currentData.schemaVersion === 2) {
-    await submitHaikuWords(state.roomId, new5, new7);
-  } else {
-    await updateDoc(state.roomRef, { words5: arrayUnion(...new5), words7: arrayUnion(...new7) });
-  }
-  renderInputFields(st.hand5, st.hand7);
   const addBtn = document.getElementById('add-word-btn');
-  if (addBtn) addBtn.innerText = "✅ 追加完了！";
+  let submitted = false;
+  state.isSubmittingWords = true;
+  setButtonBusy(addBtn, true, '追加中…');
+  try {
+    if (state.currentData.schemaVersion === 2) {
+      await submitHaikuWords(state.roomId, new5, new7);
+    } else {
+      await updateDoc(state.roomRef, { words5: arrayUnion(...new5), words7: arrayUnion(...new7) });
+    }
+    submitted = true;
+    renderInputFields(st.hand5, st.hand7);
+  } catch (error) {
+    console.error('[add-words]', error);
+    const code = String(error?.code || '');
+    if (code.includes('unavailable') || code.includes('deadline-exceeded') || code.includes('internal')) {
+      alert('素材を登録できませんでした。通信状態を確認して、もう一度お試しください。');
+    } else {
+      alert('素材の登録に失敗しました。入力内容を確認して、もう一度お試しください。');
+    }
+  } finally {
+    state.isSubmittingWords = false;
+    setButtonBusy(addBtn, false);
+    if (submitted && addBtn) addBtn.innerText = '✅ 追加完了！';
+  }
 };
 window.fillDefaultWords = async function() {
   if (!state.currentData || state.isSpectator) return;

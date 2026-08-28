@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const { getFirestore } = require('firebase-admin/firestore');
 const {
+  joinHaikuRoom,
   dealHaikuHands,
   redrawHaikuHand,
   submitHaikuPhrase,
@@ -16,6 +17,7 @@ const {
   supplementHaikuWords,
   removeHaikuWord,
   removePlayer,
+  claimHost,
   submitPoemWords,
   removePoemWord,
   updateHaikuSettings,
@@ -593,4 +595,359 @@ test('本人の引き直しは成功し、他人の札と二重実行は拒否�
     }),
     (error) => error.code === 'failed-precondition',
   );
+});
+
+
+test('Haiku素材投稿は入力・権限・状態を検証し、記号と同一文字列を許可する', async () => {
+  const roomId = 'material-regression';
+  await roomRef(roomId).set({
+    schemaVersion: 2,
+    status: 'lobby',
+    players: ['親', '参加者'],
+    spectators: ['見学者'],
+    participantUids: {
+      'uid-host': '親',
+      'uid-player': '参加者',
+      'uid-spectator': '見学者',
+    },
+    words5: [],
+    words7: [],
+  });
+
+  const validRequest = {
+    data: {
+      roomId,
+      words5: [{ id: 'symbol-1', text: '☆!?ーんっゃABC', author: '参加者' }],
+      words7: [],
+    },
+    auth: { uid: 'uid-player' },
+  };
+
+  await assert.rejects(
+    submitHaikuWords.run({ ...validRequest, auth: null }),
+    (error) => error.code === 'unauthenticated',
+  );
+  await assert.rejects(
+    submitHaikuWords.run({ ...validRequest, auth: { uid: 'uid-outsider' } }),
+    (error) => error.code === 'permission-denied',
+  );
+  await assert.rejects(
+    submitHaikuWords.run({ ...validRequest, auth: { uid: 'uid-spectator' } }),
+    (error) => error.code === 'permission-denied',
+  );
+
+  for (const invalidWord of [
+    { id: 'blank', text: '   ', author: '参加者' },
+    { id: 'null', text: null, author: '参加者' },
+    { id: 'type', text: 123, author: '参加者' },
+    { id: '   ', text: '素材', author: '参加者' },
+    { id: 'long', text: '長'.repeat(201), author: '参加者' },
+  ]) {
+    await assert.rejects(
+      submitHaikuWords.run({
+        data: { roomId, words5: [invalidWord], words7: [] },
+        auth: { uid: 'uid-player' },
+      }),
+      (error) => error.code === 'invalid-argument',
+    );
+  }
+
+  await assert.rejects(
+    submitHaikuWords.run({
+      data: { roomId, words5: [], words7: [] },
+      auth: { uid: 'uid-player' },
+    }),
+    (error) => error.code === 'invalid-argument',
+  );
+  await assert.rejects(
+    submitHaikuWords.run({
+      data: { roomId, words5: [{ id: 'spoof', text: '偽装', author: '親' }], words7: [] },
+      auth: { uid: 'uid-player' },
+    }),
+    (error) => error.code === 'permission-denied',
+  );
+
+  await submitHaikuWords.run(validRequest);
+  await submitHaikuWords.run({
+    data: {
+      roomId,
+      words5: [{ id: 'symbol-2', text: '☆!?ーんっゃABC', author: '参加者' }],
+      words7: [],
+    },
+    auth: { uid: 'uid-player' },
+  });
+
+  let room = (await roomRef(roomId).get()).data();
+  assert.deepEqual(room.words5.map((word) => word.id), ['symbol-1', 'symbol-2']);
+  assert.deepEqual(room.words5.map((word) => word.text), ['☆!?ーんっゃABC', '☆!?ーんっゃABC']);
+
+  await roomRef(roomId).update({ status: 'playing' });
+  await assert.rejects(
+    submitHaikuWords.run({
+      data: { roomId, words5: [{ id: 'late', text: '開始後', author: '参加者' }], words7: [] },
+      auth: { uid: 'uid-player' },
+    }),
+    (error) => error.code === 'failed-precondition',
+  );
+  room = (await roomRef(roomId).get()).data();
+  assert.equal(room.words5.length, 2);
+});
+
+test('Haiku句投稿は本人手札・状態・1節1句を検証し、披露後も上書きしない', async () => {
+  const roomId = 'phrase-regression';
+  await seedRoom(roomId);
+  await roomRef(roomId).update({
+    spectators: ['見学者'],
+    participantUids: {
+      'uid-host': '親',
+      'uid-player': '参加者',
+      'uid-spectator': '見学者',
+    },
+  });
+
+  await assert.rejects(
+    submitHaikuPhrase.run({
+      data: { roomId, phrase: '未開始', phraseDetails: [{ id: 'x', text: 'x', author: 'x' }, { id: 'y', text: 'y', author: 'y' }, { id: 'z', text: 'z', author: 'z' }] },
+      auth: { uid: 'uid-player' },
+    }),
+    (error) => error.code === 'failed-precondition',
+  );
+
+  await dealHaikuHands.run({ data: { roomId }, auth: { uid: 'uid-host' } });
+  const hostHand = (await roomRef(roomId).collection('hands').doc('uid-host').get()).data();
+  const playerHand = (await roomRef(roomId).collection('hands').doc('uid-player').get()).data();
+  const details = [playerHand.hand5[0], playerHand.hand7[0], playerHand.hand5[0]];
+  const phrase = '☆五七五ではない ABC ーんっゃ';
+
+  await assert.rejects(
+    submitHaikuPhrase.run({ data: { roomId, phrase, phraseDetails: details }, auth: null }),
+    (error) => error.code === 'unauthenticated',
+  );
+  await assert.rejects(
+    submitHaikuPhrase.run({ data: { roomId, phrase, phraseDetails: details }, auth: { uid: 'uid-spectator' } }),
+    (error) => error.code === 'permission-denied',
+  );
+  await assert.rejects(
+    submitHaikuPhrase.run({ data: { roomId, phrase: '   ', phraseDetails: details }, auth: { uid: 'uid-player' } }),
+    (error) => error.code === 'invalid-argument',
+  );
+  await assert.rejects(
+    submitHaikuPhrase.run({ data: { roomId, phrase: '句'.repeat(601), phraseDetails: details }, auth: { uid: 'uid-player' } }),
+    (error) => error.code === 'invalid-argument',
+  );
+  await assert.rejects(
+    submitHaikuPhrase.run({ data: { roomId, phrase, phraseDetails: details.slice(0, 2) }, auth: { uid: 'uid-player' } }),
+    (error) => error.code === 'invalid-argument',
+  );
+  await assert.rejects(
+    submitHaikuPhrase.run({
+      data: { roomId, phrase: '他人の手札', phraseDetails: [hostHand.hand5[0], hostHand.hand7[0], hostHand.hand5[0]] },
+      auth: { uid: 'uid-player' },
+    }),
+    (error) => error.code === 'permission-denied',
+  );
+
+  await submitHaikuPhrase.run({ data: { roomId, phrase, phraseDetails: details }, auth: { uid: 'uid-player' } });
+  const duplicateAssertion = (error) => error.code === 'failed-precondition'
+    && error.message === '句は1節につき1つまでです。';
+  await assert.rejects(
+    submitHaikuPhrase.run({ data: { roomId, phrase: '上書き句', phraseDetails: details }, auth: { uid: 'uid-player' } }),
+    duplicateAssertion,
+  );
+  await revealHaikuPhrase.run({ data: { roomId, targetUid: 'uid-player' }, auth: { uid: 'uid-host' } });
+  await assert.rejects(
+    submitHaikuPhrase.run({ data: { roomId, phrase: '披露後の上書き句', phraseDetails: details }, auth: { uid: 'uid-player' } }),
+    duplicateAssertion,
+  );
+
+  const room = (await roomRef(roomId).get()).data();
+  assert.equal(room.phrases['uid-player'], phrase);
+  assert.deepEqual(room.phraseDetails['uid-player'], details);
+});
+
+test('Haiku句の同時二重投稿はトランザクションにより1件だけ保存する', async () => {
+  const roomId = 'phrase-concurrency';
+  await seedRoom(roomId);
+  await dealHaikuHands.run({ data: { roomId }, auth: { uid: 'uid-host' } });
+  const hand = (await roomRef(roomId).collection('hands').doc('uid-player').get()).data();
+  const phraseDetails = [hand.hand5[0], hand.hand7[0], hand.hand5[0]];
+  const requests = ['同時投稿A', '同時投稿B'].map((phrase) => submitHaikuPhrase.run({
+    data: { roomId, phrase, phraseDetails },
+    auth: { uid: 'uid-player' },
+  }));
+
+  const results = await Promise.allSettled(requests);
+  assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
+  assert.equal(results.filter((result) => result.status === 'rejected').length, 1);
+  const rejected = results.find((result) => result.status === 'rejected');
+  assert.equal(rejected.reason.code, 'failed-precondition');
+  assert.equal(rejected.reason.message, '句は1節につき1つまでです。');
+
+  const room = (await roomRef(roomId).get()).data();
+  assert.ok(['同時投稿A', '同時投稿B'].includes(room.phrases['uid-player']));
+  assert.deepEqual(room.phraseDetails['uid-player'], phraseDetails);
+  assert.equal(Object.keys(room.phrases).length, 1);
+});
+
+
+test('Haiku入室Callableは安全な初期作成・参加・再接続だけを許可する', async () => {
+  const roomId = 'secure-join';
+
+  await assert.rejects(
+    joinHaikuRoom.run({ data: { roomId, name: '親', role: 'player' }, auth: null }),
+    (error) => error.code === 'unauthenticated',
+  );
+  await assert.rejects(
+    joinHaikuRoom.run({ data: { roomId, name: '   ', role: 'player' }, auth: { uid: 'uid-host' } }),
+    (error) => error.code === 'invalid-argument',
+  );
+  await assert.rejects(
+    joinHaikuRoom.run({ data: { roomId, name: '親', role: 'admin' }, auth: { uid: 'uid-host' } }),
+    (error) => error.code === 'invalid-argument',
+  );
+
+  const created = await joinHaikuRoom.run({
+    data: { roomId, name: '親', role: 'player' },
+    auth: { uid: 'uid-host' },
+  });
+  assert.deepEqual(created, { ok: true, created: true, joinedRound: false });
+
+  let room = (await roomRef(roomId).get()).data();
+  assert.equal(room.schemaVersion, 2);
+  assert.equal(room.status, 'lobby');
+  assert.equal(room.roundCount, 1);
+  assert.equal(room.currentHost, '親');
+  assert.equal(room.currentHostUid, 'uid-host');
+  assert.deepEqual(room.players, ['親']);
+  assert.deepEqual(room.spectators, []);
+  assert.deepEqual(room.participantUids, { 'uid-host': '親' });
+  assert.deepEqual(room.settings, { hand5: 5, hand7: 3, carryOver: true });
+  for (const field of ['words5', 'words7', 'deck5', 'deck7', 'scoreHistory']) assert.deepEqual(room[field], []);
+  for (const field of ['hands5', 'hands7', 'phrases', 'phraseDetails', 'revealedPhrases', 'votes', 'voteRoles', 'scores', 'selfPraise', 'redraws']) assert.deepEqual(room[field], {});
+
+  const joined = await joinHaikuRoom.run({
+    data: { roomId, name: '見学者', role: 'spectator' },
+    auth: { uid: 'uid-spectator' },
+  });
+  assert.deepEqual(joined, { ok: true, created: false, joinedRound: false });
+  room = (await roomRef(roomId).get()).data();
+  assert.deepEqual(room.players, ['親']);
+  assert.deepEqual(room.spectators, ['見学者']);
+  assert.equal(room.participantUids['uid-spectator'], '見学者');
+
+  await assert.rejects(
+    joinHaikuRoom.run({ data: { roomId, name: '別名', role: 'player' }, auth: { uid: 'uid-spectator' } }),
+    (error) => error.code === 'permission-denied',
+  );
+
+  await assert.rejects(
+    joinHaikuRoom.run({ data: { roomId, name: '親', role: 'player' }, auth: { uid: 'uid-new-host' } }),
+    (error) => error.code === 'already-exists',
+  );
+
+  const reconnected = await joinHaikuRoom.run({
+    data: { roomId, name: '親', role: 'player' },
+    auth: { uid: 'uid-host' },
+  });
+  assert.deepEqual(reconnected, { ok: true, created: false, joinedRound: false });
+  room = (await roomRef(roomId).get()).data();
+  assert.equal(room.participantUids['uid-host'], '親');
+  assert.equal(room.participantUids['uid-new-host'], undefined);
+  assert.equal(room.currentHost, '親');
+  assert.equal(room.currentHostUid, 'uid-host');
+  assert.deepEqual(room.players, ['親']);
+  assert.deepEqual(room.spectators, ['見学者']);
+});
+
+test('Haiku入室後の役割変更と設定変更はCallableの検証を通る', async () => {
+  const roomId = 'secure-room-management';
+  await joinHaikuRoom.run({ data: { roomId, name: '親', role: 'player' }, auth: { uid: 'uid-host' } });
+  await joinHaikuRoom.run({ data: { roomId, name: '参加者', role: 'spectator' }, auth: { uid: 'uid-player' } });
+
+  await changeHaikuRole.run({ data: { roomId, role: 'player' }, auth: { uid: 'uid-player' } });
+  let room = (await roomRef(roomId).get()).data();
+  assert.deepEqual(room.players, ['親', '参加者']);
+  assert.deepEqual(room.spectators, []);
+
+  await updateHaikuSettings.run({
+    data: { roomId, hand5: 4, hand7: 2, carryOver: false },
+    auth: { uid: 'uid-host' },
+  });
+  room = (await roomRef(roomId).get()).data();
+  assert.deepEqual(room.settings, { hand5: 4, hand7: 2, carryOver: false });
+
+  const invalidSettings = [
+    { hand5: 0, hand7: 2, carryOver: true },
+    { hand5: -1, hand7: 2, carryOver: true },
+    { hand5: 21, hand7: 2, carryOver: true },
+    { hand5: 4, hand7: 0, carryOver: true },
+    { hand5: 4, hand7: -1, carryOver: true },
+    { hand5: 4, hand7: 21, carryOver: true },
+    { hand5: '4', hand7: 2, carryOver: true },
+    { hand5: 4, hand7: 2, carryOver: 'false' },
+  ];
+  for (const settings of invalidSettings) {
+    await assert.rejects(
+      updateHaikuSettings.run({ data: { roomId, ...settings }, auth: { uid: 'uid-host' } }),
+      (error) => error.code === 'invalid-argument',
+    );
+  }
+
+  await assert.rejects(
+    updateHaikuSettings.run({ data: { roomId, hand5: 3, hand7: 2, carryOver: true }, auth: { uid: 'uid-player' } }),
+    (error) => error.code === 'permission-denied',
+  );
+
+  await roomRef(roomId).update({ status: 'playing' });
+  await assert.rejects(
+    updateHaikuSettings.run({ data: { roomId, hand5: 3, hand7: 2, carryOver: true }, auth: { uid: 'uid-host' } }),
+    (error) => error.code === 'failed-precondition',
+  );
+});
+
+
+test('v2俳句の正規Functionsフローは入室から次節進行まで成功する', async () => {
+  const roomId = 'secure-full-flow';
+  await joinHaikuRoom.run({ data: { roomId, name: '親', role: 'player' }, auth: { uid: 'uid-host' } });
+  await joinHaikuRoom.run({ data: { roomId, name: '参加者', role: 'spectator' }, auth: { uid: 'uid-player' } });
+  await changeHaikuRole.run({ data: { roomId, role: 'player' }, auth: { uid: 'uid-player' } });
+  await updateHaikuSettings.run({ data: { roomId, hand5: 1, hand7: 1, carryOver: true }, auth: { uid: 'uid-host' } });
+
+  const hostWords5 = [1, 2].map((id) => ({ id: `host-5-${id}`, text: `親五${id}`, author: '親' }));
+  const hostWords7 = [1, 2].map((id) => ({ id: `host-7-${id}`, text: `親七${id}`, author: '親' }));
+  const playerWords5 = [1, 2].map((id) => ({ id: `player-5-${id}`, text: `子五${id}`, author: '参加者' }));
+  const playerWords7 = [1, 2].map((id) => ({ id: `player-7-${id}`, text: `子七${id}`, author: '参加者' }));
+  await submitHaikuWords.run({ data: { roomId, words5: hostWords5, words7: hostWords7 }, auth: { uid: 'uid-host' } });
+  await submitHaikuWords.run({ data: { roomId, words5: playerWords5, words7: playerWords7 }, auth: { uid: 'uid-player' } });
+
+  await dealHaikuHands.run({ data: { roomId }, auth: { uid: 'uid-host' } });
+  let playerHand = (await roomRef(roomId).collection('hands').doc('uid-player').get()).data();
+  await redrawHaikuHand.run({
+    data: { roomId, selectedIds5: [playerHand.hand5[0].id], selectedIds7: [] },
+    auth: { uid: 'uid-player' },
+  });
+  playerHand = (await roomRef(roomId).collection('hands').doc('uid-player').get()).data();
+  const hostHand = (await roomRef(roomId).collection('hands').doc('uid-host').get()).data();
+  const makePhrase = (hand, label) => ({
+    phrase: `${label} ${hand.hand5[0].text} ${hand.hand7[0].text}`,
+    phraseDetails: [hand.hand5[0], hand.hand7[0], hand.hand5[0]],
+  });
+
+  await submitHaikuPhrase.run({ data: { roomId, ...makePhrase(hostHand, '親句') }, auth: { uid: 'uid-host' } });
+  await submitHaikuPhrase.run({ data: { roomId, ...makePhrase(playerHand, '子句') }, auth: { uid: 'uid-player' } });
+  await claimHost.run({ data: { roomId, game: 'haiku' }, auth: { uid: 'uid-player' } });
+  await revealHaikuPhrase.run({ data: { roomId, targetUid: 'uid-host' }, auth: { uid: 'uid-player' } });
+  await revealHaikuPhrase.run({ data: { roomId, targetUid: 'uid-player' }, auth: { uid: 'uid-player' } });
+  await submitHaikuVote.run({ data: { roomId, targetUid: 'uid-host', evalKey: 'tae' }, auth: { uid: 'uid-player' } });
+  await submitHaikuVote.run({ data: { roomId, targetUid: 'uid-player', evalKey: 'okashi' }, auth: { uid: 'uid-host' } });
+  await advanceHaikuRound.run({ data: { roomId }, auth: { uid: 'uid-player' } });
+
+  const room = (await roomRef(roomId).get()).data();
+  assert.equal(room.status, 'lobby');
+  assert.equal(room.roundCount, 2);
+  assert.equal(room.currentHost, '親');
+  assert.equal(room.currentHostUid, 'uid-host');
+  assert.deepEqual(room.phrases, {});
+  assert.deepEqual(room.votes, {});
+  assert.equal((await roomRef(roomId).collection('history').get()).size, 1);
 });

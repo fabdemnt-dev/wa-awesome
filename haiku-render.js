@@ -61,6 +61,33 @@ function setRoleActionState(id, { hidden = false, disabled = false } = {}) {
   }
 }
 
+export function refreshPhraseSubmitButton() {
+  const button = document.getElementById('submit-phrase-btn');
+  if (!button) return;
+
+  const data = state.currentData;
+  const storageKey = data ? getParticipantStorageKey(data, state.myUid, state.myName) : '';
+  const phrases = data?.phrases || {};
+  const currentRound = data?.roundCount || 1;
+  const hasSubmitted = Boolean(data) && (
+    (storageKey && phrases[storageKey] !== undefined)
+    || (state.myName && phrases[state.myName] !== undefined)
+    || state.submittedPhraseKey === `${state.roomId}:${currentRound}`
+  );
+  const hasCompletePhrase = Array.isArray(state.selectedHand)
+    && state.selectedHand.length === 3
+    && state.selectedHand.every(Boolean);
+  const disabled = state.isSpectator || state.isSubmittingPhrase || hasSubmitted || !hasCompletePhrase;
+
+  button.disabled = disabled;
+  button.style.opacity = disabled ? '0.5' : '1';
+  button.style.cursor = disabled ? 'not-allowed' : 'pointer';
+  button.setAttribute('aria-busy', state.isSubmittingPhrase ? 'true' : 'false');
+  if (state.isSubmittingPhrase) button.innerText = '投稿中…';
+  else if (hasSubmitted) button.innerText = '投稿済み';
+  else button.innerText = '整いました！';
+}
+
 export function refreshRoleBasedControls() {
   const data = state.currentData || {};
   const hostName = getCurrentHostName(data);
@@ -78,7 +105,7 @@ export function refreshRoleBasedControls() {
   });
 
   // 素材提出・補充・保存はプレイヤーだけに表示する。
-  setRoleActionState('add-word-btn', { hidden: isSpectator });
+  setRoleActionState('add-word-btn', { hidden: isSpectator, disabled: state.isSubmittingWords });
   setRoleActionState('fill-default-btn', { hidden: isSpectator });
   setRoleActionState('fill-default-hint', { hidden: isSpectator });
   setRoleActionState('save-wordset-btn', { hidden: isSpectator });
@@ -93,6 +120,7 @@ export function refreshRoleBasedControls() {
   setRoleActionState('redraw-help', { hidden: isSpectator });
   setRoleActionState('redraw-action-wrap', { hidden: isSpectator });
   setRoleActionState('phrase-builder', { hidden: isSpectator });
+  refreshPhraseSubmitButton();
 }
 
 export function renderInputFields(c5, c7) {
@@ -166,6 +194,7 @@ export function renderHand() {
   sessionStorage.setItem('haikuSelectedHand', JSON.stringify(state.selectedHand));
 
   updateDeckAndRedrawUI();
+  refreshPhraseSubmitButton();
 }
 
 // 山札（引き直し用に残っている素材）の残り枚数表示と、引き直しボタンの状態を更新する。

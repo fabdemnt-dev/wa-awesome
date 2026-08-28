@@ -22,12 +22,18 @@ service cloud.firestore {
       function signedIn() {
         return request.auth != null;
       }
+
+      function isV2HaikuRoom(data) {
+        return roomId.matches('^haiku_.*') && data.get('schemaVersion', 1) == 2;
+      }
+
       allow read: if signedIn();
-      // 新規ルームは作成者の匿名UIDと表示名を対応付ける。旧形式ルームは従来互換で許可する。
-      allow create: if signedIn();
-      // 個人データのUID単位制限は、クライアント側のデータキー移行後に追加する。
-      // 現段階では新旧ルームのゲーム進行を壊さないため、認証済み更新を維持する。
-      allow update: if signedIn();
+      // v2俳句ルームの作成・更新は、参加者・親・設定を含めてCallable Functionsだけが行う。
+      // v1俳句ルームとPoemルームは従来互換のクライアント書込みを維持する。
+      allow create: if signedIn() && !isV2HaikuRoom(request.resource.data);
+      allow update: if signedIn()
+        && !isV2HaikuRoom(resource.data)
+        && !isV2HaikuRoom(request.resource.data);
       allow delete: if false;
     }
 

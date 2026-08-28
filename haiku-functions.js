@@ -2,6 +2,7 @@ import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/
 import { app } from './firebase-config.js';
 
 const functions = getFunctions(app, 'asia-northeast1');
+const joinHaikuRoomCallable = httpsCallable(functions, 'joinHaikuRoom');
 const dealHaikuHandsCallable = httpsCallable(functions, 'dealHaikuHands');
 const changeHaikuRoleCallable = httpsCallable(functions, 'changeHaikuRole');
 const submitHaikuWordsCallable = httpsCallable(functions, 'submitHaikuWords');
@@ -25,6 +26,10 @@ function requireRoomId(roomId) {
 async function callCallable(callable, data) {
   const result = await callable(data);
   return result.data;
+}
+
+export async function joinHaikuRoom(roomId, name, role) {
+  return callCallable(joinHaikuRoomCallable, { roomId: requireRoomId(roomId), name, role });
 }
 
 export async function removePlayer(roomId, targetUid) {
