@@ -89,3 +89,37 @@ export function migrateParticipantMapToUids(data, map) {
   }
   return migrated;
 }
+
+// 句会中の記録対象は、現在の操作モード(players/spectators)ではなく、
+// 開始時または途中参加時に固定したroundPlayerUidsを優先する。
+// 旧形式・移行途中のデータでは現在のplayersへ安全にフォールバックする。
+export function getRoundParticipantEntries(data) {
+  const participantUids = data?.participantUids && typeof data.participantUids === 'object'
+    ? data.participantUids
+    : {};
+  const roundNames = data?.roundPlayerNames && typeof data.roundPlayerNames === 'object'
+    ? data.roundPlayerNames
+    : {};
+  const roundUids = Array.isArray(data?.roundPlayerUids)
+    ? [...new Set(data.roundPlayerUids.map((uid) => String(uid ?? '').trim()).filter(Boolean))]
+    : [];
+
+  if (roundUids.length > 0) {
+    return roundUids
+      .map((uid) => ({ uid, name: normalizeParticipantName(participantUids[uid] || roundNames[uid]) }))
+      .filter(({ name }) => Boolean(name));
+  }
+
+  const players = Array.isArray(data?.players) ? data.players : [];
+  return players.map((name) => {
+    const normalizedName = normalizeParticipantName(name);
+    return {
+      uid: getParticipantUidByName(data, normalizedName),
+      name: normalizedName,
+    };
+  }).filter(({ name }) => Boolean(name));
+}
+
+export function getRoundParticipantNames(data) {
+  return getRoundParticipantEntries(data).map(({ name }) => name);
+}

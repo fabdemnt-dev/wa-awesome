@@ -112,7 +112,7 @@ window.startGame = async function() {
 
   if (state.currentData.schemaVersion === 2) {
     try {
-      await dealHaikuHands(state.roomId);
+      await dealHaikuHands(state.roomId, supplementPool5, supplementPool7, supplementAuthorLabel);
       alert('句会を開始しました！');
     } catch (e) {
       console.error(e);

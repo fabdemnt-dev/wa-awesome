@@ -1,10 +1,13 @@
 import state from './haiku-state.js';
-import { getParticipantStorageKey, getParticipantUidByName, getCurrentHostName } from './participant-utils.js';
+import { getParticipantStorageKey, getParticipantUidByName, getCurrentHostName, getRoundParticipantEntries } from './participant-utils.js';
 import { escapeHTML, escapeJS, evalOptionsMaster, hostOptionKeys, childOptionKeys, spectatorOptionKeys, colorPalette } from './haiku-utils.js';
 
 export function getAuthorStyle(authorName) {
-  if (!state.currentData || !state.currentData.players) return colorPalette[0];
-  const idx = state.currentData.players.indexOf(authorName);
+  if (!state.currentData) return colorPalette[0];
+  const roundEntries = getRoundParticipantEntries(state.currentData);
+  const names = roundEntries.map(({ name }) => name);
+  const fallbackNames = state.currentData.players || [];
+  const idx = (names.length ? names : fallbackNames).indexOf(authorName);
   return idx === -1 ? colorPalette[0] : colorPalette[idx % colorPalette.length];
 }
 
@@ -199,6 +202,10 @@ export function renderBoards() {
   const revealedPhrases = state.currentData.revealedPhrases || {};
   const selfPraiseData = state.currentData.selfPraise || {};
   const players = state.currentData.players || [];
+  const roundEntries = getRoundParticipantEntries(state.currentData);
+  const boardParticipants = roundEntries.length
+    ? roundEntries
+    : players.map((name) => ({ uid: getParticipantUidByName(state.currentData, name), name }));
   const currentHost = getCurrentHostName(state.currentData);
   const hostUid = String(state.currentData.currentHostUid ?? '');
   const hostNameUid = getParticipantUidByName(state.currentData, currentHost);
@@ -214,8 +221,8 @@ export function renderBoards() {
   const myVotes = votes[myVoteKey] || {};
   const hasVotedAnywhereAsChild = !isHost && Object.values(myVotes).some(v => v != null);
 
-  boardList.innerHTML = players.map(pName => {
-    const phraseKey = getParticipantUidByName(state.currentData, pName) || pName;
+  boardList.innerHTML = boardParticipants.map(({ uid: boardUid, name: pName }) => {
+    const phraseKey = boardUid || getParticipantUidByName(state.currentData, pName) || pName;
     if (phrases[phraseKey] === undefined && phrases[pName] === undefined) return '';
     const actualPhraseKey = phrases[phraseKey] !== undefined ? phraseKey : pName;
     const isRevealed = revealedPhrases[actualPhraseKey] ?? revealedPhrases[pName];
@@ -244,28 +251,35 @@ export function renderBoards() {
     }).join(' ') : `<strong>${escapeHTML(phrases[actualPhraseKey] ?? phrases[pName])}</strong>`;
 
     const spectators = state.currentData.spectators || [];
-    const participantUid = (name) => getParticipantUidByName(state.currentData, name);
+    const participantUid = (name) => roundEntries.find((entry) => entry.name === name)?.uid
+      || getParticipantUidByName(state.currentData, name);
     const playerUids = new Set(players.map(participantUid).filter(Boolean));
     const spectatorUids = new Set(spectators.map(participantUid).filter(Boolean));
+    const roundParticipantUids = new Set(roundEntries.map(({ uid }) => uid).filter(Boolean));
     const currentHostUid = String(state.currentData.currentHostUid || '') || participantUid(currentHost);
-    const roleOfVoter = (name, uid) => {
-      if ((currentHostUid && uid === currentHostUid) || (!currentHostUid && name === currentHost)) return 'host';
-      if ((uid && spectatorUids.has(uid)) || (!uid && spectators.includes(name))) return 'spectator';
-      if ((uid && playerUids.has(uid)) || (!uid && players.includes(name))) return 'child';
-      return null;
-    };
-    const allVoters = [...players, ...spectators];
+    const allVoters = [...new Set([
+      ...players,
+      ...spectators,
+      ...roundEntries.map(({ name }) => name),
+    ])];
     const voteEntries = [];
     allVoters.forEach(voter => {
       const voterUid = participantUid(voter);
       const voterKey = voterUid || voter;
       const vData = votes[voterKey]?.[actualPhraseKey] ?? votes[voterKey]?.[pName] ?? votes[voter]?.[pName];
       if (!vData) return;
-      const role = roleOfVoter(voter, voterUid);
-      if (!role) return;
       const keys = Array.isArray(vData) ? vData : [vData];
       keys.forEach(key => {
-        if (evalOptionsMaster[key]) voteEntries.push({ key, name: voter, role });
+        if (!evalOptionsMaster[key]) return;
+        // 御印送信時の役割を保存していない旧形式でも、許可されるキーから
+        // 見学者御印（kanpu）とプレイヤー御印を区別し、切替後も表示を安定させる。
+        const role = key === 'kanpu'
+          ? 'spectator'
+          : (voterUid && voterUid === currentHostUid ? 'host'
+            : (voterUid && (playerUids.has(voterUid) || roundParticipantUids.has(voterUid))) || players.includes(voter)
+              ? 'child'
+              : spectatorUids.has(voterUid) || spectators.includes(voter) ? 'spectator' : null);
+        if (role) voteEntries.push({ key, name: voter, role });
       });
     });
     const renderVoteIcon = (key) => {

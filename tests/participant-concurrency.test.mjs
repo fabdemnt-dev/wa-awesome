@@ -5,6 +5,8 @@ import {
   setParticipantRole,
   hasParticipantRoleOverlap,
   canClaimHost,
+  getRoundParticipantEntries,
+  getRoundParticipantNames,
 } from '../participant-utils.js';
 
 // Firestore transactionが競合後に最新スナップショットで再実行される動作を、
@@ -77,6 +79,34 @@ test('親が既にplayersから消えた状態では手動引き継ぎ判定を�
   assert.equal(canClaimHost(hostMissing, '子'), false);
   assert.equal(canClaimHost(notPlaying, '子'), false);
   assert.equal(canClaimHost({ status: 'playing', players: ['親', '子'] }, '子'), false);
+});
+
+test('roundPlayerUidsを優先して現在見学中の元プレイヤーも参加者として返す', () => {
+  const data = {
+    players: ['親'],
+    spectators: ['子'],
+    participantUids: { 'uid-host': '親', 'uid-child': '子' },
+    roundPlayerUids: ['uid-host', 'uid-child'],
+    roundPlayerNames: { 'uid-host': '親', 'uid-child': '子' },
+  };
+
+  assert.deepEqual(getRoundParticipantEntries(data), [
+    { uid: 'uid-host', name: '親' },
+    { uid: 'uid-child', name: '子' },
+  ]);
+  assert.deepEqual(getRoundParticipantNames(data), ['親', '子']);
+});
+
+test('roundPlayerUidsがない旧形式では現在のplayersへフォールバックする', () => {
+  const data = {
+    players: ['親', '子'],
+    participantUids: { 'uid-host': '親', 'uid-child': '子' },
+  };
+
+  assert.deepEqual(getRoundParticipantEntries(data), [
+    { uid: 'uid-host', name: '親' },
+    { uid: 'uid-child', name: '子' },
+  ]);
 });
 
 export { applyRoleUpdate };
