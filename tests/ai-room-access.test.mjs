@@ -36,3 +36,30 @@ test('AI room page can clear in-memory conversation state', () => {
   assert.match(html, /conversation\.length = 0/);
   assert.match(html, /clearBtn\.onclick = resetConversation/);
 });
+
+test('Manus participant backend is prepared behind the same access gate', () => {
+  const createStart = backend.indexOf('exports.createAiRoomManusTask');
+  const pollStart = backend.indexOf('exports.getAiRoomManusTask');
+  assert.ok(createStart >= 0, 'Manus task creation callable should exist');
+  assert.ok(pollStart > createStart, 'Manus polling callable should exist');
+
+  const createSection = backend.slice(createStart, pollStart);
+  const gateIndex = createSection.indexOf('requireAccessCode(request.data?.accessCode)');
+  const createFetchIndex = createSection.indexOf("fetch('https://api.manus.ai/v2/task.create'");
+  assert.ok(gateIndex >= 0, 'Manus creation should require the room access code');
+  assert.ok(createFetchIndex > gateIndex, 'access-code check should happen before task.create');
+  assert.match(createSection, /'x-manus-api-key': apiKey/);
+  assert.match(createSection, /agent_profile: 'manus-1\.6-lite'/);
+  assert.match(createSection, /interactive_mode: false/);
+  assert.match(createSection, /share_visibility: 'private'/);
+});
+
+test('Manus task status uses task.listMessages and is not exposed in the page yet', () => {
+  const pollStart = backend.indexOf('exports.getAiRoomManusTask');
+  const pollSection = backend.slice(pollStart);
+  assert.match(pollSection, /task\.listMessages/);
+  assert.match(pollSection, /agent_status/);
+  assert.match(pollSection, /assistant_message/);
+  assert.doesNotMatch(html, /createAiRoomManusTask/);
+  assert.doesNotMatch(html, /getAiRoomManusTask/);
+});
