@@ -311,3 +311,193 @@ test('句投稿の一般エラー後は送信中フラグを解除して再操�
   assert.equal(harness.state.submittedPhraseKey, '');
   assert.deepEqual(harness.alerts, ['句の投稿に失敗しました。入力内容を確認して、もう一度お試しください。']);
 });
+
+
+async function loadRedrawHarness({ schemaVersion, redrawImpl, transactionImpl, currentData = {} }) {
+  const source = await fs.readFile(new URL('../haiku-game.js', import.meta.url), 'utf8');
+  const implementation = extractBetween(source, 'window.redrawHand =', '\nwindow.saveGameAsWordSet');
+  const state = {
+    currentData: {
+      schemaVersion,
+      status: 'playing',
+      roundCount: 1,
+      phrases: {},
+      deck5: [{ id: 'deck-five', text: '五音札' }],
+      deck7: [{ id: 'deck-seven', text: '七音札' }],
+      ...currentData,
+    },
+    isSpectator: false,
+    isProcessingRedraw: false,
+    redrawSelected5: ['hand-five'],
+    redrawSelected7: ['hand-seven'],
+    redrawUsed: false,
+    myUid: 'uid-player',
+    myName: '参加者',
+    roomId: 'redraw-room',
+    roomRef: { id: 'redraw-room' },
+  };
+  const alerts = [];
+  const calls = { redraw: [], transactions: 0, updates: [] };
+  const window = {};
+  const consoleMock = { error() {} };
+  const transaction = {
+    async get() {
+      return { data: () => ({
+        status: 'playing',
+        roundCount: 1,
+        phrases: {},
+        redraws: {},
+        hands5: { 'uid-player': [{ id: 'hand-five', text: '五音札' }] },
+        hands7: { 'uid-player': [{ id: 'hand-seven', text: '七音札' }] },
+        deck5: [{ id: 'deck-five', text: '五音札' }],
+        deck7: [{ id: 'deck-seven', text: '七音札' }],
+        ...currentData,
+      }) };
+    },
+    update(ref, fields) { calls.updates.push({ ref, fields }); },
+  };
+  const redrawHaikuHand = async (...args) => {
+    calls.redraw.push(args);
+    return redrawImpl ? redrawImpl(...args) : undefined;
+  };
+  const runTransaction = async (_db, callback) => {
+    calls.transactions += 1;
+    return transactionImpl ? transactionImpl(callback, transaction) : callback(transaction);
+  };
+  const install = new Function(
+    'window', 'state', 'alert', 'redrawHaikuHand', 'runTransaction', 'db',
+    'getParticipantStorageKey', 'confirm', 'console',
+    implementation,
+  );
+  install(
+    window,
+    state,
+    (message) => alerts.push(message),
+    redrawHaikuHand,
+    runTransaction,
+    {},
+    (_data, uid, name) => uid || name,
+    () => true,
+    consoleMock,
+  );
+  return { window, state, alerts, calls };
+}
+
+test('v2引き直しはCallableだけを呼び、成功後に選択状態を消去する', async () => {
+  const harness = await loadRedrawHarness({ schemaVersion: 2 });
+  await harness.window.redrawHand();
+  assert.deepEqual(harness.calls.redraw, [['redraw-room', ['hand-five'], ['hand-seven']]]);
+  assert.equal(harness.calls.transactions, 0);
+  assert.deepEqual(harness.state.redrawSelected5, []);
+  assert.deepEqual(harness.state.redrawSelected7, []);
+  assert.equal(harness.state.redrawUsed, true);
+  assert.equal(harness.state.isProcessingRedraw, false);
+  assert.deepEqual(harness.alerts, ['手札を引き直しました。']);
+});
+
+test('v2引き直しCallable失敗時は選択状態を保持し、再操作可能に戻す', async () => {
+  const harness = await loadRedrawHarness({
+    schemaVersion: 2,
+    redrawImpl: async () => { throw Object.assign(new Error('internal detail'), { code: 'functions/failed-precondition' }); },
+  });
+  await harness.window.redrawHand();
+  assert.deepEqual(harness.calls.redraw, [['redraw-room', ['hand-five'], ['hand-seven']]]);
+  assert.equal(harness.calls.transactions, 0);
+  assert.deepEqual(harness.state.redrawSelected5, ['hand-five']);
+  assert.deepEqual(harness.state.redrawSelected7, ['hand-seven']);
+  assert.equal(harness.state.redrawUsed, false);
+  assert.equal(harness.state.isProcessingRedraw, false);
+  assert.deepEqual(harness.alerts, ['引き直しに失敗しました: internal detail']);
+});
+
+test('v2引き直し処理中の連打はCallableを1回だけ呼ぶ', async () => {
+  const pending = deferred();
+  const harness = await loadRedrawHarness({
+    schemaVersion: 2,
+    redrawImpl: async () => pending.promise,
+  });
+  const first = harness.window.redrawHand();
+  const second = harness.window.redrawHand();
+  assert.equal(harness.calls.redraw.length, 1);
+  assert.equal(harness.state.isProcessingRedraw, true);
+  pending.resolve();
+  await Promise.all([first, second]);
+  assert.equal(harness.calls.redraw.length, 1);
+  assert.equal(harness.state.isProcessingRedraw, false);
+});
+
+test('v1引き直しはCallableを呼ばず従来のrunTransactionを使う', async () => {
+  const harness = await loadRedrawHarness({ schemaVersion: 1 });
+  await harness.window.redrawHand();
+  assert.equal(harness.calls.redraw.length, 0);
+  assert.equal(harness.calls.transactions, 1);
+  assert.equal(harness.state.isProcessingRedraw, false);
+  assert.deepEqual(harness.state.redrawSelected5, []);
+  assert.deepEqual(harness.state.redrawSelected7, []);
+  assert.equal(harness.calls.updates.length, 1);
+  assert.deepEqual(harness.calls.updates[0].fields, {
+    'hands5.uid-player': [{ id: 'deck-five', text: '五音札' }],
+    'hands7.uid-player': [{ id: 'deck-seven', text: '七音札' }],
+    deck5: [],
+    deck7: [],
+    'redraws.uid-player': true,
+  });
+});
+
+test('v2引き直しの成功条件はplaying状態に限定され、Callableを呼ばない', async () => {
+  const harness = await loadRedrawHarness({ schemaVersion: 2, currentData: { status: 'lobby' } });
+  await harness.window.redrawHand();
+  assert.equal(harness.calls.redraw.length, 0);
+  assert.equal(harness.state.isProcessingRedraw, false);
+});
+
+test('v2引き直しの札未選択時はCallableを呼ばない', async () => {
+  const harness = await loadRedrawHarness({ schemaVersion: 2 });
+  harness.state.redrawSelected5 = [];
+  harness.state.redrawSelected7 = [];
+  await harness.window.redrawHand();
+  assert.equal(harness.calls.redraw.length, 0);
+  assert.deepEqual(harness.alerts, ['引き直す札を選んでください。']);
+});
+
+test('v2引き直しは見学者がCallableを呼ばない', async () => {
+  const harness = await loadRedrawHarness({ schemaVersion: 2 });
+  harness.state.isSpectator = true;
+  await harness.window.redrawHand();
+  assert.equal(harness.calls.redraw.length, 0);
+});
+
+// Source-level guard: v2 must return before entering the legacy transaction block.
+test('v2分岐はCallable後にreturnし、v1の直接トランザクションを再利用する', async () => {
+  const source = await fs.readFile(new URL('../haiku-game.js', import.meta.url), 'utf8');
+  const implementation = extractBetween(source, 'window.redrawHand =', '\nwindow.saveGameAsWordSet');
+  assert.match(implementation, /schemaVersion === 2/);
+  assert.match(implementation, /await redrawHaikuHand\(state\.roomId, state\.redrawSelected5, state\.redrawSelected7\)/);
+  assert.match(implementation, /\n\s*return;\n\s*}\n\s*if \(state\.currentData\.status !== 'playing'\)/);
+  assert.match(implementation, /runTransaction\(db,/);
+});
+
+
+test('redrawHaikuHandラッパーはCallable名・引数・戻り値形式を維持する', async () => {
+  const source = await fs.readFile(new URL('../haiku-functions.js', import.meta.url), 'utf8');
+  const implementation = extractBetween(source, 'export async function redrawHaikuHand', '\nexport async function submitHaikuPhrase');
+  assert.match(implementation, /redrawHaikuHandCallable\(\{/);
+  assert.match(implementation, /roomId: requireRoomId\(roomId\)/);
+  assert.match(implementation, /selectedIds5: Array\.isArray\(selectedIds5\) \? selectedIds5 : \[\]/);
+  assert.match(implementation, /selectedIds7: Array\.isArray\(selectedIds7\) \? selectedIds7 : \[\]/);
+  assert.match(implementation, /return result\.data/);
+});
+
+
+test('v2引き直しの直接更新対象はサーバーCallable内に限定される', async () => {
+  const source = await fs.readFile(new URL('../haiku-game.js', import.meta.url), 'utf8');
+  const redraw = extractBetween(source, 'window.redrawHand =', '\nwindow.saveGameAsWordSet');
+  const v2 = extractBetween(redraw, 'if (state.currentData.schemaVersion === 2)', '\n  if (state.currentData.status !== \'playing\')');
+  assert.doesNotMatch(v2, /runTransaction|updateDoc|transaction\.update/);
+  assert.match(v2, /redrawHaikuHand\(/);
+  const functions = await fs.readFile(new URL('../functions/index.js', import.meta.url), 'utf8');
+  const serverRedraw = extractBetween(functions, 'exports.redrawHaikuHand =', '\nfunction requireParticipant');
+  for (const field of ['hand5', 'hand7', 'redrawUsed', 'deck5', 'deck7']) assert.match(serverRedraw, new RegExp(field));
+  assert.match(serverRedraw, /transaction\.update\(handRef/);
+  assert.match(serverRedraw, /transaction\.update\(roomRef/);
+});
