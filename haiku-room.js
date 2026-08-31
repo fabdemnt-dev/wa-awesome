@@ -628,15 +628,18 @@ window.joinRoom = async function() {
     document.getElementById('lobby-sec').style.display = 'block';
 
     onSnapshot(state.roomRef, (snapshot) => {
-      // キャッシュ由来の古いスナップショットで、サーバー取得済みの最新状態を巻き戻さない。
-      // 最新値は5秒ポーリングのgetDocFromServerで補完する。
-      if (snapshot.metadata?.fromCache) return;
+      // fromCacheを含むSnapshotも共通の更新順序制御へ渡す。
+      // 古いデータの巻き戻し防止はapplyRoomDataのsequence判定で行う。
       applyRoomData(snapshot.data(), ++roomUpdateSequence);
     }, (error) => {
       console.error('[room-onSnapshot]', error);
       resyncRoomFromFirestore();
     });
     startRoomResyncPolling();
+    // 入室直後に、Callable完了前後の古いSnapshotを表示しないため、
+    // リスナー登録後にサーバーの最新ルーム状態を一度だけ明示取得する。
+    // 特にモバイルで別ブラウザへ切り替えた後の参加者一覧反映を確実にする。
+    await resyncRoomFromFirestore({ requireSuccess: true });
     state.roomHistory = [];
     state.legacyHistory = [];
     subscribeRoomHistory(state.roomRef, (history) => {
