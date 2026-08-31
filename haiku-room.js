@@ -191,6 +191,11 @@ function subscribeOwnHand(data) {
     if (handUnsubscribe) handUnsubscribe();
     handUnsubscribe = null;
     handSubscriptionKey = '';
+    const observedRoundKey = `${state.roomId}:${data?.roundCount || 1}`;
+    if (state.redrawSuccessKey !== observedRoundKey) {
+      state.redrawSuccessKey = '';
+      if (data?.status !== 'playing') state.redrawUsed = false;
+    }
     return;
   }
   const key = `${state.roomRef.path}/hands/${state.myUid}`;
@@ -199,9 +204,15 @@ function subscribeOwnHand(data) {
   handSubscriptionKey = key;
   handUnsubscribe = onSnapshot(doc(state.roomRef, 'hands', state.myUid), (snapshot) => {
     const hand = snapshot.exists() ? snapshot.data() : {};
+    const currentRound = state.currentData?.roundCount || data.roundCount || 1;
+    const snapshotKey = `${state.roomId}:${currentRound}`;
+    if (state.redrawSuccessKey && state.redrawSuccessKey !== snapshotKey) {
+      state.redrawSuccessKey = '';
+    }
     state.myHand5 = Array.isArray(hand.hand5) ? hand.hand5 : [];
     state.myHand7 = Array.isArray(hand.hand7) ? hand.hand7 : [];
-    state.redrawUsed = hand.redrawUsed === true;
+    if (hand.redrawUsed === true) state.redrawSuccessKey = snapshotKey;
+    state.redrawUsed = state.redrawSuccessKey === snapshotKey || hand.redrawUsed === true;
     renderHand();
     renderBoards();
   }, (error) => {
@@ -271,6 +282,13 @@ function applyRoomData(data, sequence = ++roomUpdateSequence) {
   if (sequence < lastAppliedRoomUpdateSequence) return;
   lastAppliedRoomUpdateSequence = sequence;
   const statusBeforeUpdate = previousStatus;
+  const previousData = state.currentData;
+  const previousRoundKey = previousData ? `${state.roomId}:${previousData.roundCount || 1}` : '';
+  const nextRoundKey = `${state.roomId}:${data?.roundCount || 1}`;
+  if (previousData && previousRoundKey !== nextRoundKey) {
+    state.redrawSuccessKey = '';
+    state.redrawUsed = false;
+  }
   const normalizedRoles = normalizeParticipantRoles(data);
   data = { ...data, ...normalizedRoles };
   const embeddedHistory = Array.isArray(data?.history)
@@ -534,7 +552,12 @@ window.joinRoom = async function() {
 
   state.myUid = currentUser.uid;
   state.myName = document.getElementById('player-name')?.value.trim() || "";
-  state.roomId = document.getElementById('room-id')?.value.trim() || "";
+  const nextRoomId = document.getElementById('room-id')?.value.trim() || "";
+  if (state.roomId !== nextRoomId) {
+    state.redrawSuccessKey = '';
+    state.redrawUsed = false;
+  }
+  state.roomId = nextRoomId;
   const specCheck = document.getElementById('spectator-check');
   state.isSpectator = specCheck ? specCheck.checked : false;
 

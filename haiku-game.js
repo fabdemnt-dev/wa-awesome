@@ -162,6 +162,8 @@ window.redrawHand = async function() {
   if (!state.currentData || state.isSpectator || state.isProcessingRedraw) return;
   if (state.currentData.schemaVersion === 2) {
     if (state.currentData.status !== 'playing') return;
+    const redrawRoundKey = `${state.roomId}:${state.currentData.roundCount || 1}`;
+    if (state.redrawUsed === true || state.redrawSuccessKey === redrawRoundKey) return;
     if (state.redrawSelected5.length === 0 && state.redrawSelected7.length === 0) return alert('引き直す札を選んでください。');
     state.isProcessingRedraw = true;
     try {
@@ -169,6 +171,7 @@ window.redrawHand = async function() {
       state.redrawSelected5 = [];
       state.redrawSelected7 = [];
       state.redrawUsed = true;
+      state.redrawSuccessKey = `${state.roomId}:${state.currentData.roundCount || 1}`;
       alert('手札を引き直しました。');
     } catch (e) {
       console.error(e);
