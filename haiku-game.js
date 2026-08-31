@@ -173,6 +173,14 @@ window.redrawHand = async function() {
     state.isProcessingRedraw = true;
     try {
       await redrawHaikuHand(state.roomId, state.redrawSelected5, state.redrawSelected7);
+      if (typeof window.resyncHaikuHand === 'function') {
+        try {
+          await window.resyncHaikuHand();
+        } catch (syncError) {
+          console.error('[hand-resync]', syncError);
+          alert('引き直しは完了しましたが、手札表示の更新に失敗しました。最新の状態に更新してください。');
+        }
+      }
       state.redrawSelected5 = [];
       state.redrawSelected7 = [];
       state.redrawUsed = true;
