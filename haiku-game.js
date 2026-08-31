@@ -106,6 +106,11 @@ window.fillDefaultWords = async function() {
   } else {
     await updateDoc(state.roomRef, { words5: arrayUnion(...add5), words7: arrayUnion(...add7) });
   }
+  // 補充Callable成功の通知だけで終わらせず、サーバーの最新ルーム状態を
+  // 明示取得して、補充数をこのブラウザにも直ちに反映する。
+  if (typeof window.resyncHaikuRoom === 'function') {
+    await window.resyncHaikuRoom({ requireSuccess: true });
+  }
   const setLabel = customSet ? `「${customSet.name}」` : '標準セット';
   alert(`🎴 ${setLabel}から 五音${add5.length}個・七音${add7.length}個 を補充しました！`);
 };
