@@ -642,3 +642,21 @@ test('FirestoreはFirestore WebChannelが不安定な環境向けにlong-polling
   assert.match(config, /experimentalAutoDetectLongPolling: true/);
   assert.doesNotMatch(config, /getFirestore\(app\)/);
 });
+
+
+test('visibility復帰時のroom再同期後にv2プレイヤーの手札も再取得する', async () => {
+  const room = await fs.readFile(new URL('../haiku-room.js', import.meta.url), 'utf8');
+  const resync = extractBetween(room, 'async function resyncRoomFromFirestore', '// メイン: タブ/アプリの表示・非表示切替');
+  assert.match(resync, /state\.currentData\?\.schemaVersion === 2/);
+  assert.match(resync, /state\.currentData\.status === 'playing'/);
+  assert.match(resync, /!state\.isSpectator/);
+  assert.match(resync, /await resyncOwnHandFromFirestore\(\)/);
+  assert.match(resync, /手札の再同期に失敗しました/);
+});
+
+test('御印・投票成功後はroom再同期を行い、既存の確認フローを維持する', async () => {
+  const action = await fs.readFile(new URL('../haiku-action.js', import.meta.url), 'utf8');
+  assert.match(action, /const resyncAndVerify = async \(\) =>/);
+  assert.match(action, /await window\.resyncHaikuRoom\(\{ requireSuccess: true \}\)/);
+  assert.match(action, /御印はサーバーに保存されましたが、画面への反映確認に失敗しました/);
+});
