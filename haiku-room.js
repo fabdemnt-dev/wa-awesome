@@ -606,6 +606,10 @@ window.joinRoom = async function() {
       resyncRoomFromFirestore();
     });
     startRoomResyncPolling();
+    // 入室直後に、Callable完了前後の古いSnapshotを表示しないため、
+    // リスナー登録後にサーバーの最新ルーム状態を一度だけ明示取得する。
+    // 特にモバイルで別ブラウザへ切り替えた後の参加者一覧反映を確実にする。
+    await resyncRoomFromFirestore({ requireSuccess: true });
     state.roomHistory = [];
     state.legacyHistory = [];
     subscribeRoomHistory(state.roomRef, (history) => {
