@@ -217,8 +217,29 @@ function subscribeOwnHand(data) {
     renderBoards();
   }, (error) => {
     console.error('[hand-onSnapshot]', error);
+    showGameError(error, '手札の同期');
   });
 }
+async function resyncOwnHandFromFirestore() {
+  if (!state.roomRef || !state.myUid || state.currentData?.status !== 'playing') {
+    return { ok: false, error: new Error('手札を再取得できる状態ではありません。') };
+  }
+  const snapshot = await getDocFromServer(doc(state.roomRef, 'hands', state.myUid));
+  if (!snapshot.exists()) throw new Error('手札が見つかりません。');
+  const hand = snapshot.data() || {};
+  const currentRound = state.currentData?.roundCount || 1;
+  const snapshotKey = `${state.roomId}:${currentRound}`;
+  state.myHand5 = Array.isArray(hand.hand5) ? hand.hand5 : [];
+  state.myHand7 = Array.isArray(hand.hand7) ? hand.hand7 : [];
+  if (hand.redrawUsed === true) state.redrawSuccessKey = snapshotKey;
+  state.redrawUsed = state.redrawSuccessKey === snapshotKey || hand.redrawUsed === true;
+  renderHand();
+  renderBoards();
+  return { ok: true };
+}
+
+window.resyncHaikuHand = resyncOwnHandFromFirestore;
+
 function refreshHostRecoveryUI() {
   const data = state.currentData;
   const players = data?.players || [];

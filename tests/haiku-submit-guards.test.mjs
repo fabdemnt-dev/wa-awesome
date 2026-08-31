@@ -414,7 +414,7 @@ test('v2引き直しCallable失敗時は選択状態を保持し、再操作可�
 
 test('v2引き直し成功後は同じ節の古いSnapshotでも成功キーと表示状態を維持する', async () => {
   const source = await fs.readFile(new URL('../haiku-room.js', import.meta.url), 'utf8');
-  const handSubscription = extractBetween(source, 'function subscribeOwnHand', 'function refreshHostRecoveryUI');
+  const handSubscription = extractBetween(source, 'function subscribeOwnHand', 'async function resyncOwnHandFromFirestore');
   assert.match(handSubscription, /state\.redrawSuccessKey/);
   assert.match(handSubscription, /state\.redrawSuccessKey === snapshotKey \|\| hand\.redrawUsed === true/);
   assert.match(handSubscription, /state\.redrawUsed = state\.redrawSuccessKey === snapshotKey/);
@@ -550,7 +550,7 @@ test('v2引き直しの直接更新対象はサーバーCallable内に限定さ�
 
 test('同一節のhand SnapshotがredrawUsed:falseでも成功済み状態を維持する', async () => {
   const source = await fs.readFile(new URL('../haiku-room.js', import.meta.url), 'utf8');
-  const implementation = extractBetween(source, 'function subscribeOwnHand', 'function refreshHostRecoveryUI');
+  const implementation = extractBetween(source, 'function subscribeOwnHand', 'async function resyncOwnHandFromFirestore');
   const state = {
     roomRef: { path: 'rooms/haiku-redraw-room' },
     myUid: 'uid-player',
@@ -578,7 +578,7 @@ test('同一節のhand SnapshotがredrawUsed:falseでも成功済み状態を維
 
 test('新節のhand Snapshotでは成功済みキーを新節へ持ち越さない', async () => {
   const source = await fs.readFile(new URL('../haiku-room.js', import.meta.url), 'utf8');
-  const implementation = extractBetween(source, 'function subscribeOwnHand', 'function refreshHostRecoveryUI');
+  const implementation = extractBetween(source, 'function subscribeOwnHand', 'async function resyncOwnHandFromFirestore');
   const state = {
     roomRef: { path: 'rooms/haiku-redraw-room' },
     myUid: 'uid-player',
@@ -613,4 +613,32 @@ test('補充後再同期はv1直接更新の互換経路を変更しない', asy
   const fillDefault = extractBetween(source, 'window.fillDefaultWords = async function()', 'window.startGame');
   assert.match(fillDefault, /updateDoc\(state\.roomRef, \{ words5: arrayUnion\(\.\.\.add5\), words7: arrayUnion\(\.\.\.add7\) \}\)/);
   assert.match(fillDefault, /state\.currentData\.schemaVersion === 2/);
+});
+
+
+test('引き直し成功後はサーバー手札を再取得し、取得失敗でも成功状態を維持する', async () => {
+  const game = await fs.readFile(new URL('../haiku-game.js', import.meta.url), 'utf8');
+  const redraw = extractBetween(game, 'window.redrawHand =', '\nwindow.saveGameAsWordSet');
+  assert.match(redraw, /typeof window\.resyncHaikuHand === 'function'/);
+  assert.match(redraw, /await window\.resyncHaikuHand\(\)/);
+  assert.match(redraw, /引き直しは完了しましたが、手札表示の更新に失敗しました/);
+  assert.ok(redraw.indexOf('resyncHaikuHand') < redraw.indexOf('state.redrawUsed = true'));
+});
+
+test('手札再同期はサーバー取得結果を描画し、redrawSuccessKeyと整合させる', async () => {
+  const room = await fs.readFile(new URL('../haiku-room.js', import.meta.url), 'utf8');
+  const resync = extractBetween(room, 'async function resyncOwnHandFromFirestore', '\nwindow.resyncHaikuHand');
+  assert.match(resync, /getDocFromServer\(doc\(state\.roomRef, 'hands', state\.myUid\)\)/);
+  assert.match(resync, /state\.myHand5 = Array\.isArray\(hand\.hand5\)/);
+  assert.match(resync, /state\.myHand7 = Array\.isArray\(hand\.hand7\)/);
+  assert.match(resync, /state\.redrawUsed = state\.redrawSuccessKey === snapshotKey \|\| hand\.redrawUsed === true/);
+  assert.match(resync, /renderHand\(\);/);
+  assert.match(resync, /renderBoards\(\);/);
+});
+
+test('FirestoreはFirestore WebChannelが不安定な環境向けにlong-polling自動検出を有効化する', async () => {
+  const config = await fs.readFile(new URL('../firebase-config.js', import.meta.url), 'utf8');
+  assert.match(config, /initializeFirestore/);
+  assert.match(config, /experimentalAutoDetectLongPolling: true/);
+  assert.doesNotMatch(config, /getFirestore\(app\)/);
 });
