@@ -597,3 +597,20 @@ test('新節のhand Snapshotでは成功済みキーを新節へ持ち越さな�
   assert.equal(state.redrawSuccessKey, '');
   assert.equal(state.redrawUsed, false);
 });
+
+
+test('デフォルト素材補充成功後は最新ルーム状態を再同期してから成功通知する', async () => {
+  const source = await fs.readFile(new URL('../haiku-game.js', import.meta.url), 'utf8');
+  const fillDefault = extractBetween(source, 'window.fillDefaultWords = async function()', 'window.startGame');
+  assert.match(fillDefault, /await supplementHaikuWords\(state\.roomId, add5, add7\)/);
+  assert.match(fillDefault, /typeof window\.resyncHaikuRoom === 'function'/);
+  assert.match(fillDefault, /await window\.resyncHaikuRoom\(\{ requireSuccess: true \}\)/);
+  assert.ok(fillDefault.indexOf('resyncHaikuRoom') < fillDefault.indexOf('alert(`🎴'), '再同期は成功通知より先に実行する');
+});
+
+test('補充後再同期はv1直接更新の互換経路を変更しない', async () => {
+  const source = await fs.readFile(new URL('../haiku-game.js', import.meta.url), 'utf8');
+  const fillDefault = extractBetween(source, 'window.fillDefaultWords = async function()', 'window.startGame');
+  assert.match(fillDefault, /updateDoc\(state\.roomRef, \{ words5: arrayUnion\(\.\.\.add5\), words7: arrayUnion\(\.\.\.add7\) \}\)/);
+  assert.match(fillDefault, /state\.currentData\.schemaVersion === 2/);
+});
