@@ -331,6 +331,7 @@ async function loadRedrawHarness({ schemaVersion, redrawImpl, transactionImpl, c
     redrawSelected5: ['hand-five'],
     redrawSelected7: ['hand-seven'],
     redrawUsed: false,
+    redrawSuccessKey: '',
     myUid: 'uid-player',
     myName: '参加者',
     roomId: 'redraw-room',
@@ -391,6 +392,7 @@ test('v2引き直しはCallableだけを呼び、成功後に選択状態を消�
   assert.deepEqual(harness.state.redrawSelected5, []);
   assert.deepEqual(harness.state.redrawSelected7, []);
   assert.equal(harness.state.redrawUsed, true);
+  assert.equal(harness.state.redrawSuccessKey, 'redraw-room:1');
   assert.equal(harness.state.isProcessingRedraw, false);
   assert.deepEqual(harness.alerts, ['手札を引き直しました。']);
 });
@@ -410,6 +412,37 @@ test('v2引き直しCallable失敗時は選択状態を保持し、再操作可�
   assert.deepEqual(harness.alerts, ['引き直しに失敗しました: internal detail']);
 });
 
+test('v2引き直し成功後は同じ節の古いSnapshotでも成功キーと表示状態を維持する', async () => {
+  const source = await fs.readFile(new URL('../haiku-room.js', import.meta.url), 'utf8');
+  const handSubscription = extractBetween(source, 'function subscribeOwnHand', 'function refreshHostRecoveryUI');
+  assert.match(handSubscription, /state\.redrawSuccessKey/);
+  assert.match(handSubscription, /state\.redrawSuccessKey === snapshotKey \|\| hand\.redrawUsed === true/);
+  assert.match(handSubscription, /state\.redrawUsed = state\.redrawSuccessKey === snapshotKey/);
+  assert.match(handSubscription, /state\.myHand5 = Array\.isArray\(hand\.hand5\)/);
+  const render = await fs.readFile(new URL('../haiku-render.js', import.meta.url), 'utf8');
+  assert.match(render, /state\.redrawUsed === true/);
+  assert.match(render, /hasRedrawn \? ''/);
+});
+
+test('v2引き直し成功後は同じ節で再クリックしてもCallableを追加実行しない', async () => {
+  const harness = await loadRedrawHarness({ schemaVersion: 2 });
+  await harness.window.redrawHand();
+  harness.state.redrawSelected5 = ['another-five'];
+  harness.state.redrawSelected7 = [];
+  await harness.window.redrawHand();
+  assert.equal(harness.calls.redraw.length, 1);
+  assert.equal(harness.state.redrawUsed, true);
+});
+
+test('引き直し成功キーは節・ルーム変更時にリセットされる', async () => {
+  const source = await fs.readFile(new URL('../haiku-room.js', import.meta.url), 'utf8');
+  const applyRoom = extractBetween(source, 'function applyRoomData', '\n// ブラウザがバックグラウンド');
+  assert.match(applyRoom, /previousRoundKey !== nextRoundKey/);
+  assert.doesNotMatch(applyRoom, /previousRoundKey !== nextRoundKey \|\| data\?\.status/);
+  assert.match(applyRoom, /state\.redrawSuccessKey = ''/);
+  assert.match(source, /if \(state\.roomId !== nextRoomId\)/);
+});
+
 test('v2引き直し処理中の連打はCallableを1回だけ呼ぶ', async () => {
   const pending = deferred();
   const harness = await loadRedrawHarness({
@@ -423,6 +456,18 @@ test('v2引き直し処理中の連打はCallableを1回だけ呼ぶ', async () 
   pending.resolve();
   await Promise.all([first, second]);
   assert.equal(harness.calls.redraw.length, 1);
+  assert.equal(harness.state.isProcessingRedraw, false);
+});
+
+test('Callable失敗時は成功キーを設定せず、選択状態と再操作可能状態を維持する', async () => {
+  const harness = await loadRedrawHarness({
+    schemaVersion: 2,
+    redrawImpl: async () => { throw new Error('失敗'); },
+  });
+  await harness.window.redrawHand();
+  assert.equal(harness.state.redrawSuccessKey, '');
+  assert.equal(harness.state.redrawUsed, false);
+  assert.deepEqual(harness.state.redrawSelected5, ['hand-five']);
   assert.equal(harness.state.isProcessingRedraw, false);
 });
 
@@ -500,4 +545,55 @@ test('v2引き直しの直接更新対象はサーバーCallable内に限定さ�
   for (const field of ['hand5', 'hand7', 'redrawUsed', 'deck5', 'deck7']) assert.match(serverRedraw, new RegExp(field));
   assert.match(serverRedraw, /transaction\.update\(handRef/);
   assert.match(serverRedraw, /transaction\.update\(roomRef/);
+});
+
+
+test('同一節のhand SnapshotがredrawUsed:falseでも成功済み状態を維持する', async () => {
+  const source = await fs.readFile(new URL('../haiku-room.js', import.meta.url), 'utf8');
+  const implementation = extractBetween(source, 'function subscribeOwnHand', 'function refreshHostRecoveryUI');
+  const state = {
+    roomRef: { path: 'rooms/haiku-redraw-room' },
+    myUid: 'uid-player',
+    roomId: 'redraw-room',
+    currentData: { schemaVersion: 2, status: 'playing', roundCount: 1 },
+    redrawSuccessKey: 'redraw-room:1',
+    redrawUsed: true,
+    myHand5: [{ id: 'new-five' }],
+    myHand7: [{ id: 'new-seven' }],
+  };
+  let snapshotCallback;
+  let renders = 0;
+  const onSnapshot = (_ref, callback) => { snapshotCallback = callback; return () => {}; };
+  const install = new Function('state', 'doc', 'onSnapshot', 'renderHand', 'renderBoards', `let handUnsubscribe = null; let handSubscriptionKey = ''; ${implementation}; return subscribeOwnHand;`);
+  const subscribeOwnHand = install(state, () => ({}), onSnapshot, () => { renders += 1; }, () => {});
+  subscribeOwnHand(state.currentData);
+  snapshotCallback({ exists: () => true, data: () => ({ hand5: [{ id: 'old-five' }], hand7: [{ id: 'old-seven' }], redrawUsed: false }) });
+  assert.equal(state.redrawUsed, true);
+  assert.equal(state.redrawSuccessKey, 'redraw-room:1');
+  assert.deepEqual(state.myHand5, [{ id: 'old-five' }]);
+  assert.deepEqual(state.myHand7, [{ id: 'old-seven' }]);
+  assert.equal(renders, 1);
+});
+
+
+test('新節のhand Snapshotでは成功済みキーを新節へ持ち越さない', async () => {
+  const source = await fs.readFile(new URL('../haiku-room.js', import.meta.url), 'utf8');
+  const implementation = extractBetween(source, 'function subscribeOwnHand', 'function refreshHostRecoveryUI');
+  const state = {
+    roomRef: { path: 'rooms/haiku-redraw-room' },
+    myUid: 'uid-player',
+    roomId: 'redraw-room',
+    currentData: { schemaVersion: 2, status: 'playing', roundCount: 2 },
+    redrawSuccessKey: 'redraw-room:1',
+    redrawUsed: true,
+    myHand5: [], myHand7: [],
+  };
+  let snapshotCallback;
+  const onSnapshot = (_ref, callback) => { snapshotCallback = callback; return () => {}; };
+  const install = new Function('state', 'doc', 'onSnapshot', 'renderHand', 'renderBoards', `let handUnsubscribe = null; let handSubscriptionKey = ''; ${implementation}; return subscribeOwnHand;`);
+  const subscribeOwnHand = install(state, () => ({}), onSnapshot, () => {}, () => {});
+  subscribeOwnHand(state.currentData);
+  snapshotCallback({ exists: () => true, data: () => ({ hand5: [], hand7: [], redrawUsed: false }) });
+  assert.equal(state.redrawSuccessKey, '');
+  assert.equal(state.redrawUsed, false);
 });

@@ -11,6 +11,8 @@ const state = {
   myHand5: [],
   myHand7: [],
   redrawUsed: false,
+  // v2引き直し成功を同一ルーム・同一節の古いhand Snapshotから保護する。
+  redrawSuccessKey: "",
   // 保存データがあればそれを復元、なければ空っぽにする
   selectedHand: savedHand ? JSON.parse(savedHand) : [null, null, null],
 
