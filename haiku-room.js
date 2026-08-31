@@ -497,6 +497,16 @@ async function resyncRoomFromFirestore(options = {}) {
         // サーバー取得中に入った描画より新しい順序番号を発行し、
         // 手動更新の最新データが古い更新として破棄されないようにする。
         applyRoomData(data, ++roomUpdateSequence);
+        // visibilitychange復帰時はroomだけでなく、遅延していた手札も
+        // サーバーから取得して、引き直し後の表示を確実に最新化する。
+        if (state.currentData?.schemaVersion === 2 && state.currentData.status === 'playing' && !state.isSpectator) {
+          try {
+            await resyncOwnHandFromFirestore();
+          } catch (handError) {
+            // room再同期の成功を手札取得失敗で覆さず、次回購読・手動更新へ委ねる。
+            console.warn('手札の再同期に失敗しました:', handError);
+          }
+        }
         return { ok: true };
       }
       return { ok: false, error: new Error('ルームが見つかりません。') };
