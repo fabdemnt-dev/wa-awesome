@@ -628,9 +628,8 @@ window.joinRoom = async function() {
     document.getElementById('lobby-sec').style.display = 'block';
 
     onSnapshot(state.roomRef, (snapshot) => {
-      // キャッシュ由来の古いスナップショットで、サーバー取得済みの最新状態を巻き戻さない。
-      // 最新値は5秒ポーリングのgetDocFromServerで補完する。
-      if (snapshot.metadata?.fromCache) return;
+      // fromCacheを含むSnapshotも共通の更新順序制御へ渡す。
+      // 古いデータの巻き戻し防止はapplyRoomDataのsequence判定で行う。
       applyRoomData(snapshot.data(), ++roomUpdateSequence);
     }, (error) => {
       console.error('[room-onSnapshot]', error);

@@ -118,6 +118,10 @@ window.startGame = async function() {
   if (state.isSpectator) return alert('見学モードでは句会を開始できません');
   if (!confirm('句会を始めますか？')) return;
 
+  if (typeof window.resyncHaikuRoom === 'function') {
+    await window.resyncHaikuRoom({ requireSuccess: true });
+  }
+
   const players = state.currentData?.players || [];
   const st = state.currentData?.settings || { hand5: 5, hand7: 3 };
   const w5 = state.currentData?.words5 || [], w7 = state.currentData?.words7 || [];

@@ -660,3 +660,18 @@ test('御印・投票成功後はroom再同期を行い、既存の確認フロ�
   assert.match(action, /await window\.resyncHaikuRoom\(\{ requireSuccess: true \}\)/);
   assert.match(action, /御印はサーバーに保存されましたが、画面への反映確認に失敗しました/);
 });
+
+
+test('startGameは素材数判定の前にサーバー再同期を待つ', async () => {
+  const source = await fs.readFile(new URL('../haiku-game.js', import.meta.url), 'utf8');
+  const start = extractBetween(source, 'window.startGame =', '\nwindow.redrawHand');
+  assert.match(start, /await window\.resyncHaikuRoom\(\{ requireSuccess: true \}\)/);
+  assert.ok(start.indexOf('resyncHaikuRoom') < start.indexOf('const players = state.currentData?.players'));
+});
+
+test('room onSnapshotはfromCacheを早期破棄せず更新順序制御へ渡す', async () => {
+  const source = await fs.readFile(new URL('../haiku-room.js', import.meta.url), 'utf8');
+  const subscription = extractBetween(source, 'onSnapshot(state.roomRef, (snapshot) =>', "}, (error) => {");
+  assert.doesNotMatch(subscription, /fromCache\) return/);
+  assert.match(subscription, /applyRoomData\(snapshot\.data\(\), \+\+roomUpdateSequence\)/);
+});
