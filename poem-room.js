@@ -115,6 +115,7 @@ function applyRoomData(data, sequence = ++roomUpdateSequence) {
 
   const st = state.currentData.settings || { handCount: 5 };
   const handInput = document.getElementById('set-hand-count');
+  if (handInput) handInput.disabled = state.isSpectator || state.currentData.status !== 'lobby';
   if (handInput && document.activeElement !== handInput) {
     handInput.value = st.handCount;
   }
@@ -352,8 +353,6 @@ if (!roomSnapshot.exists()) {
     settings: { handCount: 5 },
     players: [],
     spectators: [],
-    currentHost: state.isSpectator ? null : state.myName,
-    currentHostUid: state.isSpectator ? null : currentUser.uid,
     participantUids: { [currentUser.uid]: state.myName }
   };
 
