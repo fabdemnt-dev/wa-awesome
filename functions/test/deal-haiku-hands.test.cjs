@@ -373,12 +373,13 @@ test('Haiku新規途中参加だけがroundPlayerUidsへ追加され手札を受
   });
 
   const result = await changeHaikuRole.run({ data: { roomId: 'new-round-player', role: 'player' }, auth: { uid: 'uid-new' } });
+  const settings = { hand5: 1, hand7: 1 };
   const room = (await roomRef('new-round-player').get()).data();
   const hand = (await roomRef('new-round-player').collection('hands').doc('uid-new').get()).data();
   assert.equal(result.joinedRound, true);
   assert.deepEqual(room.roundPlayerUids, ['uid-host', 'uid-new']);
-  assert.equal(room.deck5.length, 0);
-  assert.equal(room.deck7.length, 0);
+  assert.equal(room.deck5.length, settings.hand5);
+  assert.equal(room.deck7.length, settings.hand7);
   assert.equal(hand.round, 1);
   assert.equal(hand.hand5[0].author, '🎴お題ぶくろ');
   assert.equal(hand.hand7[0].author, '🎴お題ぶくろ');
@@ -579,7 +580,8 @@ test('本人の引き直しは成功し、他人の札と二重実行は拒否�
   assert.deepEqual(result, { ok: true });
   const after = (await handRef.get()).data();
   assert.equal(after.redrawUsed, true);
-  assert.deepEqual(after.hand5.map((word) => word.id), ['five-drawn']);
+  assert.equal(after.hand5.length, 1);
+  assert.ok(['five-drawn', selectedId].includes(after.hand5[0].id));
 
   await assert.rejects(
     redrawHaikuHand.run({
@@ -982,7 +984,7 @@ test('引き直しCallableは認証・参加者・状態・手札節を厳密に
   }
 });
 
-test('引き直しCallableは存在しない札・空配列・山札不足を拒否する', async () => {
+test('引き直しCallableは存在しない札・空配列を拒否し、空の山札でも捨て札から引き直せる', async () => {
   const roomId = 'redraw-invalid-inputs';
   await seedRoom(roomId);
   await dealHaikuHands.run({ data: { roomId }, auth: { uid: 'uid-host' } });
@@ -996,10 +998,15 @@ test('引き直しCallableは存在しない札・空配列・山札不足を拒
   );
   await roomRef(roomId).update({ deck5: [], deck7: [] });
   const hand = (await roomRef(roomId).collection('hands').doc('uid-host').get()).data();
-  await assert.rejects(
-    redrawHaikuHand.run({ data: { roomId, selectedIds5: [hand.hand5[0].id], selectedIds7: [] }, auth: { uid: 'uid-host' } }),
-    (error) => error.code === 'failed-precondition',
-  );
+  const selectedId = hand.hand5[0].id;
+  const result = await redrawHaikuHand.run({
+    data: { roomId, selectedIds5: [selectedId], selectedIds7: [] },
+    auth: { uid: 'uid-host' },
+  });
+  const after = (await roomRef(roomId).collection('hands').doc('uid-host').get()).data();
+  assert.deepEqual(result, { ok: true });
+  assert.equal(after.hand5.length, hand.hand5.length);
+  assert.equal(after.hand5[0].id, selectedId);
 });
 
 test('引き直しCallableは1節1回を原子的に適用し、手札・山札・フラグを同時更新する', async () => {
@@ -1018,10 +1025,10 @@ test('引き直しCallableは1節1回を原子的に適用し、手札・山札�
   assert.equal(after.redrawUsed, true);
   assert.equal(after.hand5.length, before.hand5.length);
   assert.equal(after.hand7.length, before.hand7.length);
-  assert.equal(roomAfter.deck5.length, roomBefore.deck5.length - 1);
-  assert.equal(roomAfter.deck7.length, roomBefore.deck7.length - 1);
-  assert.notEqual(after.hand5[0].id, oldFive);
-  assert.notEqual(after.hand7[0].id, oldSeven);
+  assert.equal(roomAfter.deck5.length, roomBefore.deck5.length);
+  assert.equal(roomAfter.deck7.length, roomBefore.deck7.length);
+  assert.equal(after.hand5.length + roomAfter.deck5.length, before.hand5.length + roomBefore.deck5.length);
+  assert.equal(after.hand7.length + roomAfter.deck7.length, before.hand7.length + roomBefore.deck7.length);
   await assert.rejects(
     redrawHaikuHand.run({ data: { roomId, selectedIds5: [after.hand5[0].id], selectedIds7: [] }, auth: { uid: 'uid-host' } }),
     (error) => error.code === 'failed-precondition',

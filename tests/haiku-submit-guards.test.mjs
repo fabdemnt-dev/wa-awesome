@@ -675,3 +675,23 @@ test('room onSnapshotはfromCacheを早期破棄せず更新順序制御へ渡�
   assert.doesNotMatch(subscription, /fromCache\) return/);
   assert.match(subscription, /applyRoomData\(snapshot\.data\(\), \+\+roomUpdateSequence\)/);
 });
+
+
+test('redrawHaikuHandは捨て札をpoolへ戻して手札と山札の総数を維持する', async () => {
+  const source = await fs.readFile(new URL('../functions/index.js', import.meta.url), 'utf8');
+  const implementation = extractBetween(source, 'exports.redrawHaikuHand =', '\nfunction requireParticipant');
+  assert.match(implementation, /const pool5 = \[\.\.\.selected5, \.\.\.deck5\]/);
+  assert.match(implementation, /const pool7 = \[\.\.\.selected7, \.\.\.deck7\]/);
+  assert.match(implementation, /const newDeck5 = shuffle\(pool5\)/);
+  assert.match(implementation, /const newDeck7 = shuffle\(pool7\)/);
+  assert.ok(!implementation.includes("山札が不足しています"));
+  assert.match(implementation, /const drawn5 = newDeck5\.splice\(0, selected5\.length\)/);
+  assert.match(implementation, /const drawn7 = newDeck7\.splice\(0, selected7\.length\)/);
+});
+
+test('playing中の途中参加は初期手札に加えて引き直し1回分を補充する', async () => {
+  const source = await fs.readFile(new URL('../functions/index.js', import.meta.url), 'utf8');
+  const implementation = extractBetween(source, "if (room.status === 'playing' && role === 'player' && joinedRound)", '\n  transaction.update(roomRef, update);');
+  assert.match(implementation, /settings\.hand5 \* 2 - deck5\.length/);
+  assert.match(implementation, /settings\.hand7 \* 2 - deck7\.length/);
+});
