@@ -960,14 +960,8 @@ exports.dealPoemHands = onCall(callableOptions, async (request) => {
     if (!snapshot.exists) fail('not-found', 'ルームが見つかりません。');
     const room = snapshot.data() || {};
     if (room.schemaVersion !== 2) fail('failed-precondition', '新形式のルームだけ配札Callableを利用できます。');
-    const participants = participantsByUid(room);
-    if (room.currentHost || room.currentHostUid) {
-      requireHostUid(room, uid, participants);
-    } else {
-      const firstPlayer = Array.isArray(room.players) ? room.players[0] : null;
-      const firstPlayerUid = firstPlayer ? latestUidForName(participants, firstPlayer) : null;
-      if (!firstPlayerUid || firstPlayerUid !== uid) fail('permission-denied', '親だけが配札できます。');
-    }
+    // ポエムは参加プレイヤー全員が開始できる。
+    const { participants } = requirePoemPlayer(room, uid);
     if (room.status !== 'lobby') fail('failed-precondition', 'ロビー状態のルームだけ配札できます。');
     const playerUids = validatePlayerUids(room, participants);
     const count = handCount(room, 'handCount', 5);

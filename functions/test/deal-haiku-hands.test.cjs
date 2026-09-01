@@ -67,7 +67,7 @@ async function seedRoom(roomId) {
   });
 }
 
-test('Poem配札Callableは親だけがUID別手札へ配札できる', async () => {
+test('Poem配札Callableは親以外のプレイヤーもUID別手札へ配札できる', async () => {
   await poemRoomRef('poem-deal').set({
     schemaVersion: 2, status: 'lobby', roundCount: 1, currentHost: '親', currentHostUid: 'uid-host',
     players: ['親', '参加者'], spectators: [], participantUids: { 'uid-host': '親', 'uid-player': '参加者' },
@@ -77,10 +77,10 @@ test('Poem配札Callableは親だけがUID別手札へ配札できる', async ()
     ], poems: {},
   });
   await assert.rejects(
-    dealPoemHands.run({ data: { roomId: 'poem-deal' }, auth: { uid: 'uid-player' } }),
+    dealPoemHands.run({ data: { roomId: 'poem-deal' }, auth: { uid: 'uid-outsider' } }),
     (error) => error.code === 'permission-denied',
   );
-  const result = await dealPoemHands.run({ data: { roomId: 'poem-deal' }, auth: { uid: 'uid-host' } });
+  const result = await dealPoemHands.run({ data: { roomId: 'poem-deal' }, auth: { uid: 'uid-player' } });
   const room = (await poemRoomRef('poem-deal').get()).data();
   assert.equal(result.handCount, 2);
   assert.equal(room.status, 'playing');
