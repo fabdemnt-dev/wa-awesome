@@ -22,7 +22,7 @@ function syncHarness(getDocFromServer) {
     window: {}, state: { roomRef: {} }, getDocFromServer,
     console: { warn() {} }, document: { getElementById: () => button },
     showGameError: error => errors.push(error),
-    applied,
+    applied, setTimeout, clearTimeout,
   });
   vm.runInContext(`let roomUpdateSequence = 0; let last = 0;
     function applyRoomData(data, sequence = ++roomUpdateSequence) {
@@ -77,11 +77,45 @@ test('繰り返し画面更新しても入力1回につき保存とサイズ調�
   };
   const context = vm.createContext({
     document: { getElementById: () => textarea },
-    sessionStorage: { getItem: () => null, setItem: () => { saves++; } },
+    state: { roomId: 'room', myUid: 'user', currentData: { status: 'playing', roundCount: 1 }, selectedHandIndices: new Set() },
+    sessionStorage: { getItem: () => null, removeItem() {}, setItem: key => { if (key === 'poemDraft') saves++; } },
   });
-  vm.runInContext(between(actionSource, 'export function setupAutoResize', '\nwindow.onCardClick').replace('export ', ''), context);
+  vm.runInContext(between(actionSource, 'let draftContext', '\nwindow.onCardClick').replaceAll('export ', ''), context);
   for (let i = 0; i < 100; i++) context.setupAutoResize();
   for (const fn of handlers) fn.call(textarea);
   assert.equal(saves, 1);
   assert.equal(measurements, 1);
+});
+
+test('復帰時は停止中の取得を待たず、遅れて返ったロビーで画面を戻さない', async () => {
+  const old = deferred();
+  let calls = 0;
+  const h = syncHarness(() => ++calls === 1 ? old.promise : Promise.resolve({ exists: () => true, data: () => 'playing' }));
+  const oldWork = h.window.resync();
+  assert.equal((await h.window.resync({ fresh: true })).ok, true);
+  assert.deepEqual(h.applied, ['playing']);
+  old.resolve({ exists: () => true, data: () => 'lobby' });
+  assert.equal((await oldWork).superseded, true);
+  assert.deepEqual(h.applied, ['playing']);
+});
+
+test('下書きは同じ部屋・本人・回で保持し、別の回や部屋へ持ち越さない', () => {
+  const storage = new Map();
+  const textarea = { value: '', style: {} };
+  const state = { roomId: 'A', myUid: 'u1', currentData: { status: 'playing', roundCount: 1 }, selectedHandIndices: new Set([0]) };
+  function create() {
+    const context = vm.createContext({ state, document: { getElementById: () => textarea }, sessionStorage: {
+      getItem: k => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, v), removeItem: k => storage.delete(k),
+    } });
+    vm.runInContext(between(actionSource, 'let draftContext', '\nwindow.onCardClick').replaceAll('export ', ''), context);
+    return context;
+  }
+  let h = create();
+  h.syncPoemDraftContext(); h.savePoemDraft('未投稿'); textarea.value = '未投稿';
+  h.syncPoemDraftContext(); assert.equal(textarea.value, '未投稿');
+  h = create(); textarea.value = ''; h.syncPoemDraftContext(); assert.equal(textarea.value, '未投稿');
+  state.currentData.roundCount = 2; state.selectedHandIndices.add(0); h.syncPoemDraftContext();
+  assert.equal(textarea.value, ''); assert.equal(state.selectedHandIndices.size, 0);
+  h.savePoemDraft('2回目'); state.roomId = 'B'; h.syncPoemDraftContext(); assert.equal(textarea.value, '');
+  h.savePoemDraft('Bの下書き'); state.myUid = 'u2'; h.syncPoemDraftContext(); assert.equal(textarea.value, '');
 });

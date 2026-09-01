@@ -3,7 +3,7 @@ import { doc, getDocFromServer, setDoc, onSnapshot, updateDoc, runTransaction, a
 import { normalizeParticipantName, setParticipantRole, normalizeParticipantRoles, getParticipantStorageKey } from './participant-utils.js';
 import state from './poem-state.js';
 import { escapeHTML, escapeJS, renderInputFields, renderHand, renderBoards } from './poem-render.js';
-import { setupAutoResize } from './poem-action.js';
+import { setupAutoResize, syncPoemDraftContext } from './poem-action.js';
 import { removePoemWord, updatePoemSettings, removePlayer as removePlayerSecure, changePoemRole } from './poem-functions.js';
 import { subscribeRoomHistory } from './room-history.js';
 import { ensureSignedIn } from './wordset-auth.js';
@@ -110,6 +110,7 @@ function applyRoomData(data, sequence = ++roomUpdateSequence) {
 
   if (spectators.includes(state.myName)) state.isSpectator = true;
   if (players.includes(state.myName)) state.isSpectator = false;
+  syncPoemDraftContext();
   updateRoleHelp(state.currentData);
 
   const st = state.currentData.settings || { handCount: 5 };
@@ -217,32 +218,45 @@ function applyRoomData(data, sequence = ++roomUpdateSequence) {
 // ここでは読み取りと再描画のみを行い、ゲーム状態を変更する書き込みは一切行わない。
 let roomResyncPromise = null;
 let roomResyncInterval = null;
-async function resyncRoomFromFirestore() {
+let roomSyncGeneration = 0;
+async function resyncRoomFromFirestore(options = {}) {
   if (!state.roomRef) return { ok: false, error: new Error('ルームが未接続です。') };
+  // 復帰時はバックグラウンドで停止した取得を待たず、新しく取得する。
+  if (options.fresh) {
+    roomSyncGeneration++;
+    roomResyncPromise = null;
+  }
   if (roomResyncPromise) {
     await roomResyncPromise;
-    // 待機中に投稿・披露などの更新が完了している可能性があるため、
-    // 既存取得の結果を使わず、サーバーからもう一度取得する。
     return resyncRoomFromFirestore();
   }
-
-  roomResyncPromise = (async () => {
+  const generation = roomSyncGeneration;
+  const roomRef = state.roomRef;
+  const pending = (async () => {
+    let timer;
     try {
-      const snapshot = await getDocFromServer(state.roomRef);
+      const timeout = new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('最新状態の取得がタイムアウトしました。')), 10000);
+      });
+      const snapshot = await Promise.race([getDocFromServer(roomRef), timeout]);
+      if (generation !== roomSyncGeneration || roomRef !== state.roomRef) {
+        return { ok: false, superseded: true };
+      }
       if (!snapshot.exists()) throw new Error('ルームが見つかりません。');
       applyRoomData(snapshot.data(), ++roomUpdateSequence);
       return { ok: true };
     } catch (e) {
-      // 再取得に失敗しても、既存のonSnapshot監視やゲーム操作は壊さない
       console.warn('サーバーからの再同期に失敗しました:', e);
       return { ok: false, error: e };
+    } finally {
+      clearTimeout(timer);
     }
   })();
-
+  roomResyncPromise = pending;
   try {
-    return await roomResyncPromise;
+    return await pending;
   } finally {
-    roomResyncPromise = null;
+    if (roomResyncPromise === pending) roomResyncPromise = null;
   }
 }
 
@@ -260,14 +274,18 @@ function startRoomResyncPolling() {
 // メイン: タブ/アプリの表示・非表示切替を検知する標準API
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
-  resyncRoomFromFirestore();
+  resyncRoomFromFirestore({ fresh: true });
 });
 
 // 保険: ブラウザがページをbfcacheから復元した場合(event.persisted)にも同様に再同期する
 // (特定ブラウザ専用の分岐ではなく、標準のpageshowイベントを使う)
 window.addEventListener('pageshow', (event) => {
   if (!event.persisted) return;
-  resyncRoomFromFirestore();
+  resyncRoomFromFirestore({ fresh: true });
+});
+
+window.addEventListener('focus', () => {
+  if (document.visibilityState === 'visible') resyncRoomFromFirestore({ fresh: true });
 });
 
 // 手動更新ボタン: 電波状況などでリアルタイム反映が遅れているときに、
@@ -277,8 +295,8 @@ window.manualResync = async function(where) {
   const btn = document.getElementById(where === 'game' ? 'manual-resync-btn-game' : 'manual-resync-btn-lobby');
   if (btn) { btn.disabled = true; btn.innerText = '🔄 更新中…'; }
   try {
-    const result = await resyncRoomFromFirestore();
-    if (!result.ok) showGameError(result.error, '最新の状態への更新');
+    const result = await resyncRoomFromFirestore({ fresh: true });
+    if (!result.ok && !result.superseded) showGameError(result.error, '最新の状態への更新');
   } finally {
     if (btn) { btn.disabled = false; btn.innerText = '🔄 最新の状態に更新'; }
   }
