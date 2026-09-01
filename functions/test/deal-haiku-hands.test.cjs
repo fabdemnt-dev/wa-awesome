@@ -984,7 +984,7 @@ test('引き直しCallableは認証・参加者・状態・手札節を厳密に
   }
 });
 
-test('引き直しCallableは存在しない札・空配列を拒否し、空の山札でも捨て札から引き直せる', async () => {
+test('引き直しCallableは存在しない札・空配列・山札不足を拒否する', async () => {
   const roomId = 'redraw-invalid-inputs';
   await seedRoom(roomId);
   await dealHaikuHands.run({ data: { roomId }, auth: { uid: 'uid-host' } });
@@ -998,15 +998,10 @@ test('引き直しCallableは存在しない札・空配列を拒否し、空の
   );
   await roomRef(roomId).update({ deck5: [], deck7: [] });
   const hand = (await roomRef(roomId).collection('hands').doc('uid-host').get()).data();
-  const selectedId = hand.hand5[0].id;
-  const result = await redrawHaikuHand.run({
-    data: { roomId, selectedIds5: [selectedId], selectedIds7: [] },
-    auth: { uid: 'uid-host' },
-  });
-  const after = (await roomRef(roomId).collection('hands').doc('uid-host').get()).data();
-  assert.deepEqual(result, { ok: true });
-  assert.equal(after.hand5.length, hand.hand5.length);
-  assert.equal(after.hand5[0].id, selectedId);
+  await assert.rejects(
+    redrawHaikuHand.run({ data: { roomId, selectedIds5: [hand.hand5[0].id], selectedIds7: [] }, auth: { uid: 'uid-host' } }),
+    (error) => error.code === 'failed-precondition',
+  );
 });
 
 test('引き直しCallableは1節1回を原子的に適用し、手札・山札・フラグを同時更新する', async () => {
@@ -1025,10 +1020,12 @@ test('引き直しCallableは1節1回を原子的に適用し、手札・山札�
   assert.equal(after.redrawUsed, true);
   assert.equal(after.hand5.length, before.hand5.length);
   assert.equal(after.hand7.length, before.hand7.length);
-  assert.equal(roomAfter.deck5.length, roomBefore.deck5.length);
-  assert.equal(roomAfter.deck7.length, roomBefore.deck7.length);
-  assert.equal(after.hand5.length + roomAfter.deck5.length, before.hand5.length + roomBefore.deck5.length);
-  assert.equal(after.hand7.length + roomAfter.deck7.length, before.hand7.length + roomBefore.deck7.length);
+  assert.equal(roomAfter.deck5.length, roomBefore.deck5.length - 1);
+  assert.equal(roomAfter.deck7.length, roomBefore.deck7.length - 1);
+  assert.equal(roomAfter.discardPool5.length, 1);
+  assert.equal(roomAfter.discardPool7.length, 1);
+  assert.equal(after.hand5.length + roomAfter.deck5.length + roomAfter.discardPool5.length, before.hand5.length + roomBefore.deck5.length);
+  assert.equal(after.hand7.length + roomAfter.deck7.length + roomAfter.discardPool7.length, before.hand7.length + roomBefore.deck7.length);
   await assert.rejects(
     redrawHaikuHand.run({ data: { roomId, selectedIds5: [after.hand5[0].id], selectedIds7: [] }, auth: { uid: 'uid-host' } }),
     (error) => error.code === 'failed-precondition',

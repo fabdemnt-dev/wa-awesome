@@ -677,16 +677,19 @@ test('room onSnapshotはfromCacheを早期破棄せず更新順序制御へ渡�
 });
 
 
-test('redrawHaikuHandは捨て札をpoolへ戻して手札と山札の総数を維持する', async () => {
+test('redrawHaikuHandは同節の選択札を候補から除外し捨て札プールへ保存する', async () => {
   const source = await fs.readFile(new URL('../functions/index.js', import.meta.url), 'utf8');
   const implementation = extractBetween(source, 'exports.redrawHaikuHand =', '\nfunction requireParticipant');
-  assert.match(implementation, /const pool5 = \[\.\.\.selected5, \.\.\.deck5\]/);
-  assert.match(implementation, /const pool7 = \[\.\.\.selected7, \.\.\.deck7\]/);
-  assert.match(implementation, /const newDeck5 = shuffle\(pool5\)/);
-  assert.match(implementation, /const newDeck7 = shuffle\(pool7\)/);
-  assert.ok(!implementation.includes("山札が不足しています"));
+  assert.match(implementation, /const discardPool5 = Array\.isArray\(room\.discardPool5\)/);
+  assert.match(implementation, /const discardPool7 = Array\.isArray\(room\.discardPool7\)/);
+  assert.match(implementation, /const newDeck5 = shuffle\(deck5\)/);
+  assert.match(implementation, /const newDeck7 = shuffle\(deck7\)/);
+  assert.match(implementation, /discardPool5,/);
+  assert.match(implementation, /discardPool7,/);
   assert.match(implementation, /const drawn5 = newDeck5\.splice\(0, selected5\.length\)/);
   assert.match(implementation, /const drawn7 = newDeck7\.splice\(0, selected7\.length\)/);
+  assert.ok(!implementation.includes('const pool5 = [...selected5, ...deck5]'));
+  assert.ok(!implementation.includes('const pool7 = [...selected7, ...deck7]'));
 });
 
 test('playing中の途中参加は初期手札に加えて引き直し1回分を補充する', async () => {
