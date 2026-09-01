@@ -5,23 +5,47 @@ import { exportPoemText, exportPoemCSV } from './poem-export.js';
 import { getParticipantStorageKey, getParticipantUidByName } from './participant-utils.js';
 import { submitPoemSecure, revealPoemSecure, reactPoemSecure } from './poem-functions.js';
 
+let draftContext = null;
+let draftWasSpectator = false;
+
+export function syncPoemDraftContext() {
+  const data = state.currentData;
+  if (!data || !state.roomId) return;
+  const context = JSON.stringify([state.roomId, state.myUid || state.myName, data.roundCount || 1]);
+  if (context === draftContext && draftWasSpectator === state.isSpectator) return;
+  draftWasSpectator = state.isSpectator;
+  draftContext = context;
+  const savedContext = sessionStorage.getItem('poemDraftContext');
+  const savedText = savedContext === context ? sessionStorage.getItem('poemDraft') || '' : '';
+  if (savedContext !== context) {
+    sessionStorage.removeItem('poemDraft');
+    sessionStorage.removeItem('poemDraftContext');
+  }
+  state.selectedHandIndices.clear();
+  const textarea = document.getElementById('poem-input-area');
+  if (textarea) {
+    textarea.value = savedText;
+    textarea.style.height = 'auto';
+  }
+}
+
 export function setupAutoResize() {
+  syncPoemDraftContext();
   const textarea = document.getElementById('poem-input-area');
   if (!textarea) return;
-
-  const savedDraft = sessionStorage.getItem('poemDraft');
-  if (savedDraft) {
-    textarea.value = savedDraft;
-    resizeTextarea.call(textarea);
-  }
-
   textarea.removeEventListener('input', handlePoemInput);
   textarea.addEventListener('input', handlePoemInput);
 }
 
+function savePoemDraft(text) {
+  if (!draftContext || state.isSpectator || state.currentData?.status !== 'playing') return;
+  sessionStorage.setItem('poemDraftContext', draftContext);
+  sessionStorage.setItem('poemDraft', text);
+}
+
 function handlePoemInput() {
   resizeTextarea.call(this);
-  sessionStorage.setItem('poemDraft', this.value);
+  savePoemDraft(this.value);
 }
 
 function resizeTextarea() {
@@ -46,7 +70,7 @@ window.onCardClick = function(idx) {
   textarea.selectionStart = textarea.selectionEnd = start + wordText.length;
   
   resizeTextarea.call(textarea);
-  sessionStorage.setItem('poemDraft', textarea.value);
+  savePoemDraft(textarea.value);
   textarea.focus();
 
   if (state.selectedHandIndices.has(idx)) {
