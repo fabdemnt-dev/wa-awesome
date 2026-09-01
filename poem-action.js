@@ -15,11 +15,13 @@ export function setupAutoResize() {
     resizeTextarea.call(textarea);
   }
 
-  textarea.removeEventListener('input', resizeTextarea);
-  textarea.addEventListener('input', function() {
-    resizeTextarea.call(this);
-    sessionStorage.setItem('poemDraft', this.value);
-  });
+  textarea.removeEventListener('input', handlePoemInput);
+  textarea.addEventListener('input', handlePoemInput);
+}
+
+function handlePoemInput() {
+  resizeTextarea.call(this);
+  sessionStorage.setItem('poemDraft', this.value);
 }
 
 function resizeTextarea() {

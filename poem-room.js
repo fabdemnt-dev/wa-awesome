@@ -226,12 +226,11 @@ async function resyncRoomFromFirestore() {
     return resyncRoomFromFirestore();
   }
 
-  const sequence = ++roomUpdateSequence;
   roomResyncPromise = (async () => {
     try {
       const snapshot = await getDocFromServer(state.roomRef);
       if (!snapshot.exists()) throw new Error('ルームが見つかりません。');
-      applyRoomData(snapshot.data(), sequence);
+      applyRoomData(snapshot.data(), ++roomUpdateSequence);
       return { ok: true };
     } catch (e) {
       // 再取得に失敗しても、既存のonSnapshot監視やゲーム操作は壊さない
@@ -277,8 +276,12 @@ window.addEventListener('pageshow', (event) => {
 window.manualResync = async function(where) {
   const btn = document.getElementById(where === 'game' ? 'manual-resync-btn-game' : 'manual-resync-btn-lobby');
   if (btn) { btn.disabled = true; btn.innerText = '🔄 更新中…'; }
-  await resyncRoomFromFirestore();
-  if (btn) { btn.disabled = false; btn.innerText = '🔄 最新の状態に更新'; }
+  try {
+    const result = await resyncRoomFromFirestore();
+    if (!result.ok) showGameError(result.error, '最新の状態への更新');
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerText = '🔄 最新の状態に更新'; }
+  }
 };
 
 export const SAMPLE_PHRASES = [
@@ -366,10 +369,10 @@ if (!roomSnapshot.exists()) {
     document.getElementById('login-sec').style.display = 'none';
     document.getElementById('lobby-sec').style.display = 'block';
 
-    onSnapshot(state.roomRef, (snapshot) => {
+    onSnapshot(state.roomRef, { includeMetadataChanges: true }, (snapshot) => {
       // キャッシュ由来の古い値で、サーバー取得済みの最新状態を巻き戻さない。
-      // 最新値は5秒ポーリングのgetDocFromServerで補完する。
-      if (snapshot.metadata?.fromCache) return;
+      // fromCacheだけがfalseへ変わる通知も受け取り、定期取得を待たず反映する。
+      if (snapshot.metadata?.fromCache || !snapshot.exists()) return;
       applyRoomData(snapshot.data(), ++roomUpdateSequence);
     }, (error) => {
       console.error('[room-onSnapshot]', error);
