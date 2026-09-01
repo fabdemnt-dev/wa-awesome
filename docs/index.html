@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>wa-awesome 仕様書・設計書 — 見直し版</title>
+<style>body{font-family:system-ui,sans-serif;max-width:740px;margin:auto;padding:24px 18px;color:#273449;background:#fafbfe;line-height:1.85}h1{font-size:1.6rem}h2{font-size:1.3rem;margin-top:2em}h3{font-size:1.05rem}a{color:#215f9d}p{overflow-wrap:anywhere}section{background:white;border:1px solid #dbe3ed;border-radius:12px;padding:18px;margin:20px 0}nav a{display:block;padding:8px}code{overflow-wrap:anywhere}.note{color:#526174;font-size:.95rem}</style>
+</head>
+<body>
+<main>
+<p><a href="../">わ〜鯖せーへき実験室へ戻る</a></p>
+<h1>wa-awesome<br>仕様書・設計書</h1>
+<p>画面と遊び方を、一つずつ見直すための文書です。確認した範囲から更新します。</p>
+<p class="note">見直し第2回：ポエム工房の開始条件と画面同期。全機能の見直しは継続中です。ここにない項目は、仕様を確定したことを意味しません。</p>
+<nav aria-label="目次"><a href="#top">トップページ</a><a href="#poem">ポエム工房：開始</a><a href="#design">開始処理の設計</a><a href="#sync">ポエム工房：画面同期</a><a href="#validation">確認状況</a></nav>
+<section id="top"><h2>トップページ</h2><p>見た目は現状で問題ないとの確認済み。入口は「ポエム工房」「俳句の庭」「神の手札」の3つです。</p></section>
+<section id="poem"><h2>ポエム工房：開始</h2><h3>今回の修正仕様</h3><p>ロビーに参加しているプレイヤーなら、誰でも「開始」を押せます。親や最初の参加者である必要はありません。</p><p>全員分の手札を配れるだけの素材が必要です。見学者と未参加者は開始できません。開始済みの回に再度開始を要求しても、手札や作品を消して配り直しません。</p><h3>見つかった食い違い</h3><p>画面側はプレイヤーに開始操作を提供していましたが、サーバー側は親、親情報がなければ最初のプレイヤーだけに制限していました。</p></section>
+<section id="design"><h2>開始処理の設計</h2><p><code>poem-game.js</code> から <code>dealPoemHands</code> を呼び出します。サーバーは認証、ルーム形式、参加プレイヤーであること、ロビー状態、全員のUID、素材数を確認します。</p><p>親判定を <code>requirePoemPlayer</code> に置き換えます。Firestoreトランザクション内でルームを読み、UID別の手札を作り、状態をplayingに更新します。同時開始で競合した場合は再試行時の状態確認で二重配札を防ぎます。</p><p>必要素材数はプレイヤー数 × 手札枚数。既存の親情報を開始した人へ変更する処理は追加しません。</p></section>
+<section id="sync"><h2>ポエム工房：画面同期</h2><h3>確認した問題</h3><p>キャッシュ由来の通知を除外する一方、サーバー確認済みへのメタデータ変更を購読していませんでした。この場合、画面反映が5秒周期の補助取得まで待たされることがあります。</p><p>サーバー取得前に付けた順序番号が途中の履歴再描画より古くなり、取得成功したデータが破棄される問題もありました。入力欄には再描画のたびに別のイベント関数が登録され、入力時の保存・サイズ調整が重複していました。</p><h3>修正設計</h3><p>includeMetadataChangesを有効にし、サーバー確認時に画面へ反映します。取得成功後に順序番号を発行し、手動更新の失敗は画面通知します。入力処理には同じ名前付き関数を使い、重複登録を防ぎます。</p><p>参考：<a href="https://firebase.google.com/docs/firestore/manage-data/enable-offline">Firebase公式のメタデータ通知仕様</a>。</p><h3>確認範囲</h3><p>追加テスト4件を含む単体テスト85件成功。端末での遅延秒数、回線状況、Functionsの起動時間は未計測です。</p></section><section id="validation"><h2>確認状況</h2><p>既存単体テスト71件と、開始処理の追加単体テスト10件が成功。追加テストは親・親以外の開始、親情報がない場合、見学者・未参加者・未認証の拒否、素材不足、旧形式、開始後の再要求を確認しています。</p><p class="note">追加単体テストはFirestoreを模擬しています。実際の同時開始と、こちらからの本番画面操作は未検証です。開始条件はPR #148でmain反映・Functionsデプロイ成功。2人目でも開始できたとの利用者確認済みです。同期修正はPR #149で自動テスト成功・main反映済みです。実端末での改善は未確認です。</p></section>
+</main>
+</body>
+</html>
