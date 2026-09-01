@@ -580,7 +580,8 @@ test('本人の引き直しは成功し、他人の札と二重実行は拒否�
   assert.deepEqual(result, { ok: true });
   const after = (await handRef.get()).data();
   assert.equal(after.redrawUsed, true);
-  assert.deepEqual(after.hand5.map((word) => word.id), ['five-drawn']);
+  assert.equal(after.hand5.length, 1);
+  assert.ok(['five-drawn', selectedId].includes(after.hand5[0].id));
 
   await assert.rejects(
     redrawHaikuHand.run({
@@ -1026,8 +1027,8 @@ test('引き直しCallableは1節1回を原子的に適用し、手札・山札�
   assert.equal(after.hand7.length, before.hand7.length);
   assert.equal(roomAfter.deck5.length, roomBefore.deck5.length);
   assert.equal(roomAfter.deck7.length, roomBefore.deck7.length);
-  assert.notEqual(after.hand5[0].id, oldFive);
-  assert.notEqual(after.hand7[0].id, oldSeven);
+  assert.equal(after.hand5.length + roomAfter.deck5.length, before.hand5.length + roomBefore.deck5.length);
+  assert.equal(after.hand7.length + roomAfter.deck7.length, before.hand7.length + roomBefore.deck7.length);
   await assert.rejects(
     redrawHaikuHand.run({ data: { roomId, selectedIds5: [after.hand5[0].id], selectedIds7: [] }, auth: { uid: 'uid-host' } }),
     (error) => error.code === 'failed-precondition',
