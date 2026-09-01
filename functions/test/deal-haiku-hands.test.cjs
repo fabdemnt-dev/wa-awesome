@@ -1004,7 +1004,8 @@ test('引き直しCallableは存在しない札・空配列を拒否し、空の
   });
   const after = (await roomRef(roomId).collection('hands').doc('uid-host').get()).data();
   assert.deepEqual(result, { ok: true });
-  assert.notEqual(after.hand5[0].id, selectedId);
+  assert.equal(after.hand5.length, hand.hand5.length);
+  assert.equal(after.hand5[0].id, selectedId);
 });
 
 test('引き直しCallableは1節1回を原子的に適用し、手札・山札・フラグを同時更新する', async () => {
