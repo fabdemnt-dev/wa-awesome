@@ -323,11 +323,12 @@ exports.redrawHaikuHand = onCall(callableOptions, async (request) => {
     }
     const deck5 = Array.isArray(room.deck5) ? room.deck5 : [];
     const deck7 = Array.isArray(room.deck7) ? room.deck7 : [];
-    if (deck5.length < selected5.length || deck7.length < selected7.length) {
-      fail('failed-precondition', '山札が不足しています。');
-    }
-    const newDeck5 = shuffle(deck5);
-    const newDeck7 = shuffle(deck7);
+    // 捨てる札を山へ戻してから引き直す。同じ節で山札が枯れないよう、
+    // 引き直し前後で「手札＋山札」の総数を維持する。
+    const pool5 = [...selected5, ...deck5];
+    const pool7 = [...selected7, ...deck7];
+    const newDeck5 = shuffle(pool5);
+    const newDeck7 = shuffle(pool7);
     const drawn5 = newDeck5.splice(0, selected5.length);
     const drawn7 = newDeck7.splice(0, selected7.length);
     const kept5 = hand5.filter((word) => !selectedIds5.includes(word?.id));
@@ -464,8 +465,9 @@ async function applyHaikuRoleChange(transaction, roomRef, room, uid, role, suppl
     const pool5 = Array.isArray(room.supplementPool5) && room.supplementPool5.length ? room.supplementPool5 : DEFAULT_WORDS_5;
     const pool7 = Array.isArray(room.supplementPool7) && room.supplementPool7.length ? room.supplementPool7 : DEFAULT_WORDS_7;
     const supplementAuthorLabel = optionalText(room.supplementAuthorLabel, 100) || '🎴お題ぶくろ';
-    const missing5 = Math.max(0, settings.hand5 - deck5.length);
-    const missing7 = Math.max(0, settings.hand7 - deck7.length);
+    // 途中参加者の初期手札に加え、引き直し1回分も確保する。
+    const missing5 = Math.max(0, settings.hand5 * 2 - deck5.length);
+    const missing7 = Math.max(0, settings.hand7 * 2 - deck7.length);
     deck5.push(...makeSupplementCards(pool5, missing5, supplementAuthorLabel));
     deck7.push(...makeSupplementCards(pool7, missing7, supplementAuthorLabel));
     if (deck5.length < settings.hand5 || deck7.length < settings.hand7) fail('failed-precondition', '途中参加者へ配る山札が不足しています。');
