@@ -323,12 +323,15 @@ exports.redrawHaikuHand = onCall(callableOptions, async (request) => {
     }
     const deck5 = Array.isArray(room.deck5) ? room.deck5 : [];
     const deck7 = Array.isArray(room.deck7) ? room.deck7 : [];
-    // 捨てる札を山へ戻してから引き直す。同じ節で山札が枯れないよう、
-    // 引き直し前後で「手札＋山札」の総数を維持する。
-    const pool5 = [...selected5, ...deck5];
-    const pool7 = [...selected7, ...deck7];
-    const newDeck5 = shuffle(pool5);
-    const newDeck7 = shuffle(pool7);
+    if (deck5.length < selected5.length || deck7.length < selected7.length) {
+      fail('failed-precondition', '同じ節で引き直せる山札が不足しています。');
+    }
+    // 選択札は同じ節の候補へ戻さず捨て札として保持する。次節の配札では
+    // room.words5/7から再構成されるため、捨て札は次節以降に再利用できる。
+    const discardPool5 = Array.isArray(room.discardPool5) ? [...room.discardPool5, ...selected5] : [...selected5];
+    const discardPool7 = Array.isArray(room.discardPool7) ? [...room.discardPool7, ...selected7] : [...selected7];
+    const newDeck5 = shuffle(deck5);
+    const newDeck7 = shuffle(deck7);
     const drawn5 = newDeck5.splice(0, selected5.length);
     const drawn7 = newDeck7.splice(0, selected7.length);
     const kept5 = hand5.filter((word) => !selectedIds5.includes(word?.id));
@@ -339,7 +342,12 @@ exports.redrawHaikuHand = onCall(callableOptions, async (request) => {
       redrawUsed: true,
       updatedAt: FieldValue.serverTimestamp(),
     });
-    transaction.update(roomRef, { deck5: newDeck5, deck7: newDeck7 });
+    transaction.update(roomRef, {
+      deck5: newDeck5,
+      deck7: newDeck7,
+      discardPool5,
+      discardPool7,
+    });
   });
   return { ok: true };
 });
@@ -1041,7 +1049,7 @@ exports.advanceHaikuRound = onCall(callableOptions, async (request) => {
       status: 'lobby', currentHost: nextHost, currentHostUid: nextHostUid, roundCount: currentRound + 1,
       scores: nextScores, words5: carriedWords5, words7: carriedWords7,
       lastRoundResult: { round: currentRound, taeWinners: [...taeWinners], taePoints },
-      hands5: {}, hands7: {}, deck5: [], deck7: [], phrases: {}, phraseDetails: {}, votes: {}, voteRoles: {}, revealedPhrases: {}, selfPraise: {}, redraws: {},
+      hands5: {}, hands7: {}, deck5: [], deck7: [], discardPool5: [], discardPool7: [], phrases: {}, phraseDetails: {}, votes: {}, voteRoles: {}, revealedPhrases: {}, selfPraise: {}, redraws: {},
       roundPlayerUids: FieldValue.delete(), roundPlayerNames: FieldValue.delete(),
     });
     transaction.set(historyRef, {
