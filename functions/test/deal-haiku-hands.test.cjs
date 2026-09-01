@@ -86,6 +86,8 @@ test('Poem配札Callableは親以外のプレイヤーもUID別手札へ配札�
   assert.equal(room.status, 'playing');
   assert.equal(room.hands['uid-host'].length, 2);
   assert.equal(room.hands['uid-player'].length, 2);
+  assert.equal(room.currentHost, undefined);
+  assert.equal(room.currentHostUid, undefined);
 });
 
 test('Haiku次節Callableは得点・履歴・親交代・素材持越しを一括処理する', async () => {

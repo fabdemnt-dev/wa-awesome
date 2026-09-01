@@ -132,11 +132,9 @@ button:active {
 .participant-group-spectator { color:#64748b; border-top:1px solid #e2e8f0; padding-top:10px; }
 .participant-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:8px; }
 .participant-card { display:flex; align-items:center; gap:9px; min-width:0; padding:9px 10px; border:1px solid #e2e8f0; border-radius:10px; background:#f8fafc; }
-.participant-card-host { border-color:#fbbf24; background:#fffbeb; }
 .participant-card-me { box-shadow:0 0 0 2px rgba(59,130,246,.14); }
 .participant-card-spectator { background:#f8fafc; border-style:dashed; }
 .participant-avatar { flex:0 0 32px; width:32px; height:32px; display:grid; place-items:center; border-radius:50%; background:#dbeafe; color:#1d4ed8; font-weight:800; }
-.participant-card-host .participant-avatar { background:#fef3c7; color:#b45309; }
 .participant-main { min-width:0; flex:1; }
 .participant-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#1e293b; font-weight:800; font-size:14px; }
 .participant-self { display:inline-block; margin-left:5px; padding:1px 5px; border-radius:5px; background:#dbeafe; color:#1d4ed8; font-size:10px; vertical-align:middle; }

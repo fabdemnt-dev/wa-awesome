@@ -145,11 +145,11 @@ export function renderBoards() {
         </div>
 
         <div style="margin-top: 12px;">
-          ${!isRevealed ? `
+          ${!isRevealed ? (state.isSpectator ? '<p>作品の披露をお待ちください</p>' : `
             <button class="btn-primary" onclick="revealPoem('${jsPName}')" style="width: 100%; padding: 12px; font-size: 15px;">
               🎁 タップして作品を開く
             </button>
-          ` : `
+          `) : `
             <div style="margin-top: 8px; padding: 12px; background: #f8fafc; border-left: 4px solid ${userColor}; border-radius: 4px;">
               <p style="font-size: 15px; line-height: 1.5; white-space: pre-wrap; margin: 0;">${escapeHTML(poemData.text)}</p>
             </div>

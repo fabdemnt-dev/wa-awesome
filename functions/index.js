@@ -642,7 +642,9 @@ exports.removePlayer = onCall(callableOptions, async (request) => {
       spectators: (room.spectators || []).filter((name) => name !== targetName),
       participantUids: Object.fromEntries([...participants.entries()].filter(([participantUid]) => !removedUids.includes(participantUid))),
     };
-    if (room.currentHost === targetName || room.currentHostUid === targetUid) {
+    if (game === 'poem') {
+      Object.assign(update, obsoletePoemHostFields());
+    } else if (room.currentHost === targetName || room.currentHostUid === targetUid) {
       update.currentHost = null;
       update.currentHostUid = null;
     }
@@ -661,6 +663,7 @@ exports.claimHost = onCall(callableOptions, async (request) => {
   const uid = requireAuthenticated(request);
   const roomId = requireText(request.data?.roomId, 'ルームID', 150);
   const game = roomPrefix(request.data?.game);
+  if (game !== 'haiku') fail('failed-precondition', 'ポエムには親の役割はありません。');
   const roomRef = db.collection('rooms').doc(`${game}_${roomId}`);
   await db.runTransaction(async (transaction) => {
     const snapshot = await transaction.get(roomRef);
@@ -693,11 +696,9 @@ exports.changePoemRole = onCall(callableOptions, async (request) => {
     const participants = participantsByUid(room);
     const name = participants.get(uid);
     if (!name) fail('permission-denied', '参加者だけが役割変更できます。');
-    if (room.status === 'playing' && role === 'spectator' && name === room.currentHost) fail('failed-precondition', '親はラウンド中に見学者へ切り替えられません。');
     const players = (room.players || []).filter((item) => item !== name);
     const spectators = (room.spectators || []).filter((item) => item !== name);
     const update = { players: role === 'player' ? [...players, name] : players, spectators: role === 'spectator' ? [...spectators, name] : spectators };
-    if (!room.currentHost && role === 'player') { update.currentHost = name; update.currentHostUid = uid; }
     if (room.status === 'playing' && role === 'player') {
       const settings = room.settings || { handCount: 5 };
       const hands = isPlainObject(room.hands) ? { ...room.hands } : {};
@@ -710,7 +711,7 @@ exports.changePoemRole = onCall(callableOptions, async (request) => {
       hands[uid] = hand;
       update.hands = hands;
     }
-    transaction.update(roomRef, update);
+    transaction.update(roomRef, { ...update, ...obsoletePoemHostFields() });
   });
   return { ok: true };
 });
@@ -731,7 +732,8 @@ async function updateGameSettings(request, prefix, fields) {
     const room = snapshot.data() || {};
     if (room.schemaVersion !== 2) fail('failed-precondition', '新形式のルームだけ設定Callableを利用できます。');
     const participants = participantsByUid(room);
-    requireHostUid(room, uid, participants);
+    if (prefix === 'poem') requirePoemPlayer(room, uid);
+    else requireHostUid(room, uid, participants);
     if (room.status !== 'lobby') fail('failed-precondition', '開始後は設定を変更できません。');
     const currentSettings = isPlainObject(room.settings) ? room.settings : {};
     const settings = { ...currentSettings };
@@ -741,7 +743,7 @@ async function updateGameSettings(request, prefix, fields) {
       if (carryOver !== undefined && typeof carryOver !== 'boolean') fail('invalid-argument', '素材持越し設定が正しくありません。');
       settings.carryOver = carryOver === undefined ? currentSettings.carryOver !== false : carryOver;
     }
-    transaction.update(roomRef, { settings });
+    transaction.update(roomRef, { settings, ...(prefix === 'poem' ? obsoletePoemHostFields() : {}) });
   });
   return { ok: true };
 }
@@ -970,9 +972,7 @@ exports.dealPoemHands = onCall(callableOptions, async (request) => {
     const shuffled = shuffle(words);
     const hands = {};
     playerUids.forEach((playerUid) => { hands[playerUid] = shuffled.splice(0, count); });
-    const hostName = room.currentHost || (Array.isArray(room.players) ? room.players[0] : null);
-    const hostUid = room.currentHostUid || latestUidForName(participants, hostName);
-    transaction.update(roomRef, { status: 'playing', hands, poems: {}, currentHost: hostName, currentHostUid: hostUid });
+    transaction.update(roomRef, { status: 'playing', hands, poems: {}, ...obsoletePoemHostFields() });
     result = { ok: true, hands: playerUids.length, handCount: count };
   });
   return result;
@@ -1117,6 +1117,11 @@ exports.submitHaikuVote = onCall(callableOptions, async (request) => {
   return { ok: true };
 });
 
+// 既存ルームの親情報は、通常操作の更新時に取り除く。
+function obsoletePoemHostFields() {
+  return { currentHost: FieldValue.delete(), currentHostUid: FieldValue.delete() };
+}
+
 function requirePoemRoomParticipant(room, uid) {
   const participants = participantsByUid(room);
   const name = participants.get(uid);
@@ -1164,11 +1169,9 @@ exports.revealPoemSecure = onCall(callableOptions, async (request) => {
     const snapshot = await transaction.get(roomRef);
     if (!snapshot.exists) fail('not-found', 'ルームが見つかりません。');
     const room = snapshot.data() || {};
-    const { participants } = requirePoemPlayer(room, uid);
+    requirePoemPlayer(room, uid);
     if (room.schemaVersion !== 2 || room.status !== 'playing' || room.poems?.[targetUid] === undefined) fail('failed-precondition', '披露する作品がありません。');
-    const hostUid = getCurrentHostUid(room, participants);
-    if (uid !== targetUid && uid !== hostUid) fail('permission-denied', '自分または親の作品だけ披露できます。');
-    transaction.update(roomRef, { [`poems.${targetUid}.revealed`]: true });
+    transaction.update(roomRef, { [`poems.${targetUid}.revealed`]: true, ...obsoletePoemHostFields() });
   });
   return { ok: true };
 });
