@@ -5,6 +5,64 @@ import vm from 'node:vm';
 const roomSource = readFileSync(new URL('../poem-room.js', import.meta.url), 'utf8');
 const actionSource = readFileSync(new URL('../poem-action.js', import.meta.url), 'utf8');
 
+function restoreHarness({ uid = 'u', data = { participantUids: { u: '名前' }, players: ['名前'] }, saved = '{"roomId":"A","uid":"u"}', initialRoomId = '', offline = false } = {}) {
+  const storage = new Map([['poemRoomSession', saved]]);
+  const nodes = new Map();
+  const makeNode = () => ({ style: {}, children: [], setAttribute() {}, appendChild(n) { this.children.push(n); }, addEventListener() {}, remove() {} });
+  nodes.set('login-sec', makeNode()); nodes.set('join-btn', makeNode());
+  let reads = 0, connects = 0;
+  const state = { roomRef: null };
+  const context = vm.createContext({
+    state, initialRoomId, roomUpdateSequence: 0, setTimeout, clearTimeout,
+    document: { getElementById: id => nodes.get(id), createElement: makeNode, addEventListener() {} },
+    window: { addEventListener() {} },
+    sessionStorage: { getItem: k => storage.get(k), removeItem: k => storage.delete(k) },
+    ensureSignedIn: async () => ({ uid }),
+    doc: () => ({}), db: {},
+    getDocFromServer: async () => { reads++; if (offline) throw new Error('offline'); return { exists: () => data !== null, data: () => data }; },
+    connectPoemRoom: () => { connects++; }, applyRoomData: () => {},
+  });
+  vm.runInContext('let restoringRoom = false;\n' + between(roomSource, 'async function restorePoemRoom', '\nwindow.joinRoom'), context);
+  return { context, state, storage, nodes, reads: () => reads, connects: () => connects };
+}
+
+test('再読み込みで本人の部屋と現在の役割を読み取りだけで復元する', async () => {
+  for (const role of ['players', 'spectators']) {
+    const h = restoreHarness({ data: { participantUids: { u: '名前' }, [role]: ['名前'] } });
+    await h.context.restorePoemRoom();
+    assert.equal(h.state.roomId, 'A');
+    assert.equal(h.state.myName, '名前');
+    assert.equal(h.state.isSpectator, role === 'spectators');
+    assert.equal(h.connects(), 1);
+    await h.context.restorePoemRoom();
+    assert.equal(h.connects(), 1);
+  }
+});
+
+test('削除済み部屋・参加解除・別の本人では自動入室せず保存情報を解除する', async () => {
+  for (const options of [{ data: null }, { data: { participantUids: { u: '名前' }, players: [] } }, { uid: 'other' }]) {
+    const h = restoreHarness(options);
+    await h.context.restorePoemRoom();
+    assert.equal(h.connects(), 0);
+    assert.equal(h.state.roomRef, null);
+    assert.equal(h.storage.has('poemRoomSession'), false);
+  }
+});
+
+test('通信失敗は再接続可能で、別ルームのリンクや保存のないタブは自動入室しない', async () => {
+  const h = restoreHarness({ offline: true });
+  await h.context.restorePoemRoom();
+  assert.equal(h.storage.has('poemRoomSession'), true);
+  assert.equal(h.nodes.get('join-btn').disabled, false);
+  assert.equal(h.nodes.get('login-sec').children[0].children[0].textContent, '再接続');
+  for (const options of [{ saved: null }, { saved: 'broken' }, { initialRoomId: 'B' }]) {
+    const empty = restoreHarness(options);
+    await empty.context.restorePoemRoom();
+    assert.equal(empty.reads(), 0);
+    assert.equal(empty.connects(), 0);
+  }
+});
+
 function submissionHarness(send, resync = async () => ({ ok: true })) {
   const storage = new Map();
   const input = { value: '', style: {} };
@@ -200,7 +258,7 @@ test('キャッシュからサーバー確認済みへの通知で定期取得�
     onSnapshot: (_ref, opts, callback) => { options = opts; listener = callback; },
     applyRoomData: data => applied.push(data), console, resyncRoomFromFirestore() {},
   });
-  vm.runInContext(between(roomSource, '    onSnapshot(state.roomRef', '\n    startRoomResyncPolling();'), context);
+  vm.runInContext(between(roomSource, 'onSnapshot(state.roomRef', '\n    startRoomResyncPolling();'), context);
   const emit = fromCache => listener({ exists: () => true, data: () => 'playing', metadata: { fromCache } });
   emit(true);
   assert.deepEqual(applied, []);

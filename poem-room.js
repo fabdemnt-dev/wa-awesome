@@ -314,7 +314,106 @@ export const SAMPLE_PHRASES = [
 ];
 
 
+
+// This tab's room identity is separate from browser-restored form values.
+let restoringRoom = false;
+let roomUnsubscribe = null;
+let historyUnsubscribe = null;
+function connectPoemRoom() {
+  roomUnsubscribe?.();
+  historyUnsubscribe?.();
+  previousStatus = null;
+  roomSyncGeneration++;
+    document.getElementById('login-sec').style.display = 'none';
+    document.getElementById('lobby-sec').style.display = 'block';
+
+    roomUnsubscribe = onSnapshot(state.roomRef, { includeMetadataChanges: true }, (snapshot) => {
+      // キャッシュ由来の古い値で、サーバー取得済みの最新状態を巻き戻さない。
+      // fromCacheだけがfalseへ変わる通知も受け取り、定期取得を待たず反映する。
+      if (snapshot.metadata?.fromCache || !snapshot.exists()) return;
+      applyRoomData(snapshot.data(), ++roomUpdateSequence);
+    }, (error) => {
+      console.error('[room-onSnapshot]', error);
+      resyncRoomFromFirestore();
+    });
+    startRoomResyncPolling();
+    state.roomHistory = [];
+    state.legacyHistory = [];
+    historyUnsubscribe = subscribeRoomHistory(state.roomRef, (history) => {
+      state.roomHistory = history;
+      if (state.currentData) {
+        const roomData = { ...state.currentData };
+        delete roomData.history;
+        applyRoomData(roomData);
+      }
+    }, (error) => {
+      console.error('[history-onSnapshot]', error);
+      showGameError(error, '履歴の読み込み');
+    });
+}
+
+async function restorePoemRoom() {
+  if (restoringRoom || state.roomRef) return;
+  let saved;
+  try { saved = JSON.parse(sessionStorage.getItem('poemRoomSession')); } catch { return; }
+  if (!saved || typeof saved.roomId !== 'string' || !saved.roomId || typeof saved.uid !== 'string') return;
+  if (initialRoomId && initialRoomId !== saved.roomId) return;
+  restoringRoom = true;
+  const button = document.getElementById('join-btn');
+  if (button) button.disabled = true;
+  const notice = document.getElementById('room-restore-notice') || document.createElement('p');
+  notice.id = 'room-restore-notice';
+  notice.setAttribute('role', 'status');
+  notice.textContent = '元の部屋へ接続しています…';
+  document.getElementById('login-sec').appendChild(notice);
+  try {
+    const result = await Promise.race([
+      (async () => {
+        const user = await ensureSignedIn();
+        if (user.uid !== saved.uid) return null;
+        const ref = doc(db, 'rooms', 'poem_' + saved.roomId);
+        const snapshot = await getDocFromServer(ref);
+        if (!snapshot.exists()) return null;
+        const data = snapshot.data();
+        const name = data.participantUids?.[user.uid];
+        if (!name || (!(data.players || []).includes(name) && !(data.spectators || []).includes(name))) return null;
+        return { user, ref, data, name };
+      })(),
+      new Promise((_, reject) => { restoreTimer = setTimeout(() => reject(new Error('再接続がタイムアウトしました')), 10000); })
+    ]);
+    if (!result) {
+      try { sessionStorage.removeItem('poemRoomSession'); } catch {}
+      notice.textContent = '前の参加情報を確認できませんでした。入室先を確認してください。';
+      return;
+    }
+    state.roomId = saved.roomId;
+    state.myUid = result.user.uid;
+    state.myName = result.name;
+    state.isSpectator = (result.data.spectators || []).includes(result.name);
+    state.roomRef = result.ref;
+    connectPoemRoom();
+    applyRoomData(result.data, ++roomUpdateSequence);
+    notice.remove();
+  } catch (error) {
+    state.roomRef = null;
+    notice.textContent = '元の部屋に接続できませんでした。';
+    const retry = document.createElement('button');
+    retry.type = 'button';
+    retry.textContent = '再接続';
+    retry.addEventListener('click', restorePoemRoom);
+    notice.appendChild(retry);
+  } finally {
+    clearTimeout(restoreTimer);
+    restoringRoom = false;
+    if (button) button.disabled = false;
+  }
+}
+let restoreTimer;
+document.addEventListener('DOMContentLoaded', restorePoemRoom);
+window.addEventListener('online', restorePoemRoom);
+
 window.joinRoom = async function() {
+  if (restoringRoom) return;
   let currentUser;
   try {
     currentUser = await ensureSignedIn();
@@ -383,32 +482,11 @@ if (!roomSnapshot.exists()) {
 
 }
 
-    document.getElementById('login-sec').style.display = 'none';
-    document.getElementById('lobby-sec').style.display = 'block';
+    connectPoemRoom();
+    try {
+      sessionStorage.setItem('poemRoomSession', JSON.stringify({ roomId: state.roomId, uid: state.myUid }));
+    } catch {}
 
-    onSnapshot(state.roomRef, { includeMetadataChanges: true }, (snapshot) => {
-      // キャッシュ由来の古い値で、サーバー取得済みの最新状態を巻き戻さない。
-      // fromCacheだけがfalseへ変わる通知も受け取り、定期取得を待たず反映する。
-      if (snapshot.metadata?.fromCache || !snapshot.exists()) return;
-      applyRoomData(snapshot.data(), ++roomUpdateSequence);
-    }, (error) => {
-      console.error('[room-onSnapshot]', error);
-      resyncRoomFromFirestore();
-    });
-    startRoomResyncPolling();
-    state.roomHistory = [];
-    state.legacyHistory = [];
-    subscribeRoomHistory(state.roomRef, (history) => {
-      state.roomHistory = history;
-      if (state.currentData) {
-        const roomData = { ...state.currentData };
-        delete roomData.history;
-        applyRoomData(roomData);
-      }
-    }, (error) => {
-      console.error('[history-onSnapshot]', error);
-      showGameError(error, '履歴の読み込み');
-    });
   } catch (e) {
     console.error('[joinRoom]', e);
     alert('接続エラー: ' + e.message);
