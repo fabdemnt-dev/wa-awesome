@@ -167,10 +167,10 @@ export function renderBoards() {
 
         ${isRevealed ? `
           <div class="reaction-actions" style="display: flex; gap: 16px; margin-top: 12px; align-items: center;">
-            <button onclick="addReaction('${jsPName}', 'like')" aria-label="いいねを送る" style="background: none; border: none; color: #334155; width: auto; padding: 6px 8px; font-size: 14px; cursor: pointer;">
+            <button data-no-busy-feedback="true" onclick="addReaction('${jsPName}', 'like', this)" aria-label="いいねを送る" style="background: none; border: none; color: #334155; width: auto; padding: 6px 8px; font-size: 14px; cursor: pointer;">
               👍 いいね (${likes})
             </button>
-            <button onclick="addReaction('${jsPName}', 'emo')" aria-label="エモいを送る" style="background: none; border: none; color: #334155; width: auto; padding: 6px 8px; font-size: 14px; cursor: pointer;">
+            <button data-no-busy-feedback="true" onclick="addReaction('${jsPName}', 'emo', this)" aria-label="エモいを送る" style="background: none; border: none; color: #334155; width: auto; padding: 6px 8px; font-size: 14px; cursor: pointer;">
               💖 エモい (${emos})
             </button>
           </div>
