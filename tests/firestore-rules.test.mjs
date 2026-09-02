@@ -81,7 +81,7 @@ test('ポエムの同時進行は最新作品を1回だけ保存し、古い画�
   const state = { roomRef, myUid: 'uid-player', myName: '参加者', isSpectator: false, currentData: { ...current, poems: {} } };
   const notices = [];
   // Firestoreは別VMのObjectをカスタム型として拒否するため、SDKと同じrealmで実コードを実行する。
-  const context = { window: {}, state, db, doc, runTransaction, confirm: () => true, alert: x => notices.push(x) };
+  const context = { window: {}, state, db, collection, doc, runTransaction, confirm: () => true, alert: x => notices.push(x) };
   new Function(...Object.keys(context), source.slice(source.indexOf('window.nextGame =')))(...Object.values(context));
   await Promise.all([context.window.nextGame(), context.window.nextGame()]);
   const history = await getDocs(collection(roomRef, 'history'));

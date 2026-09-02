@@ -1,4 +1,4 @@
-import { updateDoc, arrayUnion, runTransaction, doc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { updateDoc, arrayUnion, runTransaction, collection, doc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { db } from './firebase-config.js';
 import state from './poem-state.js';
 import { defaultWords } from './poem-default-words.js';
@@ -144,6 +144,7 @@ window.nextGame = async function() {
   if (!confirm('本当に新しいポエム作りに進みますか？\n（現在の作品は履歴に保存され、新しく作り直します）')) return;
 
   const roomRef = state.roomRef;
+  const historyRef = doc(collection(roomRef, 'history'));
   const round = state.currentData.roundCount || 1;
   const uid = state.myUid;
   const name = state.myName;
@@ -157,7 +158,7 @@ window.nextGame = async function() {
     if (!(current.players || []).includes(participantName)) {
       throw new Error('プレイヤー以外は次の作成に進めません');
     }
-    transaction.set(doc(roomRef, 'history', `round_${round}`), {
+    transaction.set(historyRef, {
       round,
       poems: current.poems || {},
       participantUids: current.participantUids || {}
