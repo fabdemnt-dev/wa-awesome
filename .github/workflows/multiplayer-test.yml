@@ -25,7 +25,7 @@ jobs:
           node-version: 22
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npx playwright install --with-deps chromium
-      - name: Test three players and one spectator on the published site
+      - name: Test multiplayer and T4/T5 submission guards on the published site
         run: npm test
       - name: Save screenshots, videos, traces and report
         if: always()
