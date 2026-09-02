@@ -1,4 +1,4 @@
-import { updateDoc, arrayUnion, writeBatch, collection, doc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { updateDoc, arrayUnion, runTransaction, collection, doc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { db } from './firebase-config.js';
 import state from './poem-state.js';
 import { defaultWords } from './poem-default-words.js';
@@ -143,24 +143,32 @@ window.nextGame = async function() {
   if (state.isSpectator) return alert('見学モードでは次のポエム作りに進められません');
   if (!confirm('本当に新しいポエム作りに進みますか？\n（現在の作品は履歴に保存され、新しく作り直します）')) return;
 
-  const currentRoundHistory = {
-    round: state.currentData.roundCount || 1,
-    poems: state.currentData.poems || {},
-    participantUids: state.currentData.participantUids || {}
-  };
-  const nextRoundNum = (state.currentData.roundCount || 1) + 1;
-
-  const batch = writeBatch(db);
-  batch.update(state.roomRef, {
-    status: "lobby",
-    roundCount: nextRoundNum,
-    words: [],
-    hands: {},
-    poems: {}
+  const roomRef = state.roomRef;
+  const historyRef = doc(collection(roomRef, 'history'));
+  const round = state.currentData.roundCount || 1;
+  const uid = state.myUid;
+  const name = state.myName;
+  const advanced = await runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(roomRef);
+    if (!snapshot.exists()) throw new Error('ルームが見つかりません');
+    const current = snapshot.data();
+    // 再試行でも最新の作品を保存し、同時進行や古い画面からの二重進行を防ぐ。
+    if (current.status !== 'playing' || (current.roundCount || 1) !== round) return false;
+    const participantName = current.participantUids?.[uid] || name;
+    if (!(current.players || []).includes(participantName)) {
+      throw new Error('プレイヤー以外は次の作成に進めません');
+    }
+    transaction.set(historyRef, {
+      round,
+      poems: current.poems || {},
+      participantUids: current.participantUids || {}
+    });
+    transaction.update(roomRef, {
+      status: 'lobby', roundCount: round + 1, words: [], hands: {}, poems: {}
+    });
+    return true;
   });
-  batch.set(doc(collection(state.roomRef, 'history')), currentRoundHistory);
-  await batch.commit();
+  if (!advanced) return alert('この回はすでに終了しています。最新の状態に更新してください。');
   
   alert('作品を履歴に保存しました！次の作成に進みます。');
 };
-
