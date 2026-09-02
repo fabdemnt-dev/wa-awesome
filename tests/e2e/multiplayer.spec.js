@@ -1,8 +1,9 @@
 import { test, expect } from '@playwright/test';
-const base = 'https://fabdemnt-dev.github.io/wa-awesome/';
+import { randomUUID } from 'node:crypto';
+const base = (process.env.E2E_BASE_URL || 'https://fabdemnt-dev.github.io/wa-awesome/').replace(/\/?$/, '/');
 
 async function session(browser, info, game) {
-  const room = `pw-${game}-${process.env.GITHUB_RUN_ID || Date.now()}-${process.env.GITHUB_RUN_ATTEMPT || 1}`;
+  const room = `pw-${game}-${randomUUID()}`;
   const people = [];
   const events = [];
   for (const name of ['PW-A', 'PW-B', 'PW-C', 'PW-見学']) {
@@ -50,21 +51,63 @@ async function phase(people, selector) {
   for (const { page } of people) await expect(page.locator(selector)).toBeVisible();
 }
 
+async function joinAll(s, game) {
+  const [a, b, c, viewer] = s.people;
+  await join(a, game, s.room);
+  await Promise.all([
+    join(b, game, s.room), join(c, game, s.room),
+    join(viewer, game, s.room, true),
+  ]);
+  await roster(s.people);
+}
+
+async function addMaterials(person, prefix) {
+  for (let i = 0; i < 5; i++) {
+    await person.page.locator('#word-inputs input').nth(i).fill(`${prefix}${i + 1}`);
+  }
+  await person.page.locator('#add-word-btn').click();
+}
+
+async function expectMaterials(people, count) {
+  for (const { page } of people) {
+    await expect(page.locator('#material-count')).toHaveText(new RegExp(`素材：\\s*${count}個$`));
+  }
+}
+
+test('通信復帰：再読み込みなしで送受信が再開する', async ({ browser }, info) => {
+  const s = await session(browser, info, 'poem');
+  const [a, b] = s.people;
+  try {
+    await joinAll(s, 'poem');
+    await expectMaterials(s.people, 0);
+    await a.context.setOffline(true);
+    await expect.poll(() => a.page.evaluate(() => navigator.onLine)).toBe(false);
+    await addMaterials(b, '切断中B');
+    await expectMaterials(s.people.slice(1), 5);
+    await expectMaterials([a], 0);
+    await a.context.setOffline(false);
+    await expect.poll(() => a.page.evaluate(() => navigator.onLine)).toBe(true);
+    await expectMaterials(s.people, 5);
+    await addMaterials(a, '復帰後A');
+    await expectMaterials(s.people, 10);
+  } finally {
+    try { await a.context.setOffline(false); }
+    finally { await s.close(); }
+  }
+});
+
 test('ポエム：同時参加・素材投稿・非作成者の開始・同時投稿・リアクション・次回', async ({ browser }, info) => {
   const s = await session(browser, info, 'poem');
   const [a,b,c,viewer] = s.people;
   const players = [a,b,c];
   try {
     await test.step('Aが専用ルームを作成、B・C・見学者が同時参加', async () => {
-      await join(a, 'poem', s.room);
-      await Promise.all([join(b,'poem',s.room), join(c,'poem',s.room), join(viewer,'poem',s.room,true)]);
-      await roster(s.people);
+      await joinAll(s, 'poem');
       await expect(viewer.page.locator('#start-game-btn')).toBeDisabled();
     });
     await test.step('3人が5素材ずつ同時投稿し、全員に15個反映', async () => {
-      for (const p of players) for (let i=0;i<5;i++) await p.page.locator('#word-inputs input').nth(i).fill(`${p.name}のテスト素材${i+1}`);
-      await Promise.all(players.map(p => p.page.locator('#add-word-btn').click()));
-      for (const p of s.people) await expect(p.page.locator('#material-count')).toContainText('15個');
+      await Promise.all(players.map(p => addMaterials(p, `${p.name}のテスト素材`)));
+      await expectMaterials(s.people, 15);
     });
     await test.step('2番目のBが開始、全員同期・各5枚・見学者の入力非表示', async () => {
       await b.page.locator('#start-game-btn').click();
@@ -192,15 +235,13 @@ test('ポエムT4・T5：保存後の同期失敗と次回へ遅れて届く投�
   }
 });
 
-test('俳句：同時参加・手札配布・同時提出・披露同期・次節の親交代', async ({ browser }, info) => {
+test('俳句：同時参加・手札配布・同時提出・披露同期・御印の採点・次節の親交代', async ({ browser }, info) => {
   const s = await session(browser, info, 'haiku');
   const [a,b,c,viewer] = s.people;
   const players = [a,b,c];
   try {
     await test.step('Aが専用ルームを作成、B・C・見学者が同時参加', async () => {
-      await join(a,'haiku',s.room);
-      await Promise.all([join(b,'haiku',s.room),join(c,'haiku',s.room),join(viewer,'haiku',s.room,true)]);
-      await roster(s.people);
+      await joinAll(s, 'haiku');
       await expect(viewer.page.locator('#start-game-btn')).toBeHidden();
       await expect(b.page.locator('#start-game-btn')).toBeDisabled();
     });
@@ -230,9 +271,40 @@ test('俳句：同時参加・手札配布・同時提出・披露同期・次�
       for (const p of players) await a.page.getByRole('button', { name: `📜 ${p.name}の句を披露する`, exact:true }).click();
       for (const p of s.people) await expect(p.page.locator('#phase-status-game')).toContainText('御印受付中');
     });
-    await test.step('次節へ移動、親交代を全員で確認', async () => {
+    await test.step('御印：同時投票・親の追加投票・見学者の拍手が同期する', async () => {
+      const board = person => person.page.locator('#board-list .player-board')
+        .filter({ has: person.page.getByText(`${b.name} の句`, { exact: true }) });
+      const gift = async (person, key) => {
+        await board(person).locator('.vote-select').selectOption(key);
+        await board(person).locator('.vote-submit-btn').click();
+      };
+      const checkMark = async label => {
+        for (const person of s.people) {
+          await expect(board(person).locator(`.eval-vote-icon[aria-label="${label}"]`)).toHaveCount(1);
+        }
+      };
+      await Promise.all([gift(a, 'okashi'), gift(c, 'aware')]);
+      await checkMark('🌸 いとおかし');
+      await checkMark('🌾 もののあはれ');
+      await gift(a, 'tae');
+      await checkMark('🪭 妙なり');
+      await board(viewer).getByRole('button', { name: '👏 感服つかまつった', exact: true }).click();
+      await checkMark('👏 感服つかまつった');
+      await expect(c.page.locator('#board-list .vote-submit-btn')).toHaveCount(0);
+      for (const person of s.people) {
+        await expect(board(person).locator('.eval-vote-icon')).toHaveCount(4);
+      }
+    });
+    await test.step('次節へ移動、12点の確定と親交代を全員で確認', async () => {
       await a.page.locator('#next-round-btn').click();
       await phase(s.people,'#lobby-sec');
+      for (const person of s.people) {
+        for (const [name, points] of [[a.name, 0], [b.name, 12], [c.name, 0]]) {
+          const card = person.page.locator('#player-list .participant-card-player').filter({ hasText: name });
+          await expect(card.locator('.participant-score')).toBeVisible();
+          await expect(card.locator('.participant-score')).toHaveText(`${points} 誉`);
+        }
+      }
       // B/Cの同時参加順は非決定的。次の親がA以外で全員一致することを確認。
       const nextHost = await a.page.locator('#host-info-lobby strong').innerText();
       expect(['PW-B','PW-C']).toContain(nextHost);
