@@ -28,6 +28,16 @@ const {
 
 const db = getFirestore();
 
+test('T5: 次の回に到達した手札なしの投稿は保存されない', async () => {
+  const ref = poemRoomRef('stale-poem-submit');
+  await ref.set({ schemaVersion: 2, status: 'playing', roundCount: 2, players: ['参加者'], participantUids: { 'uid-player': '参加者' }, poems: {}, hands: {} });
+  const request = { auth: { uid: 'uid-player' }, data: { roomId: 'stale-poem-submit', expectedRound: 1, text: '古い本文', usedHands: [] } };
+  await assert.rejects(submitPoemSecure.run(request), { code: 'failed-precondition' });
+  assert.deepEqual((await ref.get()).data().poems, {});
+  await submitPoemSecure.run({ ...request, data: { ...request.data, expectedRound: 2, text: '新しい本文' } });
+  assert.equal((await ref.get()).data().poems['uid-player'].text, '新しい本文');
+});
+
 function roomRef(roomId) {
   return db.collection('rooms').doc(`haiku_${roomId}`);
 }
@@ -441,12 +451,12 @@ test('Poem作品・披露・リアクションCallableはUIDと状態を検証�
     poems: {},
   });
   const poem = { text: '親の作品', usedHands: [{ id: 'h1', text: '親の素材', author: '親' }] };
-  await submitPoemSecure.run({ data: { roomId: 'poem-actions', ...poem }, auth: { uid: 'uid-host' } });
+  await submitPoemSecure.run({ data: { roomId: 'poem-actions', expectedRound: 1, ...poem }, auth: { uid: 'uid-host' } });
   await assert.rejects(
-    submitPoemSecure.run({ data: { roomId: 'poem-actions', text: '偽装作品', usedHands: poem.usedHands }, auth: { uid: 'uid-player' } }),
+    submitPoemSecure.run({ data: { roomId: 'poem-actions', expectedRound: 1, text: '偽装作品', usedHands: poem.usedHands }, auth: { uid: 'uid-player' } }),
     (error) => error.code === 'permission-denied',
   );
-  await submitPoemSecure.run({ data: { roomId: 'poem-actions', text: '参加者の作品', usedHands: [{ id: 'p1', text: '参加者の素材', author: '参加者' }] }, auth: { uid: 'uid-player' } });
+  await submitPoemSecure.run({ data: { roomId: 'poem-actions', expectedRound: 1, text: '参加者の作品', usedHands: [{ id: 'p1', text: '参加者の素材', author: '参加者' }] }, auth: { uid: 'uid-player' } });
   await assert.rejects(
     reactPoemSecure.run({ data: { roomId: 'poem-actions', targetUid: 'uid-player', type: 'like' }, auth: { uid: 'uid-spectator' } }),
     (error) => error.code === 'failed-precondition',

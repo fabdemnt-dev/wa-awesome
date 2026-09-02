@@ -1,4 +1,6 @@
-import { updateDoc, increment } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { updateDoc, increment, runTransaction } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { db } from './firebase-config.js';
+import { showGameNotice } from './ui-feedback.js';
 import state from './poem-state.js';
 import { renderHand } from './poem-render.js';
 import { exportPoemText, exportPoemCSV } from './poem-export.js';
@@ -13,7 +15,8 @@ export function syncPoemDraftContext() {
   if (!data || !state.roomId) return;
   const context = JSON.stringify([state.roomId, state.myUid || state.myName, data.roundCount || 1]);
   const storageKey = getParticipantStorageKey(data, state.myUid, state.myName);
-  const submitted = data.poems?.[storageKey] !== undefined;
+  const submitted = data.poems?.[storageKey] !== undefined ||
+    (state.poemSubmission?.context === context && state.poemSubmission.saved);
   if (!submitted && context === draftContext && draftWasSpectator === state.isSpectator) return;
   draftWasSpectator = state.isSpectator;
   draftContext = context;
@@ -78,6 +81,7 @@ function resizeTextarea() {
 
 window.onCardClick = function(idx) {
   if (state.isSpectator) return;
+  if (state.poemSubmission?.context === poemSubmissionContext() && (state.poemSubmission.pending || state.poemSubmission.saved)) return;
   const storageKey = getParticipantStorageKey(state.currentData, state.myUid, state.myName);
   if (state.currentData.poems?.[storageKey] !== undefined) return;
   const myHands = state.currentData.hands?.[storageKey] || [];
@@ -109,6 +113,7 @@ window.onCardClick = function(idx) {
 
 window.clearPoem = function() {
   if (state.isSpectator) return;
+  if (state.poemSubmission?.context === poemSubmissionContext() && (state.poemSubmission.pending || state.poemSubmission.saved)) return;
   const textarea = document.getElementById('poem-input-area');
   if (textarea) {
     textarea.value = '';
@@ -121,8 +126,15 @@ window.clearPoem = function() {
   renderHand();
 };
 
+function poemSubmissionContext() {
+  return JSON.stringify([state.roomId, state.myUid || state.myName, state.currentData?.roundCount || 1]);
+}
+
 window.submitPoem = async function() {
+  if (!state.roomRef || state.currentData?.status !== 'playing') return;
   if (state.isSpectator) return alert('見学モードではポエムの投稿はできません');
+  const context = poemSubmissionContext();
+  if (state.poemSubmission?.context === context && (state.poemSubmission.pending || state.poemSubmission.saved)) return;
   const textarea = document.getElementById('poem-input-area');
   if (!textarea) return;
 
@@ -137,33 +149,48 @@ window.submitPoem = async function() {
     if (myHands[idx]) usedHands.push(myHands[idx]);
   });
 
-  if (state.currentData.schemaVersion === 2) {
-    await submitPoemSecure(state.roomId, poemText, usedHands);
-    if (typeof window.resyncPoemRoom === 'function') {
-      const result = await window.resyncPoemRoom();
-      if (!result?.ok) throw result.error || new Error('投稿の画面反映を確認できませんでした。');
-    }
-  } else {
-    await updateDoc(state.roomRef, {
-      [`poems.${getParticipantStorageKey(state.currentData, state.myUid, state.myName)}`]: {
-        text: poemText,
-        hands: usedHands,
-        revealed: false,
-        likes: 0,
-        emos: 0
-      }
-    });
-  }
-
-  sessionStorage.removeItem('poemDraft');
-  sessionStorage.removeItem('poemDraftSelectedIds');
-  if (textarea) {
-    textarea.value = '';
-    textarea.style.height = 'auto';
-  }
-  state.selectedHandIndices.clear();
+  const roomId = state.roomId;
+  const roomRef = state.roomRef;
+  const round = state.currentData.roundCount || 1;
+  const submission = { context, pending: true, saved: false };
+  state.poemSubmission = submission;
   renderHand();
-  alert('ポエムを投稿しました。画面への反映も確認しました！');
+  try {
+    if (state.currentData.schemaVersion === 2) {
+      await submitPoemSecure(roomId, poemText, usedHands, round);
+    } else {
+      await runTransaction(db, async transaction => {
+        const snapshot = await transaction.get(roomRef);
+        const data = snapshot.exists() ? snapshot.data() : null;
+        if (!data || data.status !== 'playing' || (data.roundCount || 1) !== round) throw new Error('作成回が変わったため、前の回の投稿は保存しませんでした。');
+        if (data.poems?.[storageKey] !== undefined) throw new Error('この回のポエムは投稿済みです');
+        transaction.update(roomRef, { [`poems.${storageKey}`]: { text: poemText, hands: usedHands, revealed: false, likes: 0, emos: 0 } });
+      });
+    }
+    submission.saved = true;
+    // 保存成功の確認と画面同期は別。古い処理で新しい回の下書きを触らない。
+    if (poemSubmissionContext() !== context) return;
+    syncPoemDraftContext();
+    renderHand();
+    try {
+      if (typeof window.resyncPoemRoom !== 'function') throw new Error('同期処理がありません');
+      const result = await window.resyncPoemRoom();
+      if (!result?.ok) throw result?.error || new Error('画面更新に失敗しました');
+    } catch {
+      if (poemSubmissionContext() === context) showGameNotice('投稿は保存済みですが、画面更新に失敗しました。「最新の状態に更新」を押してください。再投稿は不要です。', 'error');
+      return;
+    }
+    if (poemSubmissionContext() === context) alert('ポエムを投稿しました。画面への反映も確認しました！');
+  } catch (error) {
+    if (poemSubmissionContext() !== context) {
+      showGameNotice('前の回・ルームへの投稿の保存を確認できませんでした。現在の下書きはそのまま残しています。', 'error');
+    } else {
+      throw error;
+    }
+  } finally {
+    submission.pending = false;
+    renderHand();
+  }
 };
 
 window.revealPoem = async function(pName) {

@@ -5,6 +5,66 @@ import vm from 'node:vm';
 const roomSource = readFileSync(new URL('../poem-room.js', import.meta.url), 'utf8');
 const actionSource = readFileSync(new URL('../poem-action.js', import.meta.url), 'utf8');
 
+function submissionHarness(send, resync = async () => ({ ok: true })) {
+  const storage = new Map();
+  const input = { value: '', style: {} };
+  const elements = new Map([['poem-input-area', input]]);
+  for (const id of ['hand-list', 'poem-composer', 'poem-spectator-notice', 'poem-clear-btn', 'poem-submit-btn']) elements.set(id, {});
+  const state = { roomId: 'A', roomRef: {}, myUid: 'u', myName: '名前', currentData: { schemaVersion: 2, status: 'playing', roundCount: 1, hands: { u: [] }, poems: {} }, selectedHandIndices: new Set() };
+  const notices = [];
+  const context = vm.createContext({ state, window: { resyncPoemRoom: resync }, document: { getElementById: id => elements.get(id) },
+    getParticipantStorageKey: () => 'u', submitPoemSecure: send, escapeHTML: x => x,
+    sessionStorage: { getItem: k => storage.get(k) ?? null, setItem: (k,v) => storage.set(k,v), removeItem: k => storage.delete(k) },
+    alert: x => notices.push(x), showGameNotice: x => notices.push(x),
+  });
+  vm.runInContext(between(actionSource, 'let draftContext', '\nwindow.onCardClick').replaceAll('export ', ''), context);
+  vm.runInContext(between(actionSource, 'function poemSubmissionContext', '\nwindow.revealPoem'), context);
+  const renderSource = readFileSync(new URL('../poem-render.js', import.meta.url), 'utf8');
+  vm.runInContext(between(renderSource, 'export function renderHand', '\nexport function renderBoards').replace('export ', ''), context);
+  context.syncPoemDraftContext(); input.value = '旧回の本文'; context.saveCurrentPoemDraft();
+  return { context, state, input, storage, notices, button: elements.get('poem-submit-btn') };
+}
+
+test('T4: 保存成功後の同期失敗は保存済み扱いを維持し、再投稿しない', async () => {
+  for (const resync of [async () => ({ ok: false }), async () => { throw new Error('通信失敗'); }]) {
+    let calls = 0;
+    const h = submissionHarness(async () => { calls++; }, resync);
+    await h.context.window.submitPoem();
+    assert.equal(h.input.value, '');
+    assert.equal(h.storage.has('poemDraft'), false);
+    assert.equal(h.button.disabled, true);
+    assert.match(h.notices[0], /投稿は保存済み/);
+    await h.context.window.submitPoem(); assert.equal(calls, 1);
+  }
+});
+
+test('投稿の通信失敗は下書きを保持して再試行でき、送信中は二重送信しない', async () => {
+  const pending = deferred(); let calls = 0;
+  const h = submissionHarness(async () => { calls++; if (calls === 1) { await pending.promise; throw new Error('失敗'); } });
+  const first = h.context.window.submitPoem();
+  assert.equal(h.button.disabled, true);
+  await h.context.window.submitPoem(); assert.equal(calls, 1);
+  pending.resolve(); await assert.rejects(first, /失敗/);
+  assert.equal(h.input.value, '旧回の本文'); assert.equal(h.button.disabled, false);
+  await h.context.window.submitPoem(); assert.equal(calls, 2);
+});
+
+test('T5: 旧投稿の成功・失敗・同期完了は次の回や別ルームの下書きを消さない', async () => {
+  for (const switchRoom of [false, true]) for (const stage of ['save-success', 'save-failure', 'sync-success']) {
+    const pending = deferred(); let args;
+    const h = submissionHarness(async (...a) => { args = a; if (stage !== 'sync-success') await pending.promise; if (stage === 'save-failure') throw new Error('古い投稿'); }, async () => { if (stage === 'sync-success') await pending.promise; return { ok: true }; });
+    const first = h.context.window.submitPoem(); await Promise.resolve(); await Promise.resolve();
+    if (switchRoom) h.state.roomId = 'B'; else h.state.currentData.roundCount = 2;
+    h.context.syncPoemDraftContext(); h.input.value = '新しい下書き'; h.context.saveCurrentPoemDraft();
+    pending.resolve(); await first;
+    assert.equal(args[0], 'A'); assert.equal(args[3], 1);
+    assert.equal(h.input.value, '新しい下書き');
+    assert.equal(h.storage.get('poemDraft'), '新しい下書き');
+    assert.equal(h.button.disabled, false);
+    assert.ok(!h.notices.some(x => x.includes('画面への反映も確認')));
+  }
+});
+
 test('履歴はキャッシュ後のサーバー確認通知で反映し、購読エラーも渡す', () => {
   const source = readFileSync(new URL('../room-history.js', import.meta.url), 'utf8');
   let options, receive, fail;

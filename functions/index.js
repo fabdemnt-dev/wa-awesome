@@ -1140,6 +1140,10 @@ function requirePoemPlayer(room, uid) {
 
 exports.submitPoemSecure = onCall(callableOptions, async (request) => {
   const uid = requireAuthenticated(request);
+  const expectedRound = request.data?.expectedRound;
+  if (!Number.isSafeInteger(expectedRound) || expectedRound < 1) {
+    fail('failed-precondition', '投稿する回を確認できません。ページを再読み込みしてください。');
+  }
   const roomId = requireText(request.data?.roomId, 'ルームID', 150);
   const text = requireText(request.data?.text, '作品', 4000);
   const usedHands = Array.isArray(request.data?.usedHands) ? request.data.usedHands : [];
@@ -1153,6 +1157,7 @@ exports.submitPoemSecure = onCall(callableOptions, async (request) => {
     const room = snapshot.data() || {};
     requirePoemPlayer(room, uid);
     if (room.schemaVersion !== 2 || room.status !== 'playing') fail('failed-precondition', '新形式のポエム作成中だけ投稿できます。');
+    if ((room.roundCount || 1) !== expectedRound) fail('failed-precondition', '作成回が変わったため、前の回の投稿は保存しませんでした。');
     if (room.poems?.[uid] !== undefined) fail('failed-precondition', '作品は1幕につき1つまでです。');
     const owned = new Set((Array.isArray(room.hands?.[uid]) ? room.hands[uid] : []).map((item) => item?.id));
     if (usedHands.some((item) => !owned.has(item.id))) fail('permission-denied', '自分の手札にない素材は使えません。');

@@ -55,14 +55,20 @@ export function renderHand() {
   if (composer) composer.hidden = state.isSpectator;
   if (notice) notice.hidden = !state.isSpectator;
   const storageKey = getParticipantStorageKey(state.currentData, state.myUid, state.myName);
-  const submitted = state.currentData.poems?.[storageKey] !== undefined;
+  const context = JSON.stringify([state.roomId, state.myUid || state.myName, state.currentData.roundCount || 1]);
+  const submission = state.poemSubmission?.context === context ? state.poemSubmission : null;
+  const submitted = state.currentData.poems?.[storageKey] !== undefined || Boolean(submission?.saved);
+  const pending = Boolean(submission?.pending);
   if (textarea) {
-    textarea.disabled = state.isSpectator || submitted;
+    textarea.disabled = state.isSpectator || submitted || pending;
     textarea.placeholder = submitted ? 'この回のポエムは投稿済みです' : '手札を元に自由にポエムを入力してね♪';
   }
   for (const id of ['poem-clear-btn', 'poem-submit-btn']) {
     const button = document.getElementById(id);
-    if (button) button.disabled = state.isSpectator || submitted;
+    if (button) {
+      button.disabled = state.isSpectator || submitted || pending;
+      if (id === 'poem-submit-btn') button.textContent = pending && !submitted ? '投稿中…' : 'ポエムを投稿';
+    }
   }
 
   if (state.isSpectator) {
