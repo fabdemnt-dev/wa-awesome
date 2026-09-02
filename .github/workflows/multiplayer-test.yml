@@ -1,0 +1,47 @@
+name: Multiplayer Playwright test
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/playwright-multiplayer-test]
+    paths:
+      - tests/e2e/**
+      - .github/workflows/multiplayer-test.yml
+permissions:
+  contents: read
+concurrency:
+  group: multiplayer-playwright
+  cancel-in-progress: false
+jobs:
+  multiplayer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: tests/e2e
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
+      - name: Test three players and one spectator on the published site
+        run: npm test
+      - name: Save screenshots, videos, traces and report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: multiplayer-playwright-${{ github.run_id }}
+          path: |
+            tests/e2e/playwright-report/
+            tests/e2e/test-results/
+            tests/e2e/results.json
+          retention-days: 7
+      - name: Write result summary
+        if: always()
+        run: |
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          const result = fs.existsSync('results.json') ? JSON.parse(fs.readFileSync('results.json')) : null;
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, '# 多人数テスト\n\n対象：配信中のwa-awesome。3プレイヤー＋1見学者、各人独立したブラウザ環境。専用ルームを作成し、既存ルームは操作しません。\n\n' + (result ? '実行集計：`' + JSON.stringify(result.stats) + '`\n' : '実行結果なし。セットアップのログを確認してください。\n') + '\nスクショ・動画・操作記録はArtifactsに保存しています。\n');
+          JS
