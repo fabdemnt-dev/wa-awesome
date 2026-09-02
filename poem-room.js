@@ -457,7 +457,7 @@ window.toggleRole = async function() {
       }));
       await changePoemRole(state.roomId, 'player', supplementalWords);
       state.isSpectator = false;
-      alert('余っている素材を優先して手札を配り、プレイヤーとして参加しました！');
+      alert('プレイヤーとして参加しました！');
       return;
     }
 
