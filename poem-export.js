@@ -32,7 +32,7 @@ export function exportPoemText(currentData, exportAll = true) {
     });
   });
 
-  navigator.clipboard.writeText(text).then(() => {
+  return navigator.clipboard.writeText(text).then(() => {
     alert('Discord用のテキストをクリップボードにコピーしました！');
   }).catch(e => alert('コピーに失敗しました: ' + e));
 }
@@ -42,22 +42,27 @@ export function exportPoemCSV(currentData, roomId, exportAll = true) {
   const historyToExport = buildHistory(currentData, exportAll);
   if (historyToExport.length === 0) return alert('出力するポエムがありません');
 
-  let csvContent = "data:text/csv;charset=utf-8,\uFEFF";
+  const csvCell = value => `"${String(value ?? '').replace(/"/g, '""')}"`;
+  let csvContent = "\uFEFF";
   csvContent += "幕,作者,作品\n";
   historyToExport.forEach(h => {
     Object.keys(h.poems || {}).forEach(poemKey => {
       const poemData = h.poems[poemKey];
       const poemText = typeof poemData === 'object' ? poemData.text : poemData;
-      const cleanText = String(poemText || '').replace(/"/g, '""');
-      csvContent += `${h.round},"${displayName(h, poemKey)}","${cleanText}"\n`;
+      csvContent += [h.round, displayName(h, poemKey), poemText].map(csvCell).join(',') + '\n';
     });
   });
 
-  const encodedUri = encodeURI(csvContent);
+  const url = URL.createObjectURL(new Blob([csvContent], { type: 'text/csv;charset=utf-8' }));
   const link = document.createElement("a");
-  link.setAttribute("href", encodedUri);
+  link.setAttribute("href", url);
   link.setAttribute("download", `poem_result_room_${roomId}.csv`);
   document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
+  try {
+    link.click();
+  } finally {
+    document.body.removeChild(link);
+    // ダウンロード開始後に一時URLを解放する。
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
 }

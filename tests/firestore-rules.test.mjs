@@ -4,8 +4,10 @@ import {
   assertSucceeds,
   initializeTestEnvironment,
 } from '@firebase/rules-unit-testing';
-import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, runTransaction, setDoc, updateDoc } from 'firebase/firestore';
 import fs from 'node:fs/promises';
+import vm from 'node:vm';
+import assert from 'node:assert/strict';
 
 let testEnv;
 
@@ -70,6 +72,28 @@ async function seedV2HaikuRoom(roomId, overrides = {}) {
   });
   return data;
 }
+
+test('ポエムの同時進行は最新作品を1回だけ保存し、古い画面で次の回を消さない', async () => {
+  const db = testEnv.authenticatedContext('uid-player').firestore();
+  const roomRef = doc(db, 'rooms/poem-history-transaction');
+  const current = { schemaVersion: 2, status: 'playing', roundCount: 1, players: ['参加者'], participantUids: { 'uid-player': '参加者' }, poems: { latest: { text: '直前に投稿された作品', revealed: true, likes: 2 } } };
+  await setDoc(roomRef, current);
+  const source = await fs.readFile(new URL('../poem-game.js', import.meta.url), 'utf8');
+  const state = { roomRef, myUid: 'uid-player', myName: '参加者', isSpectator: false, currentData: { ...current, poems: {} } };
+  const notices = [];
+  const context = vm.createContext({ window: {}, state, db, doc, runTransaction, confirm: () => true, alert: x => notices.push(x) });
+  vm.runInContext(source.slice(source.indexOf('window.nextGame =')), context);
+  await Promise.all([context.window.nextGame(), context.window.nextGame()]);
+  const history = await getDocs(collection(roomRef, 'history'));
+  assert.equal(history.size, 1);
+  assert.deepEqual(history.docs[0].data().poems, current.poems);
+  assert.equal((await getDoc(roomRef)).data().roundCount, 2);
+  assert.equal(notices.filter(x => x.includes('保存しました')).length, 1);
+  await updateDoc(roomRef, { status: 'playing', poems: { new: { text: '2回目の作品' } } });
+  await context.window.nextGame(); // 画面側はまだ1回目
+  assert.equal((await getDoc(roomRef)).data().poems.new.text, '2回目の作品');
+  assert.equal((await getDocs(collection(roomRef, 'history'))).size, 1);
+});
 
 test('未認証ユーザーはルームを読み書きできない', async () => {
   const room = doc(testEnv.unauthenticatedContext().firestore(), 'rooms/rule-test-unauth');

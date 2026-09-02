@@ -5,6 +5,47 @@ import vm from 'node:vm';
 const roomSource = readFileSync(new URL('../poem-room.js', import.meta.url), 'utf8');
 const actionSource = readFileSync(new URL('../poem-action.js', import.meta.url), 'utf8');
 
+test('履歴はキャッシュ後のサーバー確認通知で反映し、購読エラーも渡す', () => {
+  const source = readFileSync(new URL('../room-history.js', import.meta.url), 'utf8');
+  let options, receive, fail;
+  const context = vm.createContext({
+    collection: () => ({}), orderBy: () => ({}), query: () => ({}),
+    onSnapshot: (_q, opts, callback, error) => { options = opts; receive = callback; fail = error; return 'unsubscribe'; },
+  });
+  vm.runInContext(source.slice(source.indexOf('export function subscribeRoomHistory')).replaceAll('export ', ''), context);
+  const received = [], errors = [];
+  assert.equal(context.subscribeRoomHistory({}, x => received.push(x), e => errors.push(e)), 'unsubscribe');
+  assert.equal(options.includeMetadataChanges, true);
+  const docs = [{ id: 'round_1', data: () => ({ round: 1, poems: { u: '作品' } }) }];
+  receive({ metadata: { fromCache: true }, docs });
+  assert.equal(received.length, 0);
+  receive({ metadata: { fromCache: false }, docs });
+  assert.equal(received[0][0].poems.u, '作品');
+  const error = new Error('offline'); fail(error); assert.equal(errors[0], error);
+});
+
+test('ポエムCSVは引用符・改行・#を保持し、コピーの範囲と失敗通知を保つ', async () => {
+  const source = readFileSync(new URL('../poem-export.js', import.meta.url), 'utf8');
+  const data = { roundCount: 2, participantUids: { u: '名"前,さん' }, poems: { u: { text: '本文#1\n"引用",続き' } }, history: [{ round: 1, poems: { old: '過去作' } }] };
+  let blob, copied, removed = 0, revoked = 0, failCopy = false;
+  const attrs = {}, notices = [], timers = [];
+  const context = vm.createContext({ Blob,
+    getParticipantNameByUid: (d, k) => d.participantUids?.[k],
+    URL: { createObjectURL: b => { blob = b; return 'blob:download'; }, revokeObjectURL: () => { revoked++; } },
+    document: { createElement: () => ({ setAttribute: (k,v) => { attrs[k] = v; }, click() {} }), body: { appendChild() {}, removeChild() { removed++; } } },
+    navigator: { clipboard: { writeText: async text => { if (failCopy) throw new Error('拒否'); copied = text; } } },
+    alert: x => notices.push(x), setTimeout: fn => timers.push(fn),
+  });
+  vm.runInContext(source.replace(/^import[^\n]*\n/, '').replaceAll('export ', ''), context);
+  context.exportPoemCSV(data, 'room', false);
+  assert.equal(attrs.href, 'blob:download');
+  assert.equal(Buffer.from(await blob.arrayBuffer()).toString('utf8'), '\uFEFF幕,作者,作品\n"2","名""前,さん","本文#1\n""引用"",続き"\n');
+  assert.equal(removed, 1); timers[0](); assert.equal(revoked, 1);
+  await context.exportPoemText(data, false); assert.ok(!copied.includes('過去作')); assert.ok(copied.includes('本文#1'));
+  await context.exportPoemText(data, true); assert.ok(copied.includes('過去作'));
+  failCopy = true; await context.exportPoemText(data, false); assert.match(notices.at(-1), /コピーに失敗/);
+});
+
 test('リアクションはラベルを保ち、送信中の二重送信を防ぎ、失敗を通知側へ伝える', async () => {
   for (const type of ['like', 'emo']) {
     for (const schemaVersion of [1, 2]) {
