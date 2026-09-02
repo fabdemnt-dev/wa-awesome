@@ -50,17 +50,26 @@ export function renderHand() {
   const textarea = document.getElementById('poem-input-area');
   if (!handList || !state.currentData) return;
 
+  const composer = document.getElementById('poem-composer');
+  const notice = document.getElementById('poem-spectator-notice');
+  if (composer) composer.hidden = state.isSpectator;
+  if (notice) notice.hidden = !state.isSpectator;
+  const storageKey = getParticipantStorageKey(state.currentData, state.myUid, state.myName);
+  const submitted = state.currentData.poems?.[storageKey] !== undefined;
+  if (textarea) {
+    textarea.disabled = state.isSpectator || submitted;
+    textarea.placeholder = submitted ? 'この回のポエムは投稿済みです' : '手札を元に自由にポエムを入力してね♪';
+  }
+  for (const id of ['poem-clear-btn', 'poem-submit-btn']) {
+    const button = document.getElementById(id);
+    if (button) button.disabled = state.isSpectator || submitted;
+  }
+
   if (state.isSpectator) {
     handList.innerHTML = '<div style="font-size:13px; color:#94a3b8;">※見学モード中</div>';
-    if (textarea) {
-      textarea.value = '（見学モード中）';
-      textarea.disabled = true;
-    }
     return;
   }
 
-  if (textarea) textarea.disabled = false;
-  const storageKey = getParticipantStorageKey(state.currentData, state.myUid, state.myName);
   const myHands = state.currentData.hands?.[storageKey] || [];
   
   if (myHands.length === 0) {

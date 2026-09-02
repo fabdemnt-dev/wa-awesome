@@ -699,7 +699,8 @@ exports.changePoemRole = onCall(callableOptions, async (request) => {
     const players = (room.players || []).filter((item) => item !== name);
     const spectators = (room.spectators || []).filter((item) => item !== name);
     const update = { players: role === 'player' ? [...players, name] : players, spectators: role === 'spectator' ? [...spectators, name] : spectators };
-    if (room.status === 'playing' && role === 'player') {
+    // 同じ回で見学から戻った人には元の手札を返す。初参加だけ配札する。
+    if (room.status === 'playing' && role === 'player' && !Array.isArray(room.hands?.[uid])) {
       const settings = room.settings || { handCount: 5 };
       const hands = isPlainObject(room.hands) ? { ...room.hands } : {};
       const assigned = new Set(Object.values(hands).flatMap((hand) => Array.isArray(hand) ? hand.map((word) => word?.id) : []));

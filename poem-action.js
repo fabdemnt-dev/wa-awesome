@@ -12,16 +12,27 @@ export function syncPoemDraftContext() {
   const data = state.currentData;
   if (!data || !state.roomId) return;
   const context = JSON.stringify([state.roomId, state.myUid || state.myName, data.roundCount || 1]);
-  if (context === draftContext && draftWasSpectator === state.isSpectator) return;
+  const storageKey = getParticipantStorageKey(data, state.myUid, state.myName);
+  const submitted = data.poems?.[storageKey] !== undefined;
+  if (!submitted && context === draftContext && draftWasSpectator === state.isSpectator) return;
   draftWasSpectator = state.isSpectator;
   draftContext = context;
   const savedContext = sessionStorage.getItem('poemDraftContext');
-  const savedText = savedContext === context ? sessionStorage.getItem('poemDraft') || '' : '';
-  if (savedContext !== context) {
+  const savedText = !submitted && savedContext === context ? sessionStorage.getItem('poemDraft') || '' : '';
+  let selectedIds = [];
+  if (!submitted && savedContext === context) {
+    try { selectedIds = JSON.parse(sessionStorage.getItem('poemDraftSelectedIds') || '[]'); } catch { /* 壊れた選択情報だけを無視する */ }
+  }
+  if (!Array.isArray(selectedIds)) selectedIds = [];
+  if (submitted || savedContext !== context) {
     sessionStorage.removeItem('poemDraft');
     sessionStorage.removeItem('poemDraftContext');
+    sessionStorage.removeItem('poemDraftSelectedIds');
   }
   state.selectedHandIndices.clear();
+  (data.hands?.[storageKey] || []).forEach((card, index) => {
+    if (selectedIds.includes(card.id)) state.selectedHandIndices.add(index);
+  });
   const textarea = document.getElementById('poem-input-area');
   if (textarea) {
     textarea.value = savedText;
@@ -33,6 +44,7 @@ export function setupAutoResize() {
   syncPoemDraftContext();
   const textarea = document.getElementById('poem-input-area');
   if (!textarea) return;
+  if (!state.isSpectator) resizeTextarea.call(textarea);
   textarea.removeEventListener('input', handlePoemInput);
   textarea.addEventListener('input', handlePoemInput);
 }
@@ -41,6 +53,17 @@ function savePoemDraft(text) {
   if (!draftContext || state.isSpectator || state.currentData?.status !== 'playing') return;
   sessionStorage.setItem('poemDraftContext', draftContext);
   sessionStorage.setItem('poemDraft', text);
+  const storageKey = getParticipantStorageKey(state.currentData, state.myUid, state.myName);
+  const hand = state.currentData.hands?.[storageKey] || [];
+  sessionStorage.setItem('poemDraftSelectedIds', JSON.stringify(
+    [...state.selectedHandIndices].map(index => hand[index]?.id).filter(Boolean)
+  ));
+}
+
+export function saveCurrentPoemDraft() {
+  const textarea = document.getElementById('poem-input-area');
+  const key = getParticipantStorageKey(state.currentData, state.myUid, state.myName);
+  if (textarea && state.currentData?.poems?.[key] === undefined) savePoemDraft(textarea.value);
 }
 
 function handlePoemInput() {
@@ -56,6 +79,7 @@ function resizeTextarea() {
 window.onCardClick = function(idx) {
   if (state.isSpectator) return;
   const storageKey = getParticipantStorageKey(state.currentData, state.myUid, state.myName);
+  if (state.currentData.poems?.[storageKey] !== undefined) return;
   const myHands = state.currentData.hands?.[storageKey] || [];
   const item = myHands[idx];
   const textarea = document.getElementById('poem-input-area');
@@ -70,7 +94,6 @@ window.onCardClick = function(idx) {
   textarea.selectionStart = textarea.selectionEnd = start + wordText.length;
   
   resizeTextarea.call(textarea);
-  savePoemDraft(textarea.value);
   textarea.focus();
 
   if (state.selectedHandIndices.has(idx)) {
@@ -78,6 +101,8 @@ window.onCardClick = function(idx) {
   } else {
     state.selectedHandIndices.add(idx);
   }
+
+  savePoemDraft(textarea.value);
 
   renderHand();
 };
@@ -92,6 +117,7 @@ window.clearPoem = function() {
   }
   state.selectedHandIndices.clear();
   sessionStorage.removeItem('poemDraft');
+  sessionStorage.removeItem('poemDraftSelectedIds');
   renderHand();
 };
 
@@ -104,6 +130,7 @@ window.submitPoem = async function() {
   if (!poemText) return alert('ポエムを入力してください');
 
   const storageKey = getParticipantStorageKey(state.currentData, state.myUid, state.myName);
+  if (state.currentData.poems?.[storageKey] !== undefined) return alert('この回のポエムは投稿済みです');
   const myHands = state.currentData.hands?.[storageKey] || [];
   const usedHands = [];
   state.selectedHandIndices.forEach(idx => {
@@ -129,6 +156,7 @@ window.submitPoem = async function() {
   }
 
   sessionStorage.removeItem('poemDraft');
+  sessionStorage.removeItem('poemDraftSelectedIds');
   if (textarea) {
     textarea.value = '';
     textarea.style.height = 'auto';
