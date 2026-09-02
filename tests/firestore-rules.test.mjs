@@ -6,7 +6,6 @@ import {
 } from '@firebase/rules-unit-testing';
 import { collection, doc, getDoc, getDocs, runTransaction, setDoc, updateDoc } from 'firebase/firestore';
 import fs from 'node:fs/promises';
-import vm from 'node:vm';
 import assert from 'node:assert/strict';
 
 let testEnv;
@@ -81,8 +80,9 @@ test('ポエムの同時進行は最新作品を1回だけ保存し、古い画�
   const source = await fs.readFile(new URL('../poem-game.js', import.meta.url), 'utf8');
   const state = { roomRef, myUid: 'uid-player', myName: '参加者', isSpectator: false, currentData: { ...current, poems: {} } };
   const notices = [];
-  const context = vm.createContext({ window: {}, state, db, doc, runTransaction, confirm: () => true, alert: x => notices.push(x) });
-  vm.runInContext(source.slice(source.indexOf('window.nextGame =')), context);
+  // Firestoreは別VMのObjectをカスタム型として拒否するため、SDKと同じrealmで実コードを実行する。
+  const context = { window: {}, state, db, doc, runTransaction, confirm: () => true, alert: x => notices.push(x) };
+  new Function(...Object.keys(context), source.slice(source.indexOf('window.nextGame =')))(...Object.values(context));
   await Promise.all([context.window.nextGame(), context.window.nextGame()]);
   const history = await getDocs(collection(roomRef, 'history'));
   assert.equal(history.size, 1);
