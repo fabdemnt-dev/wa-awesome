@@ -1,0 +1,169 @@
+name: E2E Tests
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-tests-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  playwright:
+    name: Chromium / WebKit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    defaults:
+      run:
+        working-directory: tests/e2e
+        shell: bash
+
+    env:
+      CI: "true"
+      E2E_BASE_URL: https://fabdemnt-dev.github.io/wa-awesome/
+      PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT: "120000"
+      PLAYWRIGHT_HTML_OPEN: never
+
+    steps:
+      - name: リポジトリを取得
+        uses: actions/checkout@v5
+
+      - name: Node.jsを準備
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      - name: 診断情報を記録
+        run: |
+          mkdir -p diagnostics
+          {
+            date -u
+            cat /etc/os-release
+            node --version
+            npm --version
+            node -p "process.platform + ' ' + process.arch"
+          } 2>&1 | tee diagnostics/environment.log
+
+      - name: npm依存関係をインストール
+        timeout-minutes: 5
+        run: |
+          npm ci --no-audit --no-fund \
+            2>&1 | tee diagnostics/npm-install.log
+
+      - name: Chromium・WebKit・OSライブラリをインストール
+        timeout-minutes: 10
+        run: |
+          npx playwright install --with-deps chromium webkit \
+            2>&1 | tee diagnostics/browser-install.log
+
+          npx playwright --version \
+            2>&1 | tee diagnostics/playwright-version.log
+
+      - name: GitHub Pagesへの接続を確認
+        timeout-minutes: 5
+        run: |
+          for page in poem.html haiku.html; do
+            curl \
+              --location \
+              --fail \
+              --show-error \
+              --silent \
+              --retry 3 \
+              --retry-delay 5 \
+              --retry-connrefused \
+              --connect-timeout 15 \
+              --max-time 45 \
+              --output /dev/null \
+              --write-out "HTTP %{http_code} %{url_effective}\n" \
+              "${E2E_BASE_URL}${page}" \
+              2>&1 | tee "diagnostics/connection-${page}.log"
+          done
+
+      - name: 実行対象のテストを確認
+        run: |
+          npx playwright test \
+            --project=multiplayer \
+            --project="Pixel 7" \
+            --project="iPhone 13" \
+            --list \
+            2>&1 | tee diagnostics/test-list.log
+
+      - name: 多人数・通信復帰・御印・モバイルをテスト
+        id: tests
+        timeout-minutes: 30
+        env:
+          DEBUG: pw:browser
+        run: |
+          npm test -- \
+            --project=multiplayer \
+            --project="Pixel 7" \
+            --project="iPhone 13" \
+            --workers=1 \
+            --retries=0 \
+            2>&1 | tee diagnostics/test-run.log
+
+      - name: レポート・画像・動画・診断ログを保存
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            tests/e2e/diagnostics/
+            tests/e2e/playwright-report/
+            tests/e2e/test-results/
+            tests/e2e/results.json
+          retention-days: 7
+          if-no-files-found: warn
+
+      - name: スマホで読める結果概要を表示
+        if: always()
+        env:
+          TEST_OUTCOME: ${{ steps.tests.outcome }}
+        run: |
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+
+          const lines = [
+            '## Playwright テスト結果',
+            '',
+            `テストステップ：${process.env.TEST_OUTCOME || '未実行'}`,
+            '',
+            '対象：配信中のwa-awesome',
+            'ブラウザ：Chromium / WebKit',
+            'モバイル：Pixel 7 / iPhone 13 相当',
+            '',
+          ];
+
+          if (fs.existsSync('results.json')) {
+            const result = JSON.parse(
+              fs.readFileSync('results.json', 'utf8')
+            );
+            const stats = result.stats || {};
+
+            lines.push(
+              `成功：${stats.expected ?? 0}件`,
+              `失敗：${stats.unexpected ?? 0}件`,
+              `不安定：${stats.flaky ?? 0}件`,
+              `スキップ：${stats.skipped ?? 0}件`,
+            );
+          } else {
+            lines.push(
+              '結果JSONはありません。インストール・接続確認・テストログを確認してください。'
+            );
+          }
+
+          lines.push(
+            '',
+            '詳細は、この実行のArtifactsに保存しています。',
+            '保存期間：7日間',
+          );
+
+          fs.appendFileSync(
+            process.env.GITHUB_STEP_SUMMARY,
+            lines.join('\n') + '\n'
+          );
+          JS
