@@ -114,6 +114,81 @@ test('ポエム：同時参加・素材投稿・非作成者の開始・同時�
   } finally { await s.close(); }
 });
 
+test('ポエムT4・T5：保存後の同期失敗と次回へ遅れて届く投稿', async ({ browser }, info) => {
+  const s = await session(browser, info, 'poem-submit');
+  const [a,b] = s.people;
+  const evidence = [];
+  let release;
+  try {
+    await join(a, 'poem', s.room); await join(b, 'poem', s.room);
+    const start = async () => {
+      await b.page.locator('#fill-default-btn').click();
+      await expect(b.page.locator('#material-count')).toContainText('10個');
+      await b.page.locator('#start-game-btn').click();
+      await phase([a,b], '#game-sec');
+    };
+    await start();
+    await test.step('T4：保存は実サーバーで成功、投稿後の同期だけをテスト内で失敗させる', async () => {
+      await a.page.evaluate(() => {
+        window.originalResyncForTest = window.resyncPoemRoom;
+        window.resyncPoemRoom = async () => ({ ok: false, error: new Error('T4 controlled sync failure') });
+      });
+      await a.page.locator('#poem-input-area').fill('T4 保存済みの作品');
+      await a.page.locator('#poem-submit-btn').click();
+      await expect(a.page.locator('#game-toast')).toContainText('投稿は保存済み');
+      await expect(a.page.locator('#poem-submit-btn')).toBeDisabled();
+      await expect(a.page.locator('#poem-input-area')).toHaveValue('');
+      await expect(b.page.locator('#submission-status-game')).toContainText('1/2');
+      await b.page.getByRole('button', { name: '🎁 タップして作品を開く' }).click();
+      await expect(b.page.locator('#board-list')).toContainText('T4 保存済みの作品');
+      evidence.push({ case: 'T4', injectedFailure: 'resyncPoemRoom result only', serverSavedConfirmedBy: 'B revealed exact text' });
+      await info.attach('T4-saved-sync-failure', { body: await a.page.screenshot({ fullPage: true }), contentType: 'image/png' });
+      await a.page.evaluate(() => { window.resyncPoemRoom = window.originalResyncForTest; delete window.originalResyncForTest; });
+    });
+    await b.page.locator('#next-game-btn').click(); await phase([a,b], '#lobby-sec'); await start();
+    await test.step('T5：第2幕の手札なしPOSTを保持し、第3幕開始後に同じPOSTを解放する', async () => {
+      let held;
+      const ready = new Promise(resolve => { held = resolve; });
+      const gate = new Promise(resolve => { release = resolve; });
+      await a.page.route('**/submitPoemSecure', async route => {
+        const request = route.request();
+        if (request.method() !== 'POST') return route.continue();
+        const data = request.postDataJSON().data;
+        evidence.push({ case: 'T5', event: 'held', expectedRound: data.expectedRound, text: data.text, usedHands: data.usedHands });
+        held(data);
+        await gate;
+        await route.continue();
+      });
+      await a.page.locator('#poem-input-area').fill('T5 OLD 手札なし');
+      await a.page.locator('#poem-submit-btn').click();
+      const data = await ready;
+      expect(data.expectedRound).toBe(2); expect(data.usedHands).toEqual([]);
+      await b.page.locator('#next-game-btn').click(); await phase([a,b], '#lobby-sec'); await start();
+      await expect.poll(() => a.page.evaluate(async () => (await import('./poem-state.js')).default.currentData.roundCount)).toBe(3);
+      await a.page.locator('#poem-input-area').fill('T5 NEW 新しい下書き');
+      const responsePromise = a.page.waitForResponse(r => r.url().endsWith('/submitPoemSecure') && r.request().method() === 'POST');
+      release();
+      const response = await responsePromise;
+      expect((await response.json()).error.status).toBe('FAILED_PRECONDITION');
+      evidence.push({ case: 'T5', event: 'released-response', status: response.status(), result: 'FAILED_PRECONDITION' });
+      await expect(a.page.locator('#game-toast')).toContainText('現在の下書きはそのまま');
+      await expect(a.page.locator('#poem-input-area')).toHaveValue('T5 NEW 新しい下書き');
+      await expect(b.page.locator('#submission-status-game')).toContainText('0/2');
+      await info.attach('T5-stale-rejected-draft-kept', { body: await a.page.screenshot({ fullPage: true }), contentType: 'image/png' });
+      await a.page.unroute('**/submitPoemSecure');
+      await a.page.locator('#poem-submit-btn').click();
+      await expect(b.page.locator('#submission-status-game')).toContainText('1/2');
+      await b.page.getByRole('button', { name: '🎁 タップして作品を開く' }).click();
+      await expect(b.page.locator('#board-list')).toContainText('T5 NEW 新しい下書き');
+      await expect(b.page.locator('#board-list')).not.toContainText('T5 OLD');
+    });
+  } finally {
+    release?.();
+    await info.attach('T4-T5-safe-evidence', { body: JSON.stringify(evidence, null, 2), contentType: 'application/json' });
+    await s.close();
+  }
+});
+
 test('俳句：同時参加・手札配布・同時提出・披露同期・次節の親交代', async ({ browser }, info) => {
   const s = await session(browser, info, 'haiku');
   const [a,b,c,viewer] = s.people;

@@ -91,8 +91,8 @@
     <textarea id="poem-input-area" rows="1" placeholder="手札を元に自由にポエムを入力してね♪" style="width: 100%; padding: 8px; font-size: 15px; border: 1px solid #cbd5e1; border-radius: 4px; box-sizing: border-box; margin-top: 6px; resize: none; overflow: hidden; line-height: 1.5;"></textarea>
 
     <div class="poem-submit-actions" style="display: flex; gap: 8px;">
-      <button id="poem-clear-btn" class="btn-danger" onclick="clearPoem()" style="margin-top: 12px;">リセット</button>
-      <button id="poem-submit-btn" class="btn-primary" onclick="submitPoem()" style="margin-top: 12px;">ポエムを投稿</button>
+      <button id="poem-clear-btn" data-no-busy-feedback="true" class="btn-danger" onclick="clearPoem()" style="margin-top: 12px;">リセット</button>
+      <button id="poem-submit-btn" data-no-busy-feedback="true" class="btn-primary" onclick="submitPoem()" style="margin-top: 12px;">ポエムを投稿</button>
     </div>
     </section>
 

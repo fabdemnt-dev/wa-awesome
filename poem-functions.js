@@ -51,8 +51,8 @@ export async function removePoemWord(roomId, wordId) {
   return result.data;
 }
 
-export async function submitPoemSecure(roomId, text, usedHands) {
-  return callCallable(submitPoemSecureCallable, { roomId: requireRoomId(roomId), text, usedHands });
+export async function submitPoemSecure(roomId, text, usedHands, expectedRound) {
+  return callCallable(submitPoemSecureCallable, { roomId: requireRoomId(roomId), text, usedHands, expectedRound });
 }
 
 export async function revealPoemSecure(roomId, targetUid) {

@@ -4,6 +4,16 @@ import vm from 'node:vm';
 import test from 'node:test';
 
 const source = readFileSync(new URL('../functions/index.js', import.meta.url), 'utf8');
+
+test('T5: 手札なしでも古い回の投稿を拒否し、現在の回だけ保存する', async () => {
+  const app = setup({ status: 'playing', roundCount: 2, poems: {}, hands: {} });
+  for (const expectedRound of [1, undefined, 0, '2']) {
+    await assert.rejects(app.call('submitPoemSecure', 'player', { expectedRound, text: '古い作品', usedHands: [] }), { code: 'failed-precondition' });
+    assert.equal(Object.keys(app.room().poems).length, 0);
+  }
+  await app.call('submitPoemSecure', 'player', { expectedRound: 2, text: '新しい作品', usedHands: [] });
+  assert.equal(app.room().poems.player.text, '新しい作品');
+});
 function setup(overrides = {}) {
   const deleted = Symbol("delete");
   let room = {
@@ -138,7 +148,7 @@ test('同じ回の見学復帰は元の手札と投稿を維持する', async ()
   await app.call('changePoemRole', 'player', { role: 'player' });
   assert.equal(JSON.stringify(app.room().hands), JSON.stringify(hands));
   assert.equal(app.room().poems.player.text, '投稿済み');
-  await assert.rejects(app.call('submitPoemSecure', 'player', { text: '二度目', usedHands: [] }), { code: 'failed-precondition' });
+  await assert.rejects(app.call('submitPoemSecure', 'player', { expectedRound: 1, text: '二度目', usedHands: [] }), { code: 'failed-precondition' });
 });
 
 test('手札がない初参加者には配札する', async () => {

@@ -2,7 +2,7 @@ name: Multiplayer Playwright test
 on:
   workflow_dispatch:
   push:
-    branches: [codex/playwright-multiplayer-test]
+    branches: [codex/playwright-multiplayer-test, test/poem-submit-guards]
     paths:
       - tests/e2e/**
       - .github/workflows/multiplayer-test.yml
