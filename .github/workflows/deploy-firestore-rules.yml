@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
     paths:
+      - '.github/workflows/deploy-firestore-rules.yml'
       - 'firebase.json'
       - 'firestore.rules'
       - 'functions/**'
@@ -66,7 +67,9 @@ jobs:
         run: |
           set -euo pipefail
           for attempt in $(seq 1 60); do
-            if curl --fail --silent --show-error "$CLIENT_URL" | grep -q 'joinHaikuRoom'; then
+            # Consume the full response: grep -q can close the pipe early,
+            # causing curl (23) and a false failure under pipefail.
+            if curl --fail --silent --show-error --connect-timeout 10 --max-time 30 "$CLIENT_URL" | grep -F 'joinHaikuRoom' > /dev/null; then
               echo 'New client is publicly available.'
               exit 0
             fi
