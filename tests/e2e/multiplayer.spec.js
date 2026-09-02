@@ -123,7 +123,8 @@ test('俳句：同時参加・手札配布・同時提出・披露同期・次�
       await join(a,'haiku',s.room);
       await Promise.all([join(b,'haiku',s.room),join(c,'haiku',s.room),join(viewer,'haiku',s.room,true)]);
       await roster(s.people);
-      await expect(viewer.page.locator('#start-game-btn')).toBeDisabled();
+      await expect(viewer.page.locator('#start-game-btn')).toBeHidden();
+      await expect(b.page.locator('#start-game-btn')).toBeDisabled();
     });
     await test.step('親が素材補充・開始、全員同期と各人の手札を確認', async () => {
       await a.page.locator('#fill-default-btn').click();
@@ -151,7 +152,7 @@ test('俳句：同時参加・手札配布・同時提出・披露同期・次�
       for (const p of players) await a.page.getByRole('button', { name: `📜 ${p.name}の句を披露する`, exact:true }).click();
       for (const p of s.people) await expect(p.page.locator('#phase-status-game')).toContainText('御印受付中');
     });
-    await test.step('次節へ移動、親交代と提出状況のリセット', async () => {
+    await test.step('次節へ移動、親交代を全員で確認', async () => {
       await a.page.locator('#next-round-btn').click();
       await phase(s.people,'#lobby-sec');
       // B/Cの同時参加順は非決定的。次の親がA以外で全員一致することを確認。
