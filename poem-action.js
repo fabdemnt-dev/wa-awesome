@@ -176,24 +176,42 @@ window.revealPoem = async function(pName) {
   }
 };
 
-window.addReaction = async function(pName, type) {
+const pendingReactions = new Set();
+
+window.addReaction = async function(pName, type, button) {
   if (!state.roomRef || !state.currentData) return;
   const poems = state.currentData.poems || {};
   const targetUid = getParticipantUidByName(state.currentData, pName) || pName;
   const target = poems[targetUid] || poems[pName];
   if (!target) return;
 
-  // increment()でサーバー側に加算させることで、同時押しでもカウントが失われないようにする
-  if (state.currentData.schemaVersion === 2) {
-    await reactPoemSecure(state.roomId, targetUid, type);
-    if (typeof window.resyncPoemRoom === 'function') {
-      const result = await window.resyncPoemRoom();
-      if (!result?.ok) throw result.error || new Error('リアクションの画面反映を確認できませんでした。');
+  const key = JSON.stringify([state.roomId, targetUid, type]);
+  if (pendingReactions.has(key)) return;
+  pendingReactions.add(key);
+  if (button) {
+    button.disabled = true;
+    button.setAttribute('aria-busy', 'true');
+  }
+
+  try {
+    // increment()でサーバー側に加算させることで、同時押しでもカウントが失われないようにする
+    if (state.currentData.schemaVersion === 2) {
+      await reactPoemSecure(state.roomId, targetUid, type);
+      if (typeof window.resyncPoemRoom === 'function') {
+        const result = await window.resyncPoemRoom();
+        if (!result?.ok) throw result.error || new Error('リアクションの画面反映を確認できませんでした。');
+      }
+    } else {
+      await updateDoc(state.roomRef, {
+        [`poems.${pName}.${type === 'like' ? 'likes' : 'emos'}`]: increment(1)
+      });
     }
-  } else {
-    await updateDoc(state.roomRef, {
-      [`poems.${pName}.${type === 'like' ? 'likes' : 'emos'}`]: increment(1)
-    });
+  } finally {
+    pendingReactions.delete(key);
+    if (button) {
+      button.disabled = false;
+      button.removeAttribute('aria-busy');
+    }
   }
 };
 

@@ -204,6 +204,15 @@ button:active {
   .card { overflow-wrap: anywhere; }
 }
 
+.reaction-actions button:active {
+  transform: scale(0.96);
+}
+
+.reaction-actions button:disabled {
+  opacity: 0.65;
+  cursor: default !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; }
 }

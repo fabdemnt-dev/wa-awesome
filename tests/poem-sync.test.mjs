@@ -4,6 +4,46 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 const roomSource = readFileSync(new URL('../poem-room.js', import.meta.url), 'utf8');
 const actionSource = readFileSync(new URL('../poem-action.js', import.meta.url), 'utf8');
+
+test('リアクションはラベルを保ち、送信中の二重送信を防ぎ、失敗を通知側へ伝える', async () => {
+  for (const type of ['like', 'emo']) {
+    for (const schemaVersion of [1, 2]) {
+      const pending = deferred();
+      let calls = 0;
+      let fail = false;
+      const send = async () => { calls++; if (fail) throw new Error('通信失敗'); await pending.promise; };
+      const context = vm.createContext({
+        window: { resyncPoemRoom: async () => ({ ok: true }) },
+        state: { roomId: 'room', roomRef: {}, currentData: { schemaVersion, poems: { u: {} } } },
+        getParticipantUidByName: () => 'u', reactPoemSecure: send, updateDoc: send, increment: n => n,
+      });
+      vm.runInContext(between(actionSource, 'const pendingReactions', '\nwindow.exportText'), context);
+      const button = { innerText: 'リアクション (1)', disabled: false, setAttribute(k,v) { this[k] = v; }, removeAttribute(k) { delete this[k]; } };
+      const first = context.window.addReaction('name', type, button);
+      assert.equal(button.innerText, 'リアクション (1)');
+      assert.equal(button.disabled, true);
+      assert.equal(button['aria-busy'], 'true');
+      await context.window.addReaction('name', type, { ...button }); // 再描画されたボタンでも重複させない
+      assert.equal(calls, 1);
+      pending.resolve(); await first;
+      assert.equal(button.disabled, false);
+      assert.equal(button['aria-busy'], undefined);
+      fail = true;
+      await assert.rejects(context.window.addReaction('name', type, button), /通信失敗/);
+      assert.equal(button.disabled, false);
+      fail = false;
+      await context.window.addReaction('name', type, button);
+      assert.equal(calls, 3);
+    }
+  }
+});
+
+test('いいねとエモいは共通の処理中表示から除外する', () => {
+  const source = readFileSync(new URL('../poem-render.js', import.meta.url), 'utf8');
+  const buttons = source.match(/<button[^>]*onclick="addReaction[^>]*>/g);
+  assert.equal(buttons.length, 2);
+  for (const button of buttons) assert.match(button, /data-no-busy-feedback="true"/);
+});
 function between(source, start, end) {
   const a = source.indexOf(start), b = source.indexOf(end, a);
   assert.ok(a >= 0 && b > a);
