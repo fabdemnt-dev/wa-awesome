@@ -78,6 +78,8 @@
       <button id="manual-resync-btn-game" class="btn-secondary" onclick="manualResync('game')">🔄 最新の状態に更新</button>
     </div>
 
+    <p id="poem-spectator-notice" hidden role="status">見学モード中です。みんなの作品をお楽しみください。</p>
+    <section id="poem-composer">
     <h2>2. ポエムを紡ぐ</h2>
 
     <div class="section-title">集まった言葉（手札）</div>
@@ -89,9 +91,10 @@
     <textarea id="poem-input-area" rows="1" placeholder="手札を元に自由にポエムを入力してね♪" style="width: 100%; padding: 8px; font-size: 15px; border: 1px solid #cbd5e1; border-radius: 4px; box-sizing: border-box; margin-top: 6px; resize: none; overflow: hidden; line-height: 1.5;"></textarea>
 
     <div class="poem-submit-actions" style="display: flex; gap: 8px;">
-      <button class="btn-danger" onclick="clearPoem()" style="margin-top: 12px;">リセット</button>
-      <button class="btn-primary" onclick="submitPoem()" style="margin-top: 12px;">ポエムを投稿</button>
+      <button id="poem-clear-btn" class="btn-danger" onclick="clearPoem()" style="margin-top: 12px;">リセット</button>
+      <button id="poem-submit-btn" class="btn-primary" onclick="submitPoem()" style="margin-top: 12px;">ポエムを投稿</button>
     </div>
+    </section>
 
     <hr style="margin: 24px 0; border: none; border-top: 1px solid #e2e8f0;">
 

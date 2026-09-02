@@ -129,3 +129,20 @@ test('俳句の設定は引き続き親だけに許可する', async () => {
   await app.call('updateHaikuSettings', 'host', { hand5: 3, hand7: 2 });
   assert.equal(app.room().currentHostUid, 'host');
 });
+
+test('同じ回の見学復帰は元の手札と投稿を維持する', async () => {
+  const hands = { player: [{ id: 'old', text: '元の札' }] };
+  const app = setup({ status: 'playing', hands, poems: { player: { text: '投稿済み', revealed: false } } });
+  await app.call('changePoemRole', 'player', { role: 'spectator' });
+  await app.call('changePoemRole', 'player', { role: 'player' });
+  await app.call('changePoemRole', 'player', { role: 'player' });
+  assert.equal(JSON.stringify(app.room().hands), JSON.stringify(hands));
+  assert.equal(app.room().poems.player.text, '投稿済み');
+  await assert.rejects(app.call('submitPoemSecure', 'player', { text: '二度目', usedHands: [] }), { code: 'failed-precondition' });
+});
+
+test('手札がない初参加者には配札する', async () => {
+  const app = setup({ status: 'playing', hands: {} });
+  await app.call('changePoemRole', 'spectator', { role: 'player' });
+  assert.equal(app.room().hands.spectator.length, 2);
+});

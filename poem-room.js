@@ -3,7 +3,7 @@ import { doc, getDocFromServer, setDoc, onSnapshot, updateDoc, runTransaction, a
 import { normalizeParticipantName, setParticipantRole, normalizeParticipantRoles, getParticipantStorageKey } from './participant-utils.js';
 import state from './poem-state.js';
 import { escapeHTML, escapeJS, renderInputFields, renderHand, renderBoards } from './poem-render.js';
-import { setupAutoResize, syncPoemDraftContext } from './poem-action.js';
+import { setupAutoResize, syncPoemDraftContext, saveCurrentPoemDraft } from './poem-action.js';
 import { removePoemWord, updatePoemSettings, removePlayer as removePlayerSecure, changePoemRole } from './poem-functions.js';
 import { subscribeRoomHistory } from './room-history.js';
 import { ensureSignedIn } from './wordset-auth.js';
@@ -445,6 +445,7 @@ window.removeSubmittedWord = async function(wordId) {
 
 window.toggleRole = async function() {
   if (!state.roomRef) return;
+  if (!state.isSpectator) saveCurrentPoemDraft();
   if (state.isSpectator) {
     // ゲーム中の途中参戦も、役割変更と手札配布をサーバー側で一括検証する。
     if (state.currentData?.schemaVersion === 2) {
@@ -456,7 +457,7 @@ window.toggleRole = async function() {
       }));
       await changePoemRole(state.roomId, 'player', supplementalWords);
       state.isSpectator = false;
-      alert('余っている素材を優先して手札を配り、プレイヤーとして参加しました！');
+      alert('プレイヤーとして参加しました！');
       return;
     }
 
@@ -489,4 +490,3 @@ window.removePlayer = async function(pName) {
     showGameError(error, '鯖落ち');
   }
 };
-

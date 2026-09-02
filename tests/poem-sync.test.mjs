@@ -77,11 +77,13 @@ test('繰り返し画面更新しても入力1回につき保存とサイズ調�
   };
   const context = vm.createContext({
     document: { getElementById: () => textarea },
+    getParticipantStorageKey: () => 'user',
     state: { roomId: 'room', myUid: 'user', currentData: { status: 'playing', roundCount: 1 }, selectedHandIndices: new Set() },
     sessionStorage: { getItem: () => null, removeItem() {}, setItem: key => { if (key === 'poemDraft') saves++; } },
   });
   vm.runInContext(between(actionSource, 'let draftContext', '\nwindow.onCardClick').replaceAll('export ', ''), context);
   for (let i = 0; i < 100; i++) context.setupAutoResize();
+  measurements = 0;
   for (const fn of handlers) fn.call(textarea);
   assert.equal(saves, 1);
   assert.equal(measurements, 1);
@@ -104,7 +106,7 @@ test('下書きは同じ部屋・本人・回で保持し、別の回や部屋�
   const textarea = { value: '', style: {} };
   const state = { roomId: 'A', myUid: 'u1', currentData: { status: 'playing', roundCount: 1 }, selectedHandIndices: new Set([0]) };
   function create() {
-    const context = vm.createContext({ state, document: { getElementById: () => textarea }, sessionStorage: {
+    const context = vm.createContext({ state, getParticipantStorageKey: () => state.myUid, document: { getElementById: () => textarea }, sessionStorage: {
       getItem: k => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, v), removeItem: k => storage.delete(k),
     } });
     vm.runInContext(between(actionSource, 'let draftContext', '\nwindow.onCardClick').replaceAll('export ', ''), context);
@@ -118,4 +120,34 @@ test('下書きは同じ部屋・本人・回で保持し、別の回や部屋�
   assert.equal(textarea.value, ''); assert.equal(state.selectedHandIndices.size, 0);
   h.savePoemDraft('2回目'); state.roomId = 'B'; h.syncPoemDraftContext(); assert.equal(textarea.value, '');
   h.savePoemDraft('Bの下書き'); state.myUid = 'u2'; h.syncPoemDraftContext(); assert.equal(textarea.value, '');
+});
+
+test('見学中は作成欄だけを隠し、復帰で本文と選択を復元する', () => {
+  const storage = new Map();
+  const elements = new Map();
+  const textarea = { value: '', style: {}, scrollHeight: 80, addEventListener() {}, removeEventListener() {} };
+  elements.set('poem-input-area', textarea);
+  for (const id of ['hand-list', 'poem-composer', 'poem-spectator-notice', 'poem-clear-btn', 'poem-submit-btn', 'board-list']) elements.set(id, {});
+  const state = { roomId: 'A', myUid: 'u', isSpectator: false, currentData: { status: 'playing', roundCount: 1, hands: { u: [{ id: 'card', text: '札' }] }, poems: {} }, selectedHandIndices: new Set() };
+  const context = vm.createContext({ state, document: { getElementById: id => elements.get(id) }, getParticipantStorageKey: () => 'u', escapeHTML: x => x,
+    sessionStorage: { getItem: k => storage.get(k) ?? null, setItem: (k,v) => storage.set(k,v), removeItem: k => storage.delete(k) } });
+  vm.runInContext(between(actionSource, 'let draftContext', '\nwindow.onCardClick').replaceAll('export ', ''), context);
+  const renderSource = readFileSync(new URL('../poem-render.js', import.meta.url), 'utf8');
+  vm.runInContext(between(renderSource, 'export function renderHand', '\nexport function renderBoards').replace('export ', ''), context);
+  context.syncPoemDraftContext(); textarea.value = '下書き'; state.selectedHandIndices.add(0); context.saveCurrentPoemDraft();
+  state.isSpectator = true; context.syncPoemDraftContext(); context.renderHand();
+  assert.equal(elements.get('poem-composer').hidden, true);
+  assert.equal(elements.get('poem-spectator-notice').hidden, false);
+  assert.equal(textarea.value, '下書き');
+  assert.equal(elements.get('board-list').hidden, undefined);
+  state.isSpectator = false; context.syncPoemDraftContext(); context.renderHand(); context.setupAutoResize();
+  assert.equal(elements.get('poem-composer').hidden, false);
+  assert.equal(textarea.value, '下書き'); assert.ok(state.selectedHandIndices.has(0));
+  assert.equal(textarea.style.height, '80px');
+  state.isSpectator = true; state.currentData.roundCount = 2; context.syncPoemDraftContext();
+  state.isSpectator = false; context.syncPoemDraftContext(); context.renderHand();
+  assert.equal(textarea.value, ''); assert.equal(state.selectedHandIndices.size, 0);
+  state.currentData.poems.u = { text: '投稿済み' }; context.syncPoemDraftContext(); context.renderHand();
+  assert.equal(elements.get('poem-submit-btn').disabled, true);
+  assert.equal(textarea.disabled, true);
 });
