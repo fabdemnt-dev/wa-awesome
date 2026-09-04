@@ -257,8 +257,38 @@ test('俳句：同時参加・手札配布・同時提出・披露同期・御�
       }
       await expect(viewer.page.locator('#hand-5-list .card')).toHaveCount(0);
     });
+    await test.step('子が見学へ切り替えて戻っても今節の手札と選択中の句を維持', async () => {
+      await c.page.locator('#hand-5-list .card').nth(0).click();
+      await c.page.locator('#hand-7-list .card').nth(0).click();
+      await c.page.locator('#hand-5-list .card').nth(1).click();
+      const selectedPhrase = await Promise.all([
+        c.page.locator('#phrase-1').innerText(),
+        c.page.locator('#phrase-2').innerText(),
+        c.page.locator('#phrase-3').innerText(),
+      ]);
+
+      await c.page.locator('#role-toggle-btn-game').click();
+      for (const person of s.people) {
+        await expect(person.page.locator('#player-list .participant-card-player')).toHaveCount(2);
+        await expect(person.page.locator('#player-list .participant-card-spectator')).toHaveCount(2);
+      }
+      await expect(c.page.locator('#phrase-builder')).toBeHidden();
+      await expect(c.page.locator('#hand-5-list')).toContainText('見学モード中');
+
+      await c.page.locator('#role-toggle-btn-game').click();
+      for (const person of s.people) {
+        await expect(person.page.locator('#player-list .participant-card-player')).toHaveCount(3);
+        await expect(person.page.locator('#player-list .participant-card-spectator')).toHaveCount(1);
+      }
+      await expect(c.page.locator('#hand-5-list .card')).toHaveCount(5);
+      await expect(c.page.locator('#hand-7-list .card')).toHaveCount(3);
+      await expect(c.page.locator('#phrase-builder')).toBeVisible();
+      await expect(c.page.locator('#phrase-1')).toHaveText(selectedPhrase[0]);
+      await expect(c.page.locator('#phrase-2')).toHaveText(selectedPhrase[1]);
+      await expect(c.page.locator('#phrase-3')).toHaveText(selectedPhrase[2]);
+    });
     await test.step('3人が句を同時提出、全員3/3・再投稿禁止', async () => {
-      for (const p of players) {
+      for (const p of [a,b]) {
         await p.page.locator('#hand-5-list .card').nth(0).click();
         await p.page.locator('#hand-7-list .card').nth(0).click();
         await p.page.locator('#hand-5-list .card').nth(1).click();
