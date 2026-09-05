@@ -426,6 +426,18 @@ p {
   grid-column: 1 / -1;
 }
 
+.npc-choice[data-npc-id="support"] .shadow-art--npc-choice .shadow-art__image {
+  object-position: center 25%;
+}
+
+.npc-choice[data-npc-id="aggressive"] .shadow-art--npc-choice .shadow-art__image {
+  object-position: center 24%;
+}
+
+.npc-choice[data-npc-id="bluff"] .shadow-art--npc-choice .shadow-art__image {
+  object-position: center 27%;
+}
+
 .npc-choice__summary {
   grid-column: 1 / -1;
   margin: 0;
