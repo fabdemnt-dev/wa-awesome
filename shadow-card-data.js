@@ -22,6 +22,7 @@
       type: CARD_TYPES.OFFENSE,
       baseValue: 4,
       effect: "none",
+      image: "assets/shadow-card/card-breakthrough.webp",
       description: "効果はありません。基本値4で正面から勝負します。"
     },
     {
@@ -30,6 +31,7 @@
       type: CARD_TYPES.OFFENSE,
       baseValue: 6,
       effect: "allOut",
+      image: "assets/shadow-card/card-all-out.webp",
       description: "このラウンドで自チームが敗北した場合、次のラウンドだけ自チーム最終値が−1されます。複数枚でも−1までで、引き分けと最終ラウンドでは発生しません。"
     },
     {
@@ -38,6 +40,7 @@
       type: CARD_TYPES.SUPPORT,
       baseValue: 2,
       effect: "assist",
+      image: "assets/shadow-card/card-assist.webp",
       description: "同じチームのもう1枚が攻勢なら、自チーム最終値を＋3します。"
     },
     {
@@ -46,6 +49,7 @@
       type: CARD_TYPES.SUPPORT,
       baseValue: 3,
       effect: "defense",
+      image: "assets/shadow-card/card-defense.webp",
       description: "敵チームから受ける減算を1軽減します。複数枚なら1枚ごとに累積し、軽減後の減算は0未満になりません。"
     },
     {
@@ -54,6 +58,7 @@
       type: CARD_TYPES.INTERFERENCE,
       baseValue: 3,
       effect: "check",
+      image: "assets/shadow-card/card-check.webp",
       description: "敵チーム最終値を−1します。"
     },
     {
@@ -62,6 +67,7 @@
       type: CARD_TYPES.INTERFERENCE,
       baseValue: 2,
       effect: "disrupt",
+      image: "assets/shadow-card/card-disrupt.webp",
       description: "敵チーム最終値を−1します。敵チームに攻勢が1枚以上あれば、合計−2します。"
     },
     {
@@ -70,6 +76,7 @@
       type: CARD_TYPES.DISRUPTION,
       baseValue: null,
       effect: "shift",
+      image: "assets/shadow-card/card-shift.webp",
       description: "公開時に基本値が2または5へ等確率で変わり、確定した値をチーム基本値へ加算します。"
     },
     {
@@ -78,6 +85,7 @@
       type: CARD_TYPES.DISRUPTION,
       baseValue: 1,
       effect: "misdirect",
+      image: "assets/shadow-card/card-misdirect.webp",
       description: "敵チームに妨害が1枚以上あれば、自チーム最終値を＋3します。"
     }
   ];
@@ -115,6 +123,8 @@
       role: "連携と守りを重視する相手",
       strength: "援護と守勢を選びやすい",
       caution: "単独で高い基本値を出す判断は控えめ",
+      image: "assets/shadow-card/npc-support.webp",
+      imageAlt: "扇を手に周囲を見守る支援型の交渉人",
       randomMin: -1,
       randomMax: 1
     },
@@ -124,6 +134,8 @@
       role: "高い基本値で押し切る相手",
       strength: "突破と全力を選びやすい",
       caution: "守りを固める判断は控えめ",
+      image: "assets/shadow-card/npc-aggressive.webp",
+      imageAlt: "札を差し出し強い視線を向ける強気型の交渉人",
       randomMin: -1,
       randomMax: 1
     },
@@ -133,6 +145,8 @@
       role: "変化と読み合いを重視する相手",
       strength: "変転と誘導を選びやすい",
       caution: "判断の振れ幅が大きい",
+      image: "assets/shadow-card/npc-bluff.webp",
+      imageAlt: "扇で口元を隠し静かに微笑むブラフ型の交渉人",
       randomMin: -2,
       randomMax: 2
     }
