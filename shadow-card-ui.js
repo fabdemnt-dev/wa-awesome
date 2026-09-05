@@ -22,6 +22,12 @@
     [SCREENS.FINAL_RESULT]: "final-result-screen"
   });
 
+  const FINAL_RESULT_IMAGES = Object.freeze({
+    win: "assets/shadow-card/result-win.webp",
+    lose: "assets/shadow-card/result-lose.webp",
+    draw: "assets/shadow-card/result-draw.webp"
+  });
+
   function element(id) {
     const found = document.getElementById(id);
 
@@ -53,6 +59,27 @@
     return "0";
   }
 
+  function artMarkup(source, alt, modifier) {
+    return `
+      <span class="shadow-art ${modifier || ""}">
+        <img class="shadow-art__image" src="${escapeHtml(source)}" alt="${escapeHtml(alt || "")}" loading="lazy" width="768" height="1024">
+      </span>
+    `;
+  }
+
+  function activateImageFallbacks(root) {
+    root.querySelectorAll(".shadow-art__image").forEach((image) => {
+      const hideFailedImage = () => {
+        image.hidden = true;
+      };
+
+      image.addEventListener("error", hideFailedImage, { once: true });
+      if (image.complete && image.naturalWidth === 0) {
+        hideFailedImage();
+      }
+    });
+  }
+
   function showCurrentScreen(currentScreen) {
     Object.entries(SCREEN_IDS).forEach(([screenName, screenId]) => {
       element(screenId).hidden = screenName !== currentScreen;
@@ -77,6 +104,7 @@
           aria-checked="${selected}"
           data-npc-id="${escapeHtml(npc.id)}"
         >
+          ${artMarkup(npc.image, npc.imageAlt, "shadow-art--npc-choice")}
           <span class="npc-choice__name">${escapeHtml(npc.name)}</span>
           <span class="npc-choice__mark" aria-hidden="true">✓</span>
           <p class="npc-choice__summary"><strong>役割：</strong>${escapeHtml(npc.role)}</p>
@@ -121,9 +149,14 @@
 
     element("npc-forecasts").innerHTML = entries.map(([participantKey, sideLabel]) => {
       const side = participantSide(participantKey);
+      const npcId = participantKey === PARTICIPANT_KEYS.ALLY
+        ? state.allyNpcId
+        : state.enemyNpcIds[participantKey === PARTICIPANT_KEYS.ENEMY_ONE ? 0 : 1];
+      const npc = data.NPC_BY_ID[npcId];
 
       return `
         <article class="forecast-item forecast-item--${side}">
+          ${artMarkup(npc.image, npc.imageAlt, "shadow-art--forecast")}
           <span class="forecast-item__side">${sideLabel}</span>
           <span class="forecast-item__name">${escapeHtml(participantName(state, participantKey))}</span>
           <p class="forecast-item__text">「${escapeHtml(state.npcForecasts[participantKey])}」</p>
@@ -176,6 +209,7 @@
           ${disabled ? "disabled" : ""}
         >
           <span class="hand-card__selected-mark" aria-hidden="true">選択中</span>
+          ${artMarkup(card.image, "", "shadow-art--card")}
           <span class="hand-card__type">${escapeHtml(data.CARD_TYPE_LABELS[card.type])}</span>
           <span class="hand-card__name">${escapeHtml(card.name)}</span>
           <span class="hand-card__value">基本値 ${escapeHtml(baseValueLabel(card))}</span>
@@ -339,9 +373,11 @@
       const playedCard = roundResult.playedCards[participantKey];
       const side = participantSide(participantKey);
       const sideLabel = side === "ally" ? "自チーム" : "敵チーム";
+      const card = data.CARD_BY_ID[playedCard.cardId];
 
       return `
         <article class="revealed-card revealed-card--${side}">
+          ${artMarkup(card.image, "", "shadow-art--revealed")}
           <p>${sideLabel}・${escapeHtml(participantName(state, participantKey))}</p>
           <p class="revealed-card__name">${escapeHtml(playedCard.name)}</p>
           <p>${escapeHtml(data.CARD_TYPE_LABELS[playedCard.type])}</p>
@@ -389,6 +425,8 @@
       draw: "引き分け"
     }[finalOutcome];
 
+    element("final-result-image").src = FINAL_RESULT_IMAGES[finalOutcome];
+
     element("final-outcome").textContent = outcomeText;
     element("final-score").textContent = `自チーム ${state.scores.ally} ／ 敵チーム ${state.scores.enemy}`;
 
@@ -419,6 +457,8 @@
     } else if (state.currentScreen === SCREENS.FINAL_RESULT) {
       renderFinalResult();
     }
+
+    activateImageFallbacks(element("app"));
   }
 
   global.ShadowCardUI = Object.freeze({

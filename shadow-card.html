@@ -15,8 +15,8 @@
 
     <main id="app" class="app" tabindex="-1">
       <section id="title-screen" class="screen screen--centered" aria-labelledby="title-heading">
-        <div class="title-emblem" aria-hidden="true">
-          <span class="title-emblem__diamond"></span>
+        <div class="shadow-art shadow-art--title" aria-hidden="true">
+          <img class="shadow-art__image" src="assets/shadow-card/title-key-visual.webp" alt="" width="1536" height="1024">
         </div>
         <p class="eyebrow">ORIGINAL CARD GAME</p>
         <h1 id="title-heading" class="game-title">影札の交渉</h1>
@@ -160,6 +160,9 @@
       </section>
 
       <section id="round-result-screen" class="screen" aria-labelledby="round-result-heading" hidden>
+        <div class="shadow-art shadow-art--result" aria-hidden="true">
+          <img class="shadow-art__image" src="assets/shadow-card/result-round.webp" alt="" width="1200" height="675">
+        </div>
         <div class="screen-heading">
           <p id="round-result-label" class="eyebrow">ROUND RESULT</p>
           <h1 id="round-result-heading">ラウンド結果</h1>
@@ -188,6 +191,9 @@
       </section>
 
       <section id="final-result-screen" class="screen screen--centered" aria-labelledby="final-result-heading" hidden>
+        <div class="shadow-art shadow-art--result shadow-art--final" aria-hidden="true">
+          <img id="final-result-image" class="shadow-art__image" src="assets/shadow-card/result-draw.webp" alt="" width="1200" height="675">
+        </div>
         <p class="eyebrow">FINAL RESULT</p>
         <h1 id="final-result-heading">最終結果</h1>
         <p id="final-outcome" class="final-outcome" aria-live="polite">―</p>

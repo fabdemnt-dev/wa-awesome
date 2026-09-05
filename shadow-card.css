@@ -200,6 +200,57 @@ p {
   color: var(--color-text-muted);
 }
 
+.shadow-art {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  border: 1px solid rgba(224, 189, 131, 0.42);
+  border-radius: var(--radius-small);
+  background:
+    radial-gradient(circle at 72% 24%, rgba(224, 189, 131, 0.36), transparent 24%),
+    linear-gradient(145deg, #111c3a 0%, #382052 52%, #8c6940 100%);
+  isolation: isolate;
+}
+
+.shadow-art::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+  pointer-events: none;
+  background: linear-gradient(180deg, transparent 62%, rgba(8, 7, 14, 0.3));
+}
+
+.shadow-art__image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.shadow-art__image[hidden] {
+  display: none;
+}
+
+.shadow-art--title {
+  width: min(100%, 620px);
+  margin-bottom: 1.25rem;
+  aspect-ratio: 3 / 2;
+  border-radius: var(--radius-large);
+  box-shadow: var(--shadow-soft);
+}
+
+.shadow-art--result {
+  width: 100%;
+  margin-bottom: 1rem;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-medium);
+  box-shadow: var(--shadow-soft);
+}
+
+.shadow-art--final {
+  margin-bottom: 1.25rem;
+}
+
 .title-emblem {
   position: relative;
   width: 90px;
@@ -366,6 +417,13 @@ p {
   font-family: var(--font-serif);
   font-size: 1.2rem;
   font-weight: 700;
+}
+
+.shadow-art--npc-choice {
+  width: 100%;
+  margin-bottom: 0.35rem;
+  aspect-ratio: 16 / 7;
+  grid-column: 1 / -1;
 }
 
 .npc-choice__summary {
@@ -588,7 +646,7 @@ p {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-small);
   background: var(--color-surface-soft);
-  grid-template-columns: auto 1fr;
+  grid-template-columns: 54px auto 1fr;
   gap: 0.2rem 0.65rem;
 }
 
@@ -598,6 +656,16 @@ p {
   align-self: start;
   font-size: 0.68rem;
   font-weight: 700;
+}
+
+.shadow-art--forecast {
+  width: 54px;
+  aspect-ratio: 1;
+  grid-row: 1 / span 2;
+}
+
+.forecast-item__text {
+  grid-column: 2 / -1;
 }
 
 .forecast-item--ally .forecast-item__side {
@@ -618,7 +686,6 @@ p {
   margin: 0;
   color: var(--color-text-muted);
   font-size: 0.88rem;
-  grid-column: 1 / -1;
 }
 
 .card-scroller {
@@ -656,6 +723,13 @@ p {
 
 .hand-card:hover {
   border-color: var(--color-border-strong);
+}
+
+.shadow-art--card {
+  width: 100%;
+  margin-bottom: 0.75rem;
+  aspect-ratio: 4 / 3;
+  flex: 0 0 auto;
 }
 
 .hand-card[aria-checked="true"],
@@ -784,6 +858,12 @@ p {
 
 .revealed-card--enemy {
   border-top: 3px solid var(--color-enemy);
+}
+
+.shadow-art--revealed {
+  width: 100%;
+  margin-bottom: 0.55rem;
+  aspect-ratio: 4 / 3;
 }
 
 .revealed-card p {
