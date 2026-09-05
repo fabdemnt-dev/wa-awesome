@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="2対2で5ラウンドを戦うオリジナルWebカードゲーム『影札の交渉』">
+  <title>影札の交渉</title>
+  <link rel="stylesheet" href="shadow-card.css">
+</head>
+<body>
+  <div class="page-shell">
+    <header class="site-header">
+      <p class="site-mark" aria-label="影札の交渉">影札の交渉</p>
+    </header>
+
+    <main id="app" class="app" tabindex="-1">
+      <section id="title-screen" class="screen screen--centered" aria-labelledby="title-heading">
+        <div class="title-emblem" aria-hidden="true">
+          <span class="title-emblem__diamond"></span>
+        </div>
+        <p class="eyebrow">ORIGINAL CARD GAME</p>
+        <h1 id="title-heading" class="game-title">影札の交渉</h1>
+        <p class="title-copy">言葉の裏を読み、相棒を信じ、五度の交渉を制せ。</p>
+        <div class="button-stack title-actions">
+          <button id="start-game-button" class="button button--primary" type="button">ゲームを始める</button>
+          <button id="show-rules-button" class="button button--secondary" type="button">遊び方</button>
+        </div>
+      </section>
+
+      <section id="partner-screen" class="screen" aria-labelledby="partner-heading" hidden>
+        <div class="screen-heading">
+          <p class="eyebrow">PARTNER SELECT</p>
+          <h1 id="partner-heading">味方を選ぶ</h1>
+          <p>選ばなかった二人が敵チームになります。</p>
+        </div>
+
+        <div id="npc-selection-list" class="npc-selection-list" role="radiogroup" aria-label="味方NPCの選択"></div>
+
+        <div class="sticky-actions">
+          <button id="confirm-partner-button" class="button button--primary" type="button" disabled>この相手と組む</button>
+          <button class="button button--text" type="button" data-action="go-title">タイトルへ戻る</button>
+        </div>
+      </section>
+
+      <section id="rules-screen" class="screen" aria-labelledby="rules-heading" hidden>
+        <div class="screen-heading">
+          <p class="eyebrow">HOW TO PLAY</p>
+          <h1 id="rules-heading">遊び方</h1>
+        </div>
+
+        <div class="rules-list">
+          <article class="rule-panel">
+            <h2>勝負の流れ</h2>
+            <p>あなたと味方NPCでチームを組み、敵NPC二人と全5ラウンドを戦います。毎ラウンド、手札4枚から1枚を選びます。</p>
+          </article>
+          <article class="rule-panel">
+            <h2>場札と勝利点</h2>
+            <p>場札は「小競り合い」1点、「交渉」2点、「決戦」3点です。二人のカードを計算し、最終値が高いチームが場札の点を獲得します。</p>
+          </article>
+          <article class="rule-panel">
+            <h2>カード効果</h2>
+            <p>攻勢・支援・妨害・撹乱を組み合わせて戦います。「変転」は公開時に基本値が2または5へ等確率で変わります。</p>
+          </article>
+          <article class="rule-panel">
+            <h2>全力の代償</h2>
+            <p>「全力」を出したチームがラウンドで負けると、次のラウンドだけチーム最終値が−1されます。複数枚でも−1までで、引き分けと最終ラウンドでは発生しません。</p>
+          </article>
+          <article class="rule-panel">
+            <h2>味方が知ること</h2>
+            <p>味方NPCはあなたのカード名や選択を見ません。手札にある攻勢・支援・妨害・撹乱の枚数だけを参考にします。</p>
+          </article>
+          <article class="rule-panel">
+            <h2>敵は別々に考える</h2>
+            <p>敵NPC二人は、互いの今回の手札や選択を共有せず、それぞれ独立してカードを決めます。</p>
+          </article>
+          <article class="rule-panel">
+            <h2>最終勝利</h2>
+            <p>5ラウンド終了時に累計得点が多いチームの勝利です。同点なら引き分けになります。</p>
+          </article>
+        </div>
+
+        <div class="screen-footer-actions">
+          <button class="button button--secondary" type="button" data-action="go-title">タイトルへ戻る</button>
+        </div>
+      </section>
+
+      <section id="game-screen" class="screen" aria-labelledby="round-heading" hidden>
+        <div class="game-status">
+          <div>
+            <p class="eyebrow">CURRENT ROUND</p>
+            <h1 id="round-heading">ROUND <span id="round-number">1</span> / 5</h1>
+          </div>
+          <div class="scoreboard" aria-label="累計得点">
+            <div class="scoreboard__team scoreboard__team--ally">
+              <span>自チーム</span>
+              <strong id="ally-score">0</strong>
+            </div>
+            <span class="scoreboard__divider" aria-hidden="true">:</span>
+            <div class="scoreboard__team scoreboard__team--enemy">
+              <span>敵チーム</span>
+              <strong id="enemy-score">0</strong>
+            </div>
+          </div>
+        </div>
+
+        <section class="field-card" aria-labelledby="field-card-name">
+          <p class="field-card__label">場札</p>
+          <h2 id="field-card-name">―</h2>
+          <p><strong id="field-card-points">0</strong> 勝利点</p>
+        </section>
+
+        <div id="active-penalties" class="penalty-status" aria-live="polite">
+          <span class="penalty-status__label">今回の全力ペナルティ</span>
+          <span id="ally-penalty">自チーム：なし</span>
+          <span id="enemy-penalty">敵チーム：なし</span>
+        </div>
+
+        <section class="game-section" aria-labelledby="forecasts-heading">
+          <div class="section-title-row">
+            <h2 id="forecasts-heading">NPCの予告</h2>
+          </div>
+          <div id="npc-forecasts" class="forecast-list" aria-live="polite"></div>
+          <details class="details-panel">
+            <summary>NPCの詳しい役割説明</summary>
+            <div id="npc-role-details" class="details-panel__content"></div>
+          </details>
+        </section>
+
+        <section class="game-section hand-section" aria-labelledby="hand-heading">
+          <div class="section-title-row">
+            <div>
+              <h2 id="hand-heading">あなたの手札</h2>
+              <p>使うカードを1枚選んでください。</p>
+            </div>
+            <span id="hand-selection-status" class="selection-status" aria-live="polite">未選択</span>
+          </div>
+          <div id="player-hand" class="card-scroller" role="radiogroup" aria-label="プレイヤーの手札"></div>
+          <details id="selected-card-details" class="details-panel">
+            <summary>選択中カードの詳しい説明</summary>
+            <div id="selected-card-description" class="details-panel__content">
+              <p>カードを選ぶと詳細が表示されます。</p>
+            </div>
+          </details>
+        </section>
+
+        <section class="game-section compact-section" aria-label="過去の記録">
+          <details class="details-panel">
+            <summary>過去ラウンド履歴</summary>
+            <div id="round-history" class="details-panel__content"></div>
+          </details>
+          <details class="details-panel">
+            <summary>詳細な計算過程</summary>
+            <div id="calculation-history" class="details-panel__content"></div>
+          </details>
+        </section>
+
+        <div class="sticky-actions sticky-actions--game">
+          <button id="confirm-card-button" class="button button--primary" type="button" disabled>このカードで決定</button>
+        </div>
+      </section>
+
+      <section id="round-result-screen" class="screen" aria-labelledby="round-result-heading" hidden>
+        <div class="screen-heading">
+          <p id="round-result-label" class="eyebrow">ROUND RESULT</p>
+          <h1 id="round-result-heading">ラウンド結果</h1>
+          <p id="round-outcome" class="outcome-label" aria-live="polite">―</p>
+        </div>
+
+        <section class="result-panel" aria-labelledby="revealed-cards-heading">
+          <h2 id="revealed-cards-heading">公開されたカード</h2>
+          <div id="revealed-cards" class="revealed-card-grid"></div>
+        </section>
+
+        <section class="result-panel" aria-labelledby="calculation-heading">
+          <h2 id="calculation-heading">今回の計算</h2>
+          <div id="round-calculation" class="calculation-comparison"></div>
+        </section>
+
+        <section class="result-panel result-score" aria-labelledby="score-result-heading">
+          <h2 id="score-result-heading">得点</h2>
+          <p id="round-points-earned">獲得点：―</p>
+          <p id="cumulative-score">累計点：自チーム 0 ／ 敵チーム 0</p>
+        </section>
+
+        <div class="sticky-actions">
+          <button id="next-round-button" class="button button--primary" type="button">次のラウンドへ</button>
+        </div>
+      </section>
+
+      <section id="final-result-screen" class="screen screen--centered" aria-labelledby="final-result-heading" hidden>
+        <p class="eyebrow">FINAL RESULT</p>
+        <h1 id="final-result-heading">最終結果</h1>
+        <p id="final-outcome" class="final-outcome" aria-live="polite">―</p>
+        <p id="final-score" class="final-score">自チーム 0 ／ 敵チーム 0</p>
+
+        <section class="final-panel" aria-labelledby="formation-heading">
+          <h2 id="formation-heading">今回の編成</h2>
+          <div id="final-formation"></div>
+        </section>
+
+        <section class="final-panel" aria-labelledby="final-history-heading">
+          <h2 id="final-history-heading">全ラウンド履歴</h2>
+          <div id="final-round-history"></div>
+        </section>
+
+        <div class="button-stack final-actions">
+          <button id="rematch-button" class="button button--primary" type="button">同じ編成でもう一度</button>
+          <button id="reselect-partner-button" class="button button--secondary" type="button">味方を選び直す</button>
+          <button class="button button--text" type="button" data-action="go-title">タイトルへ戻る</button>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <small>影札の交渉 — Original Web Card Game</small>
+    </footer>
+  </div>
+
+  <noscript>
+    <p class="noscript-message">このゲームを遊ぶにはJavaScriptを有効にしてください。</p>
+  </noscript>
+
+  <script src="shadow-card-data.js" defer></script>
+  <script src="shadow-card-state.js" defer></script>
+  <script src="shadow-card-ai.js" defer></script>
+  <script src="shadow-card-logic.js" defer></script>
+  <script src="shadow-card-ui.js" defer></script>
+  <script src="shadow-card-main.js" defer></script>
+</body>
+</html>
