@@ -5,6 +5,7 @@ on:
   pull_request:
     branches:
       - local-shadow-online
+      - main
     paths:
       - ".github/workflows/shadow-card-emulator-tests.yml"
       - "tests/shadow-card-presence-rules.test.mjs"
