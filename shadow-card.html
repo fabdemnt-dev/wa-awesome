@@ -6,6 +6,7 @@
   <meta name="description" content="2対2で5ラウンドを戦うオリジナルWebカードゲーム『影札の交渉』">
   <title>影札の交渉</title>
   <link rel="stylesheet" href="shadow-card.css">
+  <link rel="stylesheet" href="shadow-card-rules-gallery.css">
 </head>
 <body>
   <div class="page-shell">
@@ -49,6 +50,10 @@
           <h1 id="rules-heading">遊び方</h1>
         </div>
 
+        <a class="rules-hero rules-art-card" href="assets/shadow-card/title-key-visual.webp" target="_blank" rel="noopener" aria-label="タイトル画像を大きく見る">
+          <img src="assets/shadow-card/title-key-visual.webp" alt="" width="1536" height="1024">
+        </a>
+
         <div class="rules-list">
           <article class="rule-panel">
             <h2>勝負の流れ</h2>
@@ -57,6 +62,12 @@
           <article class="rule-panel">
             <h2>場札と勝利点</h2>
             <p>場札は「小競り合い」1点、「交渉」2点、「決戦」3点です。二人のカードを計算し、最終値が高いチームが場札の点を獲得します。</p>
+            <div class="rules-round-art">
+              <a class="rules-art-card" href="assets/shadow-card/result-round.webp" target="_blank" rel="noopener" aria-label="ラウンド結果の画像を大きく見る">
+                <img src="assets/shadow-card/result-round.webp" alt="" width="1200" height="675" loading="lazy">
+                <span class="rules-art-card__caption">ラウンド結果</span>
+              </a>
+            </div>
           </article>
           <article class="rule-panel">
             <h2>カード効果</h2>
@@ -66,6 +77,43 @@
             <h2>全力の代償</h2>
             <p>「全力」を出したチームがラウンドで負けると、次のラウンドだけチーム最終値が−1されます。複数枚でも−1までで、引き分けと最終ラウンドでは発生しません。</p>
           </article>
+          <article class="rule-panel rule-panel--gallery" aria-labelledby="rules-card-gallery-heading">
+            <h2 id="rules-card-gallery-heading">カード一覧</h2>
+            <div class="rules-card-gallery">
+              <a class="rules-art-card" href="assets/shadow-card/card-breakthrough.webp" target="_blank" rel="noopener" aria-label="突破の画像を大きく見る">
+                <img src="assets/shadow-card/card-breakthrough.webp" alt="" width="1200" height="800" loading="lazy">
+                <span class="rules-art-card__caption">突破</span>
+              </a>
+              <a class="rules-art-card" href="assets/shadow-card/card-all-out.webp" target="_blank" rel="noopener" aria-label="全力の画像を大きく見る">
+                <img src="assets/shadow-card/card-all-out.webp" alt="" width="1200" height="800" loading="lazy">
+                <span class="rules-art-card__caption">全力</span>
+              </a>
+              <a class="rules-art-card" href="assets/shadow-card/card-assist.webp" target="_blank" rel="noopener" aria-label="援護の画像を大きく見る">
+                <img src="assets/shadow-card/card-assist.webp" alt="" width="1200" height="800" loading="lazy">
+                <span class="rules-art-card__caption">援護</span>
+              </a>
+              <a class="rules-art-card" href="assets/shadow-card/card-defense.webp" target="_blank" rel="noopener" aria-label="守勢の画像を大きく見る">
+                <img src="assets/shadow-card/card-defense.webp" alt="" width="1200" height="800" loading="lazy">
+                <span class="rules-art-card__caption">守勢</span>
+              </a>
+              <a class="rules-art-card" href="assets/shadow-card/card-check.webp" target="_blank" rel="noopener" aria-label="けん制の画像を大きく見る">
+                <img src="assets/shadow-card/card-check.webp" alt="" width="1200" height="800" loading="lazy">
+                <span class="rules-art-card__caption">けん制</span>
+              </a>
+              <a class="rules-art-card" href="assets/shadow-card/card-disrupt.webp" target="_blank" rel="noopener" aria-label="崩しの画像を大きく見る">
+                <img src="assets/shadow-card/card-disrupt.webp" alt="" width="1200" height="800" loading="lazy">
+                <span class="rules-art-card__caption">崩し</span>
+              </a>
+              <a class="rules-art-card" href="assets/shadow-card/card-shift.webp" target="_blank" rel="noopener" aria-label="変転の画像を大きく見る">
+                <img src="assets/shadow-card/card-shift.webp" alt="" width="1200" height="800" loading="lazy">
+                <span class="rules-art-card__caption">変転</span>
+              </a>
+              <a class="rules-art-card" href="assets/shadow-card/card-misdirect.webp" target="_blank" rel="noopener" aria-label="誘導の画像を大きく見る">
+                <img src="assets/shadow-card/card-misdirect.webp" alt="" width="1200" height="800" loading="lazy">
+                <span class="rules-art-card__caption">誘導</span>
+              </a>
+            </div>
+          </article>
           <article class="rule-panel">
             <h2>味方が知ること</h2>
             <p>味方NPCはあなたのカード名や選択を見ません。手札にある攻勢・支援・妨害・撹乱の枚数だけを参考にします。</p>
@@ -74,9 +122,43 @@
             <h2>敵は別々に考える</h2>
             <p>敵NPC二人は、互いの今回の手札や選択を共有せず、それぞれ独立してカードを決めます。</p>
           </article>
+          <article class="rule-panel rule-panel--gallery" aria-labelledby="rules-npc-gallery-heading">
+            <h2 id="rules-npc-gallery-heading">NPC</h2>
+            <div class="rules-npc-gallery">
+              <a class="rules-art-card" href="assets/shadow-card/npc-support.webp" target="_blank" rel="noopener" aria-label="支援型NPCの画像を大きく見る">
+                <img src="assets/shadow-card/npc-support.webp" alt="" width="1024" height="1024" loading="lazy">
+                <span class="rules-art-card__caption">支援型</span>
+              </a>
+              <a class="rules-art-card" href="assets/shadow-card/npc-aggressive.webp" target="_blank" rel="noopener" aria-label="強気型NPCの画像を大きく見る">
+                <img src="assets/shadow-card/npc-aggressive.webp" alt="" width="1024" height="1024" loading="lazy">
+                <span class="rules-art-card__caption">強気型</span>
+              </a>
+              <a class="rules-art-card" href="assets/shadow-card/npc-bluff.webp" target="_blank" rel="noopener" aria-label="ブラフ型NPCの画像を大きく見る">
+                <img src="assets/shadow-card/npc-bluff.webp" alt="" width="1024" height="1024" loading="lazy">
+                <span class="rules-art-card__caption">ブラフ型</span>
+              </a>
+            </div>
+          </article>
           <article class="rule-panel">
             <h2>最終勝利</h2>
             <p>5ラウンド終了時に累計得点が多いチームの勝利です。同点なら引き分けになります。</p>
+          </article>
+          <article class="rule-panel rule-panel--gallery" aria-labelledby="rules-result-gallery-heading">
+            <h2 id="rules-result-gallery-heading">最終結果</h2>
+            <div class="rules-result-gallery">
+              <a class="rules-art-card" href="assets/shadow-card/result-win.webp" target="_blank" rel="noopener" aria-label="勝利結果の画像を大きく見る">
+                <img src="assets/shadow-card/result-win.webp" alt="" width="1200" height="675" loading="lazy">
+                <span class="rules-art-card__caption">勝利</span>
+              </a>
+              <a class="rules-art-card" href="assets/shadow-card/result-lose.webp" target="_blank" rel="noopener" aria-label="敗北結果の画像を大きく見る">
+                <img src="assets/shadow-card/result-lose.webp" alt="" width="1200" height="675" loading="lazy">
+                <span class="rules-art-card__caption">敗北</span>
+              </a>
+              <a class="rules-art-card" href="assets/shadow-card/result-draw.webp" target="_blank" rel="noopener" aria-label="引き分け結果の画像を大きく見る">
+                <img src="assets/shadow-card/result-draw.webp" alt="" width="1200" height="675" loading="lazy">
+                <span class="rules-art-card__caption">引き分け</span>
+              </a>
+            </div>
           </article>
         </div>
 
