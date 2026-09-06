@@ -1,0 +1,178 @@
+name: Shadow Card Emulator Tests
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - local-shadow-online
+    paths:
+      - ".github/workflows/shadow-card-emulator-tests.yml"
+      - "tests/shadow-card-presence-rules.test.mjs"
+      - "database.rules.json"
+      - "package.json"
+      - "package-lock.json"
+      - "firebase.shadow-card-emulator.json"
+      - "functions/**"
+      - "tests/shadow-card-integration.test.mjs"
+  push:
+    branches:
+      - test/shadow-card-emulator-rules
+    paths:
+      - ".github/workflows/shadow-card-emulator-tests.yml"
+      - "tests/shadow-card-presence-rules.test.mjs"
+      - "database.rules.json"
+      - "package.json"
+      - "package-lock.json"
+      - "firebase.shadow-card-emulator.json"
+      - "functions/**"
+      - "tests/shadow-card-integration.test.mjs"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shadow-card-emulator-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  emulator-tests:
+    name: Local Firebase Emulator tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      GCLOUD_PROJECT: demo-shadow-card
+      GOOGLE_CLOUD_PROJECT: demo-shadow-card
+      FIREBASE_PROJECT_ID: demo-shadow-card
+      FIREBASE_CONFIG: '{"projectId":"demo-shadow-card"}'
+      SHADOW_CARD_TEST_ROUND_SECONDS: "5"
+
+    steps:
+      - name: Check out test source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            functions/package-lock.json
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Firebase CLI 14.27.0
+        run: npm install --global firebase-tools@14.27.0
+
+      - name: Verify isolated Emulator configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test "$(node --version | cut -d. -f1)" = "v20"
+          test "$(firebase --version)" = "14.27.0"
+          test -f functions/package-lock.json
+          test -f database.rules.json
+          test -f firebase.shadow-card-emulator.json
+
+          node <<'NODE'
+          const fs = require('node:fs');
+
+          const functionsPackage =
+            JSON.parse(fs.readFileSync('functions/package.json', 'utf8'));
+          const rootPackage =
+            JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          const emulatorConfig =
+            JSON.parse(fs.readFileSync(
+              'firebase.shadow-card-emulator.json',
+              'utf8',
+            ));
+
+          if (!functionsPackage.dependencies?.['firebase-admin']) {
+            throw new Error('firebase-admin is missing');
+          }
+
+          if (!functionsPackage.dependencies?.['firebase-functions']) {
+            throw new Error('firebase-functions is missing');
+          }
+
+          if (emulatorConfig.database?.rules !== 'database.rules.json') {
+            throw new Error(
+              'Emulator configuration must use database.rules.json',
+            );
+          }
+
+          const requiredScripts = [
+            'test:shadow-card:presence-rules',
+            'test:shadow-card:integration',
+          ];
+
+          for (const name of requiredScripts) {
+            const script = rootPackage.scripts?.[name];
+
+            if (!script) {
+              throw new Error(`Missing npm script: ${name}`);
+            }
+
+            if (!script.includes('--project demo-shadow-card')) {
+              throw new Error(
+                `${name} must use the demo-shadow-card project`,
+              );
+            }
+
+            if (
+              /firebase deploy|gcloud|firebaseio\.com|firebasedatabase\.app/
+                .test(script)
+            ) {
+              throw new Error(
+                `${name} contains a prohibited production operation or URL`,
+              );
+            }
+          }
+          NODE
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install Functions dependencies
+        run: npm --prefix functions ci
+
+      - name: Create local-only dummy HMAC file
+        shell: bash
+        env:
+          LOCAL_INVITE_HMAC_KEY: local-test-only-invite-key-not-production
+          LOCAL_IP_HMAC_KEY: local-test-only-ip-key-not-production
+        run: |
+          set -euo pipefail
+
+          echo "::add-mask::$LOCAL_INVITE_HMAC_KEY"
+          echo "::add-mask::$LOCAL_IP_HMAC_KEY"
+
+          umask 077
+          {
+            printf 'SHADOW_CARD_INVITE_HMAC_KEY=%s\n' \
+              "$LOCAL_INVITE_HMAC_KEY"
+            printf 'SHADOW_CARD_IP_HMAC_KEY=%s\n' \
+              "$LOCAL_IP_HMAC_KEY"
+          } > functions/.secret.local
+
+      - name: Run Presence Rules tests
+        run: npm run test:shadow-card:presence-rules
+
+      - name: Run two-player integration tests
+        if: ${{ success() }}
+        run: timeout --signal=INT 300s npm run test:shadow-card:integration
+
+      - name: Remove local-only HMAC file
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          rm -f functions/.secret.local
+          test ! -e functions/.secret.local
