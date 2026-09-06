@@ -113,6 +113,7 @@ function playedCardMarkup(s,seatId,played){
 function renderResult(r,g,s){
   el('result').innerHTML='';
   setHidden(el('next-round'),!shouldShowNextRound(g));
+  setHidden(el('return-to-title'),g?.phase!=='finished');
   if(!r)return;
   const finished=g.phase==='finished';
   const resultKind=finished?finalResultKind(g,s):'round';
