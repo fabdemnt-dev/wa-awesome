@@ -9,26 +9,58 @@
 </head>
 <body>
   <main class="online-shell">
-    <header><p class="eyebrow">ONLINE MATCH</p><h1>影札の交渉</h1><p>人間＋NPC 対 人間＋NPC／全5ラウンド</p></header>
+    <header class="online-header">
+      <div class="hero-art" aria-hidden="true">
+        <img src="assets/shadow-card/title-key-visual.webp" alt="" width="1536" height="1024">
+      </div>
+      <p class="eyebrow">ONLINE MATCH</p>
+      <h1>影札の交渉</h1>
+      <p>人間＋NPC 対 人間＋NPC／全5ラウンド</p>
+    </header>
+
     <p id="status" class="status" aria-live="polite">匿名ログイン中…</p>
+
     <section id="entry" class="panel" hidden>
       <label>表示名<input id="display-name" maxlength="20" autocomplete="nickname" value="旅人"></label>
       <button id="create-room" type="button">ルームを作る</button>
       <label>招待コード<input id="invite-code" maxlength="24" autocomplete="off" placeholder="SC2-……-……"></label>
       <button id="join-room" type="button">ルームに参加</button>
+
+      <div class="npc-roster" aria-label="影札のNPCタイプ">
+        <article class="npc-roster__item">
+          <img src="assets/shadow-card/npc-support.webp" alt="" width="1024" height="1024" loading="lazy">
+          <strong>支援型</strong><span>オンライン登場</span>
+        </article>
+        <article class="npc-roster__item">
+          <img src="assets/shadow-card/npc-aggressive.webp" alt="" width="1024" height="1024" loading="lazy">
+          <strong>強気型</strong><span>オンライン登場</span>
+        </article>
+        <article class="npc-roster__item">
+          <img src="assets/shadow-card/npc-bluff.webp" alt="" width="1024" height="1024" loading="lazy">
+          <strong>ブラフ型</strong><span>ひとり用に登場</span>
+        </article>
+      </div>
+
       <a href="shadow-card.html">ひとり用へ戻る</a>
     </section>
+
     <section id="lobby" class="panel" hidden>
       <h2>待機室</h2>
       <p class="invite-code-line">招待コード：<strong id="shown-code">参加済み</strong><span id="copy-code-hint" class="copy-code-hint" hidden>タップでコピー</span></p>
-      <ul id="members"></ul><button id="start-match" type="button" hidden>対戦を始める</button>
+      <ul id="members"></ul>
+      <div id="lobby-npc" class="lobby-npc"></div>
+      <button id="start-match" type="button" hidden>対戦を始める</button>
     </section>
+
     <section id="game" class="panel" hidden>
       <div class="score"><strong id="round-label">ROUND 1 / 5</strong><span id="score-label">0 - 0</span></div>
-      <p id="field-label"></p><p id="deadline"></p>
+      <div id="npc-panel" class="npc-grid" aria-label="対戦NPC"></div>
+      <p id="field-label" class="field-label"></p>
+      <p id="deadline"></p>
       <div id="hand" class="hand" role="radiogroup" aria-label="自分の手札"></div>
       <button id="submit-card" type="button" disabled>このカードで決定</button>
-      <div id="result"></div><button id="next-round" type="button" hidden>次のラウンドへ</button>
+      <div id="result"></div>
+      <button id="next-round" type="button" hidden>次のラウンドへ</button>
     </section>
   </main>
   <script type="module" src="shadow-card-online-main.js"></script>
