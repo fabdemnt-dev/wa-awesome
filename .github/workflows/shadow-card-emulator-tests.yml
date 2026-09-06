@@ -45,7 +45,7 @@ jobs:
       GOOGLE_CLOUD_PROJECT: demo-shadow-card
       FIREBASE_PROJECT_ID: demo-shadow-card
       FIREBASE_CONFIG: '{"projectId":"demo-shadow-card"}'
-      SHADOW_CARD_TEST_ROUND_SECONDS: "1"
+      SHADOW_CARD_TEST_ROUND_SECONDS: "5"
 
     steps:
       - name: Check out test source
@@ -168,7 +168,7 @@ jobs:
 
       - name: Run two-player integration tests
         if: ${{ success() }}
-        run: npm run test:shadow-card:integration
+        run: timeout --signal=INT 300s npm run test:shadow-card:integration
 
       - name: Remove local-only HMAC file
         if: ${{ always() }}
