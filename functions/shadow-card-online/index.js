@@ -49,6 +49,17 @@ function requestIp(request) { return request.rawRequest?.ip || request.rawReques
 function randomId() { return crypto.randomUUID(); }
 function roomRef(roomId) { return db.collection('shadowCardRooms').doc(roomId); }
 
+function hasValidExpiry(data, nowMillis = Date.now()) {
+  const expiresAt = data?.expiresAt;
+  if (!expiresAt || typeof expiresAt.toMillis !== 'function') return false;
+  try {
+    const expiresAtMillis = expiresAt.toMillis();
+    return Number.isFinite(expiresAtMillis) && expiresAtMillis > nowMillis;
+  } catch {
+    return false;
+  }
+}
+
 async function requireMember(roomId, uid) {
   const member = await roomRef(roomId).collection('members').doc(uid).get();
   if (!member.exists || member.data().leftAt) fail('permission-denied', 'このルームには参加していません。');
@@ -176,9 +187,11 @@ const joinRoom = onCall(callableOptions, async (request) => {
   const displayName = cleanText(request.data?.displayName, 20, '表示名');
   const parsed = parseInviteCode(request.data?.inviteCode);
   if (!parsed) fail('invalid-argument', '招待コードが無効または期限切れです。');
-  const locatorSnap = await db.collection('shadowCardRoomLocators').doc(parsed.locator).get();
+  const locatorRef = db.collection('shadowCardRoomLocators').doc(parsed.locator);
+  const locatorSnap = await locatorRef.get();
   if (!locatorSnap.exists) fail('not-found', '招待コードが無効または期限切れです。');
   const roomId = locatorSnap.data().roomId;
+  if (typeof roomId !== 'string' || !roomId) fail('not-found', '招待コードが無効または期限切れです。');
   const ipHash = hashIp(requestIp(request), ipSecret());
   await Promise.all([
     consumeRateLimit(`join_uid_${uid}`, 10, 600),
@@ -186,10 +199,10 @@ const joinRoom = onCall(callableOptions, async (request) => {
     consumeRateLimit(`join_room_${roomId}`, 100, 600),
   ]);
   await db.runTransaction(async (tx) => {
-    const [roomSnap, secretSnap, memberSnap] = await Promise.all([
-      tx.get(roomRef(roomId)), tx.get(db.collection('shadowCardRoomSecrets').doc(roomId)), tx.get(roomRef(roomId).collection('members').doc(uid)),
+    const [locatorTxSnap, roomSnap, secretSnap, memberSnap] = await Promise.all([
+      tx.get(locatorRef), tx.get(roomRef(roomId)), tx.get(db.collection('shadowCardRoomSecrets').doc(roomId)), tx.get(roomRef(roomId).collection('members').doc(uid)),
     ]);
-    if (!roomSnap.exists || !secretSnap.exists || roomSnap.data().status !== 'waiting') fail('not-found', '招待コードが無効または期限切れです。');
+    if (!locatorTxSnap.exists || locatorTxSnap.data().roomId !== roomId || !hasValidExpiry(locatorTxSnap.data()) || !roomSnap.exists || !hasValidExpiry(roomSnap.data()) || !secretSnap.exists || roomSnap.data().status !== 'waiting') fail('not-found', '招待コードが無効または期限切れです。');
     if (!safeEqual(mac(parsed.locator, parsed.secret, inviteSecret()), secretSnap.data().inviteMac)) fail('not-found', '招待コードが無効または期限切れです。');
     if (memberSnap.exists && !memberSnap.data().leftAt) return;
     const seatRef = roomRef(roomId).collection('seats').doc('seat2');
