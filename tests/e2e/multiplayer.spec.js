@@ -166,8 +166,12 @@ test('ポエムT4・T5：保存後の同期失敗と次回へ遅れて届く投�
     await join(a, 'poem', s.room); await join(b, 'poem', s.room);
     const start = async () => {
       await b.page.locator('#fill-default-btn').click();
-      // The local material count can update before Firestore acknowledges the write.
-      await expect(b.page.locator('#game-toast')).toContainText('補充しました');
+      // fillDefaultWords reports completion with window.alert, recorded by session().
+      await expect.poll(() => events.some(event =>
+        event.name === b.name &&
+        event.type === 'dialog' &&
+        event.message.includes('補充しました')
+      )).toBe(true);
       await expect(b.page.locator('#material-count')).toContainText('10個');
       await expect(a.page.locator('#material-count')).toContainText('10個');
       await b.page.locator('#start-game-btn').click();
