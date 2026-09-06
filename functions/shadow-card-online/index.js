@@ -74,8 +74,14 @@ async function consumeRateLimit(key, limit, windowSeconds) {
     const now = Date.now();
     const current = snap.exists ? snap.data() : null;
     const windowStart = current?.windowStart?.toMillis?.() || 0;
-    const count = now - windowStart < windowSeconds * 1000 ? Number(current.count || 0) : 0;
-    if (count >= limit) fail('resource-exhausted', '試行回数が多すぎます。しばらく待ってください。');
+    const elapsedMillis = now - windowStart;
+    const withinWindow = elapsedMillis < windowSeconds * 1000;
+    const count = withinWindow ? Number(current?.count || 0) : 0;
+    if (count >= limit) {
+      const retryAfterSeconds = Math.max(1, Math.ceil((windowSeconds * 1000 - elapsedMillis) / 1000));
+      const retryAfterMinutes = Math.max(1, Math.ceil(retryAfterSeconds / 60));
+      fail('resource-exhausted', `試行回数が多すぎます。あと${retryAfterMinutes}分ほど待ってからもう一度お試しください。`);
+    }
     transaction.set(ref, {
       count: count + 1,
       windowStart: count === 0 ? Timestamp.fromMillis(now) : current.windowStart,
@@ -156,7 +162,7 @@ const createRoom = onCall(callableOptions, async (request) => {
   const uid = uidOf(request);
   const displayName = cleanText(request.data?.displayName, 20, '表示名');
   const ipHash = hashIp(requestIp(request), ipSecret());
-  await Promise.all([consumeRateLimit(`create_uid_${uid}`, 3, 600), consumeRateLimit(`create_ip_${ipHash}`, 10, 600)]);
+  await Promise.all([consumeRateLimit(`create_uid_${uid}`, 10, 600), consumeRateLimit(`create_ip_${ipHash}`, 30, 600)]);
   const roomId = randomId();
   let invite;
   for (let attempt = 0; attempt < 5; attempt += 1) {
