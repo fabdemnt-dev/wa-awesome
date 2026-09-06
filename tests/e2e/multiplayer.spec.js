@@ -17,7 +17,7 @@ async function session(browser, info, game) {
   }
   info.annotations.push({ type: 'room', description: `${game}: ${room}` });
   console.log(`TEST ROOM: ${game} ${room}`);
-  return { people, room, async close() {
+  return { people, room, events, async close() {
     for (const { name, page, context } of people) {
       await info.attach(`${name}-screen`, { body: await page.screenshot({ fullPage: true }).catch(() => Buffer.alloc(0)), contentType: 'image/png' });
       await info.attach(`${name}-visible-text`, { body: await page.locator('body').innerText().catch(() => ''), contentType: 'text/plain' });
@@ -167,7 +167,7 @@ test('ポエムT4・T5：保存後の同期失敗と次回へ遅れて届く投�
     const start = async () => {
       await b.page.locator('#fill-default-btn').click();
       // fillDefaultWords reports completion with window.alert, recorded by session().
-      await expect.poll(() => events.some(event =>
+      await expect.poll(() => s.events.some(event =>
         event.name === b.name &&
         event.type === 'dialog' &&
         event.message.includes('補充しました')
