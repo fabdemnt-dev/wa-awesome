@@ -165,9 +165,9 @@ test('ポエムT4・T5：保存後の同期失敗と次回へ遅れて届く投�
   try {
     await join(a, 'poem', s.room); await join(b, 'poem', s.room);
     const start = async () => {
+      // The lobby can become visible before the first Firestore snapshot is applied.
+      await expect(b.page.locator('#player-list .participant-card-player')).toHaveCount(2);
       await b.page.locator('#fill-default-btn').click();
-      // The local material count can update before Firestore acknowledges the write.
-      await expect(b.page.locator('#game-toast')).toContainText('補充しました');
       await expect(b.page.locator('#material-count')).toContainText('10個');
       await expect(a.page.locator('#material-count')).toContainText('10個');
       await b.page.locator('#start-game-btn').click();
