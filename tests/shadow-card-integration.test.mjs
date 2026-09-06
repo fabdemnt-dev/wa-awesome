@@ -3,19 +3,34 @@ import assert from 'node:assert/strict';
 import { initializeApp, deleteApp } from 'firebase/app';
 import { getAuth, connectAuthEmulator, signInAnonymously, signInWithCustomToken } from 'firebase/auth';
 import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'firebase/functions';
-import { getFirestore, connectFirestoreEmulator, doc, getDoc } from 'firebase/firestore';
+import { getFirestore, connectFirestoreEmulator, doc, getDoc, terminate } from 'firebase/firestore';
 import { getDatabase, connectDatabaseEmulator, ref, set, get, onDisconnect, goOffline, goOnline } from 'firebase/database';
 import { createRequire } from 'node:module';
 const functionRequire=createRequire(new URL('../functions/package.json',import.meta.url));
 const {initializeApp:initializeAdminApp,getApps:getAdminApps,deleteApp:deleteAdminApp}=functionRequire('firebase-admin/app');
 const {getAuth:getAdminAuth}=functionRequire('firebase-admin/auth');
-const ownedClientApps=new Set();
+const ownedClients=new Set();
 let ownedAdminApp=null;
 if(!getAdminApps().length)ownedAdminApp=initializeAdminApp({projectId:'demo-shadow-card',databaseURL:'http://127.0.0.1:9000?ns=demo-shadow-card'});
 const config={projectId:'demo-shadow-card',apiKey:'demo',appId:'demo',databaseURL:'http://127.0.0.1:9000?ns=demo-shadow-card'};
-function client(name){const app=initializeApp(config,name);ownedClientApps.add(app);const auth=getAuth(app),fs=getFirestore(app),fn=getFunctions(app,'asia-northeast1'),rt=getDatabase(app);connectAuthEmulator(auth,'http://127.0.0.1:9099',{disableWarnings:true});connectFirestoreEmulator(fs,'127.0.0.1',8080);connectFunctionsEmulator(fn,'127.0.0.1',5001);connectDatabaseEmulator(rt,'127.0.0.1',9000);return{app,auth,fs,fn,rt,call:(n,d)=>httpsCallable(fn,n)(d).then(x=>x.data)}}
+function client(name){const app=initializeApp(config,name);const auth=getAuth(app),fs=getFirestore(app),fn=getFunctions(app,'asia-northeast1'),rt=getDatabase(app);connectAuthEmulator(auth,'http://127.0.0.1:9099',{disableWarnings:true});connectFirestoreEmulator(fs,'127.0.0.1',8080);connectFunctionsEmulator(fn,'127.0.0.1',5001);connectDatabaseEmulator(rt,'127.0.0.1',9000);const owned={app,auth,fs,fn,rt,call:(n,d)=>httpsCallable(fn,n)(d).then(x=>x.data)};ownedClients.add(owned);return owned}
 async function denied(p){await assert.rejects(p)}
-test.after(async()=>{await Promise.allSettled([...ownedClientApps].map(app=>deleteApp(app)));if(ownedAdminApp)await deleteAdminApp(ownedAdminApp)});
+test.after(async()=>{
+  console.log('[cleanup] begin');
+  for(const {rt} of ownedClients)goOffline(rt);
+  console.log('[cleanup] RTDB disconnected');
+  await Promise.allSettled([...ownedClients].map(({fs})=>terminate(fs)));
+  console.log('[cleanup] Firestore terminated');
+  await Promise.allSettled([...ownedClients].map(({app})=>deleteApp(app)));
+  console.log('[cleanup] Client Apps deleted');
+  if(ownedAdminApp){
+    await deleteAdminApp(ownedAdminApp);
+    console.log('[cleanup] Admin App deleted');
+  }else{
+    console.log('[cleanup] Admin App not owned; skipped');
+  }
+  console.log('[cleanup] complete');
+});
 test('two anonymous players complete private five-round match with presence and timeout',{timeout:120000},async()=>{const a=client('human-a'),b=client('human-b');await signInAnonymously(a.auth);await signInAnonymously(b.auth);assert.notEqual(a.auth.currentUser.uid,b.auth.currentUser.uid);
   const created=await a.call('shadowCardCreateRoom',{displayName:'A'});const joined=await b.call('shadowCardJoinRoom',{displayName:'B',inviteCode:created.inviteCode});assert.equal(joined.roomId,created.roomId);const roomId=created.roomId;
   let lobby=await a.call('shadowCardGetSnapshot',{roomId});assert.equal(lobby.members.length,2);assert.deepEqual(lobby.seats.map(s=>s.seatId),['seat0','seat1','seat2','seat3']);
