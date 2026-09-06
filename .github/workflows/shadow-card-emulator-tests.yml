@@ -45,6 +45,7 @@ jobs:
       GOOGLE_CLOUD_PROJECT: demo-shadow-card
       FIREBASE_PROJECT_ID: demo-shadow-card
       FIREBASE_CONFIG: '{"projectId":"demo-shadow-card"}'
+      SHADOW_CARD_TEST_ROUND_SECONDS: "1"
 
     steps:
       - name: Check out test source
