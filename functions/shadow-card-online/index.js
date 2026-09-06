@@ -25,7 +25,8 @@ const callableOptions = {
   cors: ['https://fabdemnt-dev.github.io', /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/],
   minInstances: 0,
   maxInstances: 5,
-  enforceAppCheck: process.env.FUNCTIONS_EMULATOR !== 'true',
+  // Initial release: keep App Check monitoring-only; enforce it in a separate PR after Provider registration and real-device token verification.
+  enforceAppCheck: false,
   secrets: [inviteKey, ipKey],
 };
 const schedulerOptions = { region: REGION, minInstances: 0, maxInstances: 2, secrets: [inviteKey, ipKey] };
