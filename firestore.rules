@@ -2,6 +2,40 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    function shadowCardSignedIn() { return request.auth != null; }
+    function isShadowCardMember(roomId) {
+      return shadowCardSignedIn()
+        && exists(/databases/$(database)/documents/shadowCardRooms/$(roomId)/members/$(request.auth.uid))
+        && get(/databases/$(database)/documents/shadowCardRooms/$(roomId)/members/$(request.auth.uid)).data.leftAt == null;
+    }
+
+    match /shadowCardRooms/{roomId} {
+      allow read: if isShadowCardMember(roomId);
+      allow write: if false;
+    }
+    match /shadowCardRooms/{roomId}/{publicCollection}/{docId} {
+      allow read: if isShadowCardMember(roomId)
+        && publicCollection in ['members', 'seats', 'games', 'rounds', 'results'];
+      allow write: if false;
+    }
+    match /shadowCardRooms/{roomId}/privatePlayers/{uid} {
+      allow read: if shadowCardSignedIn()
+        && request.auth.uid == uid
+        && isShadowCardMember(roomId);
+      allow write: if false;
+    }
+    match /shadowCardRooms/{roomId}/privatePlayers/{uid}/rounds/{roundId} {
+      allow read: if shadowCardSignedIn()
+        && request.auth.uid == uid
+        && isShadowCardMember(roomId);
+      allow write: if false;
+    }
+    match /shadowCardRooms/{roomId}/serverRounds/{docId} { allow read, write: if false; }
+    match /shadowCardRoomLocators/{docId} { allow read, write: if false; }
+    match /shadowCardRoomSecrets/{docId} { allow read, write: if false; }
+    match /shadowCardRateLimits/{docId} { allow read, write: if false; }
+    match /shadowCardActionRequests/{docId} { allow read, write: if false; }
+
     // ============================================================
     // 1) 訪問カウンタ counter/visits
     // ============================================================

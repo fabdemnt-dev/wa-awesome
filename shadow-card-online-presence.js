@@ -1,0 +1,2 @@
+import{ref,onDisconnect,set,serverTimestamp}from'https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js';import{rtdb}from'./shadow-card-online-firebase.js';
+export async function beginPresence(roomId,uid){const p=ref(rtdb,`shadowCardPresence/${roomId}/${uid}`);await onDisconnect(p).set({state:'offline',lastChanged:serverTimestamp()});await set(p,{state:'online',lastChanged:serverTimestamp()})}

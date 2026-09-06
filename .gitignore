@@ -3,5 +3,12 @@ functions/node_modules/
 .firebase/
 firebase-debug.log
 firestore-debug.log
+database-debug.log
 .runtimeconfig.json
 functions/.runtimeconfig.json
+functions/.secret.local
+.emulator-tmp/
+.emulator-node20/
+.emulator-minimal/functions/node_modules/
+.env.shadow-card-emulator.local
+database-debug.log

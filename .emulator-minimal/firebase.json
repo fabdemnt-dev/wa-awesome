@@ -1,0 +1,4 @@
+{
+  "functions": { "source": "functions" },
+  "emulators": { "functions": { "port": 5101 }, "ui": { "enabled": false } }
+}
