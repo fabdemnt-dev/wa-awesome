@@ -5,7 +5,7 @@
     "shadowCardRoomAccess": {
       "$roomId": {
         "$uid": {
-          ".read": "$uid === auth.uid && data.val() === true",
+          ".read": "auth != null && $uid === auth.uid && data.val() === true",
           ".write": false
         }
       }
@@ -14,8 +14,17 @@
       "$roomId": {
         "$uid": {
           ".read": "auth != null && root.child('shadowCardRoomAccess').child($roomId).child(auth.uid).val() === true",
-          ".write": "$uid === auth.uid && root.child('shadowCardRoomAccess').child($roomId).child(auth.uid).val() === true",
-          ".validate": "newData.hasChildren(['state', 'lastChanged']) && newData.child('state').isString() && (newData.child('state').val() === 'online' || newData.child('state').val() === 'offline') && newData.child('lastChanged').isNumber()"
+          ".write": "auth != null && newData.exists() && $uid === auth.uid && root.child('shadowCardRoomAccess').child($roomId).child(auth.uid).val() === true",
+          ".validate": "newData.hasChildren(['state', 'lastChanged'])",
+          "state": {
+            ".validate": "newData.isString() && (newData.val() === 'online' || newData.val() === 'offline')"
+          },
+          "lastChanged": {
+            ".validate": "newData.isNumber()"
+          },
+          "$other": {
+            ".validate": false
+          }
         }
       }
     }

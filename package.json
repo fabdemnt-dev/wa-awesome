@@ -8,6 +8,7 @@
     "test:functions": "npm --prefix functions install --ignore-scripts --no-audit --no-fund && firebase emulators:exec --only firestore,functions --project demo-wa-awesome-functions \"node --test functions/test/*.test.cjs\"",
     "test:shadow-card:local": "node --test tests/shadow-card-core.test.cjs tests/shadow-card-ai-parity.test.cjs tests/shadow-card-cleanup.test.cjs tests/shadow-card-invite-code.test.cjs",
     "test:shadow-card:rules": "firebase --config firebase.shadow-card-emulator.json emulators:exec --only firestore --project demo-shadow-card \"node --test tests/shadow-card-rules.test.mjs\"",
+    "test:shadow-card:presence-rules": "firebase --config firebase.shadow-card-emulator.json emulators:exec --only database --project demo-shadow-card \"node --test tests/shadow-card-presence-rules.test.mjs\"",
     "test:shadow-card:integration": "firebase --config firebase.shadow-card-emulator.json emulators:exec --only auth,firestore,database,functions --project demo-shadow-card \"node --test tests/shadow-card-integration.test.mjs\""
   },
   "devDependencies": {
