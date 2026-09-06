@@ -47,6 +47,7 @@ function setup(overrides = {}) {
       if (name === 'firebase-functions/params') return { defineSecret: () => ({}) };
       if (name === 'bcryptjs') return {};
       if (name === './manus-config') return {};
+      if (name === './shadow-card-online') return {};
       throw new Error(name);
     },
   };

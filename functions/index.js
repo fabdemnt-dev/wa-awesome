@@ -1440,3 +1440,16 @@ exports.deleteWordSet = onCall(callableOptions, async (request) => {
 
   return { id, deleted: true };
 });
+
+const shadowCardOnline = require('./shadow-card-online');
+exports.shadowCardCreateRoom = shadowCardOnline.createRoom;
+exports.shadowCardJoinRoom = shadowCardOnline.joinRoom;
+exports.shadowCardLeaveRoom = shadowCardOnline.leaveRoom;
+exports.shadowCardGetSnapshot = shadowCardOnline.getSnapshot;
+exports.shadowCardStartGame = shadowCardOnline.startGame;
+exports.shadowCardSubmitChoice = shadowCardOnline.submitChoice;
+exports.shadowCardContinueGame = shadowCardOnline.continueGame;
+exports.shadowCardSweepTimeouts = shadowCardOnline.sweepTimeouts;
+exports.shadowCardCleanupRooms = shadowCardOnline.cleanupRooms;
+exports.shadowCardCleanupAnonymousData = shadowCardOnline.cleanupAnonymousData;
+if (shadowCardOnline.testSweepTimeouts) exports.shadowCardTestSweepTimeouts = shadowCardOnline.testSweepTimeouts;

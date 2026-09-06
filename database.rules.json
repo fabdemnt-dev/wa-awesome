@@ -1,0 +1,23 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "shadowCardRoomAccess": {
+      "$roomId": {
+        "$uid": {
+          ".read": "$uid === auth.uid && data.val() === true",
+          ".write": false
+        }
+      }
+    },
+    "shadowCardPresence": {
+      "$roomId": {
+        "$uid": {
+          ".read": "auth != null && root.child('shadowCardRoomAccess').child($roomId).child(auth.uid).val() === true",
+          ".write": "$uid === auth.uid && root.child('shadowCardRoomAccess').child($roomId).child(auth.uid).val() === true",
+          ".validate": "newData.hasChildren(['state', 'lastChanged']) && newData.child('state').isString() && (newData.child('state').val() === 'online' || newData.child('state').val() === 'offline') && newData.child('lastChanged').isNumber()"
+        }
+      }
+    }
+  }
+}
