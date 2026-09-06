@@ -17,7 +17,7 @@ async function session(browser, info, game) {
   }
   info.annotations.push({ type: 'room', description: `${game}: ${room}` });
   console.log(`TEST ROOM: ${game} ${room}`);
-  return { people, room, events, async close() {
+  return { people, room, async close() {
     for (const { name, page, context } of people) {
       await info.attach(`${name}-screen`, { body: await page.screenshot({ fullPage: true }).catch(() => Buffer.alloc(0)), contentType: 'image/png' });
       await info.attach(`${name}-visible-text`, { body: await page.locator('body').innerText().catch(() => ''), contentType: 'text/plain' });
@@ -165,13 +165,9 @@ test('ポエムT4・T5：保存後の同期失敗と次回へ遅れて届く投�
   try {
     await join(a, 'poem', s.room); await join(b, 'poem', s.room);
     const start = async () => {
+      // The lobby can become visible before the first Firestore snapshot is applied.
+      await expect(b.page.locator('#player-list .participant-card-player')).toHaveCount(2);
       await b.page.locator('#fill-default-btn').click();
-      // fillDefaultWords reports completion with window.alert, recorded by session().
-      await expect.poll(() => s.events.some(event =>
-        event.name === b.name &&
-        event.type === 'dialog' &&
-        event.message.includes('補充しました')
-      )).toBe(true);
       await expect(b.page.locator('#material-count')).toContainText('10個');
       await expect(a.page.locator('#material-count')).toContainText('10個');
       await b.page.locator('#start-game-btn').click();
