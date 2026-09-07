@@ -41,6 +41,15 @@ function cleanText(value, max, label) {
   if (!text || text.length > max) fail('invalid-argument', `${label}は1〜${max}文字で入力してください。`);
   return text;
 }
+function playerCountOf(value) {
+  const count = Number(value);
+  if (![2, 3, 4].includes(count)) fail('invalid-argument', '対戦人数は2〜4人から選んでください。');
+  return count;
+}
+function seatForJoiningPlayer(playerCount, occupiedSeatIds = []) {
+  const preferences = playerCount === 4 ? ['seat2', 'seat1', 'seat3'] : ['seat2'];
+  return preferences.find((seatId) => !occupiedSeatIds.includes(seatId)) ?? null;
+}
 function keyValue(secret, fallback) {
   try { return secret.value() || fallback; } catch { return fallback; }
 }
@@ -161,6 +170,7 @@ async function resolveIfReady(roomId, gameId, roundNumber) {
 const createRoom = onCall(callableOptions, async (request) => {
   const uid = uidOf(request);
   const displayName = cleanText(request.data?.displayName, 20, '表示名');
+  const playerCount = playerCountOf(request.data?.playerCount ?? 2);
   const ipHash = hashIp(requestIp(request), ipSecret());
   await Promise.all([consumeRateLimit(`create_uid_${uid}`, 10, 600), consumeRateLimit(`create_ip_${ipHash}`, 30, 600)]);
   const roomId = randomId();
@@ -172,8 +182,8 @@ const createRoom = onCall(callableOptions, async (request) => {
       const existing = await tx.get(locatorRef);
       if (existing.exists) return false;
       const expiresAt = Timestamp.fromMillis(Date.now() + ROOM_TTL_HOURS * 3600_000);
-      tx.set(roomRef(roomId), { status: 'waiting', hostUid: uid, humanLimit: 2, gameId: null, stateVersion: 1, gameVersion: 1, createdAt: FieldValue.serverTimestamp(), lastActivityAt: FieldValue.serverTimestamp(), expiresAt });
-      tx.set(roomRef(roomId).collection('members').doc(uid), { uid, displayName, role: 'host', seatId: 'seat0', joinedAt: FieldValue.serverTimestamp(), leftAt: null });
+      tx.set(roomRef(roomId), { status: 'waiting', hostUid: uid, playerCount, humanLimit: playerCount, humanCount: 1, gameId: null, stateVersion: 1, gameVersion: 1, createdAt: FieldValue.serverTimestamp(), lastActivityAt: FieldValue.serverTimestamp(), expiresAt });
+      tx.set(roomRef(roomId).collection('members').doc(uid), { uid, displayName, role: 'host', seatId: 'seat0', joinOrder: 0, joinedAt: FieldValue.serverTimestamp(), leftAt: null });
       ['seat0', 'seat1', 'seat2', 'seat3'].forEach((seatId, index) => tx.set(roomRef(roomId).collection('seats').doc(seatId), {
         seatId, seatIndex: index, team: index < 2 ? 'A' : 'B', controllerType: index === 0 ? 'human' : 'pending', occupantUid: index === 0 ? uid : null, npcRole: null,
       }));
@@ -205,22 +215,32 @@ const joinRoom = onCall(callableOptions, async (request) => {
     consumeRateLimit(`join_ip_${ipHash}`, 30, 600),
     consumeRateLimit(`join_room_${roomId}`, 100, 600),
   ]);
-  await db.runTransaction(async (tx) => {
+  const seatId = await db.runTransaction(async (tx) => {
     const [locatorTxSnap, roomSnap, secretSnap, memberSnap] = await Promise.all([
       tx.get(locatorRef), tx.get(roomRef(roomId)), tx.get(db.collection('shadowCardRoomSecrets').doc(roomId)), tx.get(roomRef(roomId).collection('members').doc(uid)),
     ]);
     if (!locatorTxSnap.exists || locatorTxSnap.data().roomId !== roomId || !hasValidExpiry(locatorTxSnap.data()) || !roomSnap.exists || !hasValidExpiry(roomSnap.data()) || !secretSnap.exists || roomSnap.data().status !== 'waiting') fail('not-found', '招待コードが無効または期限切れです。');
     if (!safeEqual(mac(parsed.locator, parsed.secret, inviteSecret()), secretSnap.data().inviteMac)) fail('not-found', '招待コードが無効または期限切れです。');
-    if (memberSnap.exists && !memberSnap.data().leftAt) return;
-    const seatRef = roomRef(roomId).collection('seats').doc('seat2');
-    const seatSnap = await tx.get(seatRef);
-    if (seatSnap.data()?.controllerType === 'human') fail('resource-exhausted', 'ルームは満員です。');
-    tx.set(roomRef(roomId).collection('members').doc(uid), { uid, displayName, role: 'guest', seatId: 'seat2', joinedAt: FieldValue.serverTimestamp(), leftAt: null });
-    tx.update(seatRef, { controllerType: 'human', occupantUid: uid, npcRole: null });
-    tx.update(roomRef(roomId), { stateVersion: FieldValue.increment(1), lastActivityAt: FieldValue.serverTimestamp() });
+    if (memberSnap.exists && !memberSnap.data().leftAt) return memberSnap.data().seatId ?? null;
+    const roomData = roomSnap.data();
+    const playerCount = playerCountOf(roomData.playerCount ?? roomData.humanLimit);
+    const humanCount = Number(roomData.humanCount || 1);
+    if (humanCount >= playerCount) fail('resource-exhausted', 'ルームは満員です。');
+    const candidateSeatIds = playerCount === 4 ? ['seat2', 'seat1', 'seat3'] : ['seat2'];
+    const candidateSeatSnaps = await Promise.all(candidateSeatIds.map((seatId) => tx.get(roomRef(roomId).collection('seats').doc(seatId))));
+    const occupiedSeatIds = candidateSeatSnaps.filter((snap) => snap.data()?.controllerType === 'human').map((snap) => snap.id);
+    const assignedSeatId = seatForJoiningPlayer(playerCount, occupiedSeatIds);
+    if (!assignedSeatId && playerCount !== 3) fail('aborted', '席の割り当てに失敗しました。もう一度お試しください。');
+    if (assignedSeatId) {
+      const seatRef = roomRef(roomId).collection('seats').doc(assignedSeatId);
+      tx.update(seatRef, { controllerType: 'human', occupantUid: uid, npcRole: null });
+    }
+    tx.set(roomRef(roomId).collection('members').doc(uid), { uid, displayName, role: 'guest', seatId: assignedSeatId, joinOrder: humanCount, joinedAt: FieldValue.serverTimestamp(), leftAt: null });
+    tx.update(roomRef(roomId), { humanCount: humanCount + 1, stateVersion: FieldValue.increment(1), lastActivityAt: FieldValue.serverTimestamp() });
+    return assignedSeatId;
   });
   await grantPresence(roomId, uid);
-  return { roomId, seatId: 'seat2' };
+  return { roomId, seatId };
 });
 
 const startGame = onCall(callableOptions, async (request) => {
@@ -228,17 +248,37 @@ const startGame = onCall(callableOptions, async (request) => {
   const roomId = cleanText(request.data?.roomId, 80, 'ルームID');
   const gameId = randomId();
   await db.runTransaction(async (tx) => {
-    const roomSnap = await tx.get(roomRef(roomId));
+    const roomDocument = roomRef(roomId);
+    const roomSnap = await tx.get(roomDocument);
     if (!roomSnap.exists) fail('not-found', 'ルームが見つかりません。');
     const room = roomSnap.data();
     if (room.hostUid !== uid) fail('permission-denied', 'ホストだけが開始できます。');
     if (room.status !== 'waiting') fail('failed-precondition', '開始できる状態ではありません。');
-    const guestSeat = await tx.get(roomRef(roomId).collection('seats').doc('seat2'));
-    if (guestSeat.data()?.controllerType !== 'human') fail('failed-precondition', '対戦相手を待っています。');
-    tx.update(roomRef(roomId).collection('seats').doc('seat1'), { controllerType: 'npc', npcRole: 'support' });
-    tx.update(roomRef(roomId).collection('seats').doc('seat3'), { controllerType: 'npc', npcRole: 'aggressive' });
-    tx.set(roomRef(roomId).collection('games').doc(gameId), { gameId, phase: 'starting', roundNumber: 0, scores: { A: 0, B: 0 }, currentPenalties: { A: 0, B: 0 }, nextPenalties: { A: 0, B: 0 }, stateVersion: 1, startedAt: FieldValue.serverTimestamp() });
-    tx.update(roomRef(roomId), { status: 'playing', gameId, stateVersion: FieldValue.increment(1) });
+    const playerCount = playerCountOf(room.playerCount ?? room.humanLimit);
+    if (Number(room.humanCount) !== playerCount) fail('failed-precondition', '参加者を待っています。');
+    const [membersSnap, seatsSnap] = await Promise.all([
+      tx.get(roomDocument.collection('members')),
+      tx.get(roomDocument.collection('seats')),
+    ]);
+    const activeMembers = membersSnap.docs.filter((doc) => !doc.data().leftAt);
+    if (activeMembers.length !== playerCount) fail('failed-precondition', '参加者を待っています。');
+    let thirdPlayerSeatId = null;
+    if (playerCount === 3) {
+      const waitingMember = activeMembers.find((doc) => !doc.data().seatId);
+      if (!waitingMember) fail('failed-precondition', '3人目の席を割り当てられません。');
+      thirdPlayerSeatId = crypto.randomInt(2) === 0 ? 'seat1' : 'seat3';
+      tx.update(waitingMember.ref, { seatId: thirdPlayerSeatId });
+      tx.update(roomDocument.collection('seats').doc(thirdPlayerSeatId), { controllerType: 'human', occupantUid: waitingMember.id, npcRole: null });
+    }
+    seatsSnap.docs.forEach((seatSnap) => {
+      const seatId = seatSnap.id;
+      const willBeHuman = seatSnap.data().controllerType === 'human' || seatId === thirdPlayerSeatId;
+      if (!willBeHuman) {
+        tx.update(seatSnap.ref, { controllerType: 'npc', occupantUid: null, npcRole: seatId === 'seat1' ? 'support' : 'aggressive' });
+      }
+    });
+    tx.set(roomDocument.collection('games').doc(gameId), { gameId, phase: 'starting', roundNumber: 0, scores: { A: 0, B: 0 }, currentPenalties: { A: 0, B: 0 }, nextPenalties: { A: 0, B: 0 }, stateVersion: 1, startedAt: FieldValue.serverTimestamp() });
+    tx.update(roomDocument, { status: 'playing', gameId, stateVersion: FieldValue.increment(1) });
   });
   await createRound(roomId, gameId, 1, { A: 0, B: 0 });
   return { roomId, gameId, roundNumber: 1 };
@@ -318,8 +358,8 @@ const leaveRoom = onCall(callableOptions, async (request) => {
   if (room.status !== 'waiting') fail('failed-precondition', 'ゲーム中は退出できません。');
   const batch = db.batch();
   batch.update(roomRef(roomId).collection('members').doc(uid), { leftAt: FieldValue.serverTimestamp() });
-  batch.update(roomRef(roomId).collection('seats').doc(member.seatId), { controllerType: 'pending', occupantUid: null });
-  batch.update(roomRef(roomId), { stateVersion: FieldValue.increment(1) }); await batch.commit();
+  if (member.seatId) batch.update(roomRef(roomId).collection('seats').doc(member.seatId), { controllerType: 'pending', occupantUid: null, npcRole: null });
+  batch.update(roomRef(roomId), { humanCount: FieldValue.increment(-1), stateVersion: FieldValue.increment(1) }); await batch.commit();
   await rtdb.ref(`shadowCardRoomAccess/${roomId}/${uid}`).remove(); return { left: true };
 });
 
@@ -362,4 +402,4 @@ const cleanupAnonymousData = onSchedule({ ...schedulerOptions, schedule: 'every 
 const testSweepTimeouts = process.env.FUNCTIONS_EMULATOR === 'true'
   ? onCall({ ...callableOptions, secrets: [] }, async () => ({ swept: await sweepTimeoutsNow() })) : null;
 
-module.exports = { createRoom, joinRoom, leaveRoom, getSnapshot, startGame, submitChoice, continueGame, sweepTimeouts, cleanupRooms, cleanupAnonymousData, testSweepTimeouts, _test: { resolveIfReady, createRound, sweepTimeoutsNow, isRoomEligibleForCleanup, cleanupAnonymousDataNow } };
+module.exports = { createRoom, joinRoom, leaveRoom, getSnapshot, startGame, submitChoice, continueGame, sweepTimeouts, cleanupRooms, cleanupAnonymousData, testSweepTimeouts, _test: { resolveIfReady, createRound, sweepTimeoutsNow, isRoomEligibleForCleanup, cleanupAnonymousDataNow, playerCountOf, seatForJoiningPlayer } };

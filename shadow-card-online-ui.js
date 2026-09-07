@@ -29,11 +29,12 @@ const resultImages={
 function cardInfo(id){return cards[id]||{name:id||'不明',type:'',image:''}}
 function npcInfo(role){return npcs[role]||{name:'NPC',description:'',image:''}}
 function playerTeam(s){return s.seats?.find(seat=>seat.seatId===s.member?.seatId)?.team||null}
-function plannedAllyRole(s){return s.member?.seatId==='seat2'?'aggressive':'support'}
 function npcMarkup(role,label){const npc=npcInfo(role);return `<article class="npc-card"><img src="${npc.image}" alt="" width="1024" height="1024"><div class="npc-card__body"><span class="npc-card__label">${escapeHtml(label)}</span><strong class="npc-card__name">${escapeHtml(npc.name)}</strong><p class="npc-card__desc">${escapeHtml(npc.description)}</p></div></article>`}
 
 export function lobby(s,code){
   show('lobby');
+  const limit=Number(s.room.humanLimit)||2;
+  el('lobby-mode').textContent=`${limit}人対戦：参加者 ${s.members.length} / ${limit}`;
   const codeEl=el('shown-code');
   const hint=el('copy-code-hint');
   codeEl.textContent=code||'参加済み';
@@ -51,8 +52,8 @@ export function lobby(s,code){
     setHidden(hint,true);
   }
   el('members').innerHTML=s.members.map(m=>`<li>${escapeHtml(m.displayName)}（${m.role==='host'?'ホスト':'参加者'}）</li>`).join('');
-  el('lobby-npc').innerHTML=npcMarkup(plannedAllyRole(s),'あなたの味方NPC');
-  setHidden(el('start-match'),s.member.role!=='host'||s.members.length<2);
+  el('lobby-npc').innerHTML=limit===2?npcMarkup(s.member?.seatId==='seat2'?'aggressive':'support','あなたの味方NPC'):limit===3?'<p>開始時にチームを公平に決定し、空席をNPCが担当します。</p>':'<p>4人全員が人間プレイヤーです。</p>';
+  setHidden(el('start-match'),s.member.role!=='host'||s.members.length<limit);
 }
 
 export function game(s,onSelect){
@@ -75,12 +76,8 @@ export function game(s,onSelect){
 
 function renderNpcPanel(s){
   const team=playerTeam(s);
-  const seats=s.seats||[];
-  const ally=seats.find(seat=>seat.team===team&&seat.controllerType==='npc');
-  const enemy=seats.find(seat=>seat.team!==team&&seat.controllerType==='npc');
-  const allyRole=ally?.npcRole||(team==='B'?'aggressive':'support');
-  const enemyRole=enemy?.npcRole||(team==='B'?'support':'aggressive');
-  el('npc-panel').innerHTML=npcMarkup(allyRole,'あなたの味方NPC')+npcMarkup(enemyRole,'相手の味方NPC');
+  const npcSeats=(s.seats||[]).filter(seat=>seat.controllerType==='npc');
+  el('npc-panel').innerHTML=npcSeats.length?npcSeats.map(seat=>npcMarkup(seat.npcRole,seat.team===team?'あなたの味方NPC':'相手の味方NPC')).join(''):'<p>この対戦にNPCはいません。</p>';
 }
 
 export function shouldShowNextRound(g){return g?.phase==='round-result'}
@@ -104,7 +101,7 @@ function seatLabel(s,seatId){
   const mine=seat.team===playerTeam(s);
   if(seat.controllerType==='npc')return mine?'味方NPC':'相手NPC';
   const member=(s.members||[]).find(item=>item.seatId===seatId);
-  return member?.displayName?`${member.displayName}（相手）`:'相手プレイヤー';
+  return member?.displayName?`${member.displayName}（${mine?'味方':'相手'}）`:mine?'味方プレイヤー':'相手プレイヤー';
 }
 function playedCardMarkup(s,seatId,played){
   const card=cardInfo(played.cardId);
