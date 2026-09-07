@@ -11,8 +11,9 @@
 #rules-screen .rules-hero img {
   display: block;
   width: 100%;
-  aspect-ratio: 3 / 2;
+  height: clamp(10rem, 48vw, 12rem);
   object-fit: cover;
+  object-position: center 55%;
 }
 
 #rules-screen .rule-panel--gallery {
@@ -79,16 +80,17 @@
 }
 
 #rules-screen .rules-card-gallery .rules-art-card img {
-  aspect-ratio: 3 / 2;
+  height: clamp(8.5rem, 42vw, 10.5rem);
 }
 
 #rules-screen .rules-npc-gallery .rules-art-card img {
-  aspect-ratio: 1 / 1;
+  height: clamp(10rem, 48vw, 12rem);
+  object-position: center 20%;
 }
 
 #rules-screen .rules-result-gallery .rules-art-card img,
 #rules-screen .rules-round-art img {
-  aspect-ratio: 16 / 9;
+  height: clamp(8.5rem, 42vw, 10.5rem);
 }
 
 #rules-screen .rules-art-card figcaption,
@@ -114,6 +116,10 @@
 }
 
 @media (min-width: 560px) {
+  #rules-screen .rules-hero img {
+    height: min(22rem, 42vw);
+  }
+
   #rules-screen .rules-card-gallery {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
@@ -126,5 +132,18 @@
 
   #rules-screen .rules-result-gallery {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  #rules-screen .rules-card-gallery .rules-art-card img,
+  #rules-screen .rules-result-gallery .rules-art-card img {
+    height: min(14rem, 22vw);
+  }
+
+  #rules-screen .rules-npc-gallery .rules-art-card img {
+    height: min(18rem, 28vw);
+  }
+
+  #rules-screen .rules-round-art img {
+    height: min(20rem, 38vw);
   }
 }
