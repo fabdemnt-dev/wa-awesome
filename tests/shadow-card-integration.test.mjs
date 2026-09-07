@@ -69,6 +69,55 @@ test('two anonymous players complete private five-round match with presence and 
   const second=client('same-a-tab');const token=await getAdminAuth().createCustomToken(a.auth.currentUser.uid);await signInWithCustomToken(second.auth,token);assert.equal(second.auth.currentUser.uid,a.auth.currentUser.uid);await onDisconnect(ref(second.rt,`shadowCardPresence/${roomId}/${a.auth.currentUser.uid}`)).set({state:'offline',lastChanged:Date.now()});await set(ref(second.rt,`shadowCardPresence/${roomId}/${a.auth.currentUser.uid}`),{state:'online',lastChanged:Date.now()});goOffline(second.rt);await new Promise(r=>setTimeout(r,300));const seen=await get(ref(b.rt,`shadowCardPresence/${roomId}/${a.auth.currentUser.uid}`));assert.equal(seen.val().state,'offline');goOnline(second.rt);await set(ref(second.rt,`shadowCardPresence/${roomId}/${a.auth.currentUser.uid}`),{state:'online',lastChanged:Date.now()});assert.equal((await get(ref(b.rt,`shadowCardPresence/${roomId}/${a.auth.currentUser.uid}`))).val().state,'online');
 });
 
+async function completeMultiplayerMatch(playerCount, namePrefix) {
+  const players = Array.from({length:playerCount},(_,index)=>client(`${namePrefix}-${index}`));
+  await Promise.all(players.map(({auth})=>signInAnonymously(auth)));
+  const created = await players[0].call('shadowCardCreateRoom',{displayName:`${namePrefix}-0`,playerCount});
+  for(let index=1;index<players.length;index+=1){
+    const joined=await players[index].call('shadowCardJoinRoom',{displayName:`${namePrefix}-${index}`,inviteCode:created.inviteCode});
+    assert.equal(joined.roomId,created.roomId);
+  }
+  let lobby=await players[0].call('shadowCardGetSnapshot',{roomId:created.roomId});
+  assert.equal(lobby.room.humanLimit,playerCount);
+  assert.equal(lobby.members.length,playerCount);
+  await players[0].call('shadowCardStartGame',{roomId:created.roomId});
+  let snapshots=await Promise.all(players.map(player=>player.call('shadowCardGetSnapshot',{roomId:created.roomId})));
+  const seats=snapshots[0].seats;
+  assert.equal(seats.filter(seat=>seat.controllerType==='human').length,playerCount);
+  assert.equal(seats.filter(seat=>seat.controllerType==='npc').length,4-playerCount);
+  if(playerCount===3){
+    const humansByTeam=['A','B'].map(team=>seats.filter(seat=>seat.team===team&&seat.controllerType==='human').length).sort();
+    assert.deepEqual(humansByTeam,[1,2]);
+  }
+  for(let round=1;round<=5;round+=1){
+    if(round>1){
+      await players[0].call('shadowCardContinueGame',{roomId:created.roomId});
+      snapshots=await Promise.all(players.map(player=>player.call('shadowCardGetSnapshot',{roomId:created.roomId})));
+    }
+    await Promise.all(players.map((player,index)=>player.call('shadowCardSubmitChoice',{
+      roomId:created.roomId,
+      gameId:snapshots[index].room.gameId,
+      roundNumber:round,
+      handIndex:index%4,
+      stateVersion:snapshots[index].game.stateVersion,
+      requestId:`${namePrefix}-${round}-${index}`,
+    })));
+    snapshots[0]=await players[0].call('shadowCardGetSnapshot',{roomId:created.roomId});
+    assert.equal(Object.keys(snapshots[0].result.played).length,4);
+    assert.equal(snapshots[0].round.revealed,true);
+  }
+  assert.equal(snapshots[0].game.phase,'finished');
+  assert.equal(snapshots[0].game.roundNumber,5);
+}
+
+test('three human players complete a fair fixed-seat five-round match',{timeout:120000},async()=>{
+  await completeMultiplayerMatch(3,'three-player');
+});
+
+test('four human players complete a fixed-seat five-round match',{timeout:120000},async()=>{
+  await completeMultiplayerMatch(4,'four-player');
+});
+
 test('expired locator rejects join without mutating invite state',{timeout:30000},async()=>{
   const host=client('expired-locator-host'),guest=client('expired-locator-guest');
   await signInAnonymously(host.auth);await signInAnonymously(guest.auth);

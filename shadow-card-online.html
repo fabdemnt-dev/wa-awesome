@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="description" content="影札の交渉 オンライン2人対戦">
+  <meta name="description" content="影札の交渉 オンライン2〜4人対戦">
   <title>影札の交渉｜オンライン対戦</title>
   <link rel="stylesheet" href="shadow-card-online.css">
 </head>
@@ -15,13 +15,20 @@
       </div>
       <p class="eyebrow">ONLINE MATCH</p>
       <h1>影札の交渉</h1>
-      <p>人間＋NPC 対 人間＋NPC／全5ラウンド</p>
+      <p>2〜4人オンライン対戦／全5ラウンド</p>
     </header>
 
     <p id="status" class="status" aria-live="polite">匿名ログイン中…</p>
 
     <section id="entry" class="panel" hidden>
       <label>表示名<input id="display-name" maxlength="20" autocomplete="nickname" value="旅人"></label>
+      <label>対戦人数
+        <select id="player-count">
+          <option value="2">2人（人間＋NPC 対 人間＋NPC）</option>
+          <option value="3">3人（人間2人 対 人間＋NPC）</option>
+          <option value="4">4人（人間2人 対 人間2人）</option>
+        </select>
+      </label>
       <button id="create-room" type="button">ルームを作る</button>
       <label>招待コード<input id="invite-code" maxlength="24" autocomplete="off" placeholder="SC2-……-……"></label>
       <button id="join-room" type="button">ルームに参加</button>
@@ -46,6 +53,7 @@
 
     <section id="lobby" class="panel" hidden>
       <h2>待機室</h2>
+      <p id="lobby-mode"></p>
       <p class="invite-code-line">招待コード：<strong id="shown-code">参加済み</strong><span id="copy-code-hint" class="copy-code-hint" hidden>タップでコピー</span></p>
       <ul id="members"></ul>
       <div id="lobby-npc" class="lobby-npc"></div>
