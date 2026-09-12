@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>月秤の決闘｜わ〜鯖せーへき実験室</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --night: #080b20;
+      --panel: rgba(22, 25, 59, .9);
+      --panel-light: #222750;
+      --silver: #dfe5ff;
+      --muted: #aeb7da;
+      --moon: #fff2b8;
+      --violet: #a99af4;
+      --line: #707ab1;
+      --focus: #fff0a4;
+    }
+    * { box-sizing: border-box; }
+    html { background: var(--night); }
+    body {
+      margin: 0;
+      min-width: 0;
+      color: var(--silver);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.65;
+      background:
+        radial-gradient(circle at 18% 8%, rgba(126, 107, 219, .23), transparent 27rem),
+        radial-gradient(circle at 85% 28%, rgba(235, 226, 177, .1), transparent 22rem),
+        linear-gradient(160deg, #080b20, #111333 58%, #090b22);
+      min-height: 100vh;
+    }
+    button, a { font: inherit; }
+    button { touch-action: manipulation; }
+    button:focus-visible, a:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+    .page { width: min(100% - 28px, 920px); margin: 0 auto; padding: 18px 0 48px; }
+    .top-link { color: #d9d2ff; display: inline-block; min-height: 44px; padding: 8px 0; }
+    header { text-align: center; padding: 6px 0 14px; }
+    h1 { color: var(--moon); font-size: clamp(1.8rem, 7vw, 2.6rem); letter-spacing: .08em; margin: 4px 0 0; }
+    .subtitle { color: var(--muted); margin: 0 0 8px; }
+    .round { font-weight: 700; color: #fff; font-size: 1.05rem; }
+    .header-actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+    .soft-button, .primary-button, .copy-button {
+      border-radius: 10px; border: 1px solid var(--line); color: #fff; min-height: 46px; padding: 9px 16px;
+      background: #262b5d; cursor: pointer;
+    }
+    .soft-button:hover { background: #30366d; }
+    .primary-button { width: min(100%, 420px); background: linear-gradient(135deg, #6554bb, #8274ce); border-color: #b8adf3; font-weight: 800; font-size: 1.05rem; }
+    button:disabled { cursor: not-allowed; opacity: .48; }
+    .panel { border: 1px solid rgba(142, 151, 205, .55); border-radius: 18px; background: var(--panel); box-shadow: 0 12px 32px rgba(0,0,0,.25); }
+    .status-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
+    .fighter { padding: 15px; }
+    .fighter h2 { font-size: 1.05rem; margin: 0 0 5px; }
+    .score { display: flex; align-items: baseline; gap: 7px; margin-bottom: 7px; }
+    .score strong { color: var(--moon); font-size: 1.55rem; }
+    .gauge { height: 14px; background: #080a1d; border: 1px solid #68709e; border-radius: 999px; overflow: hidden; }
+    .gauge-fill { height: 100%; width: 66.666%; background: linear-gradient(90deg, #8878d5, #fff0a9); transition: width .35s ease; }
+    .remaining { color: var(--muted); font-size: .86rem; margin-top: 7px; }
+    .duel { padding: 18px; text-align: center; overflow: hidden; position: relative; }
+    .duel::before, .duel::after { content: "✦"; position: absolute; color: rgba(255,242,184,.35); font-size: 1.4rem; }
+    .duel::before { top: 10px; left: 8%; } .duel::after { top: 38px; right: 9%; font-size: .9rem; }
+    .moon-mark { width: 58px; height: 58px; border-radius: 50%; margin: 0 auto 7px; background: var(--moon); box-shadow: 0 0 28px rgba(255,242,184,.38); position: relative; }
+    .moon-mark::after { content: ""; position: absolute; width: 45px; height: 45px; border-radius: 50%; background: #171a3d; left: -5px; top: -4px; }
+    .scale { color: #d7d2f6; letter-spacing: .1em; margin-bottom: 12px; }
+    .played { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; max-width: 570px; margin: 0 auto; }
+    .played-card { min-height: 118px; padding: 13px 9px; border: 1px solid #7079ad; border-radius: 12px; background: linear-gradient(145deg, #252b60, #10132f); display: grid; place-content: center; }
+    .played-card.facedown { color: #c7ccec; background: repeating-linear-gradient(135deg,#171b43,#171b43 8px,#202657 8px,#202657 16px); }
+    .played-card.reveal { animation: reveal .45s ease; }
+    .played-card strong { color: var(--moon); display: block; font-size: 1.05rem; }
+    .played-label { color: var(--muted); font-size: .78rem; display: block; }
+    @keyframes reveal { from { opacity: .25; transform: rotateY(75deg); } to { opacity: 1; transform: rotateY(0); } }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
+    .message { min-height: 3.2em; margin: 15px auto 0; max-width: 660px; text-align: left; background: rgba(6,8,27,.55); border-radius: 10px; padding: 10px 12px; }
+    .message p { margin: 2px 0; }
+    .hand-panel, .history-panel { margin-top: 14px; padding: 17px; }
+    .section-title { color: var(--moon); font-size: 1.15rem; margin: 0 0 10px; }
+    .instruction { color: var(--muted); margin: -5px 0 12px; }
+    .cards { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 10px; }
+    .card { min-height: 142px; padding: 11px; text-align: left; color: var(--silver); border: 2px solid #59628f; border-radius: 12px; background: linear-gradient(150deg,#242958,#151837); cursor: pointer; }
+    .card-name { color: var(--moon); font-weight: 800; display: block; }
+    .card-type { color: #c7bdf7; font-size: .75rem; display: block; margin: 2px 0 5px; }
+    .card-effect { font-size: .82rem; display: block; line-height: 1.45; }
+    .card.selected { border-color: var(--focus); box-shadow: 0 0 0 3px rgba(255,240,164,.25); }
+    .card.selected::after { content: "✓ 選択中"; display: block; color: #fff3b4; font-weight: 800; margin-top: 7px; }
+    .card.used { opacity: .46; background: #11142d; }
+    .card.used::after { content: "使用済み"; display: block; font-weight: 800; margin-top: 7px; }
+    .decision { text-align: center; margin-top: 14px; }
+    .copy-area { margin: 14px 0; padding: 14px; border: 1px solid #a99af4; border-radius: 12px; background: rgba(86,72,151,.24); }
+    .copy-area h3 { margin: 0 0 9px; color: var(--moon); }
+    .copy-choices { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+    .history-list { display: grid; gap: 8px; }
+    .history-item { padding: 10px 12px; border-left: 3px solid #9587df; background: rgba(9,11,32,.65); border-radius: 7px; font-size: .9rem; }
+    .history-item strong { color: var(--moon); }
+    .empty { color: var(--muted); }
+    dialog { width: min(92vw, 700px); max-height: min(86vh, 780px); color: var(--silver); background: #151837; border: 1px solid #8089bb; border-radius: 16px; padding: 0; }
+    dialog::backdrop { background: rgba(2,3,13,.78); }
+    .modal-inner { padding: 20px; overflow-y: auto; max-height: 84vh; }
+    .modal-inner h2, .modal-inner h3 { color: var(--moon); }
+    .modal-inner h2 { margin-top: 0; }
+    .modal-inner li { margin-bottom: 7px; }
+    .modal-close { position: sticky; bottom: 0; width: 100%; margin-top: 10px; background: #30366d; }
+    .end-screen { text-align: center; padding: 22px; margin-top: 14px; }
+    .end-screen h2 { color: var(--moon); font-size: 1.7rem; margin: 0 0 5px; }
+    .end-actions { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
+    .end-actions a { color: #ddd6ff; min-height: 44px; padding: 8px; }
+    [hidden] { display: none !important; }
+    @media (max-width: 620px) {
+      .page { width: min(100% - 20px, 920px); padding-top: 10px; }
+      .status-grid { grid-template-columns: 1fr; gap: 8px; }
+      .fighter { padding: 12px; }
+      .cards { grid-template-columns: 1fr 1fr; gap: 8px; }
+      .card { min-height: 150px; padding: 10px; }
+      .duel, .hand-panel, .history-panel { padding: 13px; }
+    }
+    @media (max-width: 355px) { .cards { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <a class="top-link" href="../toybox/">← 🎪 おもちゃ箱へ戻る</a>
+    <header>
+      <h1>月秤の決闘</h1>
+      <p class="subtitle">月影を賭け、伏せ札の先を読む。</p>
+      <div id="round" class="round">第 1 / 6 ラウンド</div>
+      <div class="header-actions">
+        <button id="helpButton" class="soft-button" type="button">遊び方</button>
+        <button id="resetButton" class="soft-button" type="button">最初からやり直す</button>
+      </div>
+    </header>
+
+    <section class="status-grid" aria-label="月影の状態">
+      <article class="fighter panel">
+        <h2>あなた</h2>
+        <div class="score">月影 <strong id="playerMoon">10</strong><span>/ 15</span></div>
+        <div class="gauge" role="progressbar" aria-label="あなたの月影" aria-valuemin="0" aria-valuemax="15" aria-valuenow="10"><div id="playerGauge" class="gauge-fill"></div></div>
+        <div class="remaining">未使用札：<span id="playerRemaining">6</span>枚</div>
+      </article>
+      <article class="fighter panel">
+        <h2>対手</h2>
+        <div class="score">月影 <strong id="cpuMoon">10</strong><span>/ 15</span></div>
+        <div class="gauge" role="progressbar" aria-label="対手の月影" aria-valuemin="0" aria-valuemax="15" aria-valuenow="10"><div id="cpuGauge" class="gauge-fill"></div></div>
+        <div class="remaining">未使用札：<span id="cpuRemaining">6</span>枚</div>
+      </article>
+    </section>
+
+    <section class="duel panel" aria-live="polite">
+      <div class="moon-mark" aria-hidden="true"></div>
+      <div class="scale" aria-hidden="true">◯ ── ⚖ ── ◯</div>
+      <div class="played">
+        <div id="playerPlayed" class="played-card"><span class="played-label">あなたの札</span><span>未決定</span></div>
+        <div id="cpuPlayed" class="played-card facedown"><span class="played-label">対手の札</span><span>伏せられている</span></div>
+      </div>
+      <div id="copyArea" class="copy-area" hidden>
+        <h3>偽りの月が映す札を選んでください</h3>
+        <div id="copyChoices" class="copy-choices"></div>
+      </div>
+      <div id="message" class="message"><p>未使用の月札を1枚選んでください。</p></div>
+    </section>
+
+    <section class="hand-panel panel">
+      <h2 class="section-title">あなたの月札</h2>
+      <p id="handInstruction" class="instruction">札は決定するまで選び直せます。</p>
+      <div id="hand" class="cards"></div>
+      <div class="decision"><button id="confirmButton" class="primary-button" type="button" disabled>この札で決定</button></div>
+    </section>
+
+    <section class="history-panel panel">
+      <h2 class="section-title">決闘の履歴</h2>
+      <div id="history" class="history-list"><p class="empty">まだ履歴はありません。</p></div>
+    </section>
+
+    <section id="endScreen" class="end-screen panel" hidden>
+      <h2 id="endTitle"></h2>
+      <p id="endScore"></p>
+      <div class="end-actions">
+        <button id="rematchButton" class="primary-button" type="button">もう一度決闘する</button>
+        <a href="../toybox/">🎪 おもちゃ箱へ戻る</a>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="helpDialog" aria-labelledby="helpTitle">
+    <div class="modal-inner">
+      <h2 id="helpTitle">遊び方</h2>
+      <ul>
+        <li>あなたと対手は月影10から始め、月影は0〜15の範囲で動きます。</li>
+        <li>全6ラウンドです。相手の月影を0にすると即勝利。6ラウンド後は月影の多い側が勝ち、同値なら引き分けです。</li>
+        <li>毎ラウンド、双方が札を伏せてから同時に公開します。使った札は使い切りです。</li>
+        <li>対手はあなたの決定前に札を内部で固定し、今回あなたが選んでいる札は参照しません。あなたは決定前なら札を変えられますが、対手の内部確定札は変わりません。</li>
+      </ul>
+      <h3>6枚の月札</h3>
+      <ul>
+        <li><strong>満ちる月：</strong>自分の月影を3増やします。</li>
+        <li><strong>欠ける月：</strong>相手の月影を3減らします。</li>
+        <li><strong>返照の月：</strong>このラウンドの数値増減を反転します。2枚なら相殺されます。</li>
+        <li><strong>静止の月：</strong>相手の札効果を無効にします。2枚なら互いに無効となります。</li>
+        <li><strong>偽りの月：</strong>未使用の満ちる月・欠ける月・返照の月・有効な新月の誓いを模倣します。静止の月は模倣できません。使用済みになるのは偽りの月だけで、模倣元は後で使えます。</li>
+        <li><strong>新月の誓い：</strong>公開時点で自分が劣勢なら双方の月影を7にします。同値・優勢なら「誓いは結ばれなかった」となります。</li>
+      </ul>
+      <p>偽りの月は模倣候補がなくても出せます。公開後に候補が0枚なら模倣元を選ばず不発となり、偽りの月だけが使用済みになります。相手の有効な静止の月で無効になる場合も模倣元は選ばず、不発ではなく無効化として扱います。</p>
+      <p>新月の誓いは双方の札を公開した時点で判定し、その結果は後の月影変動で変わりません。その判定後に、偽りの月が新月の誓いを模倣できるか決まります。</p>
+      <h3>効果の順番</h3>
+      <ol>
+        <li>偽りの月が静止の月で無効になるか確認</li>
+        <li>新月の誓いの公開時点判定</li>
+        <li>有効な偽りの月の候補確認・コピー先決定</li>
+        <li>静止の月</li><li>返照の月</li><li>新月の誓い</li><li>満ちる月・欠ける月</li>
+      </ol>
+      <p>新月の誓いによる「7への設定」は数値増減ではないため、返照の月では反転しません。静止の月では無効になります。</p>
+      <button id="closeHelpButton" class="soft-button modal-close" type="button">閉じる</button>
+    </div>
+  </dialog>
+
+  <script>
+    'use strict';
+
+    // 定数・月札定義
+    const MAX_ROUNDS = 6;
+    const MAX_MOON = 15;
+    const START_MOON = 10;
+    const REVEAL_WAIT_MS = 650;
+    const CARDS = Object.freeze({
+      waxing: { name: '満ちる月', type: '回復', short: '自分の月影を3増やす' },
+      waning: { name: '欠ける月', type: '攻撃', short: '相手の月影を3減らす' },
+      reflection: { name: '返照の月', type: '反転', short: 'このラウンドの数値増減を反転する' },
+      stillness: { name: '静止の月', type: '防御', short: '相手の月札の効果を無効にする' },
+      falseMoon: { name: '偽りの月', type: '変化', short: '公開後、未使用の月札の効果を模倣する' },
+      oath: { name: '新月の誓い', type: '逆転', short: '公開時に劣勢なら双方の月影を7にする' }
+    });
+    const CARD_IDS = Object.keys(CARDS);
+    const COPYABLE = ['waxing', 'waning', 'reflection', 'oath'];
+
+    // ゲーム状態
+    let state;
+    let revealTimer = null;
+    function freshState() {
+      return {
+        round: 1, playerMoon: START_MOON, cpuMoon: START_MOON,
+        playerUsed: new Set(), cpuUsed: new Set(), selected: null,
+        cpuLocked: null, phase: 'select', history: [], messages: [],
+        playerCopy: null, cpuCopy: null, publicPlayerCard: null, publicCpuCard: null
+      };
+    }
+
+    // CPU固有の通常札選択処理（プレイヤーの当ラウンド選択は参照しない）
+    function chooseCpuCard() {
+      const options = CARD_IDS.filter(id => !state.cpuUsed.has(id));
+      const scores = new Map(options.map(id => [id, 1 + Math.random() * 1.8]));
+      const add = (id, value) => { if (scores.has(id)) scores.set(id, scores.get(id) + value); };
+      if (state.playerMoon <= 3) add('waning', 8);
+      if (state.cpuMoon <= 3) { add('waxing', 5); add('stillness', 4); }
+      if (state.cpuMoon < state.playerMoon) add('oath', 1 + state.round * .85);
+      const playerCards = state.history.map(item => item.playerActual);
+      const lastPlayer = playerCards[playerCards.length - 1];
+      if (!state.playerUsed.has('waning') || lastPlayer === 'waning') add('stillness', 2.7);
+      if (!state.playerUsed.has('waxing') || state.playerMoon >= state.cpuMoon) add('reflection', 1.8);
+      add('falseMoon', 1.1);
+      const best = Math.max(...scores.values());
+      const pool = options.filter(id => scores.get(id) >= best - 1.9);
+      return pool[Math.floor(Math.random() * pool.length)];
+    }
+
+    // CPU固有の偽りの月の模倣元選択（今回のプレイヤー公開札は参照しない）
+    function chooseCpuCopy(candidates) {
+      const scores = new Map(candidates.map(id => [id, 1 + Math.random() * 1.5]));
+      const add = (id, value) => { if (scores.has(id)) scores.set(id, scores.get(id) + value); };
+      if (state.cpuMoon <= 5) add('waxing', 4);
+      if (state.playerMoon <= 4) add('waning', 5);
+      if (state.cpuMoon < state.playerMoon) add('oath', 4);
+      if (!state.playerUsed.has('waxing') || state.playerMoon >= state.cpuMoon) add('reflection', 2);
+      const best = Math.max(...scores.values());
+      const pool = candidates.filter(id => scores.get(id) >= best - 1.2);
+      return pool[Math.floor(Math.random() * pool.length)];
+    }
+
+    // 共通ルール：範囲、誓い、模倣候補
+    const clampMoon = value => Math.max(0, Math.min(MAX_MOON, value));
+    function oathIsValid(side, snapshot) {
+      return side === 'player' ? snapshot.player < snapshot.cpu : snapshot.cpu < snapshot.player;
+    }
+    function copyCandidates(side, snapshot) {
+      const used = side === 'player' ? state.playerUsed : state.cpuUsed;
+      return COPYABLE.filter(id => !used.has(id) && (id !== 'oath' || oathIsValid(side, snapshot)));
+    }
+    function displayCard(actual, copy) {
+      return actual === 'falseMoon' && copy ? `${CARDS.falseMoon.name} → ${CARDS[copy].name}` : CARDS[actual].name;
+    }
+
+    // ラウンド公開と、偽りの月の事前判定
+    function revealRound() {
+      state.phase = 'revealing';
+      state.publicPlayerCard = state.selected;
+      state.publicCpuCard = state.cpuLocked;
+      state.playerUsed.add(state.selected);
+      state.cpuUsed.add(state.cpuLocked);
+      state.messages = ['双方の月札が同時に公開された。'];
+      render();
+      revealTimer = setTimeout(prepareCopies, REVEAL_WAIT_MS);
+    }
+    function prepareCopies() {
+      revealTimer = null;
+      const snapshot = { player: state.playerMoon, cpu: state.cpuMoon };
+      const playerFalseBlocked = state.publicPlayerCard === 'falseMoon' && state.publicCpuCard === 'stillness';
+      const cpuFalseBlocked = state.publicCpuCard === 'falseMoon' && state.publicPlayerCard === 'stillness';
+      if (playerFalseBlocked) state.messages.push('対手の「静止の月」により、あなたの「偽りの月」は無効化された。');
+      if (cpuFalseBlocked) state.messages.push('あなたの「静止の月」により、対手の「偽りの月」は無効化された。');
+
+      if (state.publicCpuCard === 'falseMoon' && !cpuFalseBlocked) {
+        const candidates = copyCandidates('cpu', snapshot);
+        if (candidates.length) state.cpuCopy = chooseCpuCopy(candidates);
+        else state.messages.push('対手の「偽りの月」は模倣できる札を持たず、不発となった。');
+      }
+      if (state.publicPlayerCard === 'falseMoon' && !playerFalseBlocked) {
+        const candidates = copyCandidates('player', snapshot);
+        if (candidates.length) {
+          state.phase = 'chooseCopy';
+          render();
+          return;
+        }
+        state.messages.push('あなたの「偽りの月」は模倣できる札を持たず、不発となった。');
+      }
+      resolveRound(snapshot);
+    }
+
+    // 共通ルール：確定した札を仕様の順番で解決
+    function resolveRound(snapshot) {
+      state.phase = 'resolving';
+      const actual = { player: state.publicPlayerCard, cpu: state.publicCpuCard };
+      const effective = {
+        player: actual.player === 'falseMoon' ? state.playerCopy : actual.player,
+        cpu: actual.cpu === 'falseMoon' ? state.cpuCopy : actual.cpu
+      };
+      const bothStill = actual.player === 'stillness' && actual.cpu === 'stillness';
+      const blocked = {
+        player: !bothStill && actual.cpu === 'stillness',
+        cpu: !bothStill && actual.player === 'stillness'
+      };
+      if (bothStill) state.messages.push('互いの「静止の月」は無効化し合った。');
+      else {
+        if (blocked.player && actual.player !== 'falseMoon') state.messages.push(`対手の「静止の月」により、あなたの「${CARDS[actual.player].name}」は沈黙した。`);
+        if (blocked.cpu && actual.cpu !== 'falseMoon') state.messages.push(`あなたの「静止の月」により、対手の「${CARDS[actual.cpu].name}」は沈黙した。`);
+      }
+      if (state.playerCopy) state.messages.push(`あなたの「偽りの月」は「${CARDS[state.playerCopy].name}」を映した。`);
+      if (state.cpuCopy) state.messages.push(`対手の「偽りの月」は「${CARDS[state.cpuCopy].name}」を映した。`);
+
+      const validOath = {
+        player: effective.player === 'oath' && oathIsValid('player', snapshot),
+        cpu: effective.cpu === 'oath' && oathIsValid('cpu', snapshot)
+      };
+      for (const side of ['player', 'cpu']) {
+        if (effective[side] === 'oath' && !validOath[side] && !blocked[side]) {
+          state.messages.push(`${side === 'player' ? 'あなた' : '対手'}の「新月の誓い」は結ばれなかった。`);
+        }
+      }
+
+      const reflections = ['player', 'cpu'].filter(side => effective[side] === 'reflection' && !blocked[side]).length;
+      const reversed = reflections === 1;
+      if (reflections === 2) state.messages.push('二つの「返照の月」は相殺され、増減は通常どおりとなった。');
+      else if (reversed) state.messages.push('「返照の月」が月影の増減を反転した。');
+
+      let playerBase = state.playerMoon;
+      let cpuBase = state.cpuMoon;
+      if ((validOath.player && !blocked.player) || (validOath.cpu && !blocked.cpu)) {
+        playerBase = 7; cpuBase = 7;
+        state.messages.push('「新月の誓い」により、双方の月影は7になった。');
+      }
+      let playerDelta = 0, cpuDelta = 0;
+      for (const side of ['player', 'cpu']) {
+        if (blocked[side]) continue;
+        const card = effective[side];
+        const sign = reversed ? -1 : 1;
+        if (card === 'waxing') {
+          if (side === 'player') playerDelta += 3 * sign; else cpuDelta += 3 * sign;
+        }
+        if (card === 'waning') {
+          if (side === 'player') cpuDelta -= 3 * sign; else playerDelta -= 3 * sign;
+        }
+      }
+      const beforePlayer = state.playerMoon, beforeCpu = state.cpuMoon;
+      state.playerMoon = clampMoon(playerBase + playerDelta);
+      state.cpuMoon = clampMoon(cpuBase + cpuDelta);
+      if (playerDelta || cpuDelta) state.messages.push(`月影は、あなた ${beforePlayer} → ${state.playerMoon}、対手 ${beforeCpu} → ${state.cpuMoon} となった。`);
+      else if (playerBase === beforePlayer && cpuBase === beforeCpu) state.messages.push('このラウンドでは月影は変わらなかった。');
+
+      state.history.unshift({
+        round: state.round, playerActual: actual.player, cpuActual: actual.cpu,
+        playerLabel: displayCard(actual.player, state.playerCopy), cpuLabel: displayCard(actual.cpu, state.cpuCopy),
+        playerMoon: state.playerMoon, cpuMoon: state.cpuMoon
+      });
+      finishOrContinue();
+    }
+
+    // 勝敗判定と次ラウンド
+    function finishOrContinue() {
+      let outcome = null;
+      if (state.playerMoon === 0 && state.cpuMoon === 0) outcome = 'draw';
+      else if (state.cpuMoon === 0) outcome = 'win';
+      else if (state.playerMoon === 0) outcome = 'lose';
+      else if (state.round === MAX_ROUNDS) outcome = state.playerMoon === state.cpuMoon ? 'draw' : state.playerMoon > state.cpuMoon ? 'win' : 'lose';
+      if (outcome) {
+        state.phase = 'ended'; state.outcome = outcome; render(); return;
+      }
+      state.round += 1;
+      state.selected = null; state.playerCopy = null; state.cpuCopy = null;
+      state.publicPlayerCard = null; state.publicCpuCard = null;
+      state.phase = 'select';
+      state.cpuLocked = chooseCpuCard();
+      state.messages.push('次のラウンドです。未使用の月札を選んでください。');
+      render();
+    }
+
+    // UI描画
+    const el = id => document.getElementById(id);
+    function render() {
+      el('round').textContent = `第 ${state.round} / ${MAX_ROUNDS} ラウンド`;
+      el('playerMoon').textContent = state.playerMoon; el('cpuMoon').textContent = state.cpuMoon;
+      updateGauge('player', state.playerMoon); updateGauge('cpu', state.cpuMoon);
+      el('playerRemaining').textContent = CARD_IDS.length - state.playerUsed.size;
+      el('cpuRemaining').textContent = CARD_IDS.length - state.cpuUsed.size;
+      renderPlayed(); renderHand(); renderMessages(); renderHistory(); renderEnd();
+    }
+    function updateGauge(side, value) {
+      const gauge = el(`${side}Gauge`); gauge.style.width = `${value / MAX_MOON * 100}%`;
+      gauge.parentElement.setAttribute('aria-valuenow', value);
+    }
+    function renderPlayed() {
+      const player = el('playerPlayed'), cpu = el('cpuPlayed');
+      player.className = 'played-card'; cpu.className = 'played-card facedown';
+      if (state.phase === 'select') {
+        player.innerHTML = `<span class="played-label">あなたの札</span><span>${state.selected ? `選択中：${CARDS[state.selected].name}` : '未決定'}</span>`;
+        cpu.innerHTML = '<span class="played-label">対手の札</span><span>伏せられている</span>';
+      } else if (state.phase === 'committed' || state.phase === 'revealing') {
+        player.classList.add('facedown');
+        player.innerHTML = '<span class="played-label">あなたの札</span><span>伏せ札</span>';
+        cpu.innerHTML = '<span class="played-label">対手の札</span><span>伏せ札</span>';
+      } else {
+        player.className = 'played-card reveal'; cpu.className = 'played-card reveal';
+        player.innerHTML = `<span class="played-label">あなたの札</span><strong>${displayCard(state.publicPlayerCard, state.playerCopy)}</strong>`;
+        cpu.innerHTML = `<span class="played-label">対手の札</span><strong>${displayCard(state.publicCpuCard, state.cpuCopy)}</strong>`;
+      }
+    }
+    function renderHand() {
+      const choosingCopy = state.phase === 'chooseCopy';
+      const copyIds = choosingCopy ? copyCandidates('player', { player: state.playerMoon, cpu: state.cpuMoon }) : [];
+      el('hand').innerHTML = CARD_IDS.map(id => {
+        const used = state.playerUsed.has(id);
+        const selectable = state.phase === 'select' && !used;
+        const classes = ['card', used ? 'used' : '', state.selected === id && state.phase === 'select' ? 'selected' : ''].filter(Boolean).join(' ');
+        return `<button class="${classes}" type="button" data-card="${id}" ${selectable ? '' : 'disabled'} aria-pressed="${state.selected === id}"><span class="card-name">${CARDS[id].name}</span><span class="card-type">${CARDS[id].type}</span><span class="card-effect">${CARDS[id].short}</span></button>`;
+      }).join('');
+      el('handInstruction').textContent = choosingCopy ? '模倣元は下の専用ボタンから選んでください。' : state.phase === 'select' ? '札は決定するまで選び直せます。' : 'ラウンドの処理中は札を選べません。';
+      el('confirmButton').disabled = state.phase !== 'select' || !state.selected;
+      el('copyArea').hidden = !choosingCopy;
+      el('copyChoices').innerHTML = copyIds.map(id => `<button class="copy-button" type="button" data-copy="${id}">${CARDS[id].name}<br><small>${CARDS[id].short}</small></button>`).join('');
+    }
+    function renderMessages() { el('message').innerHTML = state.messages.map(message => `<p>${message}</p>`).join(''); }
+    function renderHistory() {
+      el('history').innerHTML = state.history.length ? state.history.map(item => `<div class="history-item"><strong>第${item.round}ラウンド</strong><br>あなた：${item.playerLabel} ／ 対手：${item.cpuLabel}<br>終了後の月影　あなた ${item.playerMoon} ／ 対手 ${item.cpuMoon}</div>`).join('') : '<p class="empty">まだ履歴はありません。</p>';
+    }
+    function renderEnd() {
+      const ended = state.phase === 'ended'; el('endScreen').hidden = !ended;
+      if (!ended) return;
+      el('endTitle').textContent = state.outcome === 'win' ? '勝利 — 月秤はこちらへ傾いた' : state.outcome === 'lose' ? '敗北 — 月秤は対手へ傾いた' : '引き分け — 月秤は釣り合った';
+      el('endScore').textContent = `最終月影　あなた ${state.playerMoon} ／ 対手 ${state.cpuMoon}`;
+    }
+
+    // イベント処理
+    el('hand').addEventListener('click', event => {
+      const button = event.target.closest('[data-card]');
+      if (!button || state.phase !== 'select' || state.playerUsed.has(button.dataset.card)) return;
+      state.selected = button.dataset.card; state.messages = [`「${CARDS[state.selected].name}」を選択中です。決定するまでは変更できます。`]; render();
+    });
+    el('confirmButton').addEventListener('click', () => {
+      if (state.phase !== 'select' || !state.selected) return;
+      state.phase = 'committed';
+      state.messages = ['双方の札が伏せられた。']; render();
+      revealTimer = setTimeout(revealRound, REVEAL_WAIT_MS);
+    });
+    el('copyChoices').addEventListener('click', event => {
+      const button = event.target.closest('[data-copy]');
+      if (!button || state.phase !== 'chooseCopy') return;
+      const candidates = copyCandidates('player', { player: state.playerMoon, cpu: state.cpuMoon });
+      if (!candidates.includes(button.dataset.copy)) return;
+      state.playerCopy = button.dataset.copy;
+      resolveRound({ player: state.playerMoon, cpu: state.cpuMoon });
+    });
+    function resetGame() {
+      if (revealTimer) { clearTimeout(revealTimer); revealTimer = null; }
+      state = freshState(); state.cpuLocked = chooseCpuCard(); render();
+    }
+    el('resetButton').addEventListener('click', resetGame);
+    el('rematchButton').addEventListener('click', resetGame);
+    el('helpButton').addEventListener('click', () => el('helpDialog').showModal());
+    el('closeHelpButton').addEventListener('click', () => el('helpDialog').close());
+    el('helpDialog').addEventListener('click', event => { if (event.target === el('helpDialog')) el('helpDialog').close(); });
+
+    // 初期化
+    resetGame();
+  </script>
+</body>
+</html>
