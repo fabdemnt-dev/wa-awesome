@@ -13,9 +13,12 @@
     }
 
     const app = document.getElementById("app");
+    const toyboxReturnLink = document.getElementById("toybox-return-link");
+    const toyboxExitDialog = document.getElementById("toybox-exit-dialog");
+    const cancelToyboxExitButton = document.getElementById("cancel-toybox-exit");
 
-    if (!app) {
-      throw new Error("The game application element was not found.");
+    if (!app || !toyboxReturnLink || !toyboxExitDialog || !cancelToyboxExitButton) {
+      throw new Error("A required game application element was not found.");
     }
 
     function renderAndFocus(selector) {
@@ -111,6 +114,20 @@
       ui.render();
     }
 
+    function handleToyboxReturn(event) {
+      const state = stateApi.getGameState();
+      const isActiveMatch =
+        state.currentScreen === stateApi.SCREENS.GAME ||
+        state.currentScreen === stateApi.SCREENS.ROUND_RESULT;
+
+      if (!isActiveMatch) {
+        return;
+      }
+
+      event.preventDefault();
+      toyboxExitDialog.showModal();
+    }
+
     function handleApplicationClick(event) {
       const button = event.target.closest("button");
 
@@ -163,6 +180,11 @@
     }
 
     app.addEventListener("click", handleApplicationClick);
+    toyboxReturnLink.addEventListener("click", handleToyboxReturn);
+    cancelToyboxExitButton.addEventListener("click", () => {
+      toyboxExitDialog.close();
+      toyboxReturnLink.focus();
+    });
     stateApi.resetToTitle();
     ui.render();
   }

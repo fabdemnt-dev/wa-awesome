@@ -12,6 +12,9 @@
   <div class="page-shell">
     <header class="site-header">
       <p class="site-mark" aria-label="影札の交渉">影札の交渉</p>
+      <nav class="site-navigation" aria-label="ゲーム外への移動">
+        <a id="toybox-return-link" class="toybox-return-link" href="toybox/">← 🎪 おもちゃ箱へ戻る</a>
+      </nav>
     </header>
 
     <main id="app" class="app" tabindex="-1">
@@ -296,9 +299,21 @@
           <button id="rematch-button" class="button button--primary" type="button">同じ編成でもう一度</button>
           <button id="reselect-partner-button" class="button button--secondary" type="button">味方を選び直す</button>
           <button class="button button--text" type="button" data-action="go-title">タイトルへ戻る</button>
+          <a class="button button--text" href="toybox/">🎪 おもちゃ箱へ戻る</a>
         </div>
       </section>
     </main>
+
+    <dialog id="toybox-exit-dialog" class="exit-dialog" aria-labelledby="toybox-exit-heading">
+      <div class="exit-dialog__panel">
+        <h2 id="toybox-exit-heading">おもちゃ箱へ戻りますか？</h2>
+        <p>現在の対戦は終了します。</p>
+        <div class="exit-dialog__actions">
+          <button id="cancel-toybox-exit" class="button button--secondary" type="button">キャンセル</button>
+          <a class="button button--primary" href="toybox/">戻る</a>
+        </div>
+      </div>
+    </dialog>
 
     <footer class="site-footer">
       <small>影札の交渉 — Original Web Card Game</small>
