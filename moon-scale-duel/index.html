@@ -74,6 +74,7 @@
     @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
     .message { min-height: 3.2em; margin: 15px auto 0; max-width: 660px; text-align: left; background: rgba(6,8,27,.55); border-radius: 10px; padding: 10px 12px; }
     .message p { margin: 2px 0; }
+    .round-next { margin-top: 12px; }
     .hand-panel, .history-panel { margin-top: 14px; padding: 17px; }
     .section-title { color: var(--moon); font-size: 1.15rem; margin: 0 0 10px; }
     .instruction { color: var(--muted); margin: -5px 0 12px; }
@@ -212,6 +213,7 @@
         <div id="copyChoices" class="copy-choices"></div>
       </div>
       <div id="message" class="message"><p>未使用の月札を1枚選んでください。</p></div>
+      <button id="continueButton" class="soft-button round-next" type="button" hidden>次のラウンドへ</button>
     </section>
 
     <section class="hand-panel panel">
@@ -316,7 +318,8 @@
         round: 1, playerMoon: START_MOON, cpuMoon: START_MOON,
         playerUsed: new Set(), cpuUsed: new Set(), selected: null,
         cpuLocked: null, phase: 'select', history: [], messages: [],
-        playerCopy: null, cpuCopy: null, publicPlayerCard: null, publicCpuCard: null
+        playerCopy: null, cpuCopy: null, publicPlayerCard: null, publicCpuCard: null,
+        playerFalseStatus: null, cpuFalseStatus: null
       };
     }
 
@@ -363,6 +366,15 @@
     function displayCard(actual, copy) {
       return actual === 'falseMoon' && copy ? `${CARDS.falseMoon.name} → ${CARDS[copy].name}` : CARDS[actual].name;
     }
+    function displayPublicCard(side) {
+      const actual = side === 'player' ? state.publicPlayerCard : state.publicCpuCard;
+      const copy = side === 'player' ? state.playerCopy : state.cpuCopy;
+      const falseStatus = side === 'player' ? state.playerFalseStatus : state.cpuFalseStatus;
+      if (actual !== 'falseMoon') return CARDS[actual].name;
+      if (falseStatus === 'blocked') return '偽りの月（静止の月により無効化）';
+      if (falseStatus === 'failed') return '偽りの月（模倣先なし・不発）';
+      return displayCard(actual, copy);
+    }
 
     // ラウンド公開と、偽りの月の事前判定
     function revealRound() {
@@ -380,13 +392,24 @@
       const snapshot = { player: state.playerMoon, cpu: state.cpuMoon };
       const playerFalseBlocked = state.publicPlayerCard === 'falseMoon' && state.publicCpuCard === 'stillness';
       const cpuFalseBlocked = state.publicCpuCard === 'falseMoon' && state.publicPlayerCard === 'stillness';
-      if (playerFalseBlocked) state.messages.push('対手の「静止の月」により、あなたの「偽りの月」は無効化された。');
-      if (cpuFalseBlocked) state.messages.push('あなたの「静止の月」により、対手の「偽りの月」は無効化された。');
+      if (playerFalseBlocked) {
+        state.playerFalseStatus = 'blocked';
+        state.messages.push('対手の「静止の月」により、あなたの「偽りの月」は無効化された。');
+      }
+      if (cpuFalseBlocked) {
+        state.cpuFalseStatus = 'blocked';
+        state.messages.push('あなたの「静止の月」により、対手の「偽りの月」は無効化された。');
+      }
 
       if (state.publicCpuCard === 'falseMoon' && !cpuFalseBlocked) {
         const candidates = copyCandidates('cpu', snapshot);
-        if (candidates.length) state.cpuCopy = chooseCpuCopy(candidates);
-        else state.messages.push('対手の「偽りの月」は模倣できる札を持たず、不発となった。');
+        if (candidates.length) {
+          state.cpuCopy = chooseCpuCopy(candidates);
+          state.cpuFalseStatus = 'copied';
+        } else {
+          state.cpuFalseStatus = 'failed';
+          state.messages.push('対手の「偽りの月」は模倣できる札を持たず、不発となった。');
+        }
       }
       if (state.publicPlayerCard === 'falseMoon' && !playerFalseBlocked) {
         const candidates = copyCandidates('player', snapshot);
@@ -395,6 +418,7 @@
           render();
           return;
         }
+        state.playerFalseStatus = 'failed';
         state.messages.push('あなたの「偽りの月」は模倣できる札を持たず、不発となった。');
       }
       resolveRound(snapshot);
@@ -478,9 +502,15 @@
       if (outcome) {
         state.phase = 'ended'; state.outcome = outcome; render(); return;
       }
+      state.phase = 'roundComplete';
+      render();
+    }
+    function startNextRound() {
+      if (state.phase !== 'roundComplete') return;
       state.round += 1;
       state.selected = null; state.playerCopy = null; state.cpuCopy = null;
       state.publicPlayerCard = null; state.publicCpuCard = null;
+      state.playerFalseStatus = null; state.cpuFalseStatus = null;
       state.phase = 'select';
       state.cpuLocked = chooseCpuCard();
       state.messages.push('次のラウンドです。未使用の月札を選んでください。');
@@ -498,6 +528,7 @@
       el('playerRemaining').textContent = CARD_IDS.length - state.playerUsed.size;
       el('cpuRemaining').textContent = CARD_IDS.length - state.cpuUsed.size;
       renderPlayed(); renderHand(); renderMessages(); renderHistory(); renderEnd();
+      el('continueButton').hidden = state.phase !== 'roundComplete';
     }
     function updateGauge(side, value) {
       const gauge = el(`${side}Gauge`); gauge.style.width = `${value / MAX_MOON * 100}%`;
@@ -515,8 +546,8 @@
         cpu.innerHTML = '<span class="played-label">対手の札</span><span>伏せ札</span>';
       } else {
         player.className = 'played-card reveal'; cpu.className = 'played-card reveal';
-        player.innerHTML = `<span class="played-label">あなたの札</span><strong>${displayCard(state.publicPlayerCard, state.playerCopy)}</strong>`;
-        cpu.innerHTML = `<span class="played-label">対手の札</span><strong>${displayCard(state.publicCpuCard, state.cpuCopy)}</strong>`;
+        player.innerHTML = `<span class="played-label">あなたの札</span><strong>${displayPublicCard('player')}</strong>`;
+        cpu.innerHTML = `<span class="played-label">対手の札</span><strong>${displayPublicCard('cpu')}</strong>`;
       }
     }
     function renderHand() {
@@ -563,8 +594,10 @@
       const candidates = copyCandidates('player', { player: state.playerMoon, cpu: state.cpuMoon });
       if (!candidates.includes(button.dataset.copy)) return;
       state.playerCopy = button.dataset.copy;
+      state.playerFalseStatus = 'copied';
       resolveRound({ player: state.playerMoon, cpu: state.cpuMoon });
     });
+    el('continueButton').addEventListener('click', startNextRound);
     function resetGame() {
       if (revealTimer) { clearTimeout(revealTimer); revealTimer = null; }
       el('historyPanel').removeAttribute('open');
