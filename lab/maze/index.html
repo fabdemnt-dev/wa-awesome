@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex, nofollow">
+  <title>自動生成迷路｜試作</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main>
+    <h1>自動生成迷路</h1>
+    <p class="lead">赤い丸を動かして、星のゴールを目指そう</p>
+
+    <div class="maze-shell">
+      <div id="maze" class="maze" role="grid" aria-label="自動生成された迷路"></div>
+    </div>
+    <div class="info">
+      <div class="legend"><span class="start-key">スタート</span><span class="goal-key">ゴール</span></div>
+      <span id="status" aria-live="polite">移動 0回</span>
+    </div>
+
+    <div class="controls" aria-label="移動ボタン">
+      <button type="button" data-direction="up" aria-label="上へ移動">↑</button>
+      <button type="button" data-direction="left" aria-label="左へ移動">←</button>
+      <button type="button" data-direction="down" aria-label="下へ移動">↓</button>
+      <button type="button" data-direction="right" aria-label="右へ移動">→</button>
+    </div>
+
+    <div class="actions">
+      <button type="button" id="restart">同じ迷路を最初から</button>
+      <button type="button" id="new-maze">新しい迷路</button>
+    </div>
+
+    <form id="seed-form" class="seed-form">
+      <label for="seed">seed（同じ文字なら同じ迷路）</label>
+      <div class="seed-row">
+        <input id="seed" name="seed" autocomplete="off" maxlength="80" aria-label="迷路のseed">
+        <button type="submit">このseedで生成</button>
+      </div>
+    </form>
+  </main>
+
+  <dialog id="finish-dialog">
+    <h2>脱出成功！</h2>
+    <p>ゴールにたどり着きました。</p>
+    <div class="dialog-actions">
+      <button type="button" id="dialog-restart">同じ迷路をもう一度</button>
+      <button type="button" id="dialog-new">新しい迷路を生成</button>
+    </div>
+  </dialog>
+  <script type="module" src="./maze.js"></script>
+</body>
+</html>
