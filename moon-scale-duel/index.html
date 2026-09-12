@@ -151,6 +151,7 @@
     .modal-close { position: sticky; bottom: 0; width: 100%; margin-top: 10px; background: #30366d; }
     .end-screen { text-align: center; padding: 22px; margin-top: 14px; }
     .end-screen h2 { color: var(--moon); font-size: 1.7rem; margin: 0 0 5px; }
+    .end-reason { margin: 4px 0; }
     .end-actions { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
     .end-actions a { color: #ddd6ff; min-height: 44px; padding: 8px; }
     [hidden] { display: none !important; }
@@ -274,6 +275,7 @@
 
     <section id="endScreen" class="end-screen panel" hidden>
       <h2 id="endTitle"></h2>
+      <p id="endReason" class="end-reason"></p>
       <p id="endScore"></p>
       <div class="end-actions">
         <button id="rematchButton" class="primary-button" type="button">もう一度決闘する</button>
@@ -573,6 +575,7 @@
       el('cpuRemaining').textContent = CARD_IDS.length - state.cpuUsed.size;
       renderPlayed(); renderHand(); renderMessages(); renderHistory(); renderEnd();
       el('continueButton').hidden = state.phase !== 'roundComplete';
+      el('resetButton').hidden = state.phase === 'ended';
     }
     function updateGauge(side, value) {
       const gauge = el(`${side}Gauge`); gauge.style.width = `${value / MAX_MOON * 100}%`;
@@ -603,12 +606,17 @@
         const classes = ['card', used ? 'used' : '', state.selected === id && state.phase === 'select' ? 'selected' : ''].filter(Boolean).join(' ');
         return `<button class="${classes}" type="button" data-card="${id}" ${selectable ? '' : 'disabled'} aria-pressed="${state.selected === id}"><span class="card-art card-art--${id}" aria-hidden="true"><span class="art-moon"></span><span class="art-detail"></span></span><span class="card-name">${CARDS[id].name}</span><span class="card-type">${CARDS[id].type}</span><span class="card-effect">${CARDS[id].short}</span></button>`;
       }).join('');
-      el('handInstruction').textContent = choosingCopy ? '模倣元は下の専用ボタンから選んでください。' : state.phase === 'select' ? '札は決定するまで選び直せます。' : 'ラウンドの処理中は札を選べません。';
+      el('handInstruction').textContent = choosingCopy ? '模倣元は下の専用ボタンから選んでください。' : state.phase === 'select' ? '札は決定するまで選び直せます。' : state.phase === 'ended' ? '決闘は終了しました。' : 'ラウンドの処理中は札を選べません。';
       el('confirmButton').disabled = state.phase !== 'select' || !state.selected;
       el('copyArea').hidden = !choosingCopy;
       el('copyChoices').innerHTML = copyIds.map(id => `<button class="copy-button" type="button" data-copy="${id}">${CARDS[id].name}<br><small>${CARDS[id].short}</small></button>`).join('');
     }
-    function renderMessages() { el('message').innerHTML = state.messages.map(message => `<p>${message}</p>`).join(''); }
+    function renderMessages() {
+      const endingMessages = state.phase === 'ended'
+        ? state.messages.filter(message => message !== '次のラウンドです。未使用の月札を選んでください。' && message !== 'このラウンドでは決着とならなかった。')
+        : state.messages;
+      el('message').innerHTML = endingMessages.map(message => `<p>${message}</p>`).join('');
+    }
     function renderHistory() {
       el('historySummary').textContent = `📜 決闘の記録（${state.history.length}）`;
       el('history').innerHTML = state.history.length ? state.history.map(item => `<div class="history-item"><strong>第${item.round}ラウンド</strong><br>あなた：${item.playerLabel} ／ 対手：${item.cpuLabel}<br>終了後の月影　あなた ${item.playerMoon} ／ 対手 ${item.cpuMoon}</div>`).join('') : '<p class="empty">まだ履歴はありません。</p>';
@@ -616,7 +624,20 @@
     function renderEnd() {
       const ended = state.phase === 'ended'; el('endScreen').hidden = !ended;
       if (!ended) return;
-      el('endTitle').textContent = state.outcome === 'win' ? '勝利 — 月秤はこちらへ傾いた' : state.outcome === 'lose' ? '敗北 — 月秤は対手へ傾いた' : '引き分け — 月秤は釣り合った';
+      el('endTitle').textContent = state.outcome === 'win' ? '勝利' : state.outcome === 'lose' ? '敗北' : '引き分け';
+      if (state.playerMoon === 0 && state.cpuMoon === 0) {
+        el('endReason').textContent = '双方の月影が尽きました。決闘は引き分けです。';
+      } else if (state.cpuMoon === 0) {
+        el('endReason').textContent = '対手の月影が尽きました。あなたの勝利です。';
+      } else if (state.playerMoon === 0) {
+        el('endReason').textContent = 'あなたの月影が尽きました。今回は対手の勝利です。';
+      } else if (state.outcome === 'win') {
+        el('endReason').textContent = '6ラウンド終了時、あなたの月影が多いため勝利です。';
+      } else if (state.outcome === 'lose') {
+        el('endReason').textContent = '6ラウンド終了時、対手の月影が多いため敗北です。';
+      } else {
+        el('endReason').textContent = '6ラウンド終了時、月影が同じため決闘は引き分けです。';
+      }
       el('endScore').textContent = `最終月影　あなた ${state.playerMoon} ／ 対手 ${state.cpuMoon}`;
     }
 
