@@ -131,18 +131,10 @@ p {
   padding-top: max(0.75rem, env(safe-area-inset-top));
 }
 
-.site-mark {
-  margin: 0;
-  color: var(--color-accent-bright);
-  font-family: var(--font-serif);
-  font-size: 0.8rem;
-  letter-spacing: 0.2em;
-}
-
 .site-navigation {
   width: 100%;
   max-width: var(--content-width);
-  margin: 0.35rem auto 0;
+  margin: 0 auto;
   text-align: left;
 }
 
