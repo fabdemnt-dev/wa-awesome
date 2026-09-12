@@ -113,6 +113,9 @@
     .end-actions { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
     .end-actions a { color: #ddd6ff; min-height: 44px; padding: 8px; }
     [hidden] { display: none !important; }
+    @media (min-width: 880px) {
+      .cards { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+    }
     @media (max-width: 620px) {
       .page { width: min(100% - 20px, 920px); padding-top: 6px; }
       .mobile-status {
@@ -135,8 +138,18 @@
       .score strong { font-size: 1.25rem; }
       .gauge { height: 10px; }
       .remaining { margin-top: 3px; font-size: .72rem; }
-      .cards { grid-template-columns: 1fr 1fr; gap: 8px; }
-      .card { min-height: 120px; padding: 9px; }
+      .cards {
+        grid-template-columns: none;
+        grid-auto-flow: column;
+        grid-auto-columns: minmax(168px, 52%);
+        gap: 8px;
+        overflow-x: auto;
+        overscroll-behavior-inline: contain;
+        scroll-snap-type: x mandatory;
+        scroll-padding-inline: 2px;
+        padding: 3px 2px 10px;
+      }
+      .card { min-height: 120px; padding: 9px; scroll-snap-align: start; }
       .card-effect { font-size: .77rem; }
       .duel, .hand-panel, .history-panel { padding: 10px; }
       .hand-panel, .history-panel { margin-top: 8px; }
@@ -151,7 +164,7 @@
       .decision { margin-top: 8px; }
       .history-panel summary { padding: 5px 2px; }
     }
-    @media (max-width: 355px) { .cards { grid-template-columns: 1fr; } }
+    @media (max-width: 355px) { .cards { grid-auto-columns: minmax(162px, 72%); } }
   </style>
 </head>
 <body>
@@ -315,8 +328,7 @@
       if (state.playerMoon <= 3) add('waning', 8);
       if (state.cpuMoon <= 3) { add('waxing', 5); add('stillness', 4); }
       if (state.cpuMoon < state.playerMoon) add('oath', 1 + state.round * .85);
-      const playerCards = state.history.map(item => item.playerActual);
-      const lastPlayer = playerCards[playerCards.length - 1];
+      const lastPlayer = state.history[0]?.playerActual;
       if (!state.playerUsed.has('waning') || lastPlayer === 'waning') add('stillness', 2.7);
       if (!state.playerUsed.has('waxing') || state.playerMoon >= state.cpuMoon) add('reflection', 1.8);
       add('falseMoon', 1.1);
@@ -332,7 +344,8 @@
       if (state.cpuMoon <= 5) add('waxing', 4);
       if (state.playerMoon <= 4) add('waning', 5);
       if (state.cpuMoon < state.playerMoon) add('oath', 4);
-      if (!state.playerUsed.has('waxing') || state.playerMoon >= state.cpuMoon) add('reflection', 2);
+      const playerUsedBeforeRound = new Set(state.history.map(item => item.playerActual));
+      if (!playerUsedBeforeRound.has('waxing') || state.playerMoon >= state.cpuMoon) add('reflection', 2);
       const best = Math.max(...scores.values());
       const pool = candidates.filter(id => scores.get(id) >= best - 1.2);
       return pool[Math.floor(Math.random() * pool.length)];
