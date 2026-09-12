@@ -36,6 +36,7 @@
     button:focus-visible, a:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
     .page { width: min(100% - 28px, 920px); margin: 0 auto; padding: 18px 0 48px; }
     .top-link { color: #d9d2ff; display: inline-block; min-height: 44px; padding: 8px 0; }
+    .mobile-status { display: none; }
     header { text-align: center; padding: 6px 0 14px; }
     h1 { color: var(--moon); font-size: clamp(1.8rem, 7vw, 2.6rem); letter-spacing: .08em; margin: 4px 0 0; }
     .subtitle { color: var(--muted); margin: 0 0 8px; }
@@ -89,6 +90,8 @@
     .copy-area { margin: 14px 0; padding: 14px; border: 1px solid #a99af4; border-radius: 12px; background: rgba(86,72,151,.24); }
     .copy-area h3 { margin: 0 0 9px; color: var(--moon); }
     .copy-choices { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+    .history-panel summary { color: var(--moon); font-size: 1.15rem; font-weight: 700; cursor: pointer; min-height: 44px; padding: 8px 2px; }
+    .history-panel[open] summary { margin-bottom: 8px; }
     .history-list { display: grid; gap: 8px; }
     .history-item { padding: 10px 12px; border-left: 3px solid #9587df; background: rgba(9,11,32,.65); border-radius: 7px; font-size: .9rem; }
     .history-item strong { color: var(--moon); }
@@ -111,12 +114,42 @@
     .end-actions a { color: #ddd6ff; min-height: 44px; padding: 8px; }
     [hidden] { display: none !important; }
     @media (max-width: 620px) {
-      .page { width: min(100% - 20px, 920px); padding-top: 10px; }
-      .status-grid { grid-template-columns: 1fr; gap: 8px; }
-      .fighter { padding: 12px; }
+      .page { width: min(100% - 20px, 920px); padding-top: 6px; }
+      .mobile-status {
+        position: sticky; top: 0; z-index: 20; display: flex; justify-content: center; align-items: center;
+        gap: 7px; min-height: 38px; margin: 0 -2px 6px; padding: 5px 8px; border: 1px solid #737caf;
+        border-radius: 10px; background: rgba(13, 16, 45, .96); box-shadow: 0 5px 14px rgba(0,0,0,.28);
+        color: #f4f1ff; font-size: .79rem; font-weight: 700; white-space: nowrap;
+      }
+      .mobile-status .divider { color: #7f88b8; }
+      .top-link { min-height: 38px; padding: 5px 0; }
+      header { padding: 0 0 8px; }
+      h1 { margin-top: 0; font-size: 1.75rem; }
+      .subtitle { margin-bottom: 4px; font-size: .9rem; }
+      .header-actions { margin-top: 7px; gap: 7px; }
+      .header-actions .soft-button { min-height: 42px; padding: 7px 12px; }
+      .status-grid { grid-template-columns: 1fr 1fr; gap: 7px; margin-bottom: 8px; }
+      .fighter { padding: 9px; }
+      .fighter h2 { font-size: .92rem; margin-bottom: 1px; }
+      .score { gap: 4px; margin-bottom: 3px; font-size: .8rem; }
+      .score strong { font-size: 1.25rem; }
+      .gauge { height: 10px; }
+      .remaining { margin-top: 3px; font-size: .72rem; }
       .cards { grid-template-columns: 1fr 1fr; gap: 8px; }
-      .card { min-height: 150px; padding: 10px; }
-      .duel, .hand-panel, .history-panel { padding: 13px; }
+      .card { min-height: 120px; padding: 9px; }
+      .card-effect { font-size: .77rem; }
+      .duel, .hand-panel, .history-panel { padding: 10px; }
+      .hand-panel, .history-panel { margin-top: 8px; }
+      .moon-mark { width: 40px; height: 40px; margin-bottom: 3px; }
+      .moon-mark::after { width: 31px; height: 31px; }
+      .scale { margin-bottom: 7px; font-size: .88rem; }
+      .played { gap: 7px; }
+      .played-card { min-height: 82px; padding: 8px 6px; }
+      .message { min-height: 2.6em; margin-top: 8px; padding: 7px 9px; font-size: .87rem; }
+      .section-title { margin-bottom: 6px; }
+      .instruction { margin: -2px 0 8px; font-size: .86rem; }
+      .decision { margin-top: 8px; }
+      .history-panel summary { padding: 5px 2px; }
     }
     @media (max-width: 355px) { .cards { grid-template-columns: 1fr; } }
   </style>
@@ -124,6 +157,11 @@
 <body>
   <main class="page">
     <a class="top-link" href="../toybox/">← 🎪 おもちゃ箱へ戻る</a>
+    <div id="mobileStatus" class="mobile-status" aria-label="現在の決闘状況">
+      <span id="mobileRound">第 1 / 6</span><span class="divider" aria-hidden="true">｜</span>
+      <span>あなた <span id="mobilePlayerMoon">10</span></span><span class="divider" aria-hidden="true">｜</span>
+      <span>対手 <span id="mobileCpuMoon">10</span></span>
+    </div>
     <header>
       <h1>月秤の決闘</h1>
       <p class="subtitle">月影を賭け、伏せ札の先を読む。</p>
@@ -170,10 +208,10 @@
       <div class="decision"><button id="confirmButton" class="primary-button" type="button" disabled>この札で決定</button></div>
     </section>
 
-    <section class="history-panel panel">
-      <h2 class="section-title">決闘の履歴</h2>
+    <details id="historyPanel" class="history-panel panel">
+      <summary id="historySummary">📜 決闘の記録（0）</summary>
       <div id="history" class="history-list"><p class="empty">まだ履歴はありません。</p></div>
-    </section>
+    </details>
 
     <section id="endScreen" class="end-screen panel" hidden>
       <h2 id="endTitle"></h2>
@@ -441,6 +479,8 @@
     function render() {
       el('round').textContent = `第 ${state.round} / ${MAX_ROUNDS} ラウンド`;
       el('playerMoon').textContent = state.playerMoon; el('cpuMoon').textContent = state.cpuMoon;
+      el('mobileRound').textContent = `第 ${state.round} / ${MAX_ROUNDS}`;
+      el('mobilePlayerMoon').textContent = state.playerMoon; el('mobileCpuMoon').textContent = state.cpuMoon;
       updateGauge('player', state.playerMoon); updateGauge('cpu', state.cpuMoon);
       el('playerRemaining').textContent = CARD_IDS.length - state.playerUsed.size;
       el('cpuRemaining').textContent = CARD_IDS.length - state.cpuUsed.size;
@@ -482,6 +522,7 @@
     }
     function renderMessages() { el('message').innerHTML = state.messages.map(message => `<p>${message}</p>`).join(''); }
     function renderHistory() {
+      el('historySummary').textContent = `📜 決闘の記録（${state.history.length}）`;
       el('history').innerHTML = state.history.length ? state.history.map(item => `<div class="history-item"><strong>第${item.round}ラウンド</strong><br>あなた：${item.playerLabel} ／ 対手：${item.cpuLabel}<br>終了後の月影　あなた ${item.playerMoon} ／ 対手 ${item.cpuMoon}</div>`).join('') : '<p class="empty">まだ履歴はありません。</p>';
     }
     function renderEnd() {
@@ -513,6 +554,7 @@
     });
     function resetGame() {
       if (revealTimer) { clearTimeout(revealTimer); revealTimer = null; }
+      el('historyPanel').removeAttribute('open');
       state = freshState(); state.cpuLocked = chooseCpuCard(); render();
     }
     el('resetButton').addEventListener('click', resetGame);
