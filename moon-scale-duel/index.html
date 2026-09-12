@@ -105,10 +105,10 @@
     }
     .card-art--reflection .art-moon::after { content: ""; position: absolute; width: 29px; height: 18px; left: 0; top: 39px; border-radius: 50%; transform: scaleY(-1); background: linear-gradient(#fff5c8,#9294ca); opacity: .52; filter: blur(.4px); }
     .card-art--reflection .art-detail { width: 82%; height: 1px; left: 9%; top: 39px; background: linear-gradient(90deg,transparent,#ccd6ff,transparent); box-shadow: 0 5px rgba(161,151,224,.32), 0 10px rgba(116,133,197,.2); }
-    .card-art--still .art-moon {
+    .card-art--stillness .art-moon {
       width: 43px; height: 43px; left: 50%; top: 9px; transform: translateX(-50%); border: 3px solid #c8d4f7; border-radius: 50%; background: radial-gradient(circle,#090c24 58%,#252857 62%); box-shadow: 0 0 12px rgba(184,203,246,.52), inset 0 0 8px #050716;
     }
-    .card-art--still .art-detail { width: 58px; height: 58px; left: 50%; top: 1px; transform: translateX(-50%); border: 1px solid rgba(160,178,230,.22); border-radius: 50%; }
+    .card-art--stillness .art-detail { width: 58px; height: 58px; left: 50%; top: 1px; transform: translateX(-50%); border: 1px solid rgba(160,178,230,.22); border-radius: 50%; }
     .card-art--falseMoon .art-moon {
       width: 33px; height: 33px; left: calc(50% - 17px); top: 10px; border-radius: 50%; background: linear-gradient(135deg,#efe9ff,#a89be5); box-shadow: 15px 9px 0 -5px rgba(190,205,255,.55), -13px 13px 0 -8px rgba(232,222,255,.45), 0 0 13px rgba(177,157,235,.52);
     }
@@ -192,7 +192,7 @@
       }
       .card { min-height: 120px; padding: 9px; scroll-snap-align: start; }
       .card-art { height: 56px; margin-bottom: 7px; }
-      .card-art--waxing .art-moon, .card-art--waning .art-moon, .card-art--still .art-moon { transform: translateX(-50%) scale(.84); transform-origin: top center; }
+      .card-art--waxing .art-moon, .card-art--waning .art-moon, .card-art--stillness .art-moon { transform: translateX(-50%) scale(.84); transform-origin: top center; }
       .card-art--reflection .art-moon { transform: translateX(-50%) scale(.86); transform-origin: top center; }
       .card-art--oath .art-moon { transform: translateX(-50%) scale(.82); transform-origin: top center; }
       .card-effect { font-size: .77rem; }
