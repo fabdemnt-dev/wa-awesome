@@ -70,6 +70,9 @@
     .played-card.reveal { animation: reveal .45s ease; }
     .played-card strong { color: var(--moon); display: block; font-size: 1.05rem; }
     .played-label { color: var(--muted); font-size: .78rem; display: block; }
+    .played-art { display: block; width: 100%; height: 48px; margin: 6px 0; overflow: hidden; border-radius: 7px; background: #11162f; }
+    .played-art img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: 50% 50%; }
+    .played-art--oath img { object-position: 50% 35%; }
     @keyframes reveal { from { opacity: .25; transform: rotateY(75deg); } to { opacity: 1; transform: rotateY(0); } }
     @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
     .message { min-height: 3.2em; margin: 15px auto 0; max-width: 660px; text-align: left; background: rgba(6,8,27,.55); border-radius: 10px; padding: 10px 12px; }
@@ -387,6 +390,13 @@
       return displayCard(actual, copy);
     }
 
+    // 中央の公開札に対応する本イラスト
+    function publicCardArt(side) {
+      const actual = side === 'player' ? state.publicPlayerCard : state.publicCpuCard;
+      if (!actual) return '';
+      return `<span class="played-art played-art--${actual}" aria-hidden="true"><img src="${CARDS[actual].image}" alt=""></span>`;
+    }
+
     // ラウンド公開と、偽りの月の事前判定
     function revealRound() {
       state.phase = 'revealing';
@@ -558,8 +568,8 @@
         cpu.innerHTML = '<span class="played-label">対手の札</span><span>伏せ札</span>';
       } else {
         player.className = 'played-card reveal'; cpu.className = 'played-card reveal';
-        player.innerHTML = `<span class="played-label">あなたの札</span><strong>${displayPublicCard('player')}</strong>`;
-        cpu.innerHTML = `<span class="played-label">対手の札</span><strong>${displayPublicCard('cpu')}</strong>`;
+        player.innerHTML = `<span class="played-label">あなたの札</span>${publicCardArt('player')}<strong>${displayPublicCard('player')}</strong>`;
+        cpu.innerHTML = `<span class="played-label">対手の札</span>${publicCardArt('cpu')}<strong>${displayPublicCard('cpu')}</strong>`;
       }
     }
     function renderHand() {
