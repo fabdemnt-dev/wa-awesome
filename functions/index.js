@@ -1453,3 +1453,9 @@ exports.shadowCardSweepTimeouts = shadowCardOnline.sweepTimeouts;
 exports.shadowCardCleanupRooms = shadowCardOnline.cleanupRooms;
 exports.shadowCardCleanupAnonymousData = shadowCardOnline.cleanupAnonymousData;
 if (shadowCardOnline.testSweepTimeouts) exports.shadowCardTestSweepTimeouts = shadowCardOnline.testSweepTimeouts;
+
+const moonScaleDuelOnline = require('./moon-scale-duel-online');
+exports.moonScaleDuelCreateRoom = moonScaleDuelOnline.createRoom;
+exports.moonScaleDuelJoinRoom = moonScaleDuelOnline.joinRoom;
+exports.moonScaleDuelGetSnapshot = moonScaleDuelOnline.getSnapshot;
+exports.moonScaleDuelStartGame = moonScaleDuelOnline.startGame;

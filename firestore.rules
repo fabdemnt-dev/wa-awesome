@@ -36,6 +36,19 @@ service cloud.firestore {
     match /shadowCardRateLimits/{docId} { allow read, write: if false; }
     match /shadowCardActionRequests/{docId} { allow read, write: if false; }
 
+    // 月秤の決闘オンライン版は、初版からすべてのゲーム状態を
+    // Callable Functions経由で取得・変更する。Admin SDKだけがアクセスする。
+    match /moonScaleDuelRooms/{roomId} {
+      allow read, write: if false;
+    }
+    match /moonScaleDuelRooms/{roomId}/{document=**} {
+      allow read, write: if false;
+    }
+    match /moonScaleDuelRoomLocators/{docId} { allow read, write: if false; }
+    match /moonScaleDuelRoomSecrets/{docId} { allow read, write: if false; }
+    match /moonScaleDuelRateLimits/{docId} { allow read, write: if false; }
+    match /moonScaleDuelActionRequests/{docId} { allow read, write: if false; }
+
     // ============================================================
     // 1) 訪問カウンタ counter/visits
     // ============================================================

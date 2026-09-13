@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="月秤の決闘 オンライン2人対戦">
+  <title>月秤の決闘｜オンライン対戦</title>
+  <link rel="stylesheet" href="moon-scale-duel-online.css">
+</head>
+<body>
+  <main class="online-shell">
+    <a class="top-link" href="toybox/">← 🎪 おもちゃ箱へ戻る</a>
+    <header>
+      <p class="eyebrow">ONLINE MATCH</p>
+      <h1>月秤の決闘</h1>
+      <p>月影を賭ける、2人だけのオンライン決闘。</p>
+    </header>
+
+    <p id="status" class="status" aria-live="polite">匿名ログイン中…</p>
+
+    <section id="entry" class="panel" hidden>
+      <h2>オンライン対戦</h2>
+      <label>表示名<input id="display-name" maxlength="20" autocomplete="nickname" value="旅人"></label>
+      <button id="create-room" class="primary-button" type="button">部屋を作る</button>
+      <div class="divider" aria-hidden="true"><span>または</span></div>
+      <label>招待コード<input id="invite-code" maxlength="26" autocomplete="off" placeholder="MSD1-……-……"></label>
+      <button id="join-room" type="button">部屋に参加する</button>
+      <p class="stage-note">第1段階では、部屋作成・参加・決闘開始まで確認できます。</p>
+      <a href="moon-scale-duel/">ひとり用へ戻る</a>
+    </section>
+
+    <section id="lobby" class="panel" hidden>
+      <h2>待機室</h2>
+      <div class="invite-box">
+        <span>招待コード</span>
+        <strong id="shown-code">参加済み</strong>
+        <button id="copy-code" class="small-button" type="button">コピー</button>
+      </div>
+      <ul id="members" class="seat-list"></ul>
+      <p id="lobby-note" class="stage-note"></p>
+      <button id="start-match" class="primary-button" type="button" hidden>決闘を始める</button>
+    </section>
+
+    <section id="started" class="panel" hidden>
+      <p class="eyebrow">DUEL READY</p>
+      <h2>決闘を開始しました</h2>
+      <div class="duelists" aria-label="参加プレイヤー">
+        <div><span>あなた</span><strong id="started-you"></strong><b>月影 10</b></div>
+        <div><span>対手</span><strong id="started-opponent"></strong><b>月影 10</b></div>
+      </div>
+      <p id="started-state" class="round-state"></p>
+      <p class="stage-note">第1ラウンドの札選択は第2段階で実装します。</p>
+    </section>
+  </main>
+  <script type="module" src="moon-scale-duel-online-main.js"></script>
+</body>
+</html>
