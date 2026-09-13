@@ -4,17 +4,19 @@ import { initializeApp, deleteApp } from 'firebase/app';
 import { getAuth, connectAuthEmulator, signInAnonymously } from 'firebase/auth';
 import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'firebase/functions';
 import { getFirestore, connectFirestoreEmulator, doc, getDoc, terminate } from 'firebase/firestore';
-import { getDatabase, connectDatabaseEmulator, ref, set, get, goOffline } from 'firebase/database';
+import { getDatabase, connectDatabaseEmulator, goOffline } from 'firebase/database';
 import { createRequire } from 'node:module';
 
 const functionRequire = createRequire(new URL('../functions/package.json', import.meta.url));
 const { initializeApp: initializeAdminApp, getApps: getAdminApps, deleteApp: deleteAdminApp } = functionRequire('firebase-admin/app');
 const { getFirestore: getAdminFirestore, Timestamp } = functionRequire('firebase-admin/firestore');
+const { getDatabase: getAdminDatabase } = functionRequire('firebase-admin/database');
 let ownedAdminApp = null;
-if (!getAdminApps().length) ownedAdminApp = initializeAdminApp({ projectId: 'demo-moon-scale-duel', databaseURL: 'http://127.0.0.1:9000?ns=demo-moon-scale-duel-default-rtdb' });
+if (!getAdminApps().length) ownedAdminApp = initializeAdminApp({ projectId: 'demo-moon-scale-duel', databaseURL: 'http://127.0.0.1:9000?ns=demo-moon-scale-duel' });
 const adminDb = getAdminFirestore();
+const adminRtdb = getAdminDatabase();
 const clients = [];
-const config = { projectId: 'demo-moon-scale-duel', apiKey: 'demo', appId: 'demo', databaseURL: 'http://127.0.0.1:9000?ns=demo-moon-scale-duel-default-rtdb' };
+const config = { projectId: 'demo-moon-scale-duel', apiKey: 'demo', appId: 'demo', databaseURL: 'http://127.0.0.1:9000?ns=demo-moon-scale-duel' };
 
 function client(name) {
   const app = initializeApp(config, name);
@@ -68,6 +70,7 @@ test('stage one enforces two seats, secrets, idempotency, start guards, and shar
   assert.equal(JSON.stringify(secretDoc.data()).includes(secretPart), false);
   assert.equal(JSON.stringify(actionDoc.data()).includes(created.inviteCode), false);
   assert.equal((await adminDb.doc(`moonScaleDuelRoomLocators/${locator}`).get()).data().roomId, created.roomId);
+  assert.equal((await adminRtdb.ref(`moonScaleDuelRoomAccess/${created.roomId}/${host.auth.currentUser.uid}`).get()).val(), true);
 
   await denied(host.call('moonScaleDuelStartGame', { roomId: created.roomId, stateVersion: 1, requestId: 'start-too-early' }), 'functions/failed-precondition');
   const selfJoin = await host.call('moonScaleDuelJoinRoom', { displayName: '月詠', inviteCode: created.inviteCode, requestId: 'self-join' });
@@ -78,6 +81,7 @@ test('stage one enforces two seats, secrets, idempotency, start guards, and shar
   const joined = await guest.call('moonScaleDuelJoinRoom', joinPayload);
   assert.equal(joined.seatId, 'seat2');
   assert.deepEqual(await guest.call('moonScaleDuelJoinRoom', joinPayload), joined);
+  assert.equal((await adminRtdb.ref(`moonScaleDuelRoomAccess/${created.roomId}/${guest.auth.currentUser.uid}`).get()).val(), true);
   await denied(third.call('moonScaleDuelJoinRoom', { displayName: '三人目', inviteCode: created.inviteCode, requestId: 'third-join' }), 'functions/resource-exhausted');
 
   const before = await host.call('moonScaleDuelGetSnapshot', { roomId: created.roomId });
@@ -111,9 +115,6 @@ test('stage one enforces two seats, secrets, idempotency, start guards, and shar
   await denied(getDoc(doc(host.fs, `moonScaleDuelRooms/${created.roomId}`)), 'permission-denied');
   await denied(getDoc(doc(host.fs, `moonScaleDuelRooms/${created.roomId}/privatePlayers/${guest.auth.currentUser.uid}`)), 'permission-denied');
   await denied(getDoc(doc(host.fs, `moonScaleDuelRooms/${created.roomId}/serverGames/${started.gameId}`)), 'permission-denied');
-  await denied(set(ref(host.rt, `moonScaleDuelPresence/${created.roomId}/${guest.auth.currentUser.uid}`), { state: 'online', lastChanged: Date.now() }));
-  await set(ref(host.rt, `moonScaleDuelPresence/${created.roomId}/${host.auth.currentUser.uid}`), { state: 'online', lastChanged: Date.now() });
-  assert.equal((await get(ref(guest.rt, `moonScaleDuelPresence/${created.roomId}/${host.auth.currentUser.uid}`))).val().state, 'online');
 });
 
 test('expired waiting room rejects a new participant', { timeout: 30000 }, async () => {
