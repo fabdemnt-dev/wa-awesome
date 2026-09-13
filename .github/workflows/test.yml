@@ -32,3 +32,19 @@ jobs:
           npm install --prefix functions-ai-room
       - name: Run Functions emulator tests
         run: npm run test:functions
+      - name: Run Moon Scale Duel rules tests
+        run: npm run test:moon-scale-duel:rules
+      - name: Create Moon Scale Duel emulator secrets
+        env:
+          LOCAL_MOON_INVITE_KEY: local-test-only-moon-invite-key
+          LOCAL_MOON_IP_KEY: local-test-only-moon-ip-key
+        run: |
+          umask 077
+          printf 'MOON_SCALE_DUEL_INVITE_HMAC_KEY=%s\nMOON_SCALE_DUEL_IP_HMAC_KEY=%s\n' "$LOCAL_MOON_INVITE_KEY" "$LOCAL_MOON_IP_KEY" > functions/.secret.local
+      - name: Run Moon Scale Duel integration tests
+        run: npm run test:moon-scale-duel:integration
+      - name: Remove Moon Scale Duel emulator secrets
+        if: ${{ always() }}
+        run: |
+          rm -f functions/.secret.local
+          test ! -e functions/.secret.local

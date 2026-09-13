@@ -27,6 +27,32 @@
           }
         }
       }
+    },
+    "moonScaleDuelRoomAccess": {
+      "$roomId": {
+        "$uid": {
+          ".read": "auth != null && $uid === auth.uid && data.val() === true",
+          ".write": false
+        }
+      }
+    },
+    "moonScaleDuelPresence": {
+      "$roomId": {
+        "$uid": {
+          ".read": "auth != null && root.child('moonScaleDuelRoomAccess').child($roomId).child(auth.uid).val() === true",
+          ".write": "auth != null && newData.exists() && $uid === auth.uid && root.child('moonScaleDuelRoomAccess').child($roomId).child(auth.uid).val() === true",
+          ".validate": "newData.hasChildren(['state', 'lastChanged'])",
+          "state": {
+            ".validate": "newData.isString() && (newData.val() === 'online' || newData.val() === 'offline')"
+          },
+          "lastChanged": {
+            ".validate": "newData.isNumber()"
+          },
+          "$other": {
+            ".validate": false
+          }
+        }
+      }
     }
   }
 }

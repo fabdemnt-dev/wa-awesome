@@ -1,0 +1,67 @@
+:root {
+  color-scheme: dark;
+  --night: #080b20;
+  --panel: rgba(22, 25, 59, .92);
+  --silver: #dfe5ff;
+  --muted: #aeb7da;
+  --moon: #fff2b8;
+  --violet: #a99af4;
+  --line: #707ab1;
+  --focus: #fff0a4;
+}
+* { box-sizing: border-box; }
+html { background: var(--night); }
+body {
+  margin: 0;
+  min-width: 0;
+  min-height: 100vh;
+  color: var(--silver);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.6;
+  background:
+    radial-gradient(circle at 18% 8%, rgba(126, 107, 219, .23), transparent 27rem),
+    radial-gradient(circle at 85% 28%, rgba(235, 226, 177, .1), transparent 22rem),
+    linear-gradient(160deg, #080b20, #111333 58%, #090b22);
+}
+button, input, a { font: inherit; }
+button { touch-action: manipulation; }
+button:focus-visible, input:focus-visible, a:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+.online-shell { width: min(100% - 24px, 640px); margin: 0 auto; padding: 10px 0 48px; }
+.top-link { display: inline-flex; align-items: center; min-height: 44px; color: #d9d2ff; }
+header { text-align: center; padding: 12px 0 16px; border-bottom: 1px solid rgba(255, 226, 151, .42); }
+.eyebrow { margin: 0; color: var(--violet); font-size: .78rem; font-weight: 800; letter-spacing: .18em; }
+h1 { margin: 2px 0; color: var(--moon); font-size: clamp(1.8rem, 8vw, 2.6rem); letter-spacing: .08em; }
+header p:last-child { margin: 0; color: var(--muted); }
+.status { min-height: 44px; margin: 12px 0; padding: 9px 12px; border: 1px solid rgba(112, 122, 177, .7); border-radius: 10px; background: rgba(8, 11, 32, .72); text-align: center; }
+.panel { padding: 20px; border: 1px solid rgba(142, 151, 205, .55); border-radius: 18px; background: var(--panel); box-shadow: 0 12px 32px rgba(0,0,0,.25); }
+.panel h2 { margin: 0 0 14px; color: var(--moon); text-align: center; }
+label { display: grid; gap: 6px; margin: 12px 0; color: var(--muted); font-weight: 700; }
+input { width: 100%; min-height: 48px; padding: 10px 12px; color: #fff; border: 1px solid var(--line); border-radius: 10px; background: #10142f; }
+button { width: 100%; min-height: 48px; padding: 9px 14px; color: #fff; border: 1px solid var(--line); border-radius: 10px; background: #292f65; cursor: pointer; }
+button:hover { background: #343b78; }
+button:disabled { opacity: .45; cursor: not-allowed; }
+.primary-button { border-color: #b8adf3; background: linear-gradient(135deg, #6554bb, #8274ce); font-weight: 800; }
+.divider { display: flex; align-items: center; gap: 10px; margin: 16px 0 6px; color: var(--muted); font-size: .8rem; }
+.divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: rgba(112, 122, 177, .55); }
+.stage-note { color: var(--muted); text-align: center; }
+.panel > a { display: inline-flex; align-items: center; min-height: 44px; margin-top: 8px; color: #d9d2ff; }
+.invite-box { display: grid; grid-template-columns: 1fr auto; gap: 5px 10px; padding: 12px; border: 1px solid rgba(169, 154, 244, .55); border-radius: 12px; background: rgba(86, 72, 151, .2); }
+.invite-box span { grid-column: 1 / -1; color: var(--muted); font-size: .8rem; }
+.invite-box strong { align-self: center; color: var(--moon); overflow-wrap: anywhere; letter-spacing: .06em; }
+.invite-box .small-button { width: auto; min-height: 44px; }
+.seat-list { display: grid; gap: 10px; padding: 0; list-style: none; }
+.seat-list li { display: grid; grid-template-columns: 74px 1fr; gap: 10px; padding: 12px; border: 1px solid rgba(112, 122, 177, .55); border-radius: 12px; background: rgba(8, 11, 32, .55); }
+.seat-list strong { color: var(--moon); }
+.duelists { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.duelists div { display: grid; gap: 4px; min-width: 0; padding: 13px 8px; text-align: center; border: 1px solid rgba(112, 122, 177, .65); border-radius: 12px; background: linear-gradient(145deg, #252b60, #10132f); }
+.duelists span { color: var(--muted); font-size: .78rem; }
+.duelists strong { overflow-wrap: anywhere; color: var(--moon); }
+.duelists b { font-size: .82rem; font-weight: 600; }
+.round-state { margin: 16px 0 4px; color: var(--moon); text-align: center; font-weight: 800; }
+[hidden] { display: none !important; }
+@media (max-width: 390px) {
+  .online-shell { width: min(100% - 20px, 640px); padding-top: 4px; }
+  header { padding-top: 6px; }
+  .panel { padding: 15px; }
+  .status { margin: 8px 0; }
+}
