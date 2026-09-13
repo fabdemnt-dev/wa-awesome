@@ -50,6 +50,8 @@
     .position-comparison .position-up img { object-position: 50% 35%; }
     .position-comparison .position-center img { object-position: 50% 50%; }
     .position-comparison .position-down img { object-position: 50% 65%; }
+    .final-candidate .card-art { height: 88px; }
+    .final-candidate .card[data-card="oath"] .card-art img { object-position: 50% 35%; }
     .position-group + .position-group { margin-top: 18px; }
     .position-group h3 { margin: 0 0 8px; color: var(--moon); font-size: 1rem; }
     .cards.position-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -102,6 +104,7 @@
     </header>
     <div id="variants"></div>
     <div id="positionComparison"></div>
+    <div id="finalCandidate"></div>
   </main>
   <script>
     const CARDS = [
@@ -163,6 +166,23 @@
               <div class="decision"><button class="primary-button" type="button">この札で決定</button></div>
               <p class="selection-status" aria-live="polite">選択中：${CARDS.find(item => item.id === selected).name}</p>
             </div>`).join('')}
+        </section>`;
+
+      document.getElementById('finalCandidate').innerHTML = `
+        <section class="variant final-candidate" aria-labelledby="final-candidate-title">
+          <h2 id="final-candidate-title">本番最終候補</h2>
+          <p class="variant-note">スマホ手札候補：高さ88px。新月の誓いだけ上側を多く表示し、他の5枚は中央表示です。</p>
+          <div class="cards" aria-label="本番最終候補の月札">
+            ${CARDS.map(card => `
+              <button class="card${card.used ? ' used' : ''}${selected === card.id ? ' selected' : ''}" type="button" data-card="${card.id}" ${card.used ? 'disabled' : ''} aria-pressed="${selected === card.id}">
+                <span class="card-art"><img src="${card.image}" alt="${card.name}のイラスト"></span>
+                <span class="card-name">${card.name}</span>
+                <span class="card-type">${card.type}</span>
+                <span class="card-effect">${card.effect}</span>
+              </button>`).join('')}
+          </div>
+          <div class="decision"><button class="primary-button" type="button">この札で決定</button></div>
+          <p class="selection-status" aria-live="polite">選択中：${CARDS.find(card => card.id === selected).name}</p>
         </section>`;
     }
 
