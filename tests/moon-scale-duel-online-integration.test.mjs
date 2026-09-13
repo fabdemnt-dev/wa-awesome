@@ -11,10 +11,10 @@ const functionRequire = createRequire(new URL('../functions/package.json', impor
 const { initializeApp: initializeAdminApp, getApps: getAdminApps, deleteApp: deleteAdminApp } = functionRequire('firebase-admin/app');
 const { getFirestore: getAdminFirestore, Timestamp } = functionRequire('firebase-admin/firestore');
 let ownedAdminApp = null;
-if (!getAdminApps().length) ownedAdminApp = initializeAdminApp({ projectId: 'demo-moon-scale-duel', databaseURL: 'http://127.0.0.1:9000?ns=demo-moon-scale-duel' });
+if (!getAdminApps().length) ownedAdminApp = initializeAdminApp({ projectId: 'demo-moon-scale-duel', databaseURL: 'http://127.0.0.1:9000?ns=demo-moon-scale-duel-default-rtdb' });
 const adminDb = getAdminFirestore();
 const clients = [];
-const config = { projectId: 'demo-moon-scale-duel', apiKey: 'demo', appId: 'demo', databaseURL: 'http://127.0.0.1:9000?ns=demo-moon-scale-duel' };
+const config = { projectId: 'demo-moon-scale-duel', apiKey: 'demo', appId: 'demo', databaseURL: 'http://127.0.0.1:9000?ns=demo-moon-scale-duel-default-rtdb' };
 
 function client(name) {
   const app = initializeApp(config, name);
