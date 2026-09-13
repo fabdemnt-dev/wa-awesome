@@ -20,8 +20,8 @@
     .variant h2 { color:var(--moon); margin:0; text-align:left; font-size:1.2rem; }
     .condition { color:var(--muted); margin:0 0 12px; text-align:left; }
     .scene { position:relative; width:100%; overflow:hidden; border-radius:11px; border:1px solid rgba(142,151,205,.5); margin-bottom:12px; }
-    .variant-a .scene { height:64px; }
-    .variant-b .scene { height:84px; }
+    .variant-a .scene,.variant-c .scene { height:64px; }
+    .variant-b .scene,.variant-d .scene { height:84px; }
     .scene-bg { display:block; width:100%; height:100%; object-fit:cover; object-position:50% 50%; }
     .scene::before,.scene::after { content:"✦"; position:absolute; z-index:2; color:rgba(255,242,184,.72); text-shadow:0 0 8px rgba(255,242,184,.65); }
     .scene::before { top:7px; left:8%; font-size:1.3rem; }
@@ -29,6 +29,8 @@
     .moon-mark { position:absolute; z-index:2; width:58px; height:58px; top:-5px; left:50%; transform:translateX(-50%); border-radius:50%; background:var(--moon); box-shadow:0 0 24px rgba(255,242,184,.48); }
     .moon-mark::after { content:""; position:absolute; width:45px; height:45px; border-radius:50%; background:#171a3d; left:-5px; top:-4px; }
     .scale { position:absolute; z-index:3; left:0; right:0; bottom:0; color:#e4e0ff; letter-spacing:.1em; font-size:.88rem; text-shadow:0 1px 5px #080b20; }
+    .no-decoration .scene::before,.no-decoration .scene::after { content:none; }
+    .no-decoration .moon-mark,.no-decoration .scale { display:none; }
     .played { display:grid; grid-template-columns:1fr 1fr; gap:12px; max-width:570px; margin:0 auto; }
     .played-card { min-width:0; min-height:118px; padding:13px 9px; border:1px solid #7079ad; border-radius:12px; background:linear-gradient(145deg,#252b60,#10132f); display:grid; place-content:center; }
     .played-label { color:var(--muted); font-size:.78rem; display:block; }
@@ -57,7 +59,7 @@
   <main class="page">
     <header>
       <h1>中央上部・共通背景比較</h1>
-      <p>同じ背景画像を、64pxと84pxだけで比較する独立試作です。</p>
+      <p>同じ背景画像で、高さと既存装飾の有無を比較する独立試作です。</p>
     </header>
     <div class="comparison">
       <section class="variant variant-a" aria-labelledby="titleA">
@@ -74,10 +76,38 @@
         <div class="message"><p>対手の「静止の月」により、あなたの「返照の月」は沈黙した。</p><p>このラウンドでは月影は変わらなかった。</p></div>
         <button class="round-next" type="button">次のラウンドへ</button>
       </section>
+      <section class="variant variant-c no-decoration" aria-labelledby="titleC">
+        <h2 id="titleC">C：高さ64px・既存装飾なし</h2>
+        <p class="condition">object-fit: cover ／ object-position: 50% 50%</p>
+        <div class="scene" aria-label="高さ64px・既存装飾なしの中央上部背景">
+          <img class="scene-bg" src="duel-scene-background.jpg" alt="暗い月夜の雲と左右の淡い光">
+          <div class="moon-mark" aria-hidden="true"></div><div class="scale" aria-hidden="true">◯ ── ⚖ ── ◯</div>
+        </div>
+        <div class="played">
+          <div class="played-card"><span class="played-label">あなたの札</span><span class="played-art" aria-hidden="true"><img src="../../moon-scale-duel/assets/images/cards/moon-reflection.webp" alt=""></span><strong>返照の月</strong></div>
+          <div class="played-card"><span class="played-label">対手の札</span><span class="played-art" aria-hidden="true"><img src="../../moon-scale-duel/assets/images/cards/moon-still.webp" alt=""></span><strong>静止の月</strong></div>
+        </div>
+        <div class="message"><p>対手の「静止の月」により、あなたの「返照の月」は沈黙した。</p><p>このラウンドでは月影は変わらなかった。</p></div>
+        <button class="round-next" type="button">次のラウンドへ</button>
+      </section>
       <section class="variant variant-b" aria-labelledby="titleB">
         <h2 id="titleB">B：高さ84px</h2>
         <p class="condition">object-fit: cover ／ object-position: 50% 50%</p>
         <div class="scene" aria-label="高さ84pxの中央上部背景">
+          <img class="scene-bg" src="duel-scene-background.jpg" alt="暗い月夜の雲と左右の淡い光">
+          <div class="moon-mark" aria-hidden="true"></div><div class="scale" aria-hidden="true">◯ ── ⚖ ── ◯</div>
+        </div>
+        <div class="played">
+          <div class="played-card"><span class="played-label">あなたの札</span><span class="played-art" aria-hidden="true"><img src="../../moon-scale-duel/assets/images/cards/moon-reflection.webp" alt=""></span><strong>返照の月</strong></div>
+          <div class="played-card"><span class="played-label">対手の札</span><span class="played-art" aria-hidden="true"><img src="../../moon-scale-duel/assets/images/cards/moon-still.webp" alt=""></span><strong>静止の月</strong></div>
+        </div>
+        <div class="message"><p>対手の「静止の月」により、あなたの「返照の月」は沈黙した。</p><p>このラウンドでは月影は変わらなかった。</p></div>
+        <button class="round-next" type="button">次のラウンドへ</button>
+      </section>
+      <section class="variant variant-d no-decoration" aria-labelledby="titleD">
+        <h2 id="titleD">D：高さ84px・既存装飾なし</h2>
+        <p class="condition">object-fit: cover ／ object-position: 50% 50%</p>
+        <div class="scene" aria-label="高さ84px・既存装飾なしの中央上部背景">
           <img class="scene-bg" src="duel-scene-background.jpg" alt="暗い月夜の雲と左右の淡い光">
           <div class="moon-mark" aria-hidden="true"></div><div class="scale" aria-hidden="true">◯ ── ⚖ ── ◯</div>
         </div>
