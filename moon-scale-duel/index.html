@@ -120,6 +120,8 @@
     .end-screen { text-align: center; padding: 22px; margin-top: 14px; }
     .end-screen h2 { color: var(--moon); font-size: 1.7rem; margin: 0 0 5px; }
     .end-reason { margin: 4px 0; }
+    .result-art { display: block; width: 100%; height: 90px; margin: 12px 0; overflow: hidden; border-radius: 10px; background: #11162f; }
+    .result-art img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: 50% 48%; }
     .end-actions { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
     .end-actions a { color: #ddd6ff; min-height: 44px; padding: 8px; }
     [hidden] { display: none !important; }
@@ -209,7 +211,7 @@
     </section>
 
     <section class="duel panel" aria-live="polite">
-      <div class="duel-scene" aria-hidden="true"><img src="assets/images/duel/duel-scene-background.jpg" alt=""></div>
+      <div class="duel-scene" aria-hidden="true"><img src="assets/images/duel/duel-scene-background.webp" alt=""></div>
       <div class="played">
         <div id="playerPlayed" class="played-card"><span class="played-label">あなたの札</span><span>未決定</span></div>
         <div id="cpuPlayed" class="played-card facedown"><span class="played-label">対手の札</span><span>伏せられている</span></div>
@@ -237,6 +239,7 @@
     <section id="endScreen" class="end-screen panel" hidden>
       <h2 id="endTitle"></h2>
       <p id="endReason" class="end-reason"></p>
+      <span class="result-art"><img id="endImage" alt=""></span>
       <p id="endScore"></p>
       <div class="end-actions">
         <button id="rematchButton" class="primary-button" type="button">もう一度決闘する</button>
@@ -316,6 +319,11 @@
     });
     const CARD_IDS = Object.keys(CARDS);
     const COPYABLE = ['waxing', 'waning', 'reflection', 'oath'];
+    const RESULT_IMAGES = Object.freeze({
+      win: { src: 'assets/images/results/result-victory.webp', alt: '雲が左右へ開き、中央の大きな月から月光が広がる夜空' },
+      lose: { src: 'assets/images/results/result-defeat.webp', alt: '丸い月が雲に部分的に覆われ、月光が静かに退く夜空' },
+      draw: { src: 'assets/images/results/result-draw.webp', alt: '小さな月と左右に均衡した雲、水平の銀色の光が広がる夜空' }
+    });
 
     // ゲーム状態
     let state;
@@ -591,8 +599,14 @@
     }
     function renderEnd() {
       const ended = state.phase === 'ended'; el('endScreen').hidden = !ended;
-      if (!ended) return;
+      if (!ended) {
+        el('endImage').removeAttribute('src');
+        el('endImage').alt = '';
+        return;
+      }
       el('endTitle').textContent = state.outcome === 'win' ? '勝利' : state.outcome === 'lose' ? '敗北' : '引き分け';
+      el('endImage').src = RESULT_IMAGES[state.outcome].src;
+      el('endImage').alt = RESULT_IMAGES[state.outcome].alt;
       if (state.playerMoon === 0 && state.cpuMoon === 0) {
         el('endReason').textContent = '双方の月影が尽きました。決闘は引き分けです。';
       } else if (state.cpuMoon === 0) {
