@@ -59,11 +59,8 @@
     .gauge-fill { height: 100%; width: 66.666%; background: linear-gradient(90deg, #8878d5, #fff0a9); transition: width .35s ease; }
     .remaining { color: var(--muted); font-size: .86rem; margin-top: 7px; }
     .duel { padding: 18px; text-align: center; overflow: hidden; position: relative; }
-    .duel::before, .duel::after { content: "✦"; position: absolute; color: rgba(255,242,184,.35); font-size: 1.4rem; }
-    .duel::before { top: 10px; left: 8%; } .duel::after { top: 38px; right: 9%; font-size: .9rem; }
-    .moon-mark { width: 58px; height: 58px; border-radius: 50%; margin: 0 auto 7px; background: var(--moon); box-shadow: 0 0 28px rgba(255,242,184,.38); position: relative; }
-    .moon-mark::after { content: ""; position: absolute; width: 45px; height: 45px; border-radius: 50%; background: #171a3d; left: -5px; top: -4px; }
-    .scale { color: #d7d2f6; letter-spacing: .1em; margin-bottom: 12px; }
+    .duel-scene { width: 100%; height: 84px; margin-bottom: 12px; overflow: hidden; border: 1px solid rgba(142,151,205,.5); border-radius: 11px; background: #11162f; }
+    .duel-scene img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: 50% 50%; }
     .played { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; max-width: 570px; margin: 0 auto; }
     .played-card { min-height: 118px; padding: 13px 9px; border: 1px solid #7079ad; border-radius: 12px; background: linear-gradient(145deg, #252b60, #10132f); display: grid; place-content: center; }
     .played-card.facedown { color: #c7ccec; background: repeating-linear-gradient(135deg,#171b43,#171b43 8px,#202657 8px,#202657 16px); }
@@ -167,9 +164,6 @@
       .card-effect { font-size: .77rem; }
       .duel, .hand-panel, .history-panel { padding: 10px; }
       .hand-panel, .history-panel { margin-top: 8px; }
-      .moon-mark { width: 40px; height: 40px; margin-bottom: 3px; }
-      .moon-mark::after { width: 31px; height: 31px; }
-      .scale { margin-bottom: 7px; font-size: .88rem; }
       .played { gap: 7px; }
       .played-card { min-height: 82px; padding: 8px 6px; }
       .message { min-height: 2.6em; margin-top: 8px; padding: 7px 9px; font-size: .87rem; }
@@ -215,8 +209,7 @@
     </section>
 
     <section class="duel panel" aria-live="polite">
-      <div class="moon-mark" aria-hidden="true"></div>
-      <div class="scale" aria-hidden="true">◯ ── ⚖ ── ◯</div>
+      <div class="duel-scene" aria-hidden="true"><img src="assets/images/duel/duel-scene-background.jpg" alt=""></div>
       <div class="played">
         <div id="playerPlayed" class="played-card"><span class="played-label">あなたの札</span><span>未決定</span></div>
         <div id="cpuPlayed" class="played-card facedown"><span class="played-label">対手の札</span><span>伏せられている</span></div>
