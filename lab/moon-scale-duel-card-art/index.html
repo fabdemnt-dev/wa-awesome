@@ -46,6 +46,14 @@
     .variant-a .card-art { height: 56px; }
     .variant-b .card-art { height: 88px; }
     .variant-c .card-art { aspect-ratio: 3 / 2; }
+    .position-comparison .card-art { height: 88px; }
+    .position-comparison .position-up img { object-position: 50% 35%; }
+    .position-comparison .position-center img { object-position: 50% 50%; }
+    .position-comparison .position-down img { object-position: 50% 65%; }
+    .position-group + .position-group { margin-top: 18px; }
+    .position-group h3 { margin: 0 0 8px; color: var(--moon); font-size: 1rem; }
+    .cards.position-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .position-label { display: block; margin-bottom: 6px; color: #c7bdf7; font-size: .78rem; font-weight: 700; }
     .card-name { color: var(--moon); font-weight: 800; display: block; }
     .card-type { color: #c7bdf7; font-size: .75rem; display: block; margin: 2px 0 5px; }
     .card-effect { font-size: .82rem; display: block; line-height: 1.45; }
@@ -80,6 +88,7 @@
       .card-art { margin-bottom: 7px; }
       .card-effect { font-size: .77rem; }
       .decision { margin-top: 8px; }
+      .cards.position-cards { grid-template-columns: none; }
     }
     @media (max-width: 355px) { .cards { grid-auto-columns: minmax(162px, 72%); } }
   </style>
@@ -92,6 +101,7 @@
       <p class="notice">比較用ページです。ゲーム進行・CPU・勝敗処理は含みません。欠ける月は使用済み見本として操作できません。</p>
     </header>
     <div id="variants"></div>
+    <div id="positionComparison"></div>
   </main>
   <script>
     const CARDS = [
@@ -106,6 +116,11 @@
       { id: 'a', title: 'A：現在相当', note: 'card-art 高さ 56px' },
       { id: 'b', title: 'B：中間', note: 'card-art 高さ 88px' },
       { id: 'c', title: 'C：画像本来の比率', note: 'card-art 3:2' }
+    ];
+    const POSITION_VARIANTS = [
+      { id: 'center', label: '中央：50% 50%' },
+      { id: 'up', label: '上側を多く表示：50% 35%' },
+      { id: 'down', label: '下側を多く表示：50% 65%' }
     ];
     let selected = 'waxing';
 
@@ -126,6 +141,29 @@
           <div class="decision"><button class="primary-button" type="button">この札で決定</button></div>
           <p class="selection-status" aria-live="polite">選択中：${CARDS.find(card => card.id === selected).name}</p>
         </section>`).join('');
+
+      const comparisonCards = CARDS.filter(card => ['falseMoon', 'oath'].includes(card.id));
+      document.getElementById('positionComparison').innerHTML = `
+        <section class="variant position-comparison" aria-labelledby="position-title">
+          <h2 id="position-title">B・88px 画像位置比較</h2>
+          <p class="variant-note">高さとカードレイアウトはBのまま、画像の縦位置だけを比較します。</p>
+          ${comparisonCards.map(card => `
+            <div class="position-group">
+              <h3>${card.name}</h3>
+              <div class="cards position-cards" aria-label="${card.name}の画像位置比較">
+                ${POSITION_VARIANTS.map(position => `
+                  <button class="card${selected === card.id ? ' selected' : ''}" type="button" data-card="${card.id}" aria-pressed="${selected === card.id}">
+                    <span class="position-label">${position.label}</span>
+                    <span class="card-art position-${position.id}"><img src="${card.image}" alt="${card.name}のイラスト・${position.label}"></span>
+                    <span class="card-name">${card.name}</span>
+                    <span class="card-type">${card.type}</span>
+                    <span class="card-effect">${card.effect}</span>
+                  </button>`).join('')}
+              </div>
+              <div class="decision"><button class="primary-button" type="button">この札で決定</button></div>
+              <p class="selection-status" aria-live="polite">選択中：${CARDS.find(item => item.id === selected).name}</p>
+            </div>`).join('')}
+        </section>`;
     }
 
     document.addEventListener('click', event => {
