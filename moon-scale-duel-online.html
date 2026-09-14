@@ -18,6 +18,12 @@
 
     <p id="status" class="status" aria-live="polite">匿名ログイン中…</p>
 
+    <section id="auth-retry" class="auth-retry" aria-labelledby="auth-retry-title" hidden>
+      <h2 id="auth-retry-title">ログイン処理が完了しませんでした</h2>
+      <p id="auth-retry-message">通信状態を確認して、もう一度お試しください。</p>
+      <button id="retry-auth" class="primary-button" type="button">もう一度試す</button>
+    </section>
+
     <section id="entry" class="panel" hidden>
       <h2>オンライン対戦</h2>
       <label>表示名<input id="display-name" maxlength="20" autocomplete="nickname" value="旅人"></label>

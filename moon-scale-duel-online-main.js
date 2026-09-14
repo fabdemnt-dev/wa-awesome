@@ -1,4 +1,5 @@
 import { ensureAnonymousUser } from './moon-scale-duel-online-firebase.js';
+import { AuthTimeoutError, createAuthAttemptCoordinator } from './moon-scale-duel-auth.js';
 import { api } from './moon-scale-duel-online-api.js';
 import { beginPresence } from './moon-scale-duel-online-presence.js';
 import { state, requestIdFor, finishRequest } from './moon-scale-duel-online-state.js';
@@ -7,6 +8,7 @@ import { el, show, status, lobby, started } from './moon-scale-duel-online-ui.js
 const STORAGE_KEY = 'moonScaleDuelOnlineRoomId';
 const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 let rematchRequestInFlight = null;
+let refreshLoopStarted = false;
 function message(error) { return error?.message?.replace(/^FirebaseError:\s*/, '') || '処理に失敗しました。'; }
 
 async function refresh() {
@@ -179,32 +181,68 @@ el('copy-code').onclick = async () => {
   } catch { status('招待コードをコピーできませんでした。長押ししてコピーしてください。'); }
 };
 
-(async () => {
-  try {
-    state.uid = (await ensureAnonymousUser()).uid;
-    const savedRoomId = localStorage.getItem(STORAGE_KEY);
-    if (savedRoomId) {
-      state.roomId = savedRoomId;
-      try {
-        await beginPresence(state.roomId, state.uid);
-        await refresh();
-      } catch {
-        state.roomId = null;
-        localStorage.removeItem(STORAGE_KEY);
-        show('entry');
-        status('オンライン対戦を開始できます。');
-      }
-    } else {
-      show('entry');
-      status('オンライン対戦を開始できます。');
-    }
+function setAuthRetryVisible(visible) {
+  el('auth-retry').hidden = !visible;
+}
+
+function startRefreshLoop() {
+  if (refreshLoopStarted) return;
+  refreshLoopStarted = true;
+  (async () => {
     for (;;) {
       await wait(2000);
       if (state.roomId) {
         try { await refresh(); } catch (error) { status(message(error)); }
       }
     }
-  } catch (error) {
-    status(message(error));
+  })();
+}
+
+async function finishAuthentication(user) {
+  state.uid = user.uid;
+  const savedRoomId = localStorage.getItem(STORAGE_KEY);
+  if (savedRoomId) {
+    state.roomId = savedRoomId;
+    try {
+      await beginPresence(state.roomId, state.uid);
+      await refresh();
+    } catch {
+      state.roomId = null;
+      localStorage.removeItem(STORAGE_KEY);
+      show('entry');
+      status('オンライン対戦を開始できます。');
+    }
+  } else {
+    show('entry');
+    status('オンライン対戦を開始できます。');
   }
+  startRefreshLoop();
+}
+
+const authCoordinator = createAuthAttemptCoordinator({
+  attempt: ensureAnonymousUser,
+  onStart: () => {
+    el('retry-auth').disabled = true;
+    setAuthRetryVisible(false);
+    status('匿名ログイン中…');
+  },
+  onSuccess: finishAuthentication,
+  onFailure: (error) => {
+      show(null);
+      setAuthRetryVisible(true);
+      if (error instanceof AuthTimeoutError) {
+        status('ログインに時間がかかっています。通信状態を確認して、もう一度お試しください。');
+      } else {
+        status(`ログインできませんでした。${message(error)}`);
+      }
+  },
+  onSettled: () => { el('retry-auth').disabled = false; },
+});
+
+el('retry-auth').onclick = () => authCoordinator.run();
+
+(async () => {
+  try {
+    await authCoordinator.run();
+  } catch { /* authenticate renders a retryable error state */ }
 })();
