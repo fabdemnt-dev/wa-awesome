@@ -12,7 +12,7 @@ permissions:
 jobs:
   diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -32,58 +32,36 @@ jobs:
         run: |
           umask 077
           printf 'MOON_SCALE_DUEL_INVITE_HMAC_KEY=%s\nMOON_SCALE_DUEL_IP_HMAC_KEY=%s\n' "$LOCAL_MOON_INVITE_KEY" "$LOCAL_MOON_IP_KEY" > functions/.secret.local
-      - name: Run simultaneous submit and transaction comparison diagnostics
+      - name: Record diagnostic versions
         run: |
-          set -o pipefail
-          npx firebase --config firebase.moon-scale-duel-emulator.json emulators:exec \
-            --only auth,firestore,database,functions --project demo-moon-scale-duel \
-            "node --test --test-force-exit tests/moon-scale-duel-transaction-diagnostic.test.mjs" \
-            2>&1 | tee moon-scale-duel-transaction-diagnostic.log
-      - name: Run six-round test alone
+          mkdir -p diagnostic-artifacts
+          npx firebase --version > diagnostic-artifacts/current-firebase-tools-version.txt
+          npx --yes firebase-tools@15.30.0 --version > diagnostic-artifacts/candidate-firebase-tools-version.txt
+          printf '%s\n' '1.19.8' > diagnostic-artifacts/current-firestore-emulator-version.txt
+          printf '%s\n' '1.22.0' > diagnostic-artifacts/candidate-firestore-emulator-version.txt
+          java -version 2> diagnostic-artifacts/java-version.txt
+          node --version > diagnostic-artifacts/node-version.txt
+      - name: Run current and candidate diagnostics on the same runner
+        run: |
+          chmod +x tests/run-moon-scale-duel-transaction-version-diagnostic.sh
+          for version_spec in 'current current' 'candidate 15.30.0'; do
+            read -r version_label cli_version <<< "$version_spec"
+            tests/run-moon-scale-duel-transaction-version-diagnostic.sh "$version_label" "$cli_version" minimal-submit tests/moon-scale-duel-transaction-diagnostic.test.mjs 'diagnostic: repeat minimal simultaneous moonScaleDuelSubmitCard'
+            tests/run-moon-scale-duel-transaction-version-diagnostic.sh "$version_label" "$cli_version" promise-all tests/moon-scale-duel-transaction-diagnostic.test.mjs 'diagnostic: compare contending Firestore transactions using parallel'
+            tests/run-moon-scale-duel-transaction-version-diagnostic.sh "$version_label" "$cli_version" sequential tests/moon-scale-duel-transaction-diagnostic.test.mjs 'diagnostic: compare contending Firestore transactions using sequential'
+            tests/run-moon-scale-duel-transaction-version-diagnostic.sh "$version_label" "$cli_version" get-all tests/moon-scale-duel-transaction-diagnostic.test.mjs 'diagnostic: compare contending Firestore transactions using getAll'
+            tests/run-moon-scale-duel-transaction-version-diagnostic.sh "$version_label" "$cli_version" six-rounds tests/moon-scale-duel-online-integration.test.mjs 'six rounds complete with ordered public history and no seventh round'
+            tests/run-moon-scale-duel-transaction-version-diagnostic.sh "$version_label" "$cli_version" readiness tests/moon-scale-duel-online-integration.test.mjs 'expired readiness can be extended idempotently only by the waiting player'
+          done
+      - name: Build version comparison summary
         if: ${{ always() }}
         run: |
-          set -o pipefail
-          npx firebase --config firebase.moon-scale-duel-emulator.json emulators:exec \
-            --only auth,firestore,database,functions --project demo-moon-scale-duel \
-            "node --test --test-force-exit --test-name-pattern='six rounds complete with ordered public history and no seventh round' tests/moon-scale-duel-online-integration.test.mjs" \
-            2>&1 | tee moon-scale-duel-six-round-diagnostic.log
-      - name: Run readiness extension test alone
-        if: ${{ always() }}
-        run: |
-          set -o pipefail
-          npx firebase --config firebase.moon-scale-duel-emulator.json emulators:exec \
-            --only auth,firestore,database,functions --project demo-moon-scale-duel \
-            "node --test --test-force-exit --test-name-pattern='expired readiness can be extended idempotently only by the waiting player' tests/moon-scale-duel-online-integration.test.mjs" \
-            2>&1 | tee moon-scale-duel-readiness-diagnostic.log
+          jq -s '{cases: .}' diagnostic-artifacts/*/*/case-summary.json > diagnostic-artifacts/summary.json
       - name: Remove emulator secrets
         if: ${{ always() }}
         run: |
           rm -f functions/.secret.local
           test ! -e functions/.secret.local
-      - name: Sanitize diagnostic logs
-        if: ${{ always() }}
-        run: |
-          mkdir -p diagnostic-artifacts
-          grep '^DIAGNOSTIC ' moon-scale-duel-transaction-diagnostic.log \
-            > diagnostic-artifacts/trial-results.jsonl || true
-          for file in moon-scale-duel-*-diagnostic.log; do
-            if [ -f "$file" ]; then
-              grep -E '^(ok|not ok|# Subtest:|# tests |# pass |# fail |# skipped |# duration_ms |.*(INVALID_ARGUMENT|Transaction is invalid or closed))' "$file" \
-                | sed -E \
-                -e 's/[0-9a-f]{8}-[0-9a-f-]{27,}/[REDACTED_ID]/gi' \
-                -e 's/MSD1-[0-9A-HJKMNP-TV-Z-]+/[REDACTED_INVITE]/g' \
-                -e 's/[A-Za-z0-9_-]{24,}/[REDACTED_VALUE]/g' \
-                -e 's/(Bearer|token|authorization)([=: ]+)[^ ]+/\1\2[REDACTED]/gi' \
-                > "diagnostic-artifacts/$file"
-            fi
-          done
-          if [ -f firestore-debug.log ]; then
-            grep -Ei 'transaction|lock|retry|timeout|invalid|closed' firestore-debug.log \
-              | sed -E \
-                -e 's/[0-9a-f]{8}-[0-9a-f-]{27,}/[REDACTED_ID]/gi' \
-                -e 's/[A-Za-z0-9_-]{24,}/[REDACTED_VALUE]/g' \
-              > diagnostic-artifacts/firestore-transaction-events.log || true
-          fi
       - name: Upload sanitized diagnostic artifacts
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
