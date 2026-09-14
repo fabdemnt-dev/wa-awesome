@@ -39,9 +39,12 @@
         linear-gradient(160deg, #080b20, #111333 58%, #090b22);
     }
 
-    a { font: inherit; }
+    a,
+    button { font: inherit; }
 
-    a:focus-visible {
+    a:focus-visible,
+    button:focus-visible,
+    [tabindex="-1"]:focus-visible {
       outline: 3px solid var(--focus);
       outline-offset: 3px;
     }
@@ -60,8 +63,11 @@
       color: #d9d2ff;
     }
 
-    .mode-select {
+    .screen {
       padding: 10px 0 0;
+    }
+
+    .mode-select {
       text-align: center;
     }
 
@@ -113,6 +119,7 @@
 
     .mode-link {
       display: grid;
+      width: 100%;
       min-height: 92px;
       padding: 16px 18px;
       border: 1px solid var(--line);
@@ -123,6 +130,7 @@
       background: var(--panel);
       box-shadow: 0 12px 32px rgba(0, 0, 0, .2);
       transition: border-color .16s ease, transform .16s ease, background .16s ease;
+      cursor: pointer;
     }
 
     .mode-link:hover,
@@ -143,16 +151,112 @@
       font-size: .9rem;
     }
 
+    .rules-heading {
+      margin-bottom: 18px;
+      text-align: center;
+    }
+
+    .rules-heading h1 { font-size: clamp(1.75rem, 7vw, 2.35rem); }
+
+    .rules-list {
+      display: grid;
+      gap: 12px;
+    }
+
+    .rule-panel {
+      padding: 16px;
+      border: 1px solid rgba(112, 122, 177, .78);
+      border-radius: 16px;
+      background: var(--panel);
+      box-shadow: 0 12px 32px rgba(0, 0, 0, .18);
+    }
+
+    .rule-panel h2 {
+      margin: 0 0 8px;
+      color: var(--moon);
+      font-size: 1.12rem;
+      line-height: 1.4;
+    }
+
+    .rule-panel h3 {
+      margin: 0 0 5px;
+      color: var(--moon);
+      font-size: 1rem;
+    }
+
+    .rule-panel p { margin: 0 0 9px; }
+    .rule-panel p:last-child { margin-bottom: 0; }
+
+    .rule-panel ol,
+    .rule-panel ul {
+      margin: 0;
+      padding-left: 1.45rem;
+    }
+
+    .rule-panel li + li { margin-top: 5px; }
+
+    .card-guide {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .card-guide article {
+      min-width: 0;
+      overflow: hidden;
+      border: 1px solid rgba(112, 122, 177, .7);
+      border-radius: 12px;
+      background: rgba(10, 13, 40, .72);
+    }
+
+    .card-guide img {
+      display: block;
+      width: 100%;
+      aspect-ratio: 3 / 2;
+      object-fit: cover;
+      background: #11162f;
+    }
+
+    .card-guide-text { padding: 10px; }
+    .card-guide-text p { color: var(--muted); font-size: .88rem; }
+
+    .rules-actions {
+      display: grid;
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .secondary-button {
+      min-height: 50px;
+      padding: 12px 16px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      color: var(--silver);
+      background: #262b5d;
+      font-weight: 800;
+      cursor: pointer;
+    }
+
+    .secondary-button:hover,
+    .secondary-button:focus-visible { border-color: var(--focus); background: #30366d; }
+
     @media (max-width: 420px) {
       .page {
         width: min(calc(100% - 20px), 520px);
         padding-top: 6px;
       }
 
-      .mode-select { padding-top: 4px; }
+      .screen { padding-top: 4px; }
       .subtitle { margin-bottom: 12px; }
       .moon-art { height: 88px; margin-bottom: 12px; }
       .mode-link { min-height: 84px; padding: 13px 15px; }
+      .rule-panel { padding: 14px; }
+      .card-guide { gap: 8px; }
+      .card-guide-text { padding: 9px; }
+    }
+
+    @media (max-width: 350px) {
+      .card-guide { grid-template-columns: 1fr; }
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -163,14 +267,14 @@
 <body>
   <main class="page">
     <a class="top-link" href="toybox/">← 🎪 おもちゃ箱へ戻る</a>
-    <section class="mode-select" aria-labelledby="mode-heading">
+    <section id="title-screen" class="screen mode-select" aria-labelledby="mode-heading">
       <p class="eyebrow">CHOOSE A MODE</p>
-      <h1 id="mode-heading">月秤の決闘</h1>
+      <h1 id="mode-heading" tabindex="-1">月秤の決闘</h1>
       <p class="subtitle">遊び方を選んでください</p>
       <div class="moon-art" aria-hidden="true">
         <img src="moon-scale-duel/assets/images/duel/duel-scene-background.webp" alt="">
       </div>
-      <nav class="mode-list" aria-label="遊び方">
+      <nav class="mode-list" aria-label="月秤の決闘のメニュー">
         <a class="mode-link" href="moon-scale-duel/">
           <span class="mode-title">1人で遊ぶ</span>
           <span class="mode-description">コンピューターと対戦</span>
@@ -179,8 +283,126 @@
           <span class="mode-title">2人で遊ぶ</span>
           <span class="mode-description">招待コードで友だちと対戦</span>
         </a>
+        <button id="show-rules-button" class="mode-link" type="button" aria-controls="rules-screen" aria-expanded="false">
+          <span class="mode-title">遊び方</span>
+          <span class="mode-description">月札の効果と勝ち方を確認</span>
+        </button>
       </nav>
     </section>
+
+    <section id="rules-screen" class="screen" aria-labelledby="rules-heading" hidden>
+      <header class="rules-heading">
+        <p class="eyebrow">HOW TO PLAY</p>
+        <h1 id="rules-heading" tabindex="-1">遊び方</h1>
+      </header>
+
+      <div class="rules-list">
+        <article class="rule-panel">
+          <h2>勝負の流れ</h2>
+          <p>6種類の月札を使い、相手と月影を競う対戦ゲームです。</p>
+          <ol>
+            <li>ラウンドごとに、未使用の月札を1枚選びます。</li>
+            <li>双方が選ぶと、月札が同時に公開されます。</li>
+            <li>有効な「偽りの月」が出た場合は、公開後に模倣先を選びます。</li>
+            <li>月札の効果を解決し、月影を更新します。</li>
+            <li>決着していなければ、次のラウンドへ進みます。</li>
+          </ol>
+        </article>
+
+        <article class="rule-panel">
+          <h2>月影と勝敗</h2>
+          <p>双方とも月影10から始まり、月札の効果によって0〜15の間で増減します。</p>
+          <p>効果をすべて解決したあと、片方だけが0なら、月影が残った側の勝利です。双方が同じラウンドで0になった場合は引き分けです。</p>
+          <p>途中で決着しなければ全6ラウンドを戦い、最後に月影が多い側が勝利。同じなら引き分けです。</p>
+        </article>
+
+        <article class="rule-panel" aria-labelledby="moon-cards-heading">
+          <h2 id="moon-cards-heading">6種類の月札</h2>
+          <div class="card-guide">
+            <article>
+              <img src="moon-scale-duel/assets/images/cards/moon-full.webp" alt="満ちる月の札" width="1536" height="1024" loading="lazy">
+              <div class="card-guide-text"><h3>満ちる月</h3><p>自分の月影を3増やします。</p></div>
+            </article>
+            <article>
+              <img src="moon-scale-duel/assets/images/cards/moon-waning.webp" alt="欠ける月の札" width="1536" height="1024" loading="lazy">
+              <div class="card-guide-text"><h3>欠ける月</h3><p>相手の月影を3減らします。</p></div>
+            </article>
+            <article>
+              <img src="moon-scale-duel/assets/images/cards/moon-reflection.webp" alt="返照の月の札" width="1536" height="1024" loading="lazy">
+              <div class="card-guide-text"><h3>返照の月</h3><p>このラウンドの「＋3」「−3」を逆向きにします。</p></div>
+            </article>
+            <article>
+              <img src="moon-scale-duel/assets/images/cards/moon-still.webp" alt="静止の月の札" width="1536" height="1024" loading="lazy">
+              <div class="card-guide-text"><h3>静止の月</h3><p>相手が出した月札の効果を無効にします。</p></div>
+            </article>
+            <article>
+              <img src="moon-scale-duel/assets/images/cards/moon-new-oath.webp" alt="新月の誓いの札" width="1536" height="1024" loading="lazy">
+              <div class="card-guide-text"><h3>新月の誓い</h3><p>公開時に劣勢なら、双方の月影を7にします。</p></div>
+            </article>
+            <article>
+              <img src="moon-scale-duel/assets/images/cards/moon-false.webp" alt="偽りの月の札" width="1536" height="1024" loading="lazy">
+              <div class="card-guide-text"><h3>偽りの月</h3><p>公開後、未使用で模倣可能な月札の効果を選びます。</p></div>
+            </article>
+          </div>
+        </article>
+
+        <article class="rule-panel">
+          <h2>特殊な月札</h2>
+          <p><strong>返照の月：</strong>有効な札が1枚なら、このラウンドの「＋3」「−3」を反転します。双方の返照の月が有効なら相殺され、増減は通常どおりです。「新月の誓い」で月影を7にそろえる効果は反転しません。</p>
+          <p><strong>静止の月：</strong>相手の月札の効果を無効にします。双方が静止の月を出した場合は互いに無効化し合い、どちらも相手を止めません。</p>
+          <p><strong>新月の誓い：</strong>札を公開した時点で、自分の月影が相手より少ない場合だけ有効です。有効なら双方の月影を7にします。同じ、または自分の方が多い場合は不発です。</p>
+        </article>
+
+        <article class="rule-panel">
+          <h2>偽りの月</h2>
+          <p>実際の月札を公開したあと、自分の未使用札から模倣先を選び、その効果として扱います。模倣先に選んだ札は使用済みにならず、後のラウンドで使えます。</p>
+          <p>模倣できるのは「満ちる月」「欠ける月」「返照の月」と、公開時点で条件を満たす「新月の誓い」です。「静止の月」「偽りの月」、すでに使用した札は模倣できません。</p>
+          <p>相手の静止の月で無効になった場合は模倣先を選びません。候補がない場合も不発となり、どちらの場合も偽りの月だけが使用済みになります。</p>
+        </article>
+
+        <article class="rule-panel">
+          <h2>使用済み札と決着</h2>
+          <p>一度出した月札は、その対戦中はもう使えません。6種類を1枚ずつ使うため、最大6ラウンドです。偽りの月で模倣した札そのものは消費されません。</p>
+          <ul>
+            <li>効果解決後に片方だけ月影0：残った側の勝利</li>
+            <li>効果解決後に双方とも月影0：引き分け</li>
+            <li>第6ラウンド終了時：月影が多い側の勝利。同値は引き分け</li>
+          </ul>
+        </article>
+
+        <article class="rule-panel">
+          <h2>1人用・2人用</h2>
+          <p><strong>1人用：</strong>コンピューターと対戦します。</p>
+          <p><strong>2人用：</strong>招待コードを使って、友だちとオンライン対戦します。ゲームの月札と勝敗ルールは同じです。</p>
+        </article>
+      </div>
+
+      <div class="rules-actions">
+        <button id="back-to-title-button" class="secondary-button" type="button" aria-controls="title-screen">タイトルへ戻る</button>
+      </div>
+    </section>
   </main>
+  <script>
+    'use strict';
+
+    const titleScreen = document.getElementById('title-screen');
+    const rulesScreen = document.getElementById('rules-screen');
+    const showRulesButton = document.getElementById('show-rules-button');
+    const backToTitleButton = document.getElementById('back-to-title-button');
+    const modeHeading = document.getElementById('mode-heading');
+    const rulesHeading = document.getElementById('rules-heading');
+
+    function showScreen(screen) {
+      const showingRules = screen === rulesScreen;
+      titleScreen.hidden = showingRules;
+      rulesScreen.hidden = !showingRules;
+      showRulesButton.setAttribute('aria-expanded', String(showingRules));
+      window.scrollTo({ top: 0, behavior: 'auto' });
+      (showingRules ? rulesHeading : modeHeading).focus({ preventScroll: true });
+    }
+
+    showRulesButton.addEventListener('click', () => showScreen(rulesScreen));
+    backToTitleButton.addEventListener('click', () => showScreen(titleScreen));
+  </script>
 </body>
 </html>

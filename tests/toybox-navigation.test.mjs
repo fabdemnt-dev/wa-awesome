@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import vm from "node:vm";
 
 const home = await readFile(new URL("../index.html", import.meta.url), "utf8");
 const toybox = await readFile(new URL("../toybox/index.html", import.meta.url), "utf8");
 const moonScaleSelect = await readFile(new URL("../moon-scale-duel-select.html", import.meta.url), "utf8");
+const moonScaleCpu = await readFile(new URL("../moon-scale-duel/index.html", import.meta.url), "utf8");
+const moonScaleRules = await readFile(new URL("../functions/moon-scale-duel-online/rules.js", import.meta.url), "utf8");
 
 test("トップページからおもちゃ箱へ移動できる", () => {
   assert.match(home, /href="toybox\/"[^>]*class="card-panel"/);
@@ -29,6 +32,87 @@ test("月秤の決闘で既存の1人用と2人用を選べる", () => {
   assert.match(moonScaleSelect, />2人で遊ぶ</);
   assert.match(moonScaleSelect, /href="toybox\/"/);
   assert.match(moonScaleSelect, /🎪 おもちゃ箱へ戻る/);
+});
+
+test("月秤の決闘の入口から遊び方を開いてタイトルへ戻れる", () => {
+  assert.match(moonScaleSelect, /id="title-screen"[^>]*aria-labelledby="mode-heading"/);
+  assert.match(moonScaleSelect, /id="show-rules-button"[^>]*type="button"[^>]*aria-controls="rules-screen"[^>]*aria-expanded="false"/);
+  assert.match(moonScaleSelect, />遊び方</);
+  assert.match(moonScaleSelect, /id="rules-screen"[^>]*aria-labelledby="rules-heading"[^>]*hidden/);
+  assert.match(moonScaleSelect, /id="back-to-title-button"[^>]*type="button"[^>]*aria-controls="title-screen"/);
+  assert.match(moonScaleSelect, />タイトルへ戻る</);
+  assert.match(moonScaleSelect, /titleScreen\.hidden = showingRules/);
+  assert.match(moonScaleSelect, /rulesScreen\.hidden = !showingRules/);
+  assert.match(moonScaleSelect, /setAttribute\('aria-expanded', String\(showingRules\)\)/);
+  assert.match(moonScaleSelect, /rulesHeading : modeHeading\)\.focus/);
+});
+
+test("月秤の遊び方表示中はモード選択を隠し、戻ると再び操作できる", () => {
+  const listeners = new Map();
+  const makeElement = (id) => ({
+    id,
+    hidden: id === "rules-screen",
+    attributes: {},
+    focusCount: 0,
+    addEventListener(type, listener) { listeners.set(`${id}:${type}`, listener); },
+    setAttribute(name, value) { this.attributes[name] = value; },
+    focus() { this.focusCount += 1; },
+  });
+  const elements = Object.fromEntries([
+    "title-screen", "rules-screen", "show-rules-button", "back-to-title-button", "mode-heading", "rules-heading",
+  ].map((id) => [id, makeElement(id)]));
+  const script = moonScaleSelect.match(/<script>\s*([\s\S]*?)<\/script>/)?.[1];
+  assert.ok(script);
+  vm.runInNewContext(script, {
+    document: { getElementById: (id) => elements[id] },
+    window: { scrollTo() {} },
+  });
+
+  listeners.get("show-rules-button:click")();
+  assert.equal(elements["title-screen"].hidden, true);
+  assert.equal(elements["rules-screen"].hidden, false);
+  assert.equal(elements["show-rules-button"].attributes["aria-expanded"], "true");
+  assert.equal(elements["rules-heading"].focusCount, 1);
+
+  listeners.get("back-to-title-button:click")();
+  assert.equal(elements["title-screen"].hidden, false);
+  assert.equal(elements["rules-screen"].hidden, true);
+  assert.equal(elements["show-rules-button"].attributes["aria-expanded"], "false");
+  assert.equal(elements["mode-heading"].focusCount, 1);
+});
+
+test("月秤の遊び方は実装済みの月影と月札ルールを案内する", () => {
+  for (const cardName of ["満ちる月", "欠ける月", "返照の月", "静止の月", "新月の誓い", "偽りの月"]) {
+    assert.match(moonScaleSelect, new RegExp(cardName));
+  }
+  assert.match(moonScaleSelect, /月影10から始まり/);
+  assert.match(moonScaleSelect, /0〜15/);
+  assert.match(moonScaleSelect, /全6ラウンド/);
+  assert.match(moonScaleSelect, /自分の月影を3増やします/);
+  assert.match(moonScaleSelect, /相手の月影を3減らします/);
+  assert.match(moonScaleSelect, /双方の返照の月が有効なら相殺/);
+  assert.match(moonScaleSelect, /双方が静止の月を出した場合は互いに無効化/);
+  assert.match(moonScaleSelect, /双方の月影を7にします/);
+  assert.match(moonScaleSelect, /模倣できるのは「満ちる月」「欠ける月」「返照の月」/);
+  assert.match(moonScaleSelect, /片方だけ月影0/);
+  assert.match(moonScaleSelect, /双方とも月影0/);
+  assert.match(moonScaleSelect, /第6ラウンド終了時/);
+
+  assert.match(moonScaleCpu, /const START_MOON = 10/);
+  assert.match(moonScaleCpu, /const MAX_MOON = 15/);
+  assert.match(moonScaleCpu, /const MAX_ROUNDS = 6/);
+  assert.match(moonScaleCpu, /const COPYABLE = \['waxing', 'waning', 'reflection', 'oath'\]/);
+  assert.match(moonScaleRules, /const MAX_MOON = 15/);
+  assert.match(moonScaleRules, /COPYABLE = Object\.freeze\(\['waxing', 'waning', 'reflection', 'oath'\]\)/);
+  assert.match(moonScaleRules, /if \(after\.seat1 === 0 && after\.seat2 === 0\) outcome = 'draw'/);
+  assert.match(moonScaleRules, /else if \(round === 6\)/);
+});
+
+test("月秤の遊び方は既存の6枚の月札画像を使う", () => {
+  for (const image of ["moon-full", "moon-waning", "moon-reflection", "moon-still", "moon-new-oath", "moon-false"]) {
+    assert.match(moonScaleSelect, new RegExp(`moon-scale-duel/assets/images/cards/${image}\\.webp`));
+  }
+  assert.equal((moonScaleSelect.match(/moon-scale-duel\/assets\/images\/cards\//g) || []).length, 6);
 });
 
 test("迷路試作への公開導線を含めない", () => {
