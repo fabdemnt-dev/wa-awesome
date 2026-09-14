@@ -36,7 +36,11 @@ async function denied(promise, code) {
   await assert.rejects(promise, (error) => !code || error.code === code);
 }
 function publicPart(snapshot) {
-  return { room: snapshot.room, members: snapshot.members, seats: snapshot.seats, game: snapshot.game };
+  const { serverTimeMillis, ...game } = snapshot.game;
+  assert.equal(typeof serverTimeMillis, 'number');
+  assert.equal(Number.isFinite(serverTimeMillis), true);
+  assert.ok(serverTimeMillis > 0);
+  return { room: snapshot.room, members: snapshot.members, seats: snapshot.seats, game };
 }
 
 test.after(async () => {
