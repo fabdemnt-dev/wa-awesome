@@ -46,11 +46,13 @@ export function started(snapshot, selectedCardId = null, selectedCopyTarget = nu
   const opponentSeat = yourSeat === 'seat1' ? 'seat2' : 'seat1';
   el('started-you-moon').textContent = `月影 ${snapshot.game.moonShadow[yourSeat]}`;
   el('started-opponent-moon').textContent = `月影 ${snapshot.game.moonShadow[opponentSeat]}`;
-  const revealed = ['cards-revealed', 'choosing-copy', 'round-result'].includes(snapshot.game.phase) && snapshot.game.publicCards;
+  const revealed = ['cards-revealed', 'choosing-copy', 'round-result', 'ended', 'aborted'].includes(snapshot.game.phase) && snapshot.game.publicCards;
   hidden(el('selection-area'), Boolean(revealed));
   hidden(el('revealed-area'), !revealed);
   hidden(el('copy-area'), snapshot.game.phase !== 'choosing-copy');
-  hidden(el('round-result'), snapshot.game.phase !== 'round-result');
+  const resultVisible = ['round-result', 'ended', 'aborted'].includes(snapshot.game.phase);
+  hidden(el('round-result'), !resultVisible);
+  renderHistory(snapshot.game.history || []);
   if (revealed) {
     el('revealed-cards').innerHTML = publicCardHtml('あなたの札', snapshot.game.publicCards[yourSeat], snapshot.game.publicCopies?.[yourSeat])
       + publicCardHtml('対手の札', snapshot.game.publicCards[opponentSeat], snapshot.game.publicCopies?.[opponentSeat]);
@@ -63,11 +65,11 @@ export function started(snapshot, selectedCardId = null, selectedCopyTarget = nu
         ? '模倣先を伏せました。対手の選択を待っています…'
         : targets.length ? '本人だけに表示された候補から、模倣する効果を選んでください。' : '対手の模倣先選択を待っています…';
       el('stage-note').textContent = '必要な模倣先が揃うまで、相手の選択内容は公開されません。';
-    } else if (snapshot.game.phase === 'round-result') {
-      el('round-messages').innerHTML = snapshot.game.roundResult.messages.map((text) => `<li>${escapeHtml(text)}</li>`).join('');
-      el('stage-note').textContent = snapshot.game.roundResult.outcome
-        ? '決着判定まで完了しました。最終結果画面は後の段階で実装します。'
-        : '第1ラウンドの解決が完了しました。第2ラウンドへの遷移は第4段階で実装します。';
+    } else if (resultVisible) {
+      const result = snapshot.game.roundResult;
+      el('round-result-title').textContent = `第${result?.round || snapshot.game.round}ラウンドの結果`;
+      el('round-messages').innerHTML = (result?.messages || []).map((text) => `<li>${escapeHtml(text)}</li>`).join('');
+      renderNextRoundActions(snapshot);
     } else {
       el('stage-note').textContent = '双方の月札が同時に公開されました。';
     }
@@ -81,4 +83,40 @@ export function started(snapshot, selectedCardId = null, selectedCopyTarget = nu
     ? '月札を伏せました。対手の選択を待っています…'
     : selectedCardId ? `「${cards[selectedCardId].name}」を選択中です。` : '未使用の月札から1枚を選んでください。';
   el('stage-note').textContent = '双方が確定するまで、相手の月札は公開されません。';
+}
+
+function renderHistory(history) {
+  const panel = el('history-panel');
+  hidden(panel, history.length === 0);
+  el('history-summary').textContent = `決闘の記録（${history.length}）`;
+  el('round-history').innerHTML = history.map((item) => `<section><h4>第${item.round}ラウンド</h4><p>${(item.messages || []).map(escapeHtml).join('<br>')}</p><small>月影 ${item.moonShadowBefore.seat1} / ${item.moonShadowBefore.seat2} → ${item.moonShadowAfter.seat1} / ${item.moonShadowAfter.seat2}</small></section>`).join('');
+}
+
+function renderNextRoundActions(snapshot) {
+  const game = snapshot.game;
+  const actions = el('next-round-actions');
+  const ended = game.phase === 'ended';
+  const aborted = game.phase === 'aborted';
+  hidden(actions, ended || aborted);
+  if (ended) {
+    el('stage-note').textContent = '決闘終了。完成版の最終結果画面は第5段階で実装します。';
+    return;
+  }
+  if (aborted) {
+    el('stage-note').textContent = 'この決闘は中断されました。';
+    return;
+  }
+  const yourSeat = snapshot.you.seatId;
+  const otherSeat = yourSeat === 'seat1' ? 'seat2' : 'seat1';
+  const ready = game.nextRoundReady?.[yourSeat] === true;
+  const otherReady = game.nextRoundReady?.[otherSeat] === true;
+  hidden(el('ready-next-round'), ready);
+  el('ready-next-round').disabled = false;
+  const remaining = game.deadlineMillis == null ? null : Math.max(0, game.deadlineMillis - game.serverTimeMillis);
+  const expired = ready && !otherReady && remaining === 0;
+  hidden(el('expired-wait-actions'), !expired);
+  el('next-round-countdown').textContent = ready && !expired && remaining != null
+    ? `準備待ち期限まで約${Math.ceil(remaining / 1000)}秒` : '';
+  el('next-round-note').textContent = ready ? '対手の準備を待っています…' : '双方が準備すると次のラウンドへ進みます。';
+  el('stage-note').textContent = '前ラウンドの結果を確認し、準備ができたら次へ進んでください。';
 }

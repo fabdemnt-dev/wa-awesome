@@ -10,4 +10,7 @@ export const api = {
   startGame: (data) => call('moonScaleDuelStartGame', data),
   submitCard: (data) => call('moonScaleDuelSubmitCard', data),
   submitCopyTarget: (data) => call('moonScaleDuelSubmitCopyTarget', data),
+  readyNextRound: (data) => call('moonScaleDuelReadyNextRound', data),
+  extendNextRoundWait: (data) => call('moonScaleDuelExtendNextRoundWait', data),
+  abortAfterWait: (data) => call('moonScaleDuelAbortAfterWait', data),
 };

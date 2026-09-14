@@ -24,10 +24,15 @@ test('stage-three page keeps secret submission and copy resolution on the dedica
   assert.match(html, /この札で決定/);
   assert.match(api, /moonScaleDuelSubmitCard/);
   assert.match(api, /moonScaleDuelSubmitCopyTarget/);
+  assert.match(api, /moonScaleDuelReadyNextRound/);
+  assert.match(api, /moonScaleDuelExtendNextRoundWait/);
+  assert.match(api, /moonScaleDuelAbortAfterWait/);
   assert.match(main, /stateVersion:\s*snapshot\.game\.stateVersion/);
   assert.match(ui, /対手の選択を待っています/);
   assert.match(ui, /choosing-copy/);
   assert.match(ui, /round-result/);
+  assert.match(ui, /nextRoundReady/);
+  assert.match(ui, /deadlineMillis/);
   assert.match(html, /この効果を模倣する/);
   assert.doesNotMatch(html + main + ui, /localStorage\.(?:setItem|getItem)\([^\n]*(?:card|札|selection)/i);
   assert.match(main, /localStorage\.setItem\(STORAGE_KEY, state\.roomId\)/);

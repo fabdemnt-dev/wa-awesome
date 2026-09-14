@@ -16,7 +16,10 @@ const inviteKey = defineSecret('MOON_SCALE_DUEL_INVITE_HMAC_KEY');
 const ipKey = defineSecret('MOON_SCALE_DUEL_IP_HMAC_KEY');
 const REGION = 'asia-northeast1';
 const ROOM_TTL_MILLIS = 24 * 60 * 60 * 1000;
+const NEXT_ROUND_WAIT_MILLIS = 120 * 1000;
+const WAIT_EXTENSION_MILLIS = 60 * 1000;
 const CARD_IDS = Object.freeze(['waxing', 'waning', 'reflection', 'stillness', 'falseMoon', 'oath']);
+const SEAT_IDS = Object.freeze(['seat1', 'seat2']);
 
 const callableOptions = {
   region: REGION,
@@ -62,6 +65,7 @@ function payloadHash(type, payload) {
   return crypto.createHash('sha256').update(JSON.stringify({ type, ...payload })).digest('base64url');
 }
 function expiresAtFromNow() { return Timestamp.fromMillis(Date.now() + ROOM_TTL_MILLIS); }
+function deadlineFromNow(milliseconds) { return Timestamp.fromMillis(Date.now() + milliseconds); }
 function hasValidExpiry(data, nowMillis = Date.now()) {
   const millis = data?.expiresAt?.toMillis?.();
   return Number.isFinite(millis) && millis > nowMillis;
@@ -153,6 +157,20 @@ function publicRoundResult(data) {
     messages: Array.isArray(data.messages) ? data.messages.filter((item) => typeof item === 'string') : [],
   };
 }
+function publicHistory(data) {
+  if (!Array.isArray(data)) return [];
+  return data.map((item) => publicRoundResult(item)).filter(Boolean);
+}
+function completionResult(roundResult) {
+  if (!roundResult?.outcome) return null;
+  return {
+    type: 'completed',
+    outcome: roundResult.outcome,
+    round: Number(roundResult.round),
+    moonShadow: { ...roundResult.moonShadowAfter },
+  };
+}
+function resolutionPhase(roundResult) { return roundResult?.outcome ? 'ended' : 'round-result'; }
 function publicGame(data) {
   if (!data) return null;
   return {
@@ -165,14 +183,16 @@ function publicGame(data) {
     nextRoundReady: data.nextRoundReady,
     rematchReady: data.rematchReady,
     deadlineMillis: data.deadline?.toMillis?.() || null,
-    result: data.result,
-    publicCards: ['cards-revealed', 'choosing-copy', 'round-result'].includes(data.phase) && data.publicCards
+    result: data.result ? { ...data.result } : null,
+    history: publicHistory(data.history),
+    serverTimeMillis: Date.now(),
+    publicCards: ['cards-revealed', 'choosing-copy', 'round-result', 'ended', 'aborted'].includes(data.phase) && data.publicCards
       ? { seat1: data.publicCards.seat1, seat2: data.publicCards.seat2 }
       : null,
-    publicCopies: data.phase === 'round-result' && data.publicCopies
+    publicCopies: ['round-result', 'ended', 'aborted'].includes(data.phase) && data.publicCopies
       ? { seat1: data.publicCopies.seat1 || null, seat2: data.publicCopies.seat2 || null }
       : null,
-    roundResult: data.phase === 'round-result' ? publicRoundResult(data.roundResult) : null,
+    roundResult: ['round-result', 'ended', 'aborted'].includes(data.phase) ? publicRoundResult(data.roundResult) : null,
   };
 }
 
@@ -340,7 +360,7 @@ const startGame = onCall(callableOptions, async (request) => {
       phase: 'selecting-card', round: 1, stateVersion: nextVersion,
       moonShadow: { seat1: 10, seat2: 10 }, remainingCardCounts: { seat1: 6, seat2: 6 },
       nextRoundReady: { seat1: false, seat2: false }, rematchReady: { seat1: false, seat2: false },
-      publicCards: null, publicCopies: null, roundResult: null, deadline: null, result: null,
+      publicCards: null, publicCopies: null, roundResult: null, history: [], deadline: null, result: null,
       startedAt: FieldValue.serverTimestamp(), lastValidActionAt: FieldValue.serverTimestamp(), expiresAt,
     });
     tx.set(room.collection('serverGames').doc(gameId), {
@@ -348,7 +368,7 @@ const startGame = onCall(callableOptions, async (request) => {
       usedCards: { seat1: [], seat2: [] }, privateSelections: { seat1: null, seat2: null },
       copyCandidates: { seat1: [], seat2: [] }, copySelections: { seat1: null, seat2: null },
       falseStatus: { seat1: null, seat2: null },
-      publicResult: null, createdAt: FieldValue.serverTimestamp(),
+      publicResult: null, history: [], createdAt: FieldValue.serverTimestamp(),
     });
     for (const memberDoc of activeMembers) {
       tx.set(room.collection('privatePlayers').doc(memberDoc.id), {
@@ -436,6 +456,7 @@ const submitCard = onCall(callableOptions, async (request) => {
           round, moonShadow: gameData.moonShadow, actualCards: publicCards,
           copyTargets: {}, falseStatus: copyState.status,
         });
+        nextPhase = resolutionPhase(roundResult);
       }
     }
     const safeResult = {
@@ -451,13 +472,17 @@ const submitCard = onCall(callableOptions, async (request) => {
       copySelections: { seat1: null, seat2: null },
       falseStatus: copyState.status,
       publicResult: roundResult,
+      history: roundResult ? [...(serverData.history || []), roundResult] : (serverData.history || []),
     });
     tx.update(privatePlayerRef, { submitted: true, selectedCardId: cardId, updatedAt: FieldValue.serverTimestamp() });
     if (bothSubmitted) {
+      const result = completionResult(roundResult);
       tx.update(game, {
         phase: nextPhase, stateVersion: nextVersion, publicCards,
         publicCopies: roundResult?.copyTargets || null,
         roundResult,
+        history: roundResult ? [...(gameData.history || []), roundResult] : (gameData.history || []),
+        result,
         moonShadow: roundResult?.moonShadowAfter || gameData.moonShadow,
         remainingCardCounts: { seat1: 6 - usedCards.seat1.length, seat2: 6 - usedCards.seat2.length },
         lastValidActionAt: FieldValue.serverTimestamp(), expiresAt,
@@ -470,7 +495,12 @@ const submitCard = onCall(callableOptions, async (request) => {
           updatedAt: FieldValue.serverTimestamp(),
         });
       }
-      tx.update(room, { stateVersion: nextVersion, lastValidActionAt: FieldValue.serverTimestamp(), expiresAt });
+      tx.update(room, {
+        stateVersion: nextVersion,
+        status: result ? 'ended' : 'playing',
+        endedAt: result ? FieldValue.serverTimestamp() : null,
+        lastValidActionAt: FieldValue.serverTimestamp(), expiresAt,
+      });
     } else {
       tx.update(game, { lastValidActionAt: FieldValue.serverTimestamp(), expiresAt });
       tx.update(room, { lastValidActionAt: FieldValue.serverTimestamp(), expiresAt });
@@ -538,7 +568,7 @@ const submitCopyTarget = onCall(callableOptions, async (request) => {
         copyTargets: selections, falseStatus: { ...serverData.falseStatus, ...Object.fromEntries(requiredSeats.map((id) => [id, 'copied'])) },
       });
     }
-    const nextPhase = allSubmitted ? 'round-result' : 'choosing-copy';
+    const nextPhase = allSubmitted ? resolutionPhase(roundResult) : 'choosing-copy';
     const safeResult = { roomId, gameId, round, phase: nextPhase, stateVersion: nextVersion, submitted: true, resolved: allSubmitted };
     tx.update(ownPrivate, { copySubmitted: true, selectedCopyTarget: copyTargetId, updatedAt: FieldValue.serverTimestamp() });
     tx.update(serverGame, {
@@ -547,14 +577,22 @@ const submitCopyTarget = onCall(callableOptions, async (request) => {
         ? { ...serverData.falseStatus, ...Object.fromEntries(requiredSeats.map((id) => [id, 'copied'])) }
         : serverData.falseStatus,
       publicResult: roundResult,
+      history: allSubmitted ? [...(serverData.history || []), roundResult] : (serverData.history || []),
     });
     if (allSubmitted) {
+      const result = completionResult(roundResult);
       tx.update(game, {
         phase: nextPhase, stateVersion: nextVersion, publicCopies: roundResult.copyTargets,
         roundResult, moonShadow: roundResult.moonShadowAfter,
+        history: [...(gameData.history || []), roundResult], result,
         lastValidActionAt: FieldValue.serverTimestamp(), expiresAt,
       });
-      tx.update(room, { stateVersion: nextVersion, lastValidActionAt: FieldValue.serverTimestamp(), expiresAt });
+      tx.update(room, {
+        stateVersion: nextVersion,
+        status: result ? 'ended' : 'playing',
+        endedAt: result ? FieldValue.serverTimestamp() : null,
+        lastValidActionAt: FieldValue.serverTimestamp(), expiresAt,
+      });
     } else {
       tx.update(game, { lastValidActionAt: FieldValue.serverTimestamp(), expiresAt });
       tx.update(room, { lastValidActionAt: FieldValue.serverTimestamp(), expiresAt });
@@ -562,6 +600,143 @@ const submitCopyTarget = onCall(callableOptions, async (request) => {
     tx.set(action, { uid, type: 'submitCopyTarget', payloadHash: hash, result: safeResult, createdAt: FieldValue.serverTimestamp(), expiresAt });
     return safeResult;
   });
+});
+
+function roundActionInput(request) {
+  const roomId = roomIdOf(request);
+  const gameId = cleanText(request.data?.gameId, 80, 'ゲームID');
+  const round = Number(request.data?.round);
+  const stateVersion = Number(request.data?.stateVersion);
+  if (!Number.isInteger(round) || round < 1 || round > 6) fail('invalid-argument', 'ラウンド番号が不正です。');
+  if (!Number.isInteger(stateVersion) || stateVersion < 1) fail('invalid-argument', '状態番号が不正です。');
+  return { roomId, gameId, round, stateVersion };
+}
+
+function verifyRoundWaitState({ roomData, gameData, serverData, memberData, privateData, input }) {
+  if (!roomData || roomData.status !== 'playing' || roomData.gameId !== input.gameId || !hasValidExpiry(roomData)) {
+    fail('failed-precondition', 'この決闘は進行中ではありません。');
+  }
+  const seatId = memberData?.seatId;
+  if (!SEAT_IDS.includes(seatId) || memberData.leftAt) fail('permission-denied', 'この部屋には参加していません。');
+  if (!gameData || !serverData || !privateData) fail('failed-precondition', 'ゲーム状態を確認できません。');
+  if (gameData.phase !== 'round-result' || serverData.phase !== 'round-result') fail('failed-precondition', '現在は次ラウンド準備を行えません。');
+  if (gameData.round !== input.round || serverData.round !== input.round) fail('failed-precondition', 'ラウンドが更新されています。');
+  if (gameData.stateVersion !== input.stateVersion) fail('failed-precondition', '画面の状態が更新されています。再読み込みしてください。');
+  if (gameData.result || gameData.roundResult?.outcome || input.round >= 6) fail('failed-precondition', '決闘は終了しています。');
+  if (privateData.roomId !== input.roomId || privateData.gameId !== input.gameId || privateData.seatId !== seatId) {
+    fail('permission-denied', '本人専用状態が一致しません。');
+  }
+  return seatId;
+}
+
+const readyNextRound = onCall(callableOptions, async (request) => {
+  const uid = uidOf(request);
+  const requestId = requestIdOf(request);
+  const input = roundActionInput(request);
+  const hash = payloadHash('readyNextRound', input);
+  const action = actionRef(uid, requestId);
+  return db.runTransaction(async (tx) => {
+    const room = roomRef(input.roomId);
+    const game = room.collection('games').doc(input.gameId);
+    const serverGame = room.collection('serverGames').doc(input.gameId);
+    const member = room.collection('members').doc(uid);
+    const ownPrivate = room.collection('privatePlayers').doc(uid);
+    const [actionSnap, roomSnap, gameSnap, serverSnap, memberSnap, privateSnap] = await Promise.all([
+      tx.get(action), tx.get(room), tx.get(game), tx.get(serverGame), tx.get(member), tx.get(ownPrivate),
+    ]);
+    if (actionSnap.exists) return assertReplay(actionSnap.data(), hash);
+    const gameData = gameSnap.data();
+    const serverData = serverSnap.data();
+    const seatId = verifyRoundWaitState({ roomData: roomSnap.data(), gameData, serverData, memberData: memberSnap.data(), privateData: privateSnap.data(), input });
+    if (gameData.nextRoundReady?.[seatId]) fail('already-exists', '次ラウンドの準備は完了しています。');
+    const other = seatId === 'seat1' ? 'seat2' : 'seat1';
+    const ready = { seat1: gameData.nextRoundReady?.seat1 === true, seat2: gameData.nextRoundReady?.seat2 === true, [seatId]: true };
+    const bothReady = ready[other] === true;
+    const expiresAt = expiresAtFromNow();
+    const nextVersion = bothReady ? input.stateVersion + 1 : input.stateVersion;
+    const safeResult = { roomId: input.roomId, gameId: input.gameId, round: bothReady ? input.round + 1 : input.round, phase: bothReady ? 'selecting-card' : 'round-result', stateVersion: nextVersion, ready: true, advanced: bothReady };
+    if (bothReady) {
+      const privateSelections = serverData.privateSelections || {};
+      if (!SEAT_IDS.every((id) => privateSelections[id]?.uid)) fail('failed-precondition', '参加者状態を確認できません。');
+      tx.update(game, {
+        round: input.round + 1, phase: 'selecting-card', stateVersion: nextVersion,
+        nextRoundReady: { seat1: false, seat2: false }, deadline: null,
+        publicCards: null, publicCopies: null, roundResult: null,
+        lastValidActionAt: FieldValue.serverTimestamp(), expiresAt,
+      });
+      tx.update(serverGame, {
+        round: input.round + 1, phase: 'selecting-card',
+        privateSelections: { seat1: null, seat2: null },
+        copyCandidates: { seat1: [], seat2: [] }, copySelections: { seat1: null, seat2: null },
+        falseStatus: { seat1: null, seat2: null }, publicResult: null,
+      });
+      for (const id of SEAT_IDS) {
+        tx.update(room.collection('privatePlayers').doc(privateSelections[id].uid), {
+          submitted: false, selectedCardId: null, legalCopyTargets: [], copySubmitted: false,
+          selectedCopyTarget: null, updatedAt: FieldValue.serverTimestamp(),
+        });
+      }
+      tx.update(room, { stateVersion: nextVersion, lastValidActionAt: FieldValue.serverTimestamp(), expiresAt });
+    } else {
+      const deadline = gameData.deadline || deadlineFromNow(NEXT_ROUND_WAIT_MILLIS);
+      tx.update(game, { nextRoundReady: ready, deadline, lastValidActionAt: FieldValue.serverTimestamp(), expiresAt });
+      tx.update(room, { lastValidActionAt: FieldValue.serverTimestamp(), expiresAt });
+    }
+    tx.set(action, { uid, type: 'readyNextRound', payloadHash: hash, result: safeResult, createdAt: FieldValue.serverTimestamp(), expiresAt });
+    return safeResult;
+  });
+});
+
+function waitControlCallable(type, handler) {
+  return onCall(callableOptions, async (request) => {
+    const uid = uidOf(request);
+    const requestId = requestIdOf(request);
+    const input = roundActionInput(request);
+    const hash = payloadHash(type, input);
+    const action = actionRef(uid, requestId);
+    return db.runTransaction(async (tx) => {
+      const room = roomRef(input.roomId);
+      const game = room.collection('games').doc(input.gameId);
+      const serverGame = room.collection('serverGames').doc(input.gameId);
+      const member = room.collection('members').doc(uid);
+      const ownPrivate = room.collection('privatePlayers').doc(uid);
+      const [actionSnap, roomSnap, gameSnap, serverSnap, memberSnap, privateSnap] = await Promise.all([
+        tx.get(action), tx.get(room), tx.get(game), tx.get(serverGame), tx.get(member), tx.get(ownPrivate),
+      ]);
+      if (actionSnap.exists) return assertReplay(actionSnap.data(), hash);
+      const gameData = gameSnap.data();
+      const serverData = serverSnap.data();
+      const seatId = verifyRoundWaitState({ roomData: roomSnap.data(), gameData, serverData, memberData: memberSnap.data(), privateData: privateSnap.data(), input });
+      const other = seatId === 'seat1' ? 'seat2' : 'seat1';
+      if (gameData.nextRoundReady?.[seatId] !== true || gameData.nextRoundReady?.[other] === true) fail('permission-denied', '待機中のプレイヤーだけが操作できます。');
+      const deadlineMillis = gameData.deadline?.toMillis?.();
+      if (!Number.isFinite(deadlineMillis) || deadlineMillis > Date.now()) fail('failed-precondition', '待機期限前には操作できません。');
+      return handler({ tx, action, hash, uid, input, room, game, serverGame, gameData, serverData, seatId });
+    });
+  });
+}
+
+const extendNextRoundWait = waitControlCallable('extendNextRoundWait', ({ tx, action, hash, uid, input, room, game }) => {
+  const nextVersion = input.stateVersion + 1;
+  const expiresAt = expiresAtFromNow();
+  const deadline = deadlineFromNow(WAIT_EXTENSION_MILLIS);
+  const safeResult = { roomId: input.roomId, gameId: input.gameId, round: input.round, phase: 'round-result', stateVersion: nextVersion, deadlineMillis: deadline.toMillis() };
+  tx.update(game, { stateVersion: nextVersion, deadline, lastValidActionAt: FieldValue.serverTimestamp(), expiresAt });
+  tx.update(room, { stateVersion: nextVersion, lastValidActionAt: FieldValue.serverTimestamp(), expiresAt });
+  tx.set(action, { uid, type: 'extendNextRoundWait', payloadHash: hash, result: safeResult, createdAt: FieldValue.serverTimestamp(), expiresAt });
+  return safeResult;
+});
+
+const abortAfterWait = waitControlCallable('abortAfterWait', ({ tx, action, hash, uid, input, room, game, serverGame, gameData }) => {
+  const nextVersion = input.stateVersion + 1;
+  const expiresAt = expiresAtFromNow();
+  const result = { type: 'aborted', reason: 'next-round-timeout', round: input.round };
+  const safeResult = { roomId: input.roomId, gameId: input.gameId, round: input.round, phase: 'aborted', stateVersion: nextVersion, result };
+  tx.update(game, { phase: 'aborted', stateVersion: nextVersion, result, deadline: null, interruptedAt: FieldValue.serverTimestamp(), expiresAt });
+  tx.update(serverGame, { phase: 'aborted' });
+  tx.update(room, { status: 'aborted', stateVersion: nextVersion, interruptedAt: FieldValue.serverTimestamp(), lastValidActionAt: FieldValue.serverTimestamp(), expiresAt });
+  tx.set(action, { uid, type: 'abortAfterWait', payloadHash: hash, result: safeResult, createdAt: FieldValue.serverTimestamp(), expiresAt });
+  return safeResult;
 });
 
 const getSnapshot = onCall(callableOptions, async (request) => {
@@ -602,5 +777,10 @@ const getSnapshot = onCall(callableOptions, async (request) => {
 
 module.exports = {
   createRoom, joinRoom, getSnapshot, startGame, submitCard, submitCopyTarget,
-  _test: { CARD_IDS, publicRoom, publicGame, privatePlayer, publicRoundResult, createInviteCode, parseInviteCode, hasValidExpiry },
+  readyNextRound, extendNextRoundWait, abortAfterWait,
+  _test: {
+    CARD_IDS, publicRoom, publicGame, privatePlayer, publicRoundResult, publicHistory,
+    createInviteCode, parseInviteCode, hasValidExpiry, completionResult, resolutionPhase,
+    NEXT_ROUND_WAIT_MILLIS, WAIT_EXTENSION_MILLIS,
+  },
 };

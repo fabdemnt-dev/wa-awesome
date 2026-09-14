@@ -78,6 +78,14 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .copy-choices .online-card { flex-basis: 146px; }
 .round-result ul { margin: 8px 0 0; padding-left: 1.3rem; color: var(--muted); }
 .round-result li + li { margin-top: 6px; }
+.next-round-actions { display: grid; gap: 8px; margin-top: 14px; }
+.next-round-actions p { margin: 0; }
+.expired-wait-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.danger-button { border-color: #b97b91; background: #653149; }
+.wait-countdown { min-height: 1.6em; color: var(--moon); text-align: center; font-variant-numeric: tabular-nums; }
+.history-panel { margin-top: 16px; padding: 12px; border: 1px solid rgba(112, 122, 177, .48); border-radius: 12px; }
+.history-panel summary { color: var(--moon); cursor: pointer; font-weight: 700; }
+.history-item { margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(112, 122, 177, .35); color: var(--muted); }
 [hidden] { display: none !important; }
 @media (max-width: 390px) {
   .online-shell { width: min(100% - 20px, 640px); padding-top: 4px; }

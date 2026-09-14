@@ -1461,3 +1461,6 @@ exports.moonScaleDuelGetSnapshot = moonScaleDuelOnline.getSnapshot;
 exports.moonScaleDuelStartGame = moonScaleDuelOnline.startGame;
 exports.moonScaleDuelSubmitCard = moonScaleDuelOnline.submitCard;
 exports.moonScaleDuelSubmitCopyTarget = moonScaleDuelOnline.submitCopyTarget;
+exports.moonScaleDuelReadyNextRound = moonScaleDuelOnline.readyNextRound;
+exports.moonScaleDuelExtendNextRoundWait = moonScaleDuelOnline.extendNextRoundWait;
+exports.moonScaleDuelAbortAfterWait = moonScaleDuelOnline.abortAfterWait;
