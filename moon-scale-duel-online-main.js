@@ -13,7 +13,7 @@ async function refresh() {
   const snapshot = await api.snapshot({ roomId: state.roomId });
   state.snapshot = snapshot;
   if (snapshot.room.status === 'waiting') lobby(snapshot);
-  else started(snapshot);
+  else started(snapshot, state.selectedCardId);
   status('オンライン対戦の準備ができました。');
 }
 
@@ -51,6 +51,29 @@ el('join-room').onclick = async () => {
 el('start-match').onclick = async () => {
   try {
     await mutate('start', (requestId) => api.startGame({ roomId: state.roomId, stateVersion: state.snapshot.room.stateVersion, requestId }));
+    await refresh();
+  } catch { /* status is already shown */ }
+};
+el('online-hand').onclick = (event) => {
+  const button = event.target.closest('[data-card-id]');
+  if (!button || button.disabled || state.snapshot?.private?.submitted) return;
+  state.selectedCardId = button.dataset.cardId;
+  started(state.snapshot, state.selectedCardId);
+};
+el('submit-card').onclick = async () => {
+  const snapshot = state.snapshot;
+  if (!snapshot?.game || !state.selectedCardId) return;
+  const action = `submit-card-${snapshot.game.gameId}-${snapshot.game.round}`;
+  try {
+    await mutate(action, (requestId) => api.submitCard({
+      roomId: state.roomId,
+      gameId: snapshot.game.gameId,
+      round: snapshot.game.round,
+      stateVersion: snapshot.game.stateVersion,
+      cardId: state.selectedCardId,
+      requestId,
+    }));
+    state.selectedCardId = null;
     await refresh();
   } catch { /* status is already shown */ }
 };

@@ -2,6 +2,7 @@ export const state = {
   uid: null,
   roomId: null,
   snapshot: null,
+  selectedCardId: null,
   pendingRequestIds: new Map(),
 };
 

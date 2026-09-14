@@ -25,7 +25,7 @@
       <div class="divider" aria-hidden="true"><span>または</span></div>
       <label>招待コード<input id="invite-code" maxlength="26" autocomplete="off" placeholder="MSD1-……-……"></label>
       <button id="join-room" type="button">部屋に参加する</button>
-      <p class="stage-note">第1段階では、部屋作成・参加・決闘開始まで確認できます。</p>
+      <p class="stage-note">部屋を作り、2人で月札の秘密提出と同時公開を確認できます。</p>
       <a href="moon-scale-duel/">ひとり用へ戻る</a>
     </section>
 
@@ -49,7 +49,15 @@
         <div><span>対手</span><strong id="started-opponent"></strong><b>月影 10</b></div>
       </div>
       <p id="started-state" class="round-state"></p>
-      <p class="stage-note">第1ラウンドの札選択は第2段階で実装します。</p>
+      <div id="selection-area">
+        <p id="selection-note" class="stage-note"></p>
+        <div id="online-hand" class="online-hand" aria-label="あなたの月札"></div>
+        <button id="submit-card" class="primary-button" type="button" disabled>この札で決定</button>
+      </div>
+      <div id="revealed-area" hidden>
+        <div id="revealed-cards" class="revealed-cards" aria-label="公開された月札"></div>
+      </div>
+      <p id="stage-two-note" class="stage-note"></p>
     </section>
   </main>
   <script type="module" src="moon-scale-duel-online-main.js"></script>

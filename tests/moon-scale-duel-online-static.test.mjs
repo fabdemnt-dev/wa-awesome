@@ -15,11 +15,17 @@ test('moon-scale invite code is deterministic, parseable, and does not expose it
   assert.equal(invite.safeEqual(invite.mac(first.locator, first.secret, 'test-key'), invite.mac(first.locator, first.secret, 'test-key')), true);
 });
 
-test('stage-one page is separate and does not expose card submission controls', () => {
+test('stage-two page keeps secret submission on the dedicated online client', () => {
   const html = fs.readFileSync(new URL('../moon-scale-duel-online.html', import.meta.url), 'utf8');
   const main = fs.readFileSync(new URL('../moon-scale-duel-online-main.js', import.meta.url), 'utf8');
+  const api = fs.readFileSync(new URL('../moon-scale-duel-online-api.js', import.meta.url), 'utf8');
+  const ui = fs.readFileSync(new URL('../moon-scale-duel-online-ui.js', import.meta.url), 'utf8');
   assert.match(html, /月秤の決闘/);
-  assert.match(html, /第1ラウンドの札選択は第2段階で実装します/);
-  assert.doesNotMatch(html + main, /この札で決定|submitCard|submitChoice/);
+  assert.match(html, /この札で決定/);
+  assert.match(api, /moonScaleDuelSubmitCard/);
+  assert.match(main, /stateVersion:\s*snapshot\.game\.stateVersion/);
+  assert.match(ui, /対手の選択を待っています/);
+  assert.match(ui, /cards-revealed/);
+  assert.doesNotMatch(html + main + ui, /localStorage\.(?:setItem|getItem)\([^\n]*(?:card|札|selection)/i);
   assert.match(main, /localStorage\.setItem\(STORAGE_KEY, state\.roomId\)/);
 });
