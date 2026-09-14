@@ -6,6 +6,7 @@ import { el, show, status, lobby, started } from './moon-scale-duel-online-ui.js
 
 const STORAGE_KEY = 'moonScaleDuelOnlineRoomId';
 const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+let rematchRequestInFlight = null;
 function message(error) { return error?.message?.replace(/^FirebaseError:\s*/, '') || '処理に失敗しました。'; }
 
 async function refresh() {
@@ -123,6 +124,54 @@ el('extend-next-round-wait').onclick = async () => {
 el('abort-after-wait').onclick = async () => {
   try { await currentRoundAction('abort-after-wait', api.abortAfterWait); } catch { /* status is already shown */ }
 };
+el('request-rematch').onclick = async () => {
+  if (rematchRequestInFlight) return rematchRequestInFlight;
+  const snapshot = state.snapshot;
+  if (!snapshot?.game || snapshot.game.phase !== 'ended') return;
+  el('request-rematch').disabled = true;
+  const action = `request-rematch-${snapshot.game.gameId}-${snapshot.game.stateVersion}`;
+  rematchRequestInFlight = (async () => {
+    try {
+      await mutate(action, (requestId) => api.requestRematch({
+        roomId: state.roomId,
+        gameId: snapshot.game.gameId,
+        stateVersion: snapshot.game.stateVersion,
+        requestId,
+      }));
+      state.selectedCardId = null;
+      state.selectedCopyTarget = null;
+      await refresh();
+    } catch { el('request-rematch').disabled = false; }
+    finally { rematchRequestInFlight = null; }
+  })();
+  return rematchRequestInFlight;
+};
+async function returnToToybox(event) {
+  const destination = event.currentTarget.href;
+  if (rematchRequestInFlight) {
+    event.preventDefault();
+    await rematchRequestInFlight;
+  }
+  const snapshot = state.snapshot;
+  const yourSeat = snapshot?.you?.seatId;
+  if (!snapshot?.game || snapshot.game.phase !== 'ended' || snapshot.game.rematchReady?.[yourSeat] !== true) {
+    if (event.defaultPrevented) window.location.assign(destination);
+    return;
+  }
+  event.preventDefault();
+  const action = `cancel-rematch-${snapshot.game.gameId}-${snapshot.game.stateVersion}`;
+  try {
+    await mutate(action, (requestId) => api.cancelRematch({
+      roomId: state.roomId,
+      gameId: snapshot.game.gameId,
+      stateVersion: snapshot.game.stateVersion,
+      requestId,
+    }));
+    window.location.assign(destination);
+  } catch { /* cancellation must succeed before navigation */ }
+}
+el('top-return').addEventListener('click', returnToToybox);
+el('result-return').addEventListener('click', returnToToybox);
 el('copy-code').onclick = async () => {
   try {
     await navigator.clipboard.writeText(el('shown-code').textContent);

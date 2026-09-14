@@ -1,3 +1,5 @@
+import { resultPresentation } from './moon-scale-duel-online-state.js';
+
 const ids = ['entry', 'lobby', 'started'];
 export const el = (id) => document.getElementById(id);
 const cards = Object.freeze({
@@ -46,6 +48,9 @@ export function started(snapshot, selectedCardId = null, selectedCopyTarget = nu
   const opponentSeat = yourSeat === 'seat1' ? 'seat2' : 'seat1';
   el('started-you-moon').textContent = `月影 ${snapshot.game.moonShadow[yourSeat]}`;
   el('started-opponent-moon').textContent = `月影 ${snapshot.game.moonShadow[opponentSeat]}`;
+  const finalVisible = ['ended', 'aborted'].includes(snapshot.game.phase);
+  hidden(el('final-result'), !finalVisible);
+  if (finalVisible) renderFinalResult(snapshot, yourSeat);
   const revealed = ['cards-revealed', 'choosing-copy', 'round-result', 'ended', 'aborted'].includes(snapshot.game.phase) && snapshot.game.publicCards;
   hidden(el('selection-area'), Boolean(revealed));
   hidden(el('revealed-area'), !revealed);
@@ -119,4 +124,34 @@ function renderNextRoundActions(snapshot) {
     ? `準備待ち期限まで約${Math.ceil(remaining / 1000)}秒` : '';
   el('next-round-note').textContent = ready ? '対手の準備を待っています…' : '双方が準備すると次のラウンドへ進みます。';
   el('stage-note').textContent = '前ラウンドの結果を確認し、準備ができたら次へ進んでください。';
+}
+
+function renderFinalResult(snapshot, yourSeat) {
+  const game = snapshot.game;
+  const presentation = resultPresentation(game, yourSeat);
+  const aborted = presentation.kind === 'aborted';
+  const art = el('final-result-art');
+  const image = el('final-result-image');
+  hidden(el('rematch-actions'), false);
+  el('final-result-title').textContent = presentation.title;
+  el('final-result-reason').textContent = presentation.reason;
+  el('final-result-score').textContent = presentation.score;
+  if (aborted) {
+    hidden(art, true);
+    image.removeAttribute('src');
+    image.alt = '';
+    hidden(el('request-rematch'), true);
+    hidden(el('rematch-note'), true);
+    el('stage-note').textContent = '対戦中断は、勝利・敗北・引き分けとは別の結果です。';
+    return;
+  }
+  image.src = presentation.image.src;
+  image.alt = presentation.image.alt;
+  hidden(art, false);
+  const requested = game.rematchReady?.[yourSeat] === true;
+  hidden(el('rematch-note'), false);
+  hidden(el('request-rematch'), requested);
+  el('request-rematch').disabled = false;
+  el('rematch-note').textContent = requested ? '対手の再戦希望を待っています…' : '双方が希望すると、同じ2人で新しい決闘を始めます。';
+  el('stage-note').textContent = '決闘が終了しました。';
 }

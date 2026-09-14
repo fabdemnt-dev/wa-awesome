@@ -9,7 +9,7 @@
 </head>
 <body>
   <main class="online-shell">
-    <a class="top-link" href="toybox/">← 🎪 おもちゃ箱へ戻る</a>
+    <a id="top-return" class="top-link" href="toybox/">← 🎪 おもちゃ箱へ戻る</a>
     <header>
       <p class="eyebrow">ONLINE MATCH</p>
       <h1>月秤の決闘</h1>
@@ -76,6 +76,17 @@
           </div>
         </div>
       </div>
+      <section id="final-result" class="final-result" aria-labelledby="final-result-title" hidden>
+        <h3 id="final-result-title"></h3>
+        <p id="final-result-reason" class="end-reason"></p>
+        <span id="final-result-art" class="result-art"><img id="final-result-image" alt=""></span>
+        <p id="final-result-score"></p>
+        <div id="rematch-actions" class="end-actions">
+          <button id="request-rematch" class="primary-button" type="button">もう一度決闘する</button>
+          <p id="rematch-note" class="stage-note" aria-live="polite"></p>
+          <a id="result-return" href="toybox/">🎪 おもちゃ箱へ戻る</a>
+        </div>
+      </section>
       <details id="history-panel" class="history-panel">
         <summary id="history-summary">決闘の記録</summary>
         <div id="round-history"></div>
