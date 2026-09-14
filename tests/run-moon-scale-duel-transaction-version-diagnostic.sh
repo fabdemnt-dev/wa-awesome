@@ -37,23 +37,25 @@ exit_code=$?
 set -e
 finished_ms="$(date +%s%3N)"; elapsed_ms=$((finished_ms - started_ms))
 
-sanitize <"$work_root/full-output.log" | grep -Ei 'DIAGNOSTIC|Subtest:|tests |pass |fail |skipped |duration_ms|emulator|functions definitions|loaded|module|transaction|error|failed|warning' | head -n 2000 >"$artifact_root/preparation-and-test.log" || true
+sed -E 's/\x1B\[[0-9;]*[[:alpha:]]//g' "$work_root/full-output.log" >"$work_root/plain-output.log"
+
+sanitize <"$work_root/plain-output.log" | grep -Ei 'DIAGNOSTIC|Subtest:|tests |pass |fail |skipped |duration_ms|emulator|functions definitions|loaded|module|transaction|error|failed|warning' | head -n 2000 >"$artifact_root/preparation-and-test.log" || true
 sanitize <"$work_root/cli-version.stderr" | head -n 100 >"$artifact_root/cli-stderr.log"
 if [ -f firestore-debug.log ]; then sanitize <firestore-debug.log | grep -Ei 'transaction|lock|retry|timeout|invalid|closed|error|warning' | head -n 4000 >"$artifact_root/firestore-emulator.log" || true; fi
 if [ -f functions-debug.log ]; then sanitize <functions-debug.log | grep -Ei 'Loaded functions definitions|moonScaleDuelSubmitCard|invalid|closed|error|warning' | head -n 4000 >"$artifact_root/functions-emulator.log" || true; fi
 
 firestore_started=false; functions_started=false; function_definitions_loaded=false; test_module_loaded=false
-grep -Eq 'Firestore Emulator logging|firestore: .*running|All emulators ready' "$work_root/full-output.log" && firestore_started=true
-grep -Eq 'functions: (Watching|Loaded functions definitions)|All emulators ready' "$work_root/full-output.log" && functions_started=true
-grep -Eq 'Loaded functions definitions.*moonScaleDuelSubmitCard|moonScaleDuelSubmitCard.*Loaded functions definitions' "$work_root/full-output.log" && function_definitions_loaded=true
-grep -Eq 'DIAGNOSTIC |# Subtest:|Subtest:' "$work_root/full-output.log" && test_module_loaded=true
+grep -Eq 'Firestore Emulator logging|firestore: .*running|All emulators ready' "$work_root/plain-output.log" && firestore_started=true
+grep -Eq 'functions: (Watching|Loaded functions definitions)|All emulators ready' "$work_root/plain-output.log" && functions_started=true
+grep -Eq 'Loaded functions definitions.*moonScaleDuelSubmitCard|moonScaleDuelSubmitCard.*Loaded functions definitions' "$work_root/plain-output.log" && function_definitions_loaded=true
+grep -Eq 'DIAGNOSTIC |# Subtest:|Subtest:|tests [0-9]+' "$work_root/plain-output.log" && test_module_loaded=true
 
-callback_attempts_total="$(grep -Eo '"attempts":[0-9]+' "$work_root/full-output.log" 2>/dev/null | cut -d: -f2 | awk '{s+=$1} END {print s+0}')"
-if [ "$callback_attempts_total" -eq 0 ]; then callback_attempts_total="$(grep -Ec 'Beginning execution of .*moonScaleDuelSubmitCard' "$work_root/full-output.log" 2>/dev/null || true)"; fi
+callback_attempts_total="$(grep -Eo '"attempts":[0-9]+' "$work_root/plain-output.log" 2>/dev/null | cut -d: -f2 | awk '{s+=$1} END {print s+0}')"
+if [ "$callback_attempts_total" -eq 0 ]; then callback_attempts_total="$(grep -Ec 'Beginning execution of .*moonScaleDuelSubmitCard' "$work_root/plain-output.log" 2>/dev/null || true)"; fi
 if [ "$callback_attempts_total" -eq 0 ] && [ "$exit_code" -eq 0 ] && [ "$test_module_loaded" = true ]; then callback_attempts_total=1; fi
-trials_started="$(grep -Ec '^DIAGNOSTIC .*"trial":[0-9]+' "$work_root/full-output.log" 2>/dev/null || true)"
-trials_succeeded="$(grep -Ec '^DIAGNOSTIC .*"result":"success"' "$work_root/full-output.log" 2>/dev/null || true)"
-trials_failed="$(grep -Ec '^DIAGNOSTIC .*"result":"failure"' "$work_root/full-output.log" 2>/dev/null || true)"
+trials_started="$(grep -Ec '^DIAGNOSTIC .*"trial":[0-9]+' "$work_root/plain-output.log" 2>/dev/null || true)"
+trials_succeeded="$(grep -Ec '^DIAGNOSTIC .*"result":"success"' "$work_root/plain-output.log" 2>/dev/null || true)"
+trials_failed="$(grep -Ec '^DIAGNOSTIC .*"result":"failure"' "$work_root/plain-output.log" 2>/dev/null || true)"
 if [ "$case_name" = six-rounds ] || [ "$case_name" = readiness ]; then trials_started=1; if [ "$exit_code" -eq 0 ]; then trials_succeeded=1; trials_failed=0; else trials_succeeded=0; trials_failed=1; fi; fi
 lock_timeouts="$(grep -Eh '^WARNING: Operation failed: Transaction lock timeout\.$' "$artifact_root"/*.log 2>/dev/null | wc -l | tr -d ' ')"
 invalid_closed="$(grep -Eh 'Transaction is invalid or closed' "$artifact_root"/*.log 2>/dev/null | sort -u | wc -l | tr -d ' ')"

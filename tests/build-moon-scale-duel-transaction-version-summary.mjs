@@ -2,6 +2,7 @@ import { readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 const root = path.resolve('diagnostic-artifacts');
+const javaMajor = Number.parseInt(await readFile(path.join(root, 'java-major-version.txt'), 'utf8').catch(() => '0'), 10);
 const versions = ['current', 'candidate'];
 const expectedCases = ['minimal-submit', 'promise-all', 'sequential', 'get-all', 'six-rounds', 'readiness'];
 const cases = [];
@@ -21,7 +22,9 @@ const readiness = Object.fromEntries(versions.map((version) => {
   return [version, { valid, cases_found: found.length }];
 }));
 await writeFile(path.join(root, 'summary.json'), `${JSON.stringify({
-  version_comparison_valid: readiness.current.valid && readiness.candidate.valid,
+  java_major_version: javaMajor,
+  java_21_or_newer: javaMajor >= 21,
+  version_comparison_valid: javaMajor >= 21 && readiness.current.valid && readiness.candidate.valid,
   readiness,
   cases,
 }, null, 2)}\n`);

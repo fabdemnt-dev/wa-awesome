@@ -21,6 +21,11 @@ jobs:
         with:
           node-version: 24
           cache: npm
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
       - name: Install test dependencies
         run: npm ci
       - name: Install Functions dependencies
@@ -40,6 +45,9 @@ jobs:
           printf '%s\n' '1.19.8' > diagnostic-artifacts/current-firestore-emulator-version.txt
           printf '%s\n' '1.22.0' > diagnostic-artifacts/candidate-firestore-emulator-version.txt
           java -version 2> diagnostic-artifacts/java-version.txt
+          java_major="$(java -version 2>&1 | sed -nE '1s/.*version "([0-9]+).*/\1/p')"
+          printf '%s\n' "$java_major" > diagnostic-artifacts/java-major-version.txt
+          test "$java_major" -ge 21
           node --version > diagnostic-artifacts/node-version.txt
       - name: Run current and candidate diagnostics on the same runner
         run: |
