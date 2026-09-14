@@ -44,6 +44,25 @@ test('online page keeps secret play, final results, and rematch on the dedicated
   assert.match(main, /localStorage\.setItem\(STORAGE_KEY, state\.roomId\)/);
 });
 
+test('online authentication has finite staged timeouts and a retryable stale-safe UI', () => {
+  const html = fs.readFileSync(new URL('../moon-scale-duel-online.html', import.meta.url), 'utf8');
+  const main = fs.readFileSync(new URL('../moon-scale-duel-online-main.js', import.meta.url), 'utf8');
+  const firebase = fs.readFileSync(new URL('../moon-scale-duel-online-firebase.js', import.meta.url), 'utf8');
+  const auth = fs.readFileSync(new URL('../moon-scale-duel-auth.js', import.meta.url), 'utf8');
+  assert.match(auth, /AUTH_TIMEOUT_MS\s*=\s*20_000/);
+  assert.match(auth, /stage:\s*'auth-state-ready'/);
+  assert.match(auth, /stage:\s*'sign-in-anonymously'/);
+  assert.match(firebase, /runAnonymousAuth/);
+  assert.match(html, /id="auth-retry"[^>]*hidden/);
+  assert.match(html, /id="retry-auth"/);
+  assert.match(html, /もう一度試す/);
+  assert.match(main, /createAuthAttemptCoordinator/);
+  assert.match(auth, /currentGeneration === generation/);
+  assert.match(auth, /if \(inFlight\) return inFlight/);
+  assert.match(main, /ログインに時間がかかっています/);
+  assert.doesNotMatch(main, /location\.reload/);
+});
+
 test('completed results use the server outcome from each seat perspective and aborted stays separate', () => {
   const seat1Win = { phase: 'ended', moonShadow: { seat1: 12, seat2: 7 }, result: { type: 'completed', outcome: 'seat1', moonShadow: { seat1: 12, seat2: 7 } } };
   assert.deepEqual(

@@ -3,6 +3,7 @@ import { getAuth, signInAnonymously, connectAuthEmulator } from 'https://www.gst
 import { connectFirestoreEmulator } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
 import { getFunctions, connectFunctionsEmulator } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-functions.js';
 import { getDatabase, connectDatabaseEmulator } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js';
+import { AUTH_TIMEOUT_MS, runAnonymousAuth } from './moon-scale-duel-auth.js';
 
 export const auth = getAuth(app);
 export const functions = getFunctions(app, 'asia-northeast1');
@@ -15,8 +16,11 @@ if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
   connectDatabaseEmulator(rtdb, '127.0.0.1', 9000);
 }
 
-export async function ensureAnonymousUser() {
-  await auth.authStateReady();
-  if (auth.currentUser) return auth.currentUser;
-  return (await signInAnonymously(auth)).user;
+export async function ensureAnonymousUser(timeoutMs = AUTH_TIMEOUT_MS) {
+  return runAnonymousAuth({
+    authStateReady: () => auth.authStateReady(),
+    getCurrentUser: () => auth.currentUser,
+    signIn: () => signInAnonymously(auth),
+    timeoutMs,
+  });
 }
