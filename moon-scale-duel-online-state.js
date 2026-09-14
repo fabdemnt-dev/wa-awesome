@@ -3,6 +3,7 @@ export const state = {
   roomId: null,
   snapshot: null,
   selectedCardId: null,
+  selectedCopyTarget: null,
   pendingRequestIds: new Map(),
 };
 

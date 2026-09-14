@@ -71,6 +71,13 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .public-card > span:first-child { color: var(--muted); font-size: .78rem; }
 .public-card-art { display: block; height: 48px; overflow: hidden; border-radius: 7px; }
 .public-card strong { color: var(--moon); overflow-wrap: anywhere; }
+.public-card small { color: var(--muted); }
+.copy-area, .round-result { margin-top: 16px; padding: 14px; border: 1px solid rgba(169, 154, 244, .48); border-radius: 12px; background: rgba(8, 11, 32, .45); }
+.copy-area h3, .round-result h3 { margin: 0 0 8px; color: var(--moon); text-align: center; }
+.copy-choices { display: flex; gap: 10px; margin: 10px -4px 14px; padding: 4px; overflow-x: auto; }
+.copy-choices .online-card { flex-basis: 146px; }
+.round-result ul { margin: 8px 0 0; padding-left: 1.3rem; color: var(--muted); }
+.round-result li + li { margin-top: 6px; }
 [hidden] { display: none !important; }
 @media (max-width: 390px) {
   .online-shell { width: min(100% - 20px, 640px); padding-top: 4px; }

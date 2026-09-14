@@ -146,6 +146,18 @@ function submitPayload(room, cardId, requestId, overrides = {}) {
   };
 }
 
+function copyPayload(room, copyTargetId, requestId, stateVersion, overrides = {}) {
+  return {
+    roomId: room.roomId,
+    gameId: room.started.gameId,
+    round: 1,
+    stateVersion,
+    copyTargetId,
+    requestId,
+    ...overrides,
+  };
+}
+
 function assertNoCardLeak(snapshot) {
   assert.equal(snapshot.game.phase, 'selecting-card');
   assert.equal(snapshot.game.publicCards, null);
@@ -203,7 +215,7 @@ test('both submissions reveal atomically and near-simultaneous calls preserve on
     adminDb.doc(`moonScaleDuelRooms/${room.roomId}/serverGames/${room.started.gameId}`).get(),
   ]);
   assert.deepEqual(publicPart(hostView), publicPart(guestView));
-  assert.equal(hostView.game.phase, 'cards-revealed');
+  assert.equal(hostView.game.phase, 'round-result');
   assert.deepEqual(hostView.game.publicCards, { seat1: 'reflection', seat2: 'stillness' });
   assert.equal(hostView.game.stateVersion, room.started.stateVersion + 1);
   assert.deepEqual(hostView.game.remainingCardCounts, { seat1: 5, seat2: 5 });
@@ -211,6 +223,89 @@ test('both submissions reveal atomically and near-simultaneous calls preserve on
   assert.deepEqual(guestView.private.usedCards, ['stillness']);
   assert.deepEqual(serverGame.data().usedCards, { seat1: ['reflection'], seat2: ['stillness'] });
   assert.deepEqual(publicGame.data().publicCards, { seat1: 'reflection', seat2: 'stillness' });
+  assert.deepEqual(hostView.game.moonShadow, { seat1: 10, seat2: 10 });
+  assert.equal(hostView.game.roundResult.effects.seat1.status, 'blocked');
+});
+
+test('false moon exposes candidates only to its owner and resolves after a valid secret target', { timeout: 120000 }, async () => {
+  const room = await startedRoom('copy-one');
+  await room.host.call('moonScaleDuelSubmitCard', submitPayload(room, 'falseMoon', 'copy-one-host'));
+  const reveal = await room.guest.call('moonScaleDuelSubmitCard', submitPayload(room, 'waxing', 'copy-one-guest'));
+  assert.equal(reveal.phase, 'choosing-copy');
+  const [hostChoosing, guestChoosing] = await Promise.all([
+    room.host.call('moonScaleDuelGetSnapshot', { roomId: room.roomId }),
+    room.guest.call('moonScaleDuelGetSnapshot', { roomId: room.roomId }),
+  ]);
+  assert.deepEqual(hostChoosing.private.legalCopyTargets, ['waxing', 'waning', 'reflection']);
+  assert.deepEqual(guestChoosing.private.legalCopyTargets, []);
+  assert.equal(JSON.stringify(guestChoosing).includes('copyCandidates'), false);
+  const payload = copyPayload(room, 'waning', 'copy-one-target', reveal.stateVersion);
+  await denied(room.host.call('moonScaleDuelSubmitCopyTarget', { ...payload, requestId: 'copy-one-stale', stateVersion: reveal.stateVersion - 1 }), 'functions/failed-precondition');
+  const resolved = await room.host.call('moonScaleDuelSubmitCopyTarget', payload);
+  assert.equal(resolved.phase, 'round-result');
+  assert.deepEqual(await room.host.call('moonScaleDuelSubmitCopyTarget', payload), resolved);
+  await denied(room.host.call('moonScaleDuelSubmitCopyTarget', { ...payload, copyTargetId: 'waxing' }), 'functions/already-exists');
+  const [hostResult, guestResult] = await Promise.all([
+    room.host.call('moonScaleDuelGetSnapshot', { roomId: room.roomId }),
+    room.guest.call('moonScaleDuelGetSnapshot', { roomId: room.roomId }),
+  ]);
+  assert.deepEqual(publicPart(hostResult), publicPart(guestResult));
+  assert.equal(hostResult.game.publicCopies.seat1, 'waning');
+  assert.deepEqual(hostResult.game.moonShadow, { seat1: 10, seat2: 10 });
+});
+
+test('two false moons keep the first copy secret until both choices exist', { timeout: 120000 }, async () => {
+  const room = await startedRoom('copy-both');
+  await Promise.all([
+    room.host.call('moonScaleDuelSubmitCard', submitPayload(room, 'falseMoon', 'copy-both-host')),
+    room.guest.call('moonScaleDuelSubmitCard', submitPayload(room, 'falseMoon', 'copy-both-guest')),
+  ]);
+  const choosing = await room.host.call('moonScaleDuelGetSnapshot', { roomId: room.roomId });
+  assert.equal(choosing.game.phase, 'choosing-copy');
+  const version = choosing.game.stateVersion;
+  await room.host.call('moonScaleDuelSubmitCopyTarget', copyPayload(room, 'waxing', 'copy-both-target-a', version));
+  const guestWaiting = await room.guest.call('moonScaleDuelGetSnapshot', { roomId: room.roomId });
+  assert.equal(guestWaiting.game.publicCopies, null);
+  assert.equal(guestWaiting.game.roundResult, null);
+  assert.equal(guestWaiting.private.selectedCopyTarget, null);
+  await denied(room.guest.call('moonScaleDuelSubmitCopyTarget', copyPayload(room, 'oath', 'copy-both-invalid', version)), 'functions/failed-precondition');
+  const outsider = client('copy-both-outsider');
+  await signInAnonymously(outsider.auth);
+  await denied(outsider.call('moonScaleDuelSubmitCopyTarget', copyPayload(room, 'waning', 'copy-both-outsider', version)), 'functions/permission-denied');
+  const guestResult = await room.guest.call('moonScaleDuelSubmitCopyTarget', copyPayload(room, 'reflection', 'copy-both-target-b', version));
+  assert.equal(guestResult.resolved, true);
+  const [hostResult, finalGuest, serverGame] = await Promise.all([
+    room.host.call('moonScaleDuelGetSnapshot', { roomId: room.roomId }),
+    room.guest.call('moonScaleDuelGetSnapshot', { roomId: room.roomId }),
+    adminDb.doc(`moonScaleDuelRooms/${room.roomId}/serverGames/${room.started.gameId}`).get(),
+  ]);
+  assert.deepEqual(publicPart(hostResult), publicPart(finalGuest));
+  assert.equal(hostResult.game.phase, 'round-result');
+  assert.deepEqual(hostResult.game.publicCopies, { seat1: 'waxing', seat2: 'reflection' });
+  assert.equal(serverGame.data().publicResult.round, 1);
+  assert.equal(serverGame.data().phase, 'round-result');
+});
+
+test('near-simultaneous copy choices produce one consistent round result', { timeout: 120000 }, async () => {
+  const room = await startedRoom('copy-race');
+  await Promise.all([
+    room.host.call('moonScaleDuelSubmitCard', submitPayload(room, 'falseMoon', 'copy-race-host')),
+    room.guest.call('moonScaleDuelSubmitCard', submitPayload(room, 'falseMoon', 'copy-race-guest')),
+  ]);
+  const choosing = await room.host.call('moonScaleDuelGetSnapshot', { roomId: room.roomId });
+  const results = await Promise.all([
+    room.host.call('moonScaleDuelSubmitCopyTarget', copyPayload(room, 'waxing', 'copy-race-target-a', choosing.game.stateVersion)),
+    room.guest.call('moonScaleDuelSubmitCopyTarget', copyPayload(room, 'waning', 'copy-race-target-b', choosing.game.stateVersion)),
+  ]);
+  assert.equal(results.filter((result) => result.resolved).length, 1);
+  const [hostResult, guestResult] = await Promise.all([
+    room.host.call('moonScaleDuelGetSnapshot', { roomId: room.roomId }),
+    room.guest.call('moonScaleDuelGetSnapshot', { roomId: room.roomId }),
+  ]);
+  assert.deepEqual(publicPart(hostResult), publicPart(guestResult));
+  assert.equal(hostResult.game.phase, 'round-result');
+  assert.deepEqual(hostResult.game.publicCopies, { seat1: 'waxing', seat2: 'waning' });
+  assert.deepEqual(hostResult.game.moonShadow, { seat1: 10, seat2: 10 });
 });
 
 test('submission rejects stale, invalid, already-used, and outsider operations', { timeout: 120000 }, async () => {
