@@ -13,7 +13,7 @@ async function refresh() {
   const snapshot = await api.snapshot({ roomId: state.roomId });
   state.snapshot = snapshot;
   if (snapshot.room.status === 'waiting') lobby(snapshot);
-  else started(snapshot, state.selectedCardId);
+  else started(snapshot, state.selectedCardId, state.selectedCopyTarget);
   status('オンライン対戦の準備ができました。');
 }
 
@@ -58,7 +58,30 @@ el('online-hand').onclick = (event) => {
   const button = event.target.closest('[data-card-id]');
   if (!button || button.disabled || state.snapshot?.private?.submitted) return;
   state.selectedCardId = button.dataset.cardId;
-  started(state.snapshot, state.selectedCardId);
+  started(state.snapshot, state.selectedCardId, state.selectedCopyTarget);
+};
+el('copy-choices').onclick = (event) => {
+  const button = event.target.closest('[data-card-id]');
+  if (!button || button.disabled || state.snapshot?.private?.copySubmitted) return;
+  state.selectedCopyTarget = button.dataset.cardId;
+  started(state.snapshot, state.selectedCardId, state.selectedCopyTarget);
+};
+el('submit-copy').onclick = async () => {
+  const snapshot = state.snapshot;
+  if (!snapshot?.game || !state.selectedCopyTarget) return;
+  const action = `submit-copy-${snapshot.game.gameId}-${snapshot.game.round}`;
+  try {
+    await mutate(action, (requestId) => api.submitCopyTarget({
+      roomId: state.roomId,
+      gameId: snapshot.game.gameId,
+      round: snapshot.game.round,
+      stateVersion: snapshot.game.stateVersion,
+      copyTargetId: state.selectedCopyTarget,
+      requestId,
+    }));
+    state.selectedCopyTarget = null;
+    await refresh();
+  } catch { /* status is already shown */ }
 };
 el('submit-card').onclick = async () => {
   const snapshot = state.snapshot;

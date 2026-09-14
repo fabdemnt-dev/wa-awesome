@@ -45,8 +45,8 @@
       <p class="eyebrow">DUEL READY</p>
       <h2>決闘を開始しました</h2>
       <div class="duelists" aria-label="参加プレイヤー">
-        <div><span>あなた</span><strong id="started-you"></strong><b>月影 10</b></div>
-        <div><span>対手</span><strong id="started-opponent"></strong><b>月影 10</b></div>
+        <div><span>あなた</span><strong id="started-you"></strong><b id="started-you-moon">月影 10</b></div>
+        <div><span>対手</span><strong id="started-opponent"></strong><b id="started-opponent-moon">月影 10</b></div>
       </div>
       <p id="started-state" class="round-state"></p>
       <div id="selection-area">
@@ -57,7 +57,17 @@
       <div id="revealed-area" hidden>
         <div id="revealed-cards" class="revealed-cards" aria-label="公開された月札"></div>
       </div>
-      <p id="stage-two-note" class="stage-note"></p>
+      <div id="copy-area" class="copy-area" hidden>
+        <h3>偽りの月：模倣先</h3>
+        <p id="copy-note" class="stage-note"></p>
+        <div id="copy-choices" class="copy-choices"></div>
+        <button id="submit-copy" class="primary-button" type="button" disabled>この効果を模倣する</button>
+      </div>
+      <div id="round-result" class="round-result" hidden>
+        <h3>第1ラウンドの結果</h3>
+        <ul id="round-messages"></ul>
+      </div>
+      <p id="stage-note" class="stage-note"></p>
     </section>
   </main>
   <script type="module" src="moon-scale-duel-online-main.js"></script>

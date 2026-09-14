@@ -9,4 +9,5 @@ export const api = {
   snapshot: (data) => call('moonScaleDuelGetSnapshot', data),
   startGame: (data) => call('moonScaleDuelStartGame', data),
   submitCard: (data) => call('moonScaleDuelSubmitCard', data),
+  submitCopyTarget: (data) => call('moonScaleDuelSubmitCopyTarget', data),
 };

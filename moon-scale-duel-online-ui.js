@@ -30,26 +30,47 @@ function cardHtml(id, selected, disabled) {
   return `<button class="online-card${selected ? ' selected' : ''}" type="button" data-card-id="${id}" aria-pressed="${selected}" ${disabled ? 'disabled' : ''}><span class="online-card-art"><img src="${card.image}" alt=""></span><strong>${card.name}</strong><span>${card.type}</span><small>${card.effect}</small></button>`;
 }
 
-function publicCardHtml(label, id) {
+function publicCardHtml(label, id, copyId = null) {
   const card = cards[id];
-  return `<div class="public-card"><span>${label}</span><span class="public-card-art"><img src="${card.image}" alt=""></span><strong>${card.name}</strong></div>`;
+  const copy = copyId ? `<small>「${cards[copyId].name}」を模倣</small>` : '';
+  return `<div class="public-card"><span>${label}</span><span class="public-card-art"><img src="${card.image}" alt=""></span><strong>${card.name}</strong>${copy}</div>`;
 }
 
-export function started(snapshot, selectedCardId = null) {
+export function started(snapshot, selectedCardId = null, selectedCopyTarget = null) {
   show('started');
   const opponent = snapshot.seats.find((seat) => seat.seatId !== snapshot.you.seatId);
   el('started-you').textContent = snapshot.you.displayName;
   el('started-opponent').textContent = opponent?.displayName || '対手';
   el('started-state').textContent = `第 ${snapshot.game.round} ラウンド`;
-  const revealed = snapshot.game.phase === 'cards-revealed' && snapshot.game.publicCards;
+  const yourSeat = snapshot.you.seatId;
+  const opponentSeat = yourSeat === 'seat1' ? 'seat2' : 'seat1';
+  el('started-you-moon').textContent = `月影 ${snapshot.game.moonShadow[yourSeat]}`;
+  el('started-opponent-moon').textContent = `月影 ${snapshot.game.moonShadow[opponentSeat]}`;
+  const revealed = ['cards-revealed', 'choosing-copy', 'round-result'].includes(snapshot.game.phase) && snapshot.game.publicCards;
   hidden(el('selection-area'), Boolean(revealed));
   hidden(el('revealed-area'), !revealed);
+  hidden(el('copy-area'), snapshot.game.phase !== 'choosing-copy');
+  hidden(el('round-result'), snapshot.game.phase !== 'round-result');
   if (revealed) {
-    const yourSeat = snapshot.you.seatId;
-    const opponentSeat = yourSeat === 'seat1' ? 'seat2' : 'seat1';
-    el('revealed-cards').innerHTML = publicCardHtml('あなたの札', snapshot.game.publicCards[yourSeat])
-      + publicCardHtml('対手の札', snapshot.game.publicCards[opponentSeat]);
-    el('stage-two-note').textContent = '双方の月札が同時に公開されました。効果解決は第3段階で実装します。';
+    el('revealed-cards').innerHTML = publicCardHtml('あなたの札', snapshot.game.publicCards[yourSeat], snapshot.game.publicCopies?.[yourSeat])
+      + publicCardHtml('対手の札', snapshot.game.publicCards[opponentSeat], snapshot.game.publicCopies?.[opponentSeat]);
+    if (snapshot.game.phase === 'choosing-copy') {
+      const targets = snapshot.private?.legalCopyTargets || [];
+      const submitted = snapshot.private?.copySubmitted === true;
+      el('copy-choices').innerHTML = targets.map((id) => cardHtml(id, id === selectedCopyTarget, submitted)).join('');
+      el('submit-copy').disabled = submitted || !selectedCopyTarget;
+      el('copy-note').textContent = submitted
+        ? '模倣先を伏せました。対手の選択を待っています…'
+        : targets.length ? '本人だけに表示された候補から、模倣する効果を選んでください。' : '対手の模倣先選択を待っています…';
+      el('stage-note').textContent = '必要な模倣先が揃うまで、相手の選択内容は公開されません。';
+    } else if (snapshot.game.phase === 'round-result') {
+      el('round-messages').innerHTML = snapshot.game.roundResult.messages.map((text) => `<li>${escapeHtml(text)}</li>`).join('');
+      el('stage-note').textContent = snapshot.game.roundResult.outcome
+        ? '決着判定まで完了しました。最終結果画面は後の段階で実装します。'
+        : '第1ラウンドの解決が完了しました。第2ラウンドへの遷移は第4段階で実装します。';
+    } else {
+      el('stage-note').textContent = '双方の月札が同時に公開されました。';
+    }
     return;
   }
   const submitted = snapshot.private?.submitted === true;
@@ -59,5 +80,5 @@ export function started(snapshot, selectedCardId = null) {
   el('selection-note').textContent = submitted
     ? '月札を伏せました。対手の選択を待っています…'
     : selectedCardId ? `「${cards[selectedCardId].name}」を選択中です。` : '未使用の月札から1枚を選んでください。';
-  el('stage-two-note').textContent = '双方が確定するまで、相手の月札は公開されません。';
+  el('stage-note').textContent = '双方が確定するまで、相手の月札は公開されません。';
 }
