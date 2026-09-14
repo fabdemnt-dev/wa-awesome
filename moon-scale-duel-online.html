@@ -64,9 +64,22 @@
         <button id="submit-copy" class="primary-button" type="button" disabled>この効果を模倣する</button>
       </div>
       <div id="round-result" class="round-result" hidden>
-        <h3>第1ラウンドの結果</h3>
+        <h3 id="round-result-title">ラウンド結果</h3>
         <ul id="round-messages"></ul>
+        <div id="next-round-actions" class="next-round-actions">
+          <button id="ready-next-round" class="primary-button" type="button">次のラウンドへ</button>
+          <p id="next-round-note" class="stage-note"></p>
+          <p id="next-round-countdown" class="wait-countdown"></p>
+          <div id="expired-wait-actions" class="expired-wait-actions" hidden>
+            <button id="extend-next-round-wait" type="button">もう少し待つ</button>
+            <button id="abort-after-wait" class="danger-button" type="button">この決闘を終了する</button>
+          </div>
+        </div>
       </div>
+      <details id="history-panel" class="history-panel">
+        <summary id="history-summary">決闘の記録</summary>
+        <div id="round-history"></div>
+      </details>
       <p id="stage-note" class="stage-note"></p>
     </section>
   </main>

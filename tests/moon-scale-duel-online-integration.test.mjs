@@ -158,6 +158,30 @@ function copyPayload(room, copyTargetId, requestId, stateVersion, overrides = {}
   };
 }
 
+function roundPayload(room, snapshot, requestId, overrides = {}) {
+  return {
+    roomId: room.roomId,
+    gameId: room.started.gameId,
+    round: snapshot.game.round,
+    stateVersion: snapshot.game.stateVersion,
+    requestId,
+    ...overrides,
+  };
+}
+
+async function playRound(room, hostCard, guestCard, prefix) {
+  const before = await room.host.call('moonScaleDuelGetSnapshot', { roomId: room.roomId });
+  const payload = (cardId, requestId) => ({
+    roomId: room.roomId, gameId: room.started.gameId, round: before.game.round,
+    stateVersion: before.game.stateVersion, cardId, requestId,
+  });
+  await Promise.all([
+    room.host.call('moonScaleDuelSubmitCard', payload(hostCard, `${prefix}-host`)),
+    room.guest.call('moonScaleDuelSubmitCard', payload(guestCard, `${prefix}-guest`)),
+  ]);
+  return room.host.call('moonScaleDuelGetSnapshot', { roomId: room.roomId });
+}
+
 function assertNoCardLeak(snapshot) {
   assert.equal(snapshot.game.phase, 'selecting-card');
   assert.equal(snapshot.game.publicCards, null);
@@ -340,4 +364,152 @@ test('expired waiting room rejects a new participant', { timeout: 30000 }, async
   const created = await host.call('moonScaleDuelCreateRoom', { displayName: '期限', requestId: 'expired-create' });
   await adminDb.doc(`moonScaleDuelRooms/${created.roomId}`).update({ expiresAt: Timestamp.fromMillis(Date.now() - 1000) });
   await denied(guest.call('moonScaleDuelJoinRoom', { displayName: '遅延', inviteCode: created.inviteCode, requestId: 'expired-join' }), 'functions/not-found');
+});
+
+test('next-round readiness preserves durable state and advances exactly once', { timeout: 120000 }, async () => {
+  const room = await startedRoom('next-round');
+  const result = await playRound(room, 'waxing', 'waxing', 'next-round-r1');
+  const readyPayload = roundPayload(room, result, 'next-round-ready-host');
+  const first = await room.host.call('moonScaleDuelReadyNextRound', readyPayload);
+  assert.equal(first.advanced, false);
+  const waiting = await room.host.call('moonScaleDuelGetSnapshot', { roomId: room.roomId });
+  assert.equal(waiting.game.round, 1);
+  assert.equal(waiting.game.nextRoundReady.seat1, true);
+  assert.equal(waiting.game.nextRoundReady.seat2, false);
+  assert.ok(waiting.game.deadlineMillis > waiting.game.serverTimeMillis);
+  assert.deepEqual(await room.host.call('moonScaleDuelReadyNextRound', readyPayload), first);
+  await denied(room.host.call('moonScaleDuelReadyNextRound', { ...readyPayload, round: 2 }), 'functions/already-exists');
+
+  const moonBefore = waiting.game.moonShadow;
+  const historyBefore = waiting.game.history;
+  const advanced = await room.guest.call('moonScaleDuelReadyNextRound', roundPayload(room, waiting, 'next-round-ready-guest'));
+  assert.equal(advanced.advanced, true);
+  const next = await room.host.call('moonScaleDuelGetSnapshot', { roomId: room.roomId });
+  assert.equal(next.game.round, 2);
+  assert.equal(next.game.phase, 'selecting-card');
+  assert.deepEqual(next.game.moonShadow, moonBefore);
+  assert.deepEqual(next.game.history, historyBefore);
+  assert.deepEqual(next.game.nextRoundReady, { seat1: false, seat2: false });
+  assert.equal(next.game.deadlineMillis, null);
+  assert.equal(next.game.publicCards, null);
+  assert.equal(next.game.roundResult, null);
+  assert.equal(next.private.submitted, false);
+  assert.equal(next.private.selectedCardId, null);
+  assert.deepEqual(next.private.usedCards, ['waxing']);
+  assert.equal(next.private.availableCards.includes('waxing'), false);
+  await denied(room.host.call('moonScaleDuelSubmitCard', {
+    roomId: room.roomId, gameId: room.started.gameId, round: 2, stateVersion: next.game.stateVersion,
+    cardId: 'waxing', requestId: 'next-round-reuse-card',
+  }), 'functions/failed-precondition');
+  await denied(room.host.call('moonScaleDuelReadyNextRound', roundPayload(room, result, 'next-round-stale')), 'functions/failed-precondition');
+});
+
+test('expired readiness can be extended idempotently only by the waiting player', { timeout: 120000 }, async () => {
+  const room = await startedRoom('extend-wait');
+  const result = await playRound(room, 'waxing', 'waxing', 'extend-wait-r1');
+  await room.host.call('moonScaleDuelReadyNextRound', roundPayload(room, result, 'extend-wait-ready'));
+  const gameRef = adminDb.doc(`moonScaleDuelRooms/${room.roomId}/games/${room.started.gameId}`);
+  await gameRef.update({ deadline: Timestamp.fromMillis(Date.now() - 10) });
+  const expired = await room.host.call('moonScaleDuelGetSnapshot', { roomId: room.roomId });
+  await denied(room.guest.call('moonScaleDuelExtendNextRoundWait', roundPayload(room, expired, 'extend-wait-wrong-side')), 'functions/permission-denied');
+  const extendPayload = roundPayload(room, expired, 'extend-wait-once');
+  const extended = await room.host.call('moonScaleDuelExtendNextRoundWait', extendPayload);
+  assert.ok(extended.deadlineMillis >= Date.now() + 55000);
+  assert.deepEqual(await room.host.call('moonScaleDuelExtendNextRoundWait', extendPayload), extended);
+  await denied(room.host.call('moonScaleDuelExtendNextRoundWait', { ...extendPayload, round: 2 }), 'functions/already-exists');
+  await denied(room.host.call('moonScaleDuelExtendNextRoundWait', roundPayload(room, await room.host.call('moonScaleDuelGetSnapshot', { roomId: room.roomId }), 'extend-wait-too-early')), 'functions/failed-precondition');
+  await gameRef.update({ deadline: Timestamp.fromMillis(Date.now() - 10) });
+  const expiredAgain = await room.host.call('moonScaleDuelGetSnapshot', { roomId: room.roomId });
+  const extendedAgain = await room.host.call('moonScaleDuelExtendNextRoundWait', roundPayload(room, expiredAgain, 'extend-wait-twice'));
+  assert.ok(extendedAgain.deadlineMillis > extended.deadlineMillis);
+});
+
+test('timeout abort is separate from victory and races safely with readiness', { timeout: 120000 }, async () => {
+  const room = await startedRoom('abort-wait');
+  const result = await playRound(room, 'waxing', 'waxing', 'abort-wait-r1');
+  await room.host.call('moonScaleDuelReadyNextRound', roundPayload(room, result, 'abort-wait-ready'));
+  const current = await room.host.call('moonScaleDuelGetSnapshot', { roomId: room.roomId });
+  await denied(room.host.call('moonScaleDuelAbortAfterWait', roundPayload(room, current, 'abort-wait-early')), 'functions/failed-precondition');
+  const gameRef = adminDb.doc(`moonScaleDuelRooms/${room.roomId}/games/${room.started.gameId}`);
+  await gameRef.update({ deadline: Timestamp.fromMillis(Date.now() - 10) });
+  const expired = await room.host.call('moonScaleDuelGetSnapshot', { roomId: room.roomId });
+  await denied(room.guest.call('moonScaleDuelAbortAfterWait', roundPayload(room, expired, 'abort-wait-wrong-side')), 'functions/permission-denied');
+  const abortPayload = roundPayload(room, expired, 'abort-wait-once');
+  const aborted = await room.host.call('moonScaleDuelAbortAfterWait', abortPayload);
+  assert.equal(aborted.result.type, 'aborted');
+  assert.equal(aborted.result.reason, 'next-round-timeout');
+  assert.deepEqual(await room.host.call('moonScaleDuelAbortAfterWait', abortPayload), aborted);
+  const snapshot = await room.guest.call('moonScaleDuelGetSnapshot', { roomId: room.roomId });
+  assert.equal(snapshot.game.phase, 'aborted');
+  assert.equal(snapshot.game.result.type, 'aborted');
+  assert.equal(JSON.stringify(snapshot.game.result).includes('winner'), false);
+
+  const race = await startedRoom('abort-race');
+  const raceResult = await playRound(race, 'waxing', 'waxing', 'abort-race-r1');
+  await race.host.call('moonScaleDuelReadyNextRound', roundPayload(race, raceResult, 'abort-race-ready'));
+  const raceGameRef = adminDb.doc(`moonScaleDuelRooms/${race.roomId}/games/${race.started.gameId}`);
+  await raceGameRef.update({ deadline: Timestamp.fromMillis(Date.now() - 10) });
+  const raceState = await race.host.call('moonScaleDuelGetSnapshot', { roomId: race.roomId });
+  await Promise.allSettled([
+    race.host.call('moonScaleDuelAbortAfterWait', roundPayload(race, raceState, 'abort-race-abort')),
+    race.guest.call('moonScaleDuelReadyNextRound', roundPayload(race, raceState, 'abort-race-guest')),
+  ]);
+  const final = await race.host.call('moonScaleDuelGetSnapshot', { roomId: race.roomId });
+  assert.ok((final.game.phase === 'aborted' && final.game.round === 1) || (final.game.phase === 'selecting-card' && final.game.round === 2));
+
+  const extendRace = await startedRoom('extend-race');
+  const extendResult = await playRound(extendRace, 'waxing', 'waxing', 'extend-race-r1');
+  await extendRace.host.call('moonScaleDuelReadyNextRound', roundPayload(extendRace, extendResult, 'extend-race-ready'));
+  const extendGameRef = adminDb.doc(`moonScaleDuelRooms/${extendRace.roomId}/games/${extendRace.started.gameId}`);
+  await extendGameRef.update({ deadline: Timestamp.fromMillis(Date.now() - 10) });
+  const extendState = await extendRace.host.call('moonScaleDuelGetSnapshot', { roomId: extendRace.roomId });
+  await Promise.allSettled([
+    extendRace.host.call('moonScaleDuelExtendNextRoundWait', roundPayload(extendRace, extendState, 'extend-race-extend')),
+    extendRace.guest.call('moonScaleDuelReadyNextRound', roundPayload(extendRace, extendState, 'extend-race-guest')),
+  ]);
+  const extendFinal = await extendRace.host.call('moonScaleDuelGetSnapshot', { roomId: extendRace.roomId });
+  assert.ok((extendFinal.game.phase === 'selecting-card' && extendFinal.game.round === 2)
+    || (extendFinal.game.phase === 'round-result' && extendFinal.game.round === 1 && extendFinal.game.deadlineMillis > Date.now()));
+});
+
+test('a normal outcome ends the game and rejects next-round readiness', { timeout: 120000 }, async () => {
+  const room = await startedRoom('early-finish');
+  await Promise.all([
+    adminDb.doc(`moonScaleDuelRooms/${room.roomId}/games/${room.started.gameId}`).update({ moonShadow: { seat1: 3, seat2: 3 } }),
+    adminDb.doc(`moonScaleDuelRooms/${room.roomId}/serverGames/${room.started.gameId}`).update({ moonShadow: { seat1: 3, seat2: 3 } }),
+  ]);
+  const result = await playRound(room, 'waning', 'waning', 'early-finish-r1');
+  assert.equal(result.game.phase, 'ended');
+  assert.equal(result.game.result.type, 'completed');
+  assert.equal(result.game.result.outcome, 'draw');
+  assert.deepEqual(result.game.moonShadow, { seat1: 0, seat2: 0 });
+  await denied(room.host.call('moonScaleDuelReadyNextRound', roundPayload(room, result, 'early-finish-ready')), 'functions/failed-precondition');
+});
+
+test('six rounds complete with ordered public history and no seventh round', { timeout: 180000 }, async () => {
+  const room = await startedRoom('six-rounds');
+  const cards = ['waxing', 'waning', 'reflection', 'stillness', 'oath', 'falseMoon'];
+  for (let index = 0; index < cards.length; index += 1) {
+    const round = index + 1;
+    const result = await playRound(room, cards[index], cards[index], `six-rounds-r${round}`);
+    assert.equal(result.game.round, round);
+    assert.equal(result.game.history.length, round);
+    assert.deepEqual(result.game.history.map((item) => item.round), Array.from({ length: round }, (_, item) => item + 1));
+    assert.equal(JSON.stringify(result.game.history).includes('privateSelections'), false);
+    assert.equal(JSON.stringify(result.game.history).includes('copyCandidates'), false);
+    if (round < 6) {
+      await Promise.all([
+        room.host.call('moonScaleDuelReadyNextRound', roundPayload(room, result, `six-rounds-ready-h-${round}`)),
+        room.guest.call('moonScaleDuelReadyNextRound', roundPayload(room, result, `six-rounds-ready-g-${round}`)),
+      ]);
+      const next = await room.host.call('moonScaleDuelGetSnapshot', { roomId: room.roomId });
+      assert.equal(next.game.round, round + 1);
+      assert.equal(next.private.usedCards.length, round);
+    } else {
+      assert.equal(result.game.phase, 'ended');
+      assert.equal(result.game.result.type, 'completed');
+      assert.equal(result.game.result.outcome, 'draw');
+      await denied(room.host.call('moonScaleDuelReadyNextRound', roundPayload(room, result, 'six-rounds-seventh')), 'functions/failed-precondition');
+    }
+  }
 });

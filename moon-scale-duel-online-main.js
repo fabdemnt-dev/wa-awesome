@@ -12,6 +12,8 @@ async function refresh() {
   if (!state.roomId) return;
   const snapshot = await api.snapshot({ roomId: state.roomId });
   state.snapshot = snapshot;
+  if (!snapshot.private?.availableCards?.includes(state.selectedCardId)) state.selectedCardId = null;
+  if (!snapshot.private?.legalCopyTargets?.includes(state.selectedCopyTarget)) state.selectedCopyTarget = null;
   if (snapshot.room.status === 'waiting') lobby(snapshot);
   else started(snapshot, state.selectedCardId, state.selectedCopyTarget);
   status('オンライン対戦の準備ができました。');
@@ -99,6 +101,27 @@ el('submit-card').onclick = async () => {
     state.selectedCardId = null;
     await refresh();
   } catch { /* status is already shown */ }
+};
+function currentRoundAction(actionName, apiMethod) {
+  const snapshot = state.snapshot;
+  if (!snapshot?.game) return Promise.resolve();
+  const action = `${actionName}-${snapshot.game.gameId}-${snapshot.game.round}-${snapshot.game.stateVersion}`;
+  return mutate(action, (requestId) => apiMethod({
+    roomId: state.roomId,
+    gameId: snapshot.game.gameId,
+    round: snapshot.game.round,
+    stateVersion: snapshot.game.stateVersion,
+    requestId,
+  })).then(refresh);
+}
+el('ready-next-round').onclick = async () => {
+  try { await currentRoundAction('ready-next-round', api.readyNextRound); } catch { /* status is already shown */ }
+};
+el('extend-next-round-wait').onclick = async () => {
+  try { await currentRoundAction('extend-next-round-wait', api.extendNextRoundWait); } catch { /* status is already shown */ }
+};
+el('abort-after-wait').onclick = async () => {
+  try { await currentRoundAction('abort-after-wait', api.abortAfterWait); } catch { /* status is already shown */ }
 };
 el('copy-code').onclick = async () => {
   try {
