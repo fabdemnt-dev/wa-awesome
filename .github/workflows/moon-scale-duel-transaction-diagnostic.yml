@@ -1,0 +1,92 @@
+name: Moon Scale Duel Transaction Diagnostic
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - diagnostic/moon-scale-duel-transaction
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install test dependencies
+        run: npm ci
+      - name: Create emulator secrets
+        env:
+          LOCAL_MOON_INVITE_KEY: local-test-only-moon-invite-key
+          LOCAL_MOON_IP_KEY: local-test-only-moon-ip-key
+        run: |
+          umask 077
+          printf 'MOON_SCALE_DUEL_INVITE_HMAC_KEY=%s\nMOON_SCALE_DUEL_IP_HMAC_KEY=%s\n' "$LOCAL_MOON_INVITE_KEY" "$LOCAL_MOON_IP_KEY" > functions/.secret.local
+      - name: Run simultaneous submit and transaction comparison diagnostics
+        run: |
+          set -o pipefail
+          npx firebase --config firebase.moon-scale-duel-emulator.json emulators:exec \
+            --only auth,firestore,database,functions --project demo-moon-scale-duel \
+            "node --test --test-force-exit tests/moon-scale-duel-transaction-diagnostic.test.mjs" \
+            2>&1 | tee moon-scale-duel-transaction-diagnostic.log
+      - name: Run six-round test alone
+        if: ${{ always() }}
+        run: |
+          set -o pipefail
+          npx firebase --config firebase.moon-scale-duel-emulator.json emulators:exec \
+            --only auth,firestore,database,functions --project demo-moon-scale-duel \
+            "node --test --test-force-exit --test-name-pattern='six rounds complete with ordered public history and no seventh round' tests/moon-scale-duel-online-integration.test.mjs" \
+            2>&1 | tee moon-scale-duel-six-round-diagnostic.log
+      - name: Run readiness extension test alone
+        if: ${{ always() }}
+        run: |
+          set -o pipefail
+          npx firebase --config firebase.moon-scale-duel-emulator.json emulators:exec \
+            --only auth,firestore,database,functions --project demo-moon-scale-duel \
+            "node --test --test-force-exit --test-name-pattern='expired readiness can be extended idempotently only by the waiting player' tests/moon-scale-duel-online-integration.test.mjs" \
+            2>&1 | tee moon-scale-duel-readiness-diagnostic.log
+      - name: Remove emulator secrets
+        if: ${{ always() }}
+        run: |
+          rm -f functions/.secret.local
+          test ! -e functions/.secret.local
+      - name: Sanitize diagnostic logs
+        if: ${{ always() }}
+        run: |
+          mkdir -p diagnostic-artifacts
+          grep '^DIAGNOSTIC ' moon-scale-duel-transaction-diagnostic.log \
+            > diagnostic-artifacts/trial-results.jsonl || true
+          for file in moon-scale-duel-*-diagnostic.log; do
+            if [ -f "$file" ]; then
+              grep -E '^(ok|not ok|# Subtest:|# tests |# pass |# fail |# skipped |# duration_ms |.*(INVALID_ARGUMENT|Transaction is invalid or closed))' "$file" \
+                | sed -E \
+                -e 's/[0-9a-f]{8}-[0-9a-f-]{27,}/[REDACTED_ID]/gi' \
+                -e 's/MSD1-[0-9A-HJKMNP-TV-Z-]+/[REDACTED_INVITE]/g' \
+                -e 's/[A-Za-z0-9_-]{24,}/[REDACTED_VALUE]/g' \
+                -e 's/(Bearer|token|authorization)([=: ]+)[^ ]+/\1\2[REDACTED]/gi' \
+                > "diagnostic-artifacts/$file"
+            fi
+          done
+          if [ -f firestore-debug.log ]; then
+            grep -Ei 'transaction|lock|retry|timeout|invalid|closed' firestore-debug.log \
+              | sed -E \
+                -e 's/[0-9a-f]{8}-[0-9a-f-]{27,}/[REDACTED_ID]/gi' \
+                -e 's/[A-Za-z0-9_-]{24,}/[REDACTED_VALUE]/g' \
+              > diagnostic-artifacts/firestore-transaction-events.log || true
+          fi
+      - name: Upload sanitized diagnostic artifacts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: moon-scale-duel-transaction-diagnostic
+          path: diagnostic-artifacts/
+          if-no-files-found: warn
+          retention-days: 7
