@@ -12,7 +12,7 @@ permissions:
 jobs:
   diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -21,11 +21,6 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      - name: Set up Java 21
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
       - name: Install test dependencies
         run: npm ci
       - name: Install Functions dependencies
@@ -37,44 +32,44 @@ jobs:
         run: |
           umask 077
           printf 'MOON_SCALE_DUEL_INVITE_HMAC_KEY=%s\nMOON_SCALE_DUEL_IP_HMAC_KEY=%s\n' "$LOCAL_MOON_INVITE_KEY" "$LOCAL_MOON_IP_KEY" > functions/.secret.local
-      - name: Record diagnostic versions
+      - name: Record environment versions
         run: |
-          mkdir -p diagnostic-artifacts
-          npx firebase --version > diagnostic-artifacts/current-firebase-tools-version.txt
-          npx --yes firebase-tools@15.30.0 --version > diagnostic-artifacts/candidate-firebase-tools-version.txt
-          printf '%s\n' '1.19.8' > diagnostic-artifacts/current-firestore-emulator-version.txt
-          printf '%s\n' '1.22.0' > diagnostic-artifacts/candidate-firestore-emulator-version.txt
-          java -version 2> diagnostic-artifacts/java-version.txt
-          java_major="$(java -version 2>&1 | sed -nE '1s/.*version "([0-9]+).*/\1/p')"
-          printf '%s\n' "$java_major" > diagnostic-artifacts/java-major-version.txt
-          test "$java_major" -ge 21
-          node --version > diagnostic-artifacts/node-version.txt
-      - name: Run candidate and current diagnostics on the same runner
+          mkdir -p diagnostic-artifacts/runtime diagnostic-work
+          node --version > diagnostic-artifacts/runtime/node-version.txt
+          npm --version > diagnostic-artifacts/runtime/npm-version.txt
+          npx firebase --version > diagnostic-artifacts/runtime/firebase-tools-version.txt
+          java -version 2> diagnostic-artifacts/runtime/java-version.txt
+      - name: Run the normal Moon Scale Duel integration suite with diagnostics
+        env:
+          MOON_SCALE_DUEL_TRANSACTION_DIAGNOSTIC: '1'
         run: |
-          chmod +x tests/run-moon-scale-duel-transaction-version-diagnostic.sh
-          overall_status=0
-          execution_order=0
-          for version_spec in 'candidate 15.30.0 1.22.0' 'current 14.27.0 1.19.8'; do
-            execution_order=$((execution_order + 1))
-            read -r version_label cli_version emulator_version <<< "$version_spec"
-            tests/run-moon-scale-duel-transaction-version-diagnostic.sh "$version_label" "$cli_version" "$emulator_version" minimal-submit tests/moon-scale-duel-transaction-diagnostic.test.mjs 'diagnostic: repeat minimal simultaneous moonScaleDuelSubmitCard' 10 "$execution_order" || overall_status=1
-            tests/run-moon-scale-duel-transaction-version-diagnostic.sh "$version_label" "$cli_version" "$emulator_version" promise-all tests/moon-scale-duel-transaction-diagnostic.test.mjs 'diagnostic: compare contending Firestore transactions using parallel' 10 "$execution_order" || overall_status=1
-            tests/run-moon-scale-duel-transaction-version-diagnostic.sh "$version_label" "$cli_version" "$emulator_version" sequential tests/moon-scale-duel-transaction-diagnostic.test.mjs 'diagnostic: compare contending Firestore transactions using sequential' 10 "$execution_order" || overall_status=1
-            tests/run-moon-scale-duel-transaction-version-diagnostic.sh "$version_label" "$cli_version" "$emulator_version" get-all tests/moon-scale-duel-transaction-diagnostic.test.mjs 'diagnostic: compare contending Firestore transactions using getAll' 10 "$execution_order" || overall_status=1
-            tests/run-moon-scale-duel-transaction-version-diagnostic.sh "$version_label" "$cli_version" "$emulator_version" six-rounds tests/moon-scale-duel-online-integration.test.mjs 'six rounds complete with ordered public history and no seventh round' 1 "$execution_order" || overall_status=1
-            tests/run-moon-scale-duel-transaction-version-diagnostic.sh "$version_label" "$cli_version" "$emulator_version" readiness tests/moon-scale-duel-online-integration.test.mjs 'expired readiness can be extended idempotently only by the waiting player' 1 "$execution_order" || overall_status=1
-            for port in 8080 5001 9099 9000; do
-              if lsof -iTCP:"$port" -sTCP:LISTEN -t >/dev/null; then
-                printf 'Emulator remains on port %s after %s\n' "$port" "$version_label" | tee -a diagnostic-artifacts/cleanup-errors.log
-                overall_status=1
-              fi
-            done
-          done
-          printf '%s\n' "$overall_status" > diagnostic-artifacts/case-exit-status.txt
-      - name: Build version comparison summary
+          set +e
+          npm run test:moon-scale-duel:integration > diagnostic-work/runtime-integration.log 2>&1
+          integration_status=$?
+          set -e
+          printf '%s\n' "$integration_status" > diagnostic-artifacts/runtime-integration-exit-code.txt
+      - name: Build sanitized diagnostic artifacts
         if: ${{ always() }}
         run: |
-          node tests/build-moon-scale-duel-transaction-version-summary.mjs
+          mkdir -p diagnostic-artifacts/runtime
+          sed -n 's/^.*MOON_SCALE_DUEL_TRANSACTION_DIAGNOSTIC //p' diagnostic-work/runtime-integration.log \
+            > diagnostic-artifacts/runtime/transaction-events.jsonl || true
+          grep -E '^(✔|✖|ℹ|# Subtest:|# tests |# pass |# fail |# skipped |.*(INVALID_ARGUMENT|Transaction is invalid or closed))' diagnostic-work/runtime-integration.log \
+            | sed -E \
+              -e 's/[0-9a-f]{8}-[0-9a-f-]{27,}/[REDACTED_ID]/gi' \
+              -e 's/MSD1-[0-9A-HJKMNP-TV-Z-]+/[REDACTED_INVITE]/g' \
+              -e 's/(roomId|inviteCode|gameId|cardId|copyTarget|requestId|token|authorization)([=: ]+)[^ ,}]*/\1\2[REDACTED]/gi' \
+              -e 's/(Bearer +)[^ ]+/\1[REDACTED]/gi' \
+              -e 's/[A-Za-z0-9_-]{32,}/[REDACTED_VALUE]/g' \
+            > diagnostic-artifacts/runtime/sanitized-test-output.log || true
+          if [ -f firestore-debug.log ]; then
+            grep -Ei 'transaction|lock|retry|timeout|invalid|closed|error|warning' firestore-debug.log \
+              | sed -E \
+                -e 's/[0-9a-f]{8}-[0-9a-f-]{27,}/[REDACTED_ID]/gi' \
+                -e 's/[A-Za-z0-9_-]{32,}/[REDACTED_VALUE]/g' \
+              > diagnostic-artifacts/runtime/firestore-transaction-events.log || true
+          fi
+          node tests/build-moon-scale-duel-runtime-transaction-summary.mjs
       - name: Remove emulator secrets
         if: ${{ always() }}
         run: |
@@ -84,12 +79,12 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: moon-scale-duel-transaction-diagnostic
+          name: moon-scale-duel-runtime-transaction-diagnostic
           path: diagnostic-artifacts/
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 7
-      - name: Validate diagnostic comparison
+      - name: Preserve integration result
         if: ${{ always() }}
         run: |
-          node -e "const s=require('./diagnostic-artifacts/summary.json'); if (!s.version_comparison_valid) process.exit(1)"
-          test "$(cat diagnostic-artifacts/case-exit-status.txt)" = 0
+          test -s diagnostic-artifacts/runtime/transaction-events.jsonl
+          test "$(cat diagnostic-artifacts/runtime-integration-exit-code.txt)" = 0
