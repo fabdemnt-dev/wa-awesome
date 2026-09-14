@@ -13,4 +13,6 @@ export const api = {
   readyNextRound: (data) => call('moonScaleDuelReadyNextRound', data),
   extendNextRoundWait: (data) => call('moonScaleDuelExtendNextRoundWait', data),
   abortAfterWait: (data) => call('moonScaleDuelAbortAfterWait', data),
+  requestRematch: (data) => call('moonScaleDuelRequestRematch', data),
+  cancelRematch: (data) => call('moonScaleDuelCancelRematch', data),
 };
