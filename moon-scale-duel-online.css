@@ -58,6 +58,19 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .duelists strong { overflow-wrap: anywhere; color: var(--moon); }
 .duelists b { font-size: .82rem; font-weight: 600; }
 .round-state { margin: 16px 0 4px; color: var(--moon); text-align: center; font-weight: 800; }
+.online-hand { display: flex; gap: 10px; margin: 12px -4px 16px; padding: 4px; overflow-x: auto; scroll-snap-type: x mandatory; }
+.online-card { flex: 0 0 154px; display: grid; gap: 4px; align-content: start; min-height: 218px; padding: 8px; text-align: left; scroll-snap-align: start; background: #151a3c; }
+.online-card.selected { border-color: var(--focus); box-shadow: 0 0 0 2px rgba(255, 240, 164, .35); }
+.online-card-art { display: block; height: 88px; overflow: hidden; border-radius: 8px; background: #080b20; }
+.online-card-art img, .public-card-art img { width: 100%; height: 100%; display: block; object-fit: cover; object-position: 50% 50%; }
+.online-card[data-card-id="oath"] .online-card-art img { object-position: 50% 35%; }
+.online-card strong { color: var(--moon); }
+.online-card span:not(.online-card-art), .online-card small { color: var(--muted); }
+.revealed-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+.public-card { display: grid; gap: 5px; min-width: 0; padding: 10px; text-align: center; border: 1px solid rgba(112, 122, 177, .65); border-radius: 12px; background: #10142f; }
+.public-card > span:first-child { color: var(--muted); font-size: .78rem; }
+.public-card-art { display: block; height: 48px; overflow: hidden; border-radius: 7px; }
+.public-card strong { color: var(--moon); overflow-wrap: anywhere; }
 [hidden] { display: none !important; }
 @media (max-width: 390px) {
   .online-shell { width: min(100% - 20px, 640px); padding-top: 4px; }

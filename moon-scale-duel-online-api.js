@@ -8,4 +8,5 @@ export const api = {
   joinRoom: (data) => call('moonScaleDuelJoinRoom', data),
   snapshot: (data) => call('moonScaleDuelGetSnapshot', data),
   startGame: (data) => call('moonScaleDuelStartGame', data),
+  submitCard: (data) => call('moonScaleDuelSubmitCard', data),
 };

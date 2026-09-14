@@ -93,7 +93,7 @@ test('stage one enforces two seats, secrets, idempotency, start guards, and shar
 
   const startPayload = { roomId: created.roomId, stateVersion: before.room.stateVersion, requestId: 'start-replay-1' };
   const started = await host.call('moonScaleDuelStartGame', startPayload);
-  assert.equal(started.phase, 'stage1-ready');
+  assert.equal(started.phase, 'selecting-card');
   assert.deepEqual(await host.call('moonScaleDuelStartGame', startPayload), started);
   await denied(third.call('moonScaleDuelJoinRoom', { displayName: '遅刻', inviteCode: created.inviteCode, requestId: 'late-join' }), 'functions/not-found');
 
@@ -106,6 +106,8 @@ test('stage one enforces two seats, secrets, idempotency, start guards, and shar
   assert.deepEqual(hostSnapshot.game.remainingCardCounts, { seat1: 6, seat2: 6 });
   assert.equal(hostSnapshot.private.seatId, 'seat1');
   assert.equal(guestSnapshot.private.seatId, 'seat2');
+  assert.deepEqual(hostSnapshot.private.availableCards, ['waxing', 'waning', 'reflection', 'stillness', 'falseMoon', 'oath']);
+  assert.equal(hostSnapshot.private.submitted, false);
   assert.equal(JSON.stringify(hostSnapshot).includes('privateSelections'), false);
   assert.equal(JSON.stringify(hostSnapshot).includes('hostUid'), false);
 
@@ -115,6 +117,125 @@ test('stage one enforces two seats, secrets, idempotency, start guards, and shar
   await denied(getDoc(doc(host.fs, `moonScaleDuelRooms/${created.roomId}`)), 'permission-denied');
   await denied(getDoc(doc(host.fs, `moonScaleDuelRooms/${created.roomId}/privatePlayers/${guest.auth.currentUser.uid}`)), 'permission-denied');
   await denied(getDoc(doc(host.fs, `moonScaleDuelRooms/${created.roomId}/serverGames/${started.gameId}`)), 'permission-denied');
+});
+
+async function startedRoom(prefix) {
+  const host = client(`${prefix}-host`);
+  const guest = client(`${prefix}-guest`);
+  await Promise.all([signInAnonymously(host.auth), signInAnonymously(guest.auth)]);
+  const created = await host.call('moonScaleDuelCreateRoom', { displayName: '月詠', requestId: `${prefix}-create` });
+  await guest.call('moonScaleDuelJoinRoom', { displayName: '星読', inviteCode: created.inviteCode, requestId: `${prefix}-join` });
+  const waiting = await host.call('moonScaleDuelGetSnapshot', { roomId: created.roomId });
+  const started = await host.call('moonScaleDuelStartGame', {
+    roomId: created.roomId,
+    stateVersion: waiting.room.stateVersion,
+    requestId: `${prefix}-start`,
+  });
+  return { host, guest, roomId: created.roomId, started };
+}
+
+function submitPayload(room, cardId, requestId, overrides = {}) {
+  return {
+    roomId: room.roomId,
+    gameId: room.started.gameId,
+    round: 1,
+    stateVersion: room.started.stateVersion,
+    cardId,
+    requestId,
+    ...overrides,
+  };
+}
+
+function assertNoCardLeak(snapshot) {
+  assert.equal(snapshot.game.phase, 'selecting-card');
+  assert.equal(snapshot.game.publicCards, null);
+  assert.equal(snapshot.private.selectedCardId, null);
+  assert.equal(snapshot.private.submitted, false);
+  assert.equal(JSON.stringify(snapshot).includes('privateSelections'), false);
+  assert.equal(JSON.stringify(snapshot).includes('submittedCount'), false);
+}
+
+test('one-sided submissions stay private in either seat and request replay is idempotent', { timeout: 120000 }, async () => {
+  const hostFirst = await startedRoom('secret-a');
+  const hostPayload = submitPayload(hostFirst, 'waxing', 'secret-a-submit');
+  const first = await hostFirst.host.call('moonScaleDuelSubmitCard', hostPayload);
+  assert.deepEqual(first, {
+    roomId: hostFirst.roomId,
+    gameId: hostFirst.started.gameId,
+    round: 1,
+    phase: 'selecting-card',
+    stateVersion: hostFirst.started.stateVersion,
+    submitted: true,
+    revealed: false,
+  });
+  assert.deepEqual(await hostFirst.host.call('moonScaleDuelSubmitCard', hostPayload), first);
+  const [hostView, guestView, publicGame, serverGame] = await Promise.all([
+    hostFirst.host.call('moonScaleDuelGetSnapshot', { roomId: hostFirst.roomId }),
+    hostFirst.guest.call('moonScaleDuelGetSnapshot', { roomId: hostFirst.roomId }),
+    adminDb.doc(`moonScaleDuelRooms/${hostFirst.roomId}/games/${hostFirst.started.gameId}`).get(),
+    adminDb.doc(`moonScaleDuelRooms/${hostFirst.roomId}/serverGames/${hostFirst.started.gameId}`).get(),
+  ]);
+  assert.equal(hostView.private.submitted, true);
+  assert.equal(hostView.private.selectedCardId, 'waxing');
+  assertNoCardLeak(guestView);
+  assert.equal(JSON.stringify(publicGame.data()).includes('waxing'), false);
+  assert.equal(serverGame.data().privateSelections.seat1.cardId, 'waxing');
+  assert.equal(hostView.private.usedCards.length, 0);
+  await denied(hostFirst.host.call('moonScaleDuelSubmitCard', { ...hostPayload, cardId: 'waning' }), 'functions/already-exists');
+
+  const guestFirst = await startedRoom('secret-b');
+  await guestFirst.guest.call('moonScaleDuelSubmitCard', submitPayload(guestFirst, 'oath', 'secret-b-submit'));
+  const hostWaiting = await guestFirst.host.call('moonScaleDuelGetSnapshot', { roomId: guestFirst.roomId });
+  assertNoCardLeak(hostWaiting);
+});
+
+test('both submissions reveal atomically and near-simultaneous calls preserve one transition', { timeout: 120000 }, async () => {
+  const room = await startedRoom('reveal');
+  const [hostResult, guestResult] = await Promise.all([
+    room.host.call('moonScaleDuelSubmitCard', submitPayload(room, 'reflection', 'reveal-host')),
+    room.guest.call('moonScaleDuelSubmitCard', submitPayload(room, 'stillness', 'reveal-guest')),
+  ]);
+  assert.equal([hostResult, guestResult].filter((result) => result.revealed).length, 1);
+  const [hostView, guestView, publicGame, serverGame] = await Promise.all([
+    room.host.call('moonScaleDuelGetSnapshot', { roomId: room.roomId }),
+    room.guest.call('moonScaleDuelGetSnapshot', { roomId: room.roomId }),
+    adminDb.doc(`moonScaleDuelRooms/${room.roomId}/games/${room.started.gameId}`).get(),
+    adminDb.doc(`moonScaleDuelRooms/${room.roomId}/serverGames/${room.started.gameId}`).get(),
+  ]);
+  assert.deepEqual(publicPart(hostView), publicPart(guestView));
+  assert.equal(hostView.game.phase, 'cards-revealed');
+  assert.deepEqual(hostView.game.publicCards, { seat1: 'reflection', seat2: 'stillness' });
+  assert.equal(hostView.game.stateVersion, room.started.stateVersion + 1);
+  assert.deepEqual(hostView.game.remainingCardCounts, { seat1: 5, seat2: 5 });
+  assert.deepEqual(hostView.private.usedCards, ['reflection']);
+  assert.deepEqual(guestView.private.usedCards, ['stillness']);
+  assert.deepEqual(serverGame.data().usedCards, { seat1: ['reflection'], seat2: ['stillness'] });
+  assert.deepEqual(publicGame.data().publicCards, { seat1: 'reflection', seat2: 'stillness' });
+});
+
+test('submission rejects stale, invalid, already-used, and outsider operations', { timeout: 120000 }, async () => {
+  const room = await startedRoom('guards');
+  const outsider = client('guards-outsider');
+  await signInAnonymously(outsider.auth);
+  await denied(room.host.call('moonScaleDuelSubmitCard', submitPayload(room, 'waxing', 'guards-stale', {
+    stateVersion: room.started.stateVersion - 1,
+  })), 'functions/failed-precondition');
+  await denied(room.host.call('moonScaleDuelSubmitCard', submitPayload(room, 'not-a-card', 'guards-invalid')), 'functions/invalid-argument');
+  await denied(outsider.call('moonScaleDuelSubmitCard', submitPayload(room, 'waxing', 'guards-outsider')), 'functions/permission-denied');
+
+  const hostPrivateRef = adminDb.doc(`moonScaleDuelRooms/${room.roomId}/privatePlayers/${room.host.auth.currentUser.uid}`);
+  const serverRef = adminDb.doc(`moonScaleDuelRooms/${room.roomId}/serverGames/${room.started.gameId}`);
+  await Promise.all([
+    hostPrivateRef.update({ usedCards: ['waning'] }),
+    serverRef.update({ 'usedCards.seat1': ['waning'] }),
+  ]);
+  await denied(room.host.call('moonScaleDuelSubmitCard', submitPayload(room, 'waning', 'guards-used')), 'functions/failed-precondition');
+  await room.host.call('moonScaleDuelSubmitCard', submitPayload(room, 'waxing', 'guards-first'));
+  await denied(room.host.call('moonScaleDuelSubmitCard', submitPayload(room, 'reflection', 'guards-second')), 'functions/already-exists');
+
+  await denied(getDoc(doc(room.host.fs, `moonScaleDuelRooms/${room.roomId}`)), 'permission-denied');
+  await denied(getDoc(doc(room.host.fs, `moonScaleDuelRooms/${room.roomId}/privatePlayers/${room.guest.auth.currentUser.uid}`)), 'permission-denied');
+  await denied(getDoc(doc(room.host.fs, `moonScaleDuelRooms/${room.roomId}/serverGames/${room.started.gameId}`)), 'permission-denied');
 });
 
 test('expired waiting room rejects a new participant', { timeout: 30000 }, async () => {

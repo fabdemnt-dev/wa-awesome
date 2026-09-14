@@ -1459,3 +1459,4 @@ exports.moonScaleDuelCreateRoom = moonScaleDuelOnline.createRoom;
 exports.moonScaleDuelJoinRoom = moonScaleDuelOnline.joinRoom;
 exports.moonScaleDuelGetSnapshot = moonScaleDuelOnline.getSnapshot;
 exports.moonScaleDuelStartGame = moonScaleDuelOnline.startGame;
+exports.moonScaleDuelSubmitCard = moonScaleDuelOnline.submitCard;
