@@ -3,6 +3,7 @@ set -u
 
 version_label="$1"; cli_version="$2"; emulator_version="$3"; case_name="$4"
 test_file="$5"; test_pattern="$6"; trials_expected="$7"
+execution_order="$8"
 repo_root="$(pwd)"
 artifact_root="$repo_root/diagnostic-artifacts/$version_label/$case_name"
 work_root="$repo_root/diagnostic-work/$version_label/$case_name"
@@ -66,6 +67,7 @@ if [ "$diagnostic_started" = false ]; then preparation_error="$(grep -Ei 'error|
 
 jq -n --arg version "$version_label" --arg emulator_version "$emulator_version" --arg case "$case_name" \
   --arg actual_cli_version "$actual_cli_version" --arg preparation_error "$preparation_error" \
+  --argjson execution_order "$execution_order" \
   --argjson cli_available "$cli_available" --argjson cli_version_matches "$cli_version_matches" \
   --argjson firestore_emulator_started "$firestore_started" --argjson functions_emulator_started "$functions_started" \
   --argjson function_definitions_loaded "$function_definitions_loaded" --argjson test_module_loaded "$test_module_loaded" \
@@ -73,5 +75,5 @@ jq -n --arg version "$version_label" --arg emulator_version "$emulator_version" 
   --argjson trials_expected "$trials_expected" --argjson trials_started "$trials_started" --argjson trials_succeeded "$trials_succeeded" \
   --argjson trials_failed "$trials_failed" --argjson exit_code "$exit_code" --argjson lock_timeout_count "${lock_timeouts:-0}" \
   --argjson invalid_closed_count "${invalid_closed:-0}" --argjson invalid_argument_count "${invalid_argument:-0}" --argjson elapsed_ms "$elapsed_ms" \
-  '{version:$version,emulator_version:$emulator_version,case:$case,actual_cli_version:$actual_cli_version,cli_available:$cli_available,cli_version_matches:$cli_version_matches,firestore_emulator_started:$firestore_emulator_started,functions_emulator_started:$functions_emulator_started,function_definitions_loaded:$function_definitions_loaded,test_module_loaded:$test_module_loaded,diagnostic_started:$diagnostic_started,callback_attempts_total:$callback_attempts_total,trials_expected:$trials_expected,trials_started:$trials_started,trials_succeeded:$trials_succeeded,trials_failed:$trials_failed,exit_code:$exit_code,lock_timeout_count:$lock_timeout_count,invalid_closed_count:$invalid_closed_count,invalid_argument_count:$invalid_argument_count,elapsed_ms:$elapsed_ms,preparation_error:$preparation_error}' >"$artifact_root/case-summary.json"
+  '{version:$version,execution_order:$execution_order,emulator_version:$emulator_version,case:$case,actual_cli_version:$actual_cli_version,cli_available:$cli_available,cli_version_matches:$cli_version_matches,firestore_emulator_started:$firestore_emulator_started,functions_emulator_started:$functions_emulator_started,function_definitions_loaded:$function_definitions_loaded,test_module_loaded:$test_module_loaded,diagnostic_started:$diagnostic_started,callback_attempts_total:$callback_attempts_total,trials_expected:$trials_expected,trials_started:$trials_started,trials_succeeded:$trials_succeeded,trials_failed:$trials_failed,exit_code:$exit_code,lock_timeout_count:$lock_timeout_count,invalid_closed_count:$invalid_closed_count,invalid_argument_count:$invalid_argument_count,elapsed_ms:$elapsed_ms,preparation_error:$preparation_error}' >"$artifact_root/case-summary.json"
 exit "$exit_code"

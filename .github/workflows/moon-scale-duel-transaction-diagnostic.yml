@@ -49,18 +49,20 @@ jobs:
           printf '%s\n' "$java_major" > diagnostic-artifacts/java-major-version.txt
           test "$java_major" -ge 21
           node --version > diagnostic-artifacts/node-version.txt
-      - name: Run current and candidate diagnostics on the same runner
+      - name: Run candidate and current diagnostics on the same runner
         run: |
           chmod +x tests/run-moon-scale-duel-transaction-version-diagnostic.sh
           overall_status=0
-          for version_spec in 'current 14.27.0 1.19.8' 'candidate 15.30.0 1.22.0'; do
+          execution_order=0
+          for version_spec in 'candidate 15.30.0 1.22.0' 'current 14.27.0 1.19.8'; do
+            execution_order=$((execution_order + 1))
             read -r version_label cli_version emulator_version <<< "$version_spec"
-            tests/run-moon-scale-duel-transaction-version-diagnostic.sh "$version_label" "$cli_version" "$emulator_version" minimal-submit tests/moon-scale-duel-transaction-diagnostic.test.mjs 'diagnostic: repeat minimal simultaneous moonScaleDuelSubmitCard' 10 || overall_status=1
-            tests/run-moon-scale-duel-transaction-version-diagnostic.sh "$version_label" "$cli_version" "$emulator_version" promise-all tests/moon-scale-duel-transaction-diagnostic.test.mjs 'diagnostic: compare contending Firestore transactions using parallel' 10 || overall_status=1
-            tests/run-moon-scale-duel-transaction-version-diagnostic.sh "$version_label" "$cli_version" "$emulator_version" sequential tests/moon-scale-duel-transaction-diagnostic.test.mjs 'diagnostic: compare contending Firestore transactions using sequential' 10 || overall_status=1
-            tests/run-moon-scale-duel-transaction-version-diagnostic.sh "$version_label" "$cli_version" "$emulator_version" get-all tests/moon-scale-duel-transaction-diagnostic.test.mjs 'diagnostic: compare contending Firestore transactions using getAll' 10 || overall_status=1
-            tests/run-moon-scale-duel-transaction-version-diagnostic.sh "$version_label" "$cli_version" "$emulator_version" six-rounds tests/moon-scale-duel-online-integration.test.mjs 'six rounds complete with ordered public history and no seventh round' 1 || overall_status=1
-            tests/run-moon-scale-duel-transaction-version-diagnostic.sh "$version_label" "$cli_version" "$emulator_version" readiness tests/moon-scale-duel-online-integration.test.mjs 'expired readiness can be extended idempotently only by the waiting player' 1 || overall_status=1
+            tests/run-moon-scale-duel-transaction-version-diagnostic.sh "$version_label" "$cli_version" "$emulator_version" minimal-submit tests/moon-scale-duel-transaction-diagnostic.test.mjs 'diagnostic: repeat minimal simultaneous moonScaleDuelSubmitCard' 10 "$execution_order" || overall_status=1
+            tests/run-moon-scale-duel-transaction-version-diagnostic.sh "$version_label" "$cli_version" "$emulator_version" promise-all tests/moon-scale-duel-transaction-diagnostic.test.mjs 'diagnostic: compare contending Firestore transactions using parallel' 10 "$execution_order" || overall_status=1
+            tests/run-moon-scale-duel-transaction-version-diagnostic.sh "$version_label" "$cli_version" "$emulator_version" sequential tests/moon-scale-duel-transaction-diagnostic.test.mjs 'diagnostic: compare contending Firestore transactions using sequential' 10 "$execution_order" || overall_status=1
+            tests/run-moon-scale-duel-transaction-version-diagnostic.sh "$version_label" "$cli_version" "$emulator_version" get-all tests/moon-scale-duel-transaction-diagnostic.test.mjs 'diagnostic: compare contending Firestore transactions using getAll' 10 "$execution_order" || overall_status=1
+            tests/run-moon-scale-duel-transaction-version-diagnostic.sh "$version_label" "$cli_version" "$emulator_version" six-rounds tests/moon-scale-duel-online-integration.test.mjs 'six rounds complete with ordered public history and no seventh round' 1 "$execution_order" || overall_status=1
+            tests/run-moon-scale-duel-transaction-version-diagnostic.sh "$version_label" "$cli_version" "$emulator_version" readiness tests/moon-scale-duel-online-integration.test.mjs 'expired readiness can be extended idempotently only by the waiting player' 1 "$execution_order" || overall_status=1
             for port in 8080 5001 9099 9000; do
               if lsof -iTCP:"$port" -sTCP:LISTEN -t >/dev/null; then
                 printf 'Emulator remains on port %s after %s\n' "$port" "$version_label" | tee -a diagnostic-artifacts/cleanup-errors.log
