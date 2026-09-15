@@ -51,7 +51,7 @@
 
     .page-shell {
       display: flex;
-      width: min(100%, 620px);
+      width: min(100%, 1120px);
       min-height: 100vh;
       margin: 0 auto;
       padding: max(14px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) max(22px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
@@ -71,16 +71,65 @@
 
     main { flex: 1; }
 
+    .game-screen, .final-screen {
+      width: min(100%, 620px);
+      margin-right: auto;
+      margin-left: auto;
+    }
+
     .screen { animation: enter .24s ease-out; }
 
     .title-screen {
       display: flex;
       min-height: calc(100vh - 100px);
-      padding: 7vh 0 2rem;
-      flex-direction: column;
-      align-items: center;
+      padding: clamp(1.25rem, 5vh, 3.5rem) 0 2rem;
+      align-items: stretch;
       justify-content: center;
-      text-align: center;
+    }
+
+    .title-layout {
+      display: grid;
+      min-height: min(680px, calc(100vh - 130px));
+      overflow: hidden;
+      border: 1px solid rgba(224, 202, 139, .36);
+      border-radius: 18px;
+      background: rgba(7, 10, 19, .88);
+      box-shadow: 0 24px 70px rgba(0, 0, 0, .46);
+      grid-template-columns: minmax(0, .94fr) minmax(330px, 1.06fr);
+    }
+
+    .title-content {
+      display: flex;
+      position: relative;
+      z-index: 1;
+      padding: clamp(2rem, 5vw, 4.5rem);
+      flex-direction: column;
+      justify-content: center;
+      background:
+        radial-gradient(circle at 10% 15%, rgba(224, 202, 139, .12), transparent 18rem),
+        linear-gradient(135deg, rgba(15, 20, 36, .98), rgba(7, 10, 19, .96));
+    }
+
+    .title-art {
+      position: relative;
+      min-height: 520px;
+      overflow: hidden;
+      background: #090b13;
+    }
+
+    .title-art::after {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg, rgba(7, 10, 19, .52), transparent 30%);
+      content: "";
+      pointer-events: none;
+    }
+
+    .title-art img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: 60% 20%;
     }
 
     .caskets-emblem {
@@ -131,12 +180,12 @@
     }
 
     h1, h2, h3 { font-family: ui-serif, "Yu Mincho", "Hiragino Mincho ProN", serif; }
-    h1 { margin: 0; font-size: clamp(2.25rem, 11vw, 4rem); letter-spacing: .08em; line-height: 1.25; }
+    h1 { margin: 0; font-size: clamp(2.25rem, 5vw, 4rem); letter-spacing: .08em; line-height: 1.25; }
     h2 { margin: 0; font-size: 1.35rem; }
     h3 { margin: 0 0 .4rem; font-size: 1.02rem; }
 
     .subtitle { margin: .2rem 0 0; color: var(--muted); font-size: .9rem; letter-spacing: .09em; }
-    .lead { max-width: 30rem; margin: 1.15rem auto 1.7rem; color: var(--muted); }
+    .lead { max-width: 30rem; margin: 1.15rem 0 1.7rem; color: var(--muted); }
 
     .actions { display: grid; width: min(100%, 340px); gap: .7rem; }
 
@@ -296,6 +345,29 @@
       .trap-grid { grid-template-columns: 1fr; }
     }
 
+    @media (max-width: 760px) {
+      .title-screen { padding-top: .75rem; }
+      .title-layout {
+        min-height: 0;
+        grid-template-columns: 1fr;
+      }
+      .title-art {
+        min-height: 0;
+        height: clamp(250px, 48vh, 390px);
+        order: -1;
+      }
+      .title-art::after {
+        background: linear-gradient(0deg, rgba(7, 10, 19, .72), transparent 38%);
+      }
+      .title-art img { object-position: 58% 17%; }
+      .title-content {
+        padding: clamp(1.35rem, 6vw, 2.25rem);
+        text-align: center;
+      }
+      .lead { margin-right: auto; margin-left: auto; }
+      .actions { margin-right: auto; margin-left: auto; }
+    }
+
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
     }
@@ -307,31 +379,34 @@
 
     <main>
       <section id="title-screen" class="screen title-screen" aria-labelledby="game-title">
-        <div class="caskets-emblem" aria-hidden="true">
-          <span class="emblem-box emblem-box--red"></span>
-          <span class="emblem-box emblem-box--blue"></span>
+        <div class="title-layout">
+          <div class="title-content">
+            <p class="eyebrow">Twin Shadow Caskets</p>
+            <h1 id="game-title">双影の宝匣</h1>
+            <p class="subtitle">あなた 対 セレネ ／ 全5ラウンド</p>
+            <p class="lead">二つの封印箱へ星片と罠を隠し、相手が守った光を読み解こう。</p>
+            <div class="actions">
+              <button id="start-button" class="button button--primary" type="button">ゲームを始める</button>
+              <button id="rules-button" class="button" type="button" aria-controls="rules-panel" aria-expanded="false">遊び方</button>
+              <a class="button" href="../toybox/">🎪 おもちゃ箱へ戻る</a>
+            </div>
+            <section id="rules-panel" class="rules-panel" aria-labelledby="rules-title" hidden>
+              <h2 id="rules-title" tabindex="-1">遊び方</h2>
+              <p>毎ラウンド、星片を赤箱か青箱へ隠し、罠を置くか決めます。その後、セレネの箱を一つ開けます。</p>
+              <ul>
+                <li>星片だけ：+3点</li>
+                <li>空箱：0点</li>
+                <li>罠だけ：-2点</li>
+                <li>星片と罠：+1点</li>
+              </ul>
+              <p>得点に下限はありません。5ラウンド終了時、累計得点が高い側の勝利です。</p>
+              <button id="close-rules-button" class="button" type="button">閉じる</button>
+            </section>
+          </div>
+          <div class="title-art">
+            <img src="assets/selene-title.webp" alt="封印された書庫にたたずむ対戦相手セレネ" width="1024" height="1536">
+          </div>
         </div>
-        <p class="eyebrow">Twin Shadow Caskets</p>
-        <h1 id="game-title">双影の宝匣</h1>
-        <p class="subtitle">あなた 対 セレネ ／ 全5ラウンド</p>
-        <p class="lead">二つの封印箱へ星片と罠を隠し、相手が守った光を読み解こう。</p>
-        <div class="actions">
-          <button id="start-button" class="button button--primary" type="button">ゲームを始める</button>
-          <button id="rules-button" class="button" type="button" aria-controls="rules-panel" aria-expanded="false">遊び方</button>
-          <a class="button" href="../toybox/">🎪 おもちゃ箱へ戻る</a>
-        </div>
-        <section id="rules-panel" class="rules-panel" aria-labelledby="rules-title" hidden>
-          <h2 id="rules-title" tabindex="-1">遊び方</h2>
-          <p>毎ラウンド、星片を赤箱か青箱へ隠し、罠を置くか決めます。その後、セレネの箱を一つ開けます。</p>
-          <ul>
-            <li>星片だけ：+3点</li>
-            <li>空箱：0点</li>
-            <li>罠だけ：-2点</li>
-            <li>星片と罠：+1点</li>
-          </ul>
-          <p>得点に下限はありません。5ラウンド終了時、累計得点が高い側の勝利です。</p>
-          <button id="close-rules-button" class="button" type="button">閉じる</button>
-        </section>
       </section>
 
       <section id="game-screen" class="screen game-screen" aria-labelledby="phase-title" hidden>
