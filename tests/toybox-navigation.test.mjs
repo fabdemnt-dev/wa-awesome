@@ -27,12 +27,23 @@ test("おもちゃ箱から月秤の決闘のモード選択へ移動できる",
 });
 
 test("月秤の決闘で既存の1人用と2人用を選べる", () => {
-  assert.match(moonScaleSelect, /href="moon-scale-duel\/"/);
-  assert.match(moonScaleSelect, />1人で遊ぶ</);
-  assert.match(moonScaleSelect, /href="moon-scale-duel-online\.html"/);
-  assert.match(moonScaleSelect, />2人で遊ぶ</);
+  assert.match(moonScaleSelect, /class="mode-link mode-link--primary" href="moon-scale-duel\/">1人で遊ぶ<\/a>/);
+  assert.match(moonScaleSelect, /class="mode-link mode-link--secondary" href="moon-scale-duel-online\.html">2人で遊ぶ<\/a>/);
   assert.match(moonScaleSelect, /href="toybox\/"/);
   assert.match(moonScaleSelect, /🎪 おもちゃ箱へ戻る/);
+});
+
+test("月秤の決闘の入口をオリジナルカードゲームのタイトル画面として表示する", () => {
+  assert.match(moonScaleSelect, /<div class="moon-art"[^>]*>[\s\S]*?<p class="eyebrow">ORIGINAL CARD GAME<\/p>[\s\S]*?<h1 id="mode-heading"/);
+  assert.doesNotMatch(moonScaleSelect, /CHOOSE A MODE/);
+  assert.match(moonScaleSelect, /月影を賭ける、1対1の伏せ札決闘。残る札と相手の思惑を読み、月秤をこちらへ傾けよう。/);
+  assert.match(moonScaleSelect, /\.moon-art\s*\{[^}]*width:\s*100%[^}]*aspect-ratio:\s*3\s*\/\s*2/s);
+  assert.match(moonScaleSelect, /\.moon-art img\s*\{[^}]*width:\s*100%[^}]*height:\s*100%[^}]*object-fit:\s*cover[^}]*object-position:\s*7%\s+50%/s);
+  assert.match(moonScaleSelect, /duel-scene-background\.webp" alt="" width="1536" height="480"/);
+  assert.match(moonScaleSelect, /\.mode-list\s*\{[^}]*width:\s*min\(100%,\s*340px\)/s);
+  assert.match(moonScaleSelect, /\.mode-link\s*\{[^}]*min-height:\s*50px/s);
+  assert.match(moonScaleSelect, /\.mode-link--primary\s*\{[^}]*background:\s*linear-gradient/s);
+  assert.match(moonScaleSelect, /id="show-rules-button" class="mode-link mode-link--secondary"/);
 });
 
 test("月秤の決闘の入口から遊び方を開いてタイトルへ戻れる", () => {
