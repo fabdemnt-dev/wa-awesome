@@ -39,8 +39,9 @@ test("おもちゃ箱から月秤の決闘のモード選択へ移動できる",
 
 test("おもちゃ箱から双影の宝匣へ移動して戻れる", () => {
   assert.match(toybox, /href="\.\.\/twin-shadow-caskets\/"[^>]*class="card-panel"/);
-  assert.match(toybox, /双影の宝匣/);
-  assert.match(toybox, /Twin Shadow Caskets/);
+  assert.match(toybox, /🗝️ 双影の宝匣/);
+  assert.doesNotMatch(toybox, /Twin Shadow Caskets/);
+  assert.match(twinShadowCaskets, /Twin Shadow Caskets/);
   assert.match(twinShadowCaskets, /href="\.\.\/toybox\/"/);
   assert.match(twinShadowCaskets, /🎪 おもちゃ箱へ戻る/);
   assert.match(toybox, /href="\.\.\/shadow-card\.html"[^>]*class="card-panel"/);
