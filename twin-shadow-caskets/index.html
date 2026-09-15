@@ -395,7 +395,8 @@
 
     .opening-reveal.is-active .opening-reveal__lid { animation: casket-open .32s .12s ease-out both; }
     .opening-reveal.is-active .opening-reveal__seal { animation: seal-release .28s .2s ease-out both; }
-    .opening-reveal.is-active .opening-reveal__contents { animation: contents-appear .25s .47s ease-out both; }
+    .opening-reveal.is-active .opening-reveal__contents { animation: contents-appear .24s .36s ease-out both; }
+    .opening-reveal.is-leaving { animation: opening-reveal-leave .28s ease-in both; }
 
     .reveal-grid { display: grid; margin: 1rem 0; gap: .8rem; }
     .reveal-card { padding: 1rem; border: 1px solid var(--line); border-radius: 11px; background: #0c1120; }
@@ -489,6 +490,7 @@
     @keyframes casket-open { from { transform: rotateX(0); filter: brightness(1); } to { transform: perspective(180px) rotateX(58deg); filter: brightness(1.22); } }
     @keyframes seal-release { from { opacity: 1; transform: translateX(-50%) scale(1); } to { opacity: 0; transform: translateX(-50%) scale(.72); } }
     @keyframes contents-appear { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
+    @keyframes opening-reveal-leave { to { opacity: 0; } }
 
     @media (max-width: 359px) {
       .page-shell { padding-right: 10px; padding-left: 10px; }
@@ -657,7 +659,8 @@
     'use strict';
 
     const TOTAL_ROUNDS = 5;
-    const OPENING_REVEAL_MS = 880;
+    const OPENING_REVEAL_HOLD_MS = 1320;
+    const OPENING_REVEAL_FADE_MS = 280;
     const REDUCED_REVEAL_MS = 70;
     const COLORS = Object.freeze({ red: '赤箱', blue: '青箱' });
     const state = {
@@ -784,7 +787,7 @@
       byId('placement-phase').hidden = false;
       byId('opening-phase').hidden = true;
       byId('opening-reveal').hidden = true;
-      byId('opening-reveal').classList.remove('is-active');
+      byId('opening-reveal').classList.remove('is-active', 'is-leaving');
       byId('result-phase').hidden = true;
       byId('player-caskets').classList.remove('sealed');
       updatePressed('[data-open]', 'open', null);
@@ -904,16 +907,22 @@
       byId('opening-phase').hidden = true;
       byId('result-phase').hidden = true;
       reveal.hidden = false;
-      reveal.classList.remove('is-active');
+      reveal.classList.remove('is-active', 'is-leaving');
       void reveal.offsetWidth;
       reveal.classList.add('is-active');
       byId('phase-label').textContent = '開封';
       byId('phase-title').textContent = `セレネの${COLORS[state.playerOpen]}`;
       byId('phase-help').textContent = '封印がほどけ、中身が現れます。';
 
-      await new Promise((resolve) => window.setTimeout(resolve, reducedMotion ? REDUCED_REVEAL_MS : OPENING_REVEAL_MS));
+      if (reducedMotion) {
+        await new Promise((resolve) => window.setTimeout(resolve, REDUCED_REVEAL_MS));
+      } else {
+        await new Promise((resolve) => window.setTimeout(resolve, OPENING_REVEAL_HOLD_MS));
+        reveal.classList.add('is-leaving');
+        await new Promise((resolve) => window.setTimeout(resolve, OPENING_REVEAL_FADE_MS));
+      }
       reveal.hidden = true;
-      reveal.classList.remove('is-active');
+      reveal.classList.remove('is-active', 'is-leaving');
     }
 
     function revealRound(resolution) {
