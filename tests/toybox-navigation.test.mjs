@@ -12,6 +12,7 @@ const moonScaleSelect = await readFile(new URL("../moon-scale-duel-select.html",
 const moonScaleCpu = await readFile(new URL("../moon-scale-duel/index.html", import.meta.url), "utf8");
 const moonScaleOnlineState = await readFile(new URL("../moon-scale-duel-online-state.js", import.meta.url), "utf8");
 const moonScaleRules = await readFile(new URL("../functions/moon-scale-duel-online/rules.js", import.meta.url), "utf8");
+const twinShadowCaskets = await readFile(new URL("../twin-shadow-caskets/index.html", import.meta.url), "utf8");
 
 test("トップページからおもちゃ箱へ移動できる", () => {
   assert.match(home, /href="toybox\/"[^>]*class="card-panel"/);
@@ -34,6 +35,16 @@ test("影札はmain全体の巨大なフォーカス枠だけを除外する", (
 test("おもちゃ箱から月秤の決闘のモード選択へ移動できる", () => {
   assert.match(toybox, /href="\.\.\/moon-scale-duel-select\.html"[^>]*class="card-panel"/);
   assert.doesNotMatch(toybox, /href="\.\.\/moon-scale-duel\/"[^>]*class="card-panel"/);
+});
+
+test("おもちゃ箱から双影の宝匣へ移動して戻れる", () => {
+  assert.match(toybox, /href="\.\.\/twin-shadow-caskets\/"[^>]*class="card-panel"/);
+  assert.match(toybox, /双影の宝匣/);
+  assert.match(toybox, /Twin Shadow Caskets/);
+  assert.match(twinShadowCaskets, /href="\.\.\/toybox\/"/);
+  assert.match(twinShadowCaskets, /🎪 おもちゃ箱へ戻る/);
+  assert.match(toybox, /href="\.\.\/shadow-card\.html"[^>]*class="card-panel"/);
+  assert.match(toybox, /href="\.\.\/moon-scale-duel-select\.html"[^>]*class="card-panel"/);
 });
 
 test("月秤の決闘で既存の1人用と2人用を選べる", () => {

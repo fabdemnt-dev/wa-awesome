@@ -1,0 +1,709 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="赤と青の封印箱をめぐる、1対1の短期心理戦ゲーム。">
+  <title>双影の宝匣｜Twin Shadow Caskets</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #070a13;
+      --surface: #101629;
+      --surface-strong: #171e34;
+      --line: #59637a;
+      --text: #f1f3f8;
+      --muted: #b2bbcc;
+      --gold: #e0ca8b;
+      --red: #b44757;
+      --red-dark: #571f2a;
+      --blue: #3c72b8;
+      --blue-dark: #17365f;
+      --focus: #fff0ad;
+      --danger: #e9a0a9;
+    }
+
+    * { box-sizing: border-box; }
+
+    html { min-height: 100%; background: var(--bg); }
+
+    body {
+      min-width: 280px;
+      min-height: 100vh;
+      margin: 0;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 50% -10%, rgba(215, 225, 255, .19), transparent 34rem),
+        linear-gradient(160deg, #05070d 0%, #0a1021 55%, #090b13 100%);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.65;
+    }
+
+    button, a { font: inherit; }
+    button { color: inherit; }
+
+    button:focus-visible, a:focus-visible {
+      outline: 3px solid var(--focus);
+      outline-offset: 3px;
+    }
+
+    [hidden] { display: none !important; }
+
+    .page-shell {
+      display: flex;
+      width: min(100%, 620px);
+      min-height: 100vh;
+      margin: 0 auto;
+      padding: max(14px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) max(22px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
+      flex-direction: column;
+    }
+
+    .back-link {
+      display: inline-flex;
+      min-height: 44px;
+      align-items: center;
+      align-self: flex-start;
+      color: #dfe5f3;
+      font-size: .86rem;
+      font-weight: 700;
+      text-decoration: none;
+    }
+
+    main { flex: 1; }
+
+    .screen { animation: enter .24s ease-out; }
+
+    .title-screen {
+      display: flex;
+      min-height: calc(100vh - 100px);
+      padding: 7vh 0 2rem;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+    }
+
+    .caskets-emblem {
+      display: grid;
+      width: min(100%, 410px);
+      margin-bottom: 1.4rem;
+      grid-template-columns: 1fr 1fr;
+      gap: clamp(1.5rem, 10vw, 4.5rem);
+    }
+
+    .emblem-box {
+      position: relative;
+      height: 96px;
+      border: 1px solid rgba(229, 232, 240, .48);
+      border-radius: 9px 9px 16px 16px;
+      box-shadow: inset 0 0 22px rgba(0, 0, 0, .56), 0 12px 28px rgba(0, 0, 0, .35);
+    }
+
+    .emblem-box::before {
+      position: absolute;
+      top: 17px;
+      right: 16px;
+      left: 16px;
+      height: 1px;
+      background: rgba(241, 238, 219, .52);
+      content: "";
+    }
+
+    .emblem-box::after {
+      position: absolute;
+      inset: 34px auto auto 50%;
+      color: var(--gold);
+      content: "✦";
+      font-size: 1.4rem;
+      transform: translateX(-50%);
+    }
+
+    .emblem-box--red { background: linear-gradient(150deg, #8f3544, #2a1118); }
+    .emblem-box--blue { background: linear-gradient(150deg, #315f9b, #101f3c); }
+
+    .eyebrow {
+      margin: 0 0 .3rem;
+      color: var(--gold);
+      font-size: .72rem;
+      font-weight: 800;
+      letter-spacing: .2em;
+      text-transform: uppercase;
+    }
+
+    h1, h2, h3 { font-family: ui-serif, "Yu Mincho", "Hiragino Mincho ProN", serif; }
+    h1 { margin: 0; font-size: clamp(2.25rem, 11vw, 4rem); letter-spacing: .08em; line-height: 1.25; }
+    h2 { margin: 0; font-size: 1.35rem; }
+    h3 { margin: 0 0 .4rem; font-size: 1.02rem; }
+
+    .subtitle { margin: .2rem 0 0; color: var(--muted); font-size: .9rem; letter-spacing: .09em; }
+    .lead { max-width: 30rem; margin: 1.15rem auto 1.7rem; color: var(--muted); }
+
+    .actions { display: grid; width: min(100%, 340px); gap: .7rem; }
+
+    .button {
+      display: inline-flex;
+      min-height: 50px;
+      padding: .75rem 1rem;
+      border: 1px solid #778298;
+      border-radius: 8px;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(180deg, #242c43, #151b2e);
+      cursor: pointer;
+      font-weight: 800;
+      text-decoration: none;
+    }
+
+    .button--primary {
+      border-color: var(--gold);
+      color: #17140c;
+      background: linear-gradient(180deg, #f0dda5, #c6a85f);
+    }
+
+    .button:disabled { cursor: not-allowed; opacity: .42; }
+    .button:not(:disabled):active { transform: translateY(1px); }
+
+    .rules-panel, .panel {
+      padding: 1rem;
+      border: 1px solid rgba(122, 134, 158, .55);
+      border-radius: 12px;
+      background: rgba(16, 22, 41, .94);
+      box-shadow: 0 18px 42px rgba(0, 0, 0, .28);
+    }
+
+    .rules-panel { width: min(100%, 540px); margin-top: 1rem; text-align: left; }
+    .rules-panel p, .rules-panel li { color: var(--muted); font-size: .9rem; }
+    .rules-panel ul { padding-left: 1.3rem; }
+    .rules-panel .button { width: 100%; }
+
+    .game-screen { padding-bottom: 2rem; }
+
+    .status-bar {
+      display: grid;
+      margin-bottom: 1rem;
+      padding: .8rem;
+      border: 1px solid rgba(224, 202, 139, .42);
+      border-radius: 10px;
+      background: rgba(7, 10, 19, .86);
+      grid-template-columns: 1fr auto 1fr;
+      gap: .55rem;
+      text-align: center;
+    }
+
+    .score-name { display: block; color: var(--muted); font-size: .74rem; }
+    .score-value { color: var(--gold); font-size: 1.45rem; }
+    .round-value { align-self: center; color: #e2e7f1; font-size: .82rem; font-weight: 800; }
+
+    .phase-heading { margin-bottom: .9rem; text-align: center; }
+    .phase-heading p { margin: .25rem 0 0; color: var(--muted); font-size: .9rem; }
+
+    .casket-grid {
+      display: grid;
+      margin: 1rem 0;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: clamp(1rem, 6vw, 2.5rem);
+    }
+
+    .casket {
+      position: relative;
+      min-height: 116px;
+      padding: 1rem .6rem .75rem;
+      overflow: hidden;
+      border: 2px solid transparent;
+      border-radius: 10px 10px 17px 17px;
+      background: var(--surface-strong);
+      box-shadow: inset 0 -18px 30px rgba(0, 0, 0, .28), 0 10px 20px rgba(0, 0, 0, .22);
+      cursor: pointer;
+      text-align: center;
+    }
+
+    .casket::before {
+      display: block;
+      height: 14px;
+      margin: 0 -.6rem 1rem;
+      border-top: 1px solid rgba(255, 255, 255, .46);
+      border-bottom: 1px solid rgba(0, 0, 0, .4);
+      content: "";
+    }
+
+    .casket--red { border-color: #cb7180; background: linear-gradient(150deg, var(--red), var(--red-dark)); }
+    .casket--blue { border-color: #78a5df; background: linear-gradient(150deg, var(--blue), var(--blue-dark)); }
+    .casket[aria-pressed="true"] { outline: 3px solid var(--focus); outline-offset: 4px; transform: translateY(-3px); }
+    .casket-label { display: block; font-weight: 900; }
+    .casket-hint { display: block; margin-top: .25rem; color: #f2f4fa; font-size: .75rem; }
+
+    .choice-summary {
+      min-height: 50px;
+      margin: 1rem 0;
+      padding: .65rem .8rem;
+      border-left: 3px solid var(--gold);
+      border-radius: 0 7px 7px 0;
+      color: var(--muted);
+      background: rgba(224, 202, 139, .08);
+    }
+
+    .choice-summary strong { color: var(--text); }
+
+    .trap-grid { display: grid; margin: 1rem 0; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .55rem; }
+
+    .choice-button {
+      min-height: 48px;
+      padding: .55rem .35rem;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #1a2237;
+      cursor: pointer;
+      font-size: .84rem;
+      font-weight: 800;
+    }
+
+    .choice-button[aria-pressed="true"] { border-color: var(--focus); color: #17140c; background: var(--focus); }
+    .full-button { width: 100%; }
+
+    .sealed .casket { cursor: default; opacity: .86; }
+    .sealed .casket[aria-pressed="true"] { outline: none; transform: none; }
+
+    .reveal-grid { display: grid; margin: 1rem 0; gap: .8rem; }
+    .reveal-card { padding: .85rem; border: 1px solid var(--line); border-radius: 9px; background: #0c1120; }
+    .reveal-card p { margin: .25rem 0; color: var(--muted); }
+    .reveal-card strong { color: var(--text); }
+    .breakdown { color: var(--gold) !important; font-weight: 800; }
+
+    .opening-mark { display: inline-block; margin-right: .3rem; animation: unseal .48s ease-out; }
+
+    .history { margin-top: 1rem; }
+    .history h3 { font-family: inherit; font-size: .9rem; }
+    .history-list { display: grid; margin: 0; padding: 0; list-style: none; gap: .35rem; }
+    .history-list li { padding: .45rem .6rem; border-radius: 6px; color: var(--muted); background: rgba(255, 255, 255, .035); font-size: .82rem; }
+    .history-empty { color: var(--muted); font-size: .82rem; }
+
+    .selene-line { margin: .8rem 0; color: #e7dcbb; font-family: ui-serif, "Yu Mincho", serif; text-align: center; }
+
+    .final-screen { padding: 5vh 0 2rem; text-align: center; }
+    .final-symbol { margin: 1rem 0 .3rem; color: var(--gold); font-size: 2.2rem; }
+    .final-title { font-size: clamp(2rem, 10vw, 3.2rem); }
+    .final-score { margin: .7rem 0 1.2rem; color: var(--muted); font-size: 1.05rem; }
+    .final-screen .history { margin-bottom: 1.25rem; text-align: left; }
+    .final-screen .actions { margin: 0 auto; }
+
+    @keyframes enter { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+    @keyframes unseal { 0% { opacity: 0; transform: scale(.7) rotate(-8deg); } 65% { filter: brightness(1.8); } 100% { opacity: 1; transform: none; } }
+
+    @media (max-width: 359px) {
+      .page-shell { padding-right: 10px; padding-left: 10px; }
+      .casket-grid { gap: .75rem; }
+      .casket { min-height: 104px; }
+      .trap-grid { grid-template-columns: 1fr; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page-shell">
+    <a class="back-link" href="../toybox/">← 🎪 おもちゃ箱へ戻る</a>
+
+    <main>
+      <section id="title-screen" class="screen title-screen" aria-labelledby="game-title">
+        <div class="caskets-emblem" aria-hidden="true">
+          <span class="emblem-box emblem-box--red"></span>
+          <span class="emblem-box emblem-box--blue"></span>
+        </div>
+        <p class="eyebrow">Twin Shadow Caskets</p>
+        <h1 id="game-title">双影の宝匣</h1>
+        <p class="subtitle">あなた 対 セレネ ／ 全5ラウンド</p>
+        <p class="lead">二つの封印箱へ星片と罠を隠し、相手が守った光を読み解こう。</p>
+        <div class="actions">
+          <button id="start-button" class="button button--primary" type="button">ゲームを始める</button>
+          <button id="rules-button" class="button" type="button" aria-controls="rules-panel" aria-expanded="false">遊び方</button>
+          <a class="button" href="../toybox/">🎪 おもちゃ箱へ戻る</a>
+        </div>
+        <section id="rules-panel" class="rules-panel" aria-labelledby="rules-title" hidden>
+          <h2 id="rules-title" tabindex="-1">遊び方</h2>
+          <p>毎ラウンド、星片を赤箱か青箱へ隠し、罠を置くか決めます。その後、セレネの箱を一つ開けます。</p>
+          <ul>
+            <li>星片だけ：+3点</li>
+            <li>空箱：0点</li>
+            <li>罠だけ：-2点</li>
+            <li>星片と罠：+1点</li>
+          </ul>
+          <p>得点に下限はありません。5ラウンド終了時、累計得点が高い側の勝利です。</p>
+          <button id="close-rules-button" class="button" type="button">閉じる</button>
+        </section>
+      </section>
+
+      <section id="game-screen" class="screen game-screen" aria-labelledby="phase-title" hidden>
+        <div class="status-bar" aria-label="対戦状況">
+          <div><span class="score-name">あなた</span><strong id="player-score" class="score-value">0</strong></div>
+          <div id="round-label" class="round-value">ROUND 1 / 5</div>
+          <div><span class="score-name">セレネ</span><strong id="selene-score" class="score-value">0</strong></div>
+        </div>
+
+        <section class="panel">
+          <div class="phase-heading">
+            <p class="eyebrow" id="phase-label">星片配置</p>
+            <h2 id="phase-title" tabindex="-1">星片を隠す箱を選ぶ</h2>
+            <p id="phase-help">選んだ後も、配置を決定するまでは選び直せます。</p>
+          </div>
+
+          <div id="placement-phase">
+            <div id="player-caskets" class="casket-grid" aria-label="あなたの封印箱">
+              <button class="casket casket--red" type="button" data-star="red" aria-pressed="false"><span class="casket-label">赤箱</span><span class="casket-hint">✦ 星片を隠す</span></button>
+              <button class="casket casket--blue" type="button" data-star="blue" aria-pressed="false"><span class="casket-label">青箱</span><span class="casket-hint">✦ 星片を隠す</span></button>
+            </div>
+
+            <div id="trap-area" hidden>
+              <h3>罠を置く場所</h3>
+              <div class="trap-grid" aria-label="罠の配置">
+                <button class="choice-button" type="button" data-trap="red" aria-pressed="false">⚠ 赤箱</button>
+                <button class="choice-button" type="button" data-trap="blue" aria-pressed="false">⚠ 青箱</button>
+                <button class="choice-button" type="button" data-trap="none" aria-pressed="false">罠を置かない</button>
+              </div>
+            </div>
+
+            <p id="placement-summary" class="choice-summary" aria-live="polite">星片：未選択 ／ 罠：未選択</p>
+            <button id="lock-placement-button" class="button button--primary full-button" type="button" disabled>配置を決定</button>
+          </div>
+
+          <div id="opening-phase" hidden>
+            <div class="casket-grid" aria-label="セレネの封印箱">
+              <button class="casket casket--red" type="button" data-open="red" aria-pressed="false"><span class="casket-label">セレネの赤箱</span><span class="casket-hint">中身は封印中</span></button>
+              <button class="casket casket--blue" type="button" data-open="blue" aria-pressed="false"><span class="casket-label">セレネの青箱</span><span class="casket-hint">中身は封印中</span></button>
+            </div>
+            <p id="opening-summary" class="choice-summary" aria-live="polite">開ける箱：未選択</p>
+            <button id="open-button" class="button button--primary full-button" type="button" disabled>この箱を開ける</button>
+          </div>
+
+          <div id="result-phase" hidden>
+            <div id="round-result" class="reveal-grid" aria-live="polite"></div>
+            <p id="selene-line" class="selene-line"></p>
+            <button id="next-button" class="button button--primary full-button" type="button">次のラウンドへ</button>
+          </div>
+        </section>
+
+        <section class="history" aria-labelledby="history-title">
+          <h3 id="history-title">公開済みの履歴</h3>
+          <p id="history-empty" class="history-empty">まだ公開された結果はありません。</p>
+          <ol id="history-list" class="history-list"></ol>
+        </section>
+      </section>
+
+      <section id="final-screen" class="screen final-screen" aria-labelledby="final-title" hidden>
+        <p class="final-symbol" aria-hidden="true">✦</p>
+        <p class="eyebrow">Final Result</p>
+        <h2 id="final-title" class="final-title" tabindex="-1">最終結果</h2>
+        <p id="final-score" class="final-score"></p>
+        <section class="history" aria-labelledby="final-history-title">
+          <h3 id="final-history-title">5ラウンドの履歴</h3>
+          <ol id="final-history-list" class="history-list"></ol>
+        </section>
+        <div class="actions">
+          <button id="replay-button" class="button button--primary" type="button">もう一度遊ぶ</button>
+          <a class="button" href="../toybox/">🎪 おもちゃ箱へ戻る</a>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    'use strict';
+
+    const TOTAL_ROUNDS = 5;
+    const COLORS = Object.freeze({ red: '赤箱', blue: '青箱' });
+    const state = {
+      round: 1,
+      playerScore: 0,
+      seleneScore: 0,
+      playerStar: null,
+      playerTrap: null,
+      playerOpen: null,
+      seleneChoice: null,
+      history: [],
+      phase: 'title',
+      busy: false,
+    };
+
+    const byId = (id) => document.getElementById(id);
+    const showOnly = (id) => {
+      ['title-screen', 'game-screen', 'final-screen'].forEach((screenId) => {
+        byId(screenId).hidden = screenId !== id;
+      });
+    };
+    const signed = (value) => value > 0 ? `+${value}` : String(value);
+    const recentHistory = () => state.history.slice(-3);
+
+    function weightedChoice(entries) {
+      const value = Math.random();
+      let cursor = 0;
+      for (const [choice, probability] of entries) {
+        cursor += probability;
+        if (value < cursor) return choice;
+      }
+      return entries.at(-1)[0];
+    }
+
+    function countColor(items, getter) {
+      return items.reduce((counts, item) => {
+        const color = getter(item);
+        if (color === 'red' || color === 'blue') counts[color] += 1;
+        return counts;
+      }, { red: 0, blue: 0 });
+    }
+
+    function selenePlan() {
+      const recent = recentHistory();
+      if (!recent.length) {
+        return {
+          star: weightedChoice([['red', .5], ['blue', .5]]),
+          trap: weightedChoice([['red', .35], ['blue', .35], ['none', .3]]),
+          open: weightedChoice([['red', .5], ['blue', .5]]),
+        };
+      }
+
+      const opened = countColor(recent, (item) => item.playerOpen);
+      const stars = countColor(recent, (item) => item.playerStar);
+      let starWeights = [['red', .5], ['blue', .5]];
+      let trapWeights = [['red', .35], ['blue', .35], ['none', .3]];
+      let openWeights = [['red', .5], ['blue', .5]];
+
+      if (opened.red > opened.blue) {
+        starWeights = [['red', .4], ['blue', .6]];
+        trapWeights = [['red', .45], ['blue', .3], ['none', .25]];
+      } else if (opened.blue > opened.red) {
+        starWeights = [['red', .6], ['blue', .4]];
+        trapWeights = [['red', .3], ['blue', .45], ['none', .25]];
+      }
+
+      if (stars.red > stars.blue) openWeights = [['red', .6], ['blue', .4]];
+      else if (stars.blue > stars.red) openWeights = [['red', .4], ['blue', .6]];
+
+      return {
+        star: weightedChoice(starWeights),
+        trap: weightedChoice(trapWeights),
+        open: weightedChoice(openWeights),
+      };
+    }
+
+    function openingResult(opened, star, trap) {
+      const hasStar = opened === star;
+      const hasTrap = opened === trap;
+      if (hasStar && hasTrap) return { score: 1, label: '星片と罠', breakdown: '✦ 星片 +3 / ⚠ 罠 -2 / 合計 +1' };
+      if (hasStar) return { score: 3, label: '星片', breakdown: '✦ 星片 +3 / 合計 +3' };
+      if (hasTrap) return { score: -2, label: '罠', breakdown: '⚠ 罠 -2 / 合計 -2' };
+      return { score: 0, label: '空箱', breakdown: '空箱 / 合計 0' };
+    }
+
+    function updateScores() {
+      byId('player-score').textContent = state.playerScore;
+      byId('selene-score').textContent = state.seleneScore;
+      byId('round-label').textContent = `ROUND ${state.round} / ${TOTAL_ROUNDS}`;
+    }
+
+    function updatePressed(selector, attribute, value) {
+      document.querySelectorAll(selector).forEach((button) => {
+        button.setAttribute('aria-pressed', String(button.dataset[attribute] === value));
+      });
+    }
+
+    function updatePlacement() {
+      updatePressed('[data-star]', 'star', state.playerStar);
+      updatePressed('[data-trap]', 'trap', state.playerTrap);
+      const star = state.playerStar ? COLORS[state.playerStar] : '未選択';
+      const trap = state.playerTrap === 'none' ? '置かない' : state.playerTrap ? COLORS[state.playerTrap] : '未選択';
+      byId('placement-summary').innerHTML = `<strong>星片：</strong>${star} ／ <strong>罠：</strong>${trap}`;
+      byId('trap-area').hidden = !state.playerStar;
+      byId('lock-placement-button').disabled = !(state.playerStar && state.playerTrap) || state.busy;
+      byId('phase-label').textContent = state.playerStar ? '罠配置' : '星片配置';
+      byId('phase-title').textContent = state.playerStar ? '罠を置く場所を選ぶ' : '星片を隠す箱を選ぶ';
+      byId('phase-help').textContent = '配置を決定するまでは、星片も罠も選び直せます。';
+    }
+
+    function renderHistory(listId = 'history-list') {
+      const list = byId(listId);
+      list.innerHTML = state.history.map((item) => `<li>R${item.round} あなた ${signed(item.playerDelta)} / セレネ ${signed(item.seleneDelta)}</li>`).join('');
+      if (listId === 'history-list') byId('history-empty').hidden = state.history.length > 0;
+    }
+
+    function startRound() {
+      state.playerStar = null;
+      state.playerTrap = null;
+      state.playerOpen = null;
+      state.seleneChoice = selenePlan();
+      state.phase = 'placement';
+      state.busy = false;
+      byId('placement-phase').hidden = false;
+      byId('opening-phase').hidden = true;
+      byId('result-phase').hidden = true;
+      byId('player-caskets').classList.remove('sealed');
+      updatePressed('[data-open]', 'open', null);
+      byId('opening-summary').textContent = '開ける箱：未選択';
+      updateScores();
+      updatePlacement();
+      renderHistory();
+      byId('phase-title').focus({ preventScroll: true });
+    }
+
+    function beginGame() {
+      state.round = 1;
+      state.playerScore = 0;
+      state.seleneScore = 0;
+      state.history = [];
+      state.seleneChoice = null;
+      state.busy = false;
+      showOnly('game-screen');
+      startRound();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    document.querySelectorAll('[data-star]').forEach((button) => {
+      button.addEventListener('click', () => {
+        if (state.phase !== 'placement' || state.busy) return;
+        state.playerStar = button.dataset.star;
+        updatePlacement();
+      });
+    });
+
+    document.querySelectorAll('[data-trap]').forEach((button) => {
+      button.addEventListener('click', () => {
+        if (state.phase !== 'placement' || state.busy || !state.playerStar) return;
+        state.playerTrap = button.dataset.trap;
+        updatePlacement();
+      });
+    });
+
+    byId('lock-placement-button').addEventListener('click', () => {
+      if (state.phase !== 'placement' || state.busy || !state.playerStar || !state.playerTrap) return;
+      state.busy = true;
+      state.phase = 'opening';
+      byId('lock-placement-button').disabled = true;
+      document.querySelectorAll('[data-star], [data-trap]').forEach((button) => { button.disabled = true; });
+      byId('player-caskets').classList.add('sealed');
+      byId('placement-phase').hidden = true;
+      byId('opening-phase').hidden = false;
+      byId('phase-label').textContent = '開封先選択';
+      byId('phase-title').textContent = 'セレネの箱を一つ選ぶ';
+      byId('phase-help').textContent = '中身は、開ける箱を決定するまで分かりません。';
+      state.busy = false;
+      byId('phase-title').focus({ preventScroll: true });
+    });
+
+    document.querySelectorAll('[data-open]').forEach((button) => {
+      button.addEventListener('click', () => {
+        if (state.phase !== 'opening' || state.busy) return;
+        state.playerOpen = button.dataset.open;
+        updatePressed('[data-open]', 'open', state.playerOpen);
+        byId('opening-summary').innerHTML = `<strong>開ける箱：</strong>セレネの${COLORS[state.playerOpen]}`;
+        byId('open-button').disabled = false;
+      });
+    });
+
+    function positionText(value) { return value === 'none' ? '置かない' : COLORS[value]; }
+
+    function revealRound() {
+      const playerResult = openingResult(state.playerOpen, state.seleneChoice.star, state.seleneChoice.trap);
+      const seleneResult = openingResult(state.seleneChoice.open, state.playerStar, state.playerTrap);
+      state.playerScore += playerResult.score;
+      state.seleneScore += seleneResult.score;
+      state.history.push({
+        round: state.round,
+        playerStar: state.playerStar,
+        playerTrap: state.playerTrap,
+        playerOpen: state.playerOpen,
+        seleneStar: state.seleneChoice.star,
+        seleneTrap: state.seleneChoice.trap,
+        seleneOpen: state.seleneChoice.open,
+        playerDelta: playerResult.score,
+        seleneDelta: seleneResult.score,
+      });
+      updateScores();
+      renderHistory();
+
+      byId('round-result').innerHTML = `
+        <article class="reveal-card">
+          <h3><span class="opening-mark">✦</span>あなたの開封結果</h3>
+          <p>セレネ：星片は<strong>${COLORS[state.seleneChoice.star]}</strong>／罠は<strong>${positionText(state.seleneChoice.trap)}</strong></p>
+          <p>あなたが開けた箱：<strong>${COLORS[state.playerOpen]}</strong> — ${playerResult.label}</p>
+          <p class="breakdown">${playerResult.breakdown}</p>
+          <p>このラウンド ${signed(playerResult.score)}点 ／ 累計 ${state.playerScore}点</p>
+        </article>
+        <article class="reveal-card">
+          <h3><span class="opening-mark">⚠</span>セレネの開封結果</h3>
+          <p>あなた：星片は<strong>${COLORS[state.playerStar]}</strong>／罠は<strong>${positionText(state.playerTrap)}</strong></p>
+          <p>セレネが開けた箱：<strong>${COLORS[state.seleneChoice.open]}</strong> — ${seleneResult.label}</p>
+          <p class="breakdown">${seleneResult.breakdown}</p>
+          <p>このラウンド ${signed(seleneResult.score)}点 ／ 累計 ${state.seleneScore}点</p>
+        </article>`;
+
+      const lines = ['封印は解かれました。次の選択へ進みましょう。', '光と影、どちらも結果の一部です。', '一手の記憶が、次の読みを深くします。'];
+      byId('selene-line').textContent = `セレネ「${lines[Math.floor(Math.random() * lines.length)]}」`;
+      byId('next-button').textContent = state.round === TOTAL_ROUNDS ? '最終結果を見る' : '次のラウンドへ';
+      byId('opening-phase').hidden = true;
+      byId('result-phase').hidden = false;
+      byId('phase-label').textContent = '同時公開';
+      byId('phase-title').textContent = `第${state.round}ラウンドの結果`;
+      byId('phase-help').textContent = '双方の配置と開封結果が公開されました。';
+      state.phase = 'result';
+      state.busy = false;
+      byId('phase-title').focus({ preventScroll: true });
+    }
+
+    byId('open-button').addEventListener('click', () => {
+      if (state.phase !== 'opening' || state.busy || !state.playerOpen) return;
+      state.busy = true;
+      byId('open-button').disabled = true;
+      document.querySelectorAll('[data-open]').forEach((button) => { button.disabled = true; });
+      revealRound();
+    });
+
+    function showFinal() {
+      showOnly('final-screen');
+      const outcome = state.playerScore === state.seleneScore ? '引き分け' : state.playerScore > state.seleneScore ? '勝利' : '敗北';
+      byId('final-title').textContent = outcome;
+      byId('final-score').textContent = `あなた ${state.playerScore}点 ／ セレネ ${state.seleneScore}点`;
+      renderHistory('final-history-list');
+      state.phase = 'final';
+      state.seleneChoice = null;
+      state.playerStar = null;
+      state.playerTrap = null;
+      state.playerOpen = null;
+      state.busy = false;
+      byId('final-title').focus({ preventScroll: true });
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    byId('next-button').addEventListener('click', () => {
+      if (state.phase !== 'result' || state.busy) return;
+      state.busy = true;
+      if (state.round === TOTAL_ROUNDS) {
+        showFinal();
+        return;
+      }
+      state.round += 1;
+      document.querySelectorAll('[data-star], [data-trap], [data-open]').forEach((button) => { button.disabled = false; });
+      startRound();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+
+    byId('start-button').addEventListener('click', beginGame);
+    byId('replay-button').addEventListener('click', () => {
+      document.querySelectorAll('[data-star], [data-trap], [data-open]').forEach((button) => { button.disabled = false; });
+      beginGame();
+    });
+
+    byId('rules-button').addEventListener('click', () => {
+      const panel = byId('rules-panel');
+      panel.hidden = !panel.hidden;
+      byId('rules-button').setAttribute('aria-expanded', String(!panel.hidden));
+      if (!panel.hidden) byId('rules-title').focus({ preventScroll: true });
+    });
+
+    byId('close-rules-button').addEventListener('click', () => {
+      byId('rules-panel').hidden = true;
+      byId('rules-button').setAttribute('aria-expanded', 'false');
+      byId('rules-button').focus();
+    });
+  </script>
+</body>
+</html>
