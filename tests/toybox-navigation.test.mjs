@@ -112,7 +112,15 @@ test("月秤の遊び方は既存の6枚の月札画像を使う", () => {
   for (const image of ["moon-full", "moon-waning", "moon-reflection", "moon-still", "moon-new-oath", "moon-false"]) {
     assert.match(moonScaleSelect, new RegExp(`moon-scale-duel/assets/images/cards/${image}\\.webp`));
   }
-  assert.equal((moonScaleSelect.match(/moon-scale-duel\/assets\/images\/cards\//g) || []).length, 6);
+  assert.equal((moonScaleSelect.match(/src="moon-scale-duel\/assets\/images\/cards\//g) || []).length, 6);
+});
+
+test("月秤の遊び方は月札画像をスマホ向けの固定範囲へ収める", () => {
+  assert.match(moonScaleSelect, /\.card-guide\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s);
+  assert.match(moonScaleSelect, /\.card-guide img\s*\{[^}]*width:\s*100%[^}]*height:\s*clamp\(8\.5rem,\s*42vw,\s*10\.5rem\)[^}]*object-fit:\s*cover/s);
+  assert.match(moonScaleSelect, /@media \(max-width:\s*350px\)\s*\{\s*\.card-guide\s*\{\s*grid-template-columns:\s*1fr/s);
+  assert.equal((moonScaleSelect.match(/class="card-guide-image"/g) || []).length, 6);
+  assert.equal((moonScaleSelect.match(/aria-label="[^"]+の札を大きく見る"/g) || []).length, 6);
 });
 
 test("迷路試作への公開導線を含めない", () => {

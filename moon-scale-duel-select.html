@@ -212,9 +212,13 @@
     .card-guide img {
       display: block;
       width: 100%;
-      aspect-ratio: 3 / 2;
+      height: clamp(8.5rem, 42vw, 10.5rem);
       object-fit: cover;
       background: #11162f;
+    }
+
+    .card-guide-image {
+      display: block;
     }
 
     .card-guide-text { padding: 10px; }
@@ -320,27 +324,27 @@
           <h2 id="moon-cards-heading">6種類の月札</h2>
           <div class="card-guide">
             <article>
-              <img src="moon-scale-duel/assets/images/cards/moon-full.webp" alt="満ちる月の札" width="1536" height="1024" loading="lazy">
+              <a class="card-guide-image" href="moon-scale-duel/assets/images/cards/moon-full.webp" target="_blank" rel="noopener" aria-label="満ちる月の札を大きく見る"><img src="moon-scale-duel/assets/images/cards/moon-full.webp" alt="満ちる月の札" width="1536" height="1024" loading="lazy"></a>
               <div class="card-guide-text"><h3>満ちる月</h3><p>自分の月影を3増やします。</p></div>
             </article>
             <article>
-              <img src="moon-scale-duel/assets/images/cards/moon-waning.webp" alt="欠ける月の札" width="1536" height="1024" loading="lazy">
+              <a class="card-guide-image" href="moon-scale-duel/assets/images/cards/moon-waning.webp" target="_blank" rel="noopener" aria-label="欠ける月の札を大きく見る"><img src="moon-scale-duel/assets/images/cards/moon-waning.webp" alt="欠ける月の札" width="1536" height="1024" loading="lazy"></a>
               <div class="card-guide-text"><h3>欠ける月</h3><p>相手の月影を3減らします。</p></div>
             </article>
             <article>
-              <img src="moon-scale-duel/assets/images/cards/moon-reflection.webp" alt="返照の月の札" width="1536" height="1024" loading="lazy">
+              <a class="card-guide-image" href="moon-scale-duel/assets/images/cards/moon-reflection.webp" target="_blank" rel="noopener" aria-label="返照の月の札を大きく見る"><img src="moon-scale-duel/assets/images/cards/moon-reflection.webp" alt="返照の月の札" width="1536" height="1024" loading="lazy"></a>
               <div class="card-guide-text"><h3>返照の月</h3><p>このラウンドの「＋3」「−3」を逆向きにします。</p></div>
             </article>
             <article>
-              <img src="moon-scale-duel/assets/images/cards/moon-still.webp" alt="静止の月の札" width="1536" height="1024" loading="lazy">
+              <a class="card-guide-image" href="moon-scale-duel/assets/images/cards/moon-still.webp" target="_blank" rel="noopener" aria-label="静止の月の札を大きく見る"><img src="moon-scale-duel/assets/images/cards/moon-still.webp" alt="静止の月の札" width="1536" height="1024" loading="lazy"></a>
               <div class="card-guide-text"><h3>静止の月</h3><p>相手が出した月札の効果を無効にします。</p></div>
             </article>
             <article>
-              <img src="moon-scale-duel/assets/images/cards/moon-new-oath.webp" alt="新月の誓いの札" width="1536" height="1024" loading="lazy">
+              <a class="card-guide-image" href="moon-scale-duel/assets/images/cards/moon-new-oath.webp" target="_blank" rel="noopener" aria-label="新月の誓いの札を大きく見る"><img src="moon-scale-duel/assets/images/cards/moon-new-oath.webp" alt="新月の誓いの札" width="1536" height="1024" loading="lazy"></a>
               <div class="card-guide-text"><h3>新月の誓い</h3><p>公開時に劣勢なら、双方の月影を7にします。</p></div>
             </article>
             <article>
-              <img src="moon-scale-duel/assets/images/cards/moon-false.webp" alt="偽りの月の札" width="1536" height="1024" loading="lazy">
+              <a class="card-guide-image" href="moon-scale-duel/assets/images/cards/moon-false.webp" target="_blank" rel="noopener" aria-label="偽りの月の札を大きく見る"><img src="moon-scale-duel/assets/images/cards/moon-false.webp" alt="偽りの月の札" width="1536" height="1024" loading="lazy"></a>
               <div class="card-guide-text"><h3>偽りの月</h3><p>公開後、未使用で模倣可能な月札の効果を選びます。</p></div>
             </article>
           </div>
