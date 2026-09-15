@@ -5,6 +5,9 @@ import vm from "node:vm";
 
 const home = await readFile(new URL("../index.html", import.meta.url), "utf8");
 const toybox = await readFile(new URL("../toybox/index.html", import.meta.url), "utf8");
+const shadowCard = await readFile(new URL("../shadow-card.html", import.meta.url), "utf8");
+const shadowCardCss = await readFile(new URL("../shadow-card.css", import.meta.url), "utf8");
+const shadowCardUi = await readFile(new URL("../shadow-card-ui.js", import.meta.url), "utf8");
 const moonScaleSelect = await readFile(new URL("../moon-scale-duel-select.html", import.meta.url), "utf8");
 const moonScaleCpu = await readFile(new URL("../moon-scale-duel/index.html", import.meta.url), "utf8");
 const moonScaleOnlineState = await readFile(new URL("../moon-scale-duel-online-state.js", import.meta.url), "utf8");
@@ -19,6 +22,13 @@ test("トップページからおもちゃ箱へ移動できる", () => {
 test("おもちゃ箱から影札の交渉へ移動できる", () => {
   assert.match(toybox, /href="\.\.\/shadow-card\.html"[^>]*class="card-panel"/);
   assert.match(toybox, /🃏 影札の交渉/);
+});
+
+test("影札はmain全体の巨大なフォーカス枠だけを除外する", () => {
+  assert.match(shadowCard, /<main id="app" class="app" tabindex="-1">/);
+  assert.match(shadowCardCss, /:focus-visible\s*\{[^}]*outline:\s*3px solid var\(--color-focus\)[^}]*outline-offset:\s*3px/s);
+  assert.match(shadowCardCss, /#app:focus-visible\s*\{[^}]*outline:\s*none/s);
+  assert.match(shadowCardUi, /element\("app"\)\.focus\(\{ preventScroll: true \}\)/);
 });
 
 test("おもちゃ箱から月秤の決闘のモード選択へ移動できる", () => {

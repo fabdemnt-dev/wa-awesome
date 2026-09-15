@@ -111,6 +111,10 @@ p {
   outline-offset: 3px;
 }
 
+#app:focus-visible {
+  outline: none;
+}
+
 .page-shell {
   display: flex;
   min-height: 100vh;
