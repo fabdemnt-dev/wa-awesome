@@ -266,6 +266,16 @@
       text-align: center;
     }
 
+    .casket-image {
+      display: block;
+      width: clamp(76px, 18vw, 96px);
+      height: auto;
+      margin: 0 auto .3rem;
+      aspect-ratio: 1;
+      object-fit: contain;
+      pointer-events: none;
+    }
+
     .casket::before {
       display: block;
       height: 14px;
@@ -274,6 +284,8 @@
       border-bottom: 1px solid rgba(0, 0, 0, .4);
       content: "";
     }
+
+    .casket--illustrated::before { display: none; }
 
     .casket--red { border-color: #cb7180; background: linear-gradient(150deg, var(--red), var(--red-dark)); }
     .casket--blue { border-color: #78a5df; background: linear-gradient(150deg, var(--blue), var(--blue-dark)); }
@@ -522,6 +534,7 @@
       .page-shell { padding-right: 10px; padding-left: 10px; }
       .casket-grid { gap: .75rem; }
       .casket { min-height: 104px; }
+      .casket-image { width: 72px; }
       .trap-grid { grid-template-columns: 1fr; }
       .reveal-card { padding: .8rem; }
       .reveal-card__header { grid-template-columns: minmax(0, 1fr) 6.5rem; gap: .45rem; }
@@ -615,8 +628,8 @@
 
           <div id="placement-phase">
             <div id="player-caskets" class="casket-grid" aria-label="あなたの封印箱">
-              <button class="casket casket--red" type="button" data-star="red" aria-pressed="false"><span class="casket-label">赤箱</span><span class="casket-hint">✦ 星片を隠す</span></button>
-              <button class="casket casket--blue" type="button" data-star="blue" aria-pressed="false"><span class="casket-label">青箱</span><span class="casket-hint">✦ 星片を隠す</span></button>
+              <button class="casket casket--red casket--illustrated" type="button" data-star="red" aria-pressed="false"><img class="casket-image" src="assets/images/caskets/casket-red-closed.webp" alt=""><span class="casket-label">赤箱</span><span class="casket-hint">✦ 星片を隠す</span></button>
+              <button class="casket casket--blue casket--illustrated" type="button" data-star="blue" aria-pressed="false"><img class="casket-image" src="assets/images/caskets/casket-blue-closed.webp" alt=""><span class="casket-label">青箱</span><span class="casket-hint">✦ 星片を隠す</span></button>
             </div>
 
             <div id="trap-area" hidden>
@@ -634,8 +647,8 @@
 
           <div id="opening-phase" hidden>
             <div class="casket-grid" aria-label="セレネの封印箱">
-              <button class="casket casket--red" type="button" data-open="red" aria-pressed="false"><span class="casket-label">セレネの赤箱</span><span class="casket-hint">中身は封印中</span></button>
-              <button class="casket casket--blue" type="button" data-open="blue" aria-pressed="false"><span class="casket-label">セレネの青箱</span><span class="casket-hint">中身は封印中</span></button>
+              <button class="casket casket--red casket--illustrated" type="button" data-open="red" aria-pressed="false"><img class="casket-image" src="assets/images/caskets/casket-red-closed.webp" alt=""><span class="casket-label">セレネの赤箱</span><span class="casket-hint">中身は封印中</span></button>
+              <button class="casket casket--blue casket--illustrated" type="button" data-open="blue" aria-pressed="false"><img class="casket-image" src="assets/images/caskets/casket-blue-closed.webp" alt=""><span class="casket-label">セレネの青箱</span><span class="casket-hint">中身は封印中</span></button>
             </div>
             <p id="opening-summary" class="choice-summary" aria-live="polite">開ける箱：未選択</p>
             <button id="open-button" class="button button--primary full-button" type="button" disabled>この箱を開ける</button>
