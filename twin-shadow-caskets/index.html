@@ -312,6 +312,91 @@
     .sealed .casket { cursor: default; opacity: .86; }
     .sealed .casket[aria-pressed="true"] { outline: none; transform: none; }
 
+    .opening-reveal {
+      display: grid;
+      min-height: 260px;
+      padding: 1rem;
+      place-items: center;
+      text-align: center;
+    }
+
+    .opening-reveal__stage { width: min(100%, 270px); }
+
+    .opening-reveal__casket {
+      position: relative;
+      min-height: 142px;
+      padding: 3.9rem 1rem 1rem;
+      overflow: hidden;
+      border: 2px solid;
+      border-radius: 12px 12px 22px 22px;
+      box-shadow: inset 0 -24px 34px rgba(0, 0, 0, .38), 0 16px 30px rgba(0, 0, 0, .32);
+    }
+
+    .opening-reveal__casket--red {
+      border-color: #cb7180;
+      background: linear-gradient(150deg, var(--red), var(--red-dark));
+    }
+
+    .opening-reveal__casket--blue {
+      border-color: #78a5df;
+      background: linear-gradient(150deg, var(--blue), var(--blue-dark));
+    }
+
+    .opening-reveal__lid {
+      position: absolute;
+      top: 0;
+      right: -2px;
+      left: -2px;
+      height: 54px;
+      border: 2px solid inherit;
+      border-radius: 12px 12px 5px 5px;
+      background: rgba(8, 10, 17, .45);
+      box-shadow: inset 0 -8px 16px rgba(0, 0, 0, .42);
+      transform-origin: center top;
+    }
+
+    .opening-reveal__seal {
+      position: absolute;
+      top: 34px;
+      left: 50%;
+      z-index: 1;
+      display: grid;
+      width: 38px;
+      height: 38px;
+      border: 1px solid rgba(255, 244, 203, .72);
+      border-radius: 50%;
+      place-items: center;
+      color: var(--gold);
+      background: #25202a;
+      box-shadow: 0 0 0 5px rgba(8, 10, 17, .26), 0 0 18px rgba(224, 202, 139, .22);
+      transform: translateX(-50%);
+    }
+
+    .opening-reveal__contents {
+      display: grid;
+      min-height: 54px;
+      place-content: center;
+      gap: .1rem;
+      opacity: 0;
+      transform: translateY(7px);
+    }
+
+    .opening-reveal__symbols { font-size: 1.75rem; font-weight: 900; letter-spacing: .18em; line-height: 1.15; }
+    .opening-reveal__name { font-weight: 900; }
+    .opening-reveal__contents--star { color: #fff0b5; text-shadow: 0 0 18px rgba(255, 232, 151, .78); }
+    .opening-reveal__contents--trap { color: #ffadb7; text-shadow: 0 0 15px rgba(180, 52, 68, .7); }
+    .opening-reveal__contents--empty { color: #d1d7e2; }
+    .opening-reveal__contents--both .opening-reveal__symbols {
+      color: #f4d98d;
+      text-shadow: 13px 0 17px rgba(170, 49, 65, .62), -8px 0 17px rgba(255, 232, 151, .6);
+    }
+
+    .opening-reveal__label { margin: .75rem 0 0; color: var(--muted); font-size: .85rem; font-weight: 800; }
+
+    .opening-reveal.is-active .opening-reveal__lid { animation: casket-open .32s .12s ease-out both; }
+    .opening-reveal.is-active .opening-reveal__seal { animation: seal-release .28s .2s ease-out both; }
+    .opening-reveal.is-active .opening-reveal__contents { animation: contents-appear .25s .47s ease-out both; }
+
     .reveal-grid { display: grid; margin: 1rem 0; gap: .8rem; }
     .reveal-card { padding: 1rem; border: 1px solid var(--line); border-radius: 11px; background: #0c1120; }
     .reveal-card__header {
@@ -401,6 +486,9 @@
 
     @keyframes enter { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
     @keyframes unseal { 0% { opacity: 0; transform: scale(.7) rotate(-8deg); } 65% { filter: brightness(1.8); } 100% { opacity: 1; transform: none; } }
+    @keyframes casket-open { from { transform: rotateX(0); filter: brightness(1); } to { transform: perspective(180px) rotateX(58deg); filter: brightness(1.22); } }
+    @keyframes seal-release { from { opacity: 1; transform: translateX(-50%) scale(1); } to { opacity: 0; transform: translateX(-50%) scale(.72); } }
+    @keyframes contents-appear { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
 
     @media (max-width: 359px) {
       .page-shell { padding-right: 10px; padding-left: 10px; }
@@ -439,6 +527,9 @@
 
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+      .opening-reveal__lid { transform: perspective(180px) rotateX(58deg); }
+      .opening-reveal__seal { opacity: 0; }
+      .opening-reveal__contents { opacity: 1; transform: none; }
     }
   </style>
 </head>
@@ -520,6 +611,17 @@
             <button id="open-button" class="button button--primary full-button" type="button" disabled>この箱を開ける</button>
           </div>
 
+          <div id="opening-reveal" class="opening-reveal" aria-live="polite" hidden>
+            <div class="opening-reveal__stage">
+              <div id="opening-reveal-casket" class="opening-reveal__casket">
+                <span class="opening-reveal__lid" aria-hidden="true"></span>
+                <span class="opening-reveal__seal" aria-hidden="true">◇</span>
+                <div id="opening-reveal-contents" class="opening-reveal__contents"></div>
+              </div>
+              <p id="opening-reveal-label" class="opening-reveal__label"></p>
+            </div>
+          </div>
+
           <div id="result-phase" hidden>
             <div id="round-result" class="reveal-grid" aria-live="polite"></div>
             <p id="selene-line" class="selene-line"></p>
@@ -555,6 +657,8 @@
     'use strict';
 
     const TOTAL_ROUNDS = 5;
+    const OPENING_REVEAL_MS = 880;
+    const REDUCED_REVEAL_MS = 70;
     const COLORS = Object.freeze({ red: '赤箱', blue: '青箱' });
     const state = {
       round: 1,
@@ -679,6 +783,8 @@
       state.busy = false;
       byId('placement-phase').hidden = false;
       byId('opening-phase').hidden = true;
+      byId('opening-reveal').hidden = true;
+      byId('opening-reveal').classList.remove('is-active');
       byId('result-phase').hidden = true;
       byId('player-caskets').classList.remove('sealed');
       updatePressed('[data-open]', 'open', null);
@@ -765,9 +871,53 @@
         </dl>`;
     }
 
-    function revealRound() {
+    function resolveRound() {
       const playerResult = openingResult(state.playerOpen, state.seleneChoice.star, state.seleneChoice.trap);
       const seleneResult = openingResult(state.seleneChoice.open, state.playerStar, state.playerTrap);
+      return { playerResult, seleneResult };
+    }
+
+    function openingRevealContents(result) {
+      if (result.label === '星片') {
+        return '<span class="opening-reveal__symbols">✦</span><span class="opening-reveal__name">星片</span>';
+      }
+      if (result.label === '罠') {
+        return '<span class="opening-reveal__symbols">⚠</span><span class="opening-reveal__name">罠</span>';
+      }
+      if (result.label === '星片と罠') {
+        return '<span class="opening-reveal__symbols">✦　⚠</span><span class="opening-reveal__name">星片と罠</span>';
+      }
+      return '<span class="opening-reveal__name">空の宝匣</span>';
+    }
+
+    async function playOpeningReveal(resolution) {
+      const reveal = byId('opening-reveal');
+      const casket = byId('opening-reveal-casket');
+      const contents = byId('opening-reveal-contents');
+      const result = resolution.playerResult;
+      const reducedMotion = Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+
+      casket.className = `opening-reveal__casket opening-reveal__casket--${state.playerOpen}`;
+      contents.className = `opening-reveal__contents opening-reveal__contents--${result.label === '星片と罠' ? 'both' : result.label === '星片' ? 'star' : result.label === '罠' ? 'trap' : 'empty'}`;
+      contents.innerHTML = openingRevealContents(result);
+      byId('opening-reveal-label').textContent = `セレネの${COLORS[state.playerOpen]}を開封`;
+      byId('opening-phase').hidden = true;
+      byId('result-phase').hidden = true;
+      reveal.hidden = false;
+      reveal.classList.remove('is-active');
+      void reveal.offsetWidth;
+      reveal.classList.add('is-active');
+      byId('phase-label').textContent = '開封';
+      byId('phase-title').textContent = `セレネの${COLORS[state.playerOpen]}`;
+      byId('phase-help').textContent = '封印がほどけ、中身が現れます。';
+
+      await new Promise((resolve) => window.setTimeout(resolve, reducedMotion ? REDUCED_REVEAL_MS : OPENING_REVEAL_MS));
+      reveal.hidden = true;
+      reveal.classList.remove('is-active');
+    }
+
+    function revealRound(resolution) {
+      const { playerResult, seleneResult } = resolution;
       state.playerScore += playerResult.score;
       state.seleneScore += seleneResult.score;
       state.history.push({
@@ -834,12 +984,15 @@
       byId('phase-title').focus({ preventScroll: true });
     }
 
-    byId('open-button').addEventListener('click', () => {
+    byId('open-button').addEventListener('click', async () => {
       if (state.phase !== 'opening' || state.busy || !state.playerOpen) return;
       state.busy = true;
+      state.phase = 'revealing';
       byId('open-button').disabled = true;
       document.querySelectorAll('[data-open]').forEach((button) => { button.disabled = true; });
-      revealRound();
+      const resolution = resolveRound();
+      await playOpeningReveal(resolution);
+      revealRound(resolution);
     });
 
     function showFinal() {
