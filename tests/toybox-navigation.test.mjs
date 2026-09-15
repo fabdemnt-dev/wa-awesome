@@ -43,6 +43,17 @@ test("月秤の決闘で既存の1人用と2人用を選べる", () => {
   assert.match(moonScaleSelect, /🎪 おもちゃ箱へ戻る/);
 });
 
+test("月秤の決闘はheader・main・footerを持つページ外枠を表示する", () => {
+  assert.match(moonScaleSelect, /<div class="page-shell">\s*<header class="site-header">\s*<nav class="site-navigation"[^>]*>\s*<a class="top-link" href="toybox\/">← 🎪 おもちゃ箱へ戻る<\/a>\s*<\/nav>\s*<\/header>\s*<main class="page">/s);
+  assert.match(moonScaleSelect, /<\/main>\s*<footer class="site-footer">\s*<small>月秤の決闘 — Original Web Card Game<\/small>\s*<\/footer>\s*<\/div>/s);
+  assert.match(moonScaleSelect, /\.page-shell\s*\{[^}]*min-height:\s*100vh[^}]*flex-direction:\s*column/s);
+  assert.match(moonScaleSelect, /\.top-link\s*\{[^}]*min-height:\s*44px[^}]*padding:\s*\.45rem 0[^}]*font-size:\s*\.82rem[^}]*font-weight:\s*700/s);
+  assert.match(moonScaleSelect, /\.page\s*\{[^}]*flex:\s*1/s);
+  assert.match(moonScaleSelect, /\.site-footer\s*\{[^}]*padding-top:\s*1rem[^}]*padding-bottom:\s*max\(1rem, env\(safe-area-inset-bottom\)\)[^}]*font-size:\s*\.72rem[^}]*text-align:\s*center/s);
+  assert.doesNotMatch(moonScaleSelect, /\.site-footer\s*\{[^}]*(?:border|box-shadow|background)/s);
+  assert.match(moonScaleSelect, /<main class="page">[\s\S]*id="title-screen"[\s\S]*id="rules-screen"[\s\S]*<\/main>/);
+});
+
 test("月秤の決闘の入口をオリジナルカードゲームのタイトル画面として表示する", () => {
   assert.match(moonScaleSelect, /<div class="moon-art"[^>]*>[\s\S]*?<p class="eyebrow">ORIGINAL CARD GAME<\/p>[\s\S]*?<h1 id="mode-heading"/);
   assert.doesNotMatch(moonScaleSelect, /CHOOSE A MODE/);

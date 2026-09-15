@@ -49,18 +49,55 @@
       outline-offset: 3px;
     }
 
-    .page {
-      width: min(calc(100% - 28px), 520px);
+    .page-shell {
+      display: flex;
+      min-height: 100vh;
+      flex-direction: column;
+    }
+
+    .site-header,
+    .site-footer {
+      width: 100%;
+      padding-right: max(14px, env(safe-area-inset-right));
+      padding-left: max(14px, env(safe-area-inset-left));
+      color: var(--muted);
+    }
+
+    .site-header {
+      min-height: 48px;
+      padding-top: max(12px, env(safe-area-inset-top));
+    }
+
+    .site-navigation {
+      width: 100%;
+      max-width: 520px;
       margin: 0 auto;
-      padding: 18px 0 max(40px, env(safe-area-inset-bottom));
+      text-align: left;
+    }
+
+    .page {
+      width: 100%;
+      max-width: 520px;
+      margin: 0 auto;
+      padding: 10px max(14px, env(safe-area-inset-right)) 40px max(14px, env(safe-area-inset-left));
+      flex: 1;
     }
 
     .top-link {
       display: inline-flex;
       min-height: 44px;
-      padding: 8px 0;
+      padding: .45rem 0;
       align-items: center;
       color: #d9d2ff;
+      font-size: .82rem;
+      font-weight: 700;
+    }
+
+    .site-footer {
+      padding-top: 1rem;
+      padding-bottom: max(1rem, env(safe-area-inset-bottom));
+      font-size: .72rem;
+      text-align: center;
     }
 
     .screen {
@@ -306,8 +343,15 @@
     .secondary-button:focus-visible { border-color: var(--focus); background: #30366d; }
 
     @media (max-width: 420px) {
+      .site-header,
+      .site-footer {
+        padding-right: max(10px, env(safe-area-inset-right));
+        padding-left: max(10px, env(safe-area-inset-left));
+      }
+
       .page {
-        width: min(calc(100% - 20px), 520px);
+        padding-right: max(10px, env(safe-area-inset-right));
+        padding-left: max(10px, env(safe-area-inset-left));
         padding-top: 6px;
       }
 
@@ -329,8 +373,14 @@
   </style>
 </head>
 <body>
-  <main class="page">
-    <a class="top-link" href="toybox/">← 🎪 おもちゃ箱へ戻る</a>
+  <div class="page-shell">
+    <header class="site-header">
+      <nav class="site-navigation" aria-label="ゲーム外への移動">
+        <a class="top-link" href="toybox/">← 🎪 おもちゃ箱へ戻る</a>
+      </nav>
+    </header>
+
+    <main class="page">
     <section id="title-screen" class="screen mode-select" aria-labelledby="mode-heading">
       <div class="moon-art" aria-hidden="true">
         <img src="moon-scale-duel/assets/images/duel/duel-scene-background.webp" alt="" width="1536" height="480">
@@ -436,7 +486,12 @@
         <button id="back-to-title-button" class="secondary-button" type="button" aria-controls="title-screen">タイトルへ戻る</button>
       </div>
     </section>
-  </main>
+    </main>
+
+    <footer class="site-footer">
+      <small>月秤の決闘 — Original Web Card Game</small>
+    </footer>
+  </div>
   <script>
     'use strict';
 
