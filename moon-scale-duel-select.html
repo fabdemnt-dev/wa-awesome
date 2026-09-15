@@ -195,21 +195,41 @@
 
     .rule-panel li + li { margin-top: 5px; }
 
-    .card-guide {
+    .card-guide,
+    .result-guide {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 10px;
     }
 
-    .card-guide article {
+    .gallery-card {
+      position: relative;
+      display: block;
       min-width: 0;
       overflow: hidden;
       border: 1px solid rgba(112, 122, 177, .7);
       border-radius: 12px;
+      color: var(--silver);
       background: rgba(10, 13, 40, .72);
+      text-decoration: none;
     }
 
-    .card-guide img {
+    .gallery-card::after {
+      position: absolute;
+      top: 7px;
+      right: 7px;
+      padding: 3px 7px;
+      border: 1px solid rgba(236, 220, 166, .55);
+      border-radius: 999px;
+      content: "拡大";
+      color: #171426;
+      background: rgba(236, 220, 166, .92);
+      font-size: .65rem;
+      font-weight: 800;
+      letter-spacing: .04em;
+    }
+
+    .gallery-card img {
       display: block;
       width: 100%;
       height: clamp(8.5rem, 42vw, 10.5rem);
@@ -217,12 +237,38 @@
       background: #11162f;
     }
 
-    .card-guide-image {
+    .gallery-caption {
       display: block;
+      padding: 9px 10px 10px;
+      font-size: .9rem;
+      font-weight: 800;
+      text-align: center;
     }
 
-    .card-guide-text { padding: 10px; }
-    .card-guide-text p { color: var(--muted); font-size: .88rem; }
+    .card-effect-list {
+      display: grid;
+      gap: 7px;
+      margin: 12px 0 0;
+    }
+
+    .card-guide + h3 { margin-top: 14px; }
+
+    .card-effect-list div {
+      padding: 9px 10px;
+      border-left: 3px solid rgba(236, 220, 166, .72);
+      background: rgba(10, 13, 40, .55);
+    }
+
+    .card-effect-list dt {
+      color: var(--moon);
+      font-weight: 800;
+    }
+
+    .card-effect-list dd {
+      margin: 2px 0 0;
+      color: var(--muted);
+      font-size: .9rem;
+    }
 
     .rules-actions {
       display: grid;
@@ -255,8 +301,8 @@
       .moon-art { height: 88px; margin-bottom: 12px; }
       .mode-link { min-height: 84px; padding: 13px 15px; }
       .rule-panel { padding: 14px; }
-      .card-guide { gap: 8px; }
-      .card-guide-text { padding: 9px; }
+      .card-guide,
+      .result-guide { gap: 8px; }
     }
 
     @media (max-width: 350px) {
@@ -323,31 +369,22 @@
         <article class="rule-panel" aria-labelledby="moon-cards-heading">
           <h2 id="moon-cards-heading">6種類の月札</h2>
           <div class="card-guide">
-            <article>
-              <a class="card-guide-image" href="moon-scale-duel/assets/images/cards/moon-full.webp" target="_blank" rel="noopener" aria-label="満ちる月の札を大きく見る"><img src="moon-scale-duel/assets/images/cards/moon-full.webp" alt="満ちる月の札" width="1536" height="1024" loading="lazy"></a>
-              <div class="card-guide-text"><h3>満ちる月</h3><p>自分の月影を3増やします。</p></div>
-            </article>
-            <article>
-              <a class="card-guide-image" href="moon-scale-duel/assets/images/cards/moon-waning.webp" target="_blank" rel="noopener" aria-label="欠ける月の札を大きく見る"><img src="moon-scale-duel/assets/images/cards/moon-waning.webp" alt="欠ける月の札" width="1536" height="1024" loading="lazy"></a>
-              <div class="card-guide-text"><h3>欠ける月</h3><p>相手の月影を3減らします。</p></div>
-            </article>
-            <article>
-              <a class="card-guide-image" href="moon-scale-duel/assets/images/cards/moon-reflection.webp" target="_blank" rel="noopener" aria-label="返照の月の札を大きく見る"><img src="moon-scale-duel/assets/images/cards/moon-reflection.webp" alt="返照の月の札" width="1536" height="1024" loading="lazy"></a>
-              <div class="card-guide-text"><h3>返照の月</h3><p>このラウンドの「＋3」「−3」を逆向きにします。</p></div>
-            </article>
-            <article>
-              <a class="card-guide-image" href="moon-scale-duel/assets/images/cards/moon-still.webp" target="_blank" rel="noopener" aria-label="静止の月の札を大きく見る"><img src="moon-scale-duel/assets/images/cards/moon-still.webp" alt="静止の月の札" width="1536" height="1024" loading="lazy"></a>
-              <div class="card-guide-text"><h3>静止の月</h3><p>相手が出した月札の効果を無効にします。</p></div>
-            </article>
-            <article>
-              <a class="card-guide-image" href="moon-scale-duel/assets/images/cards/moon-new-oath.webp" target="_blank" rel="noopener" aria-label="新月の誓いの札を大きく見る"><img src="moon-scale-duel/assets/images/cards/moon-new-oath.webp" alt="新月の誓いの札" width="1536" height="1024" loading="lazy"></a>
-              <div class="card-guide-text"><h3>新月の誓い</h3><p>公開時に劣勢なら、双方の月影を7にします。</p></div>
-            </article>
-            <article>
-              <a class="card-guide-image" href="moon-scale-duel/assets/images/cards/moon-false.webp" target="_blank" rel="noopener" aria-label="偽りの月の札を大きく見る"><img src="moon-scale-duel/assets/images/cards/moon-false.webp" alt="偽りの月の札" width="1536" height="1024" loading="lazy"></a>
-              <div class="card-guide-text"><h3>偽りの月</h3><p>公開後、未使用で模倣可能な月札の効果を選びます。</p></div>
-            </article>
+            <a class="gallery-card card-guide-image" href="moon-scale-duel/assets/images/cards/moon-full.webp" target="_blank" rel="noopener" aria-label="満ちる月の札を大きく見る"><img src="moon-scale-duel/assets/images/cards/moon-full.webp" alt="満ちる月の札" width="1536" height="1024" loading="lazy"><span class="gallery-caption">満ちる月</span></a>
+            <a class="gallery-card card-guide-image" href="moon-scale-duel/assets/images/cards/moon-waning.webp" target="_blank" rel="noopener" aria-label="欠ける月の札を大きく見る"><img src="moon-scale-duel/assets/images/cards/moon-waning.webp" alt="欠ける月の札" width="1536" height="1024" loading="lazy"><span class="gallery-caption">欠ける月</span></a>
+            <a class="gallery-card card-guide-image" href="moon-scale-duel/assets/images/cards/moon-reflection.webp" target="_blank" rel="noopener" aria-label="返照の月の札を大きく見る"><img src="moon-scale-duel/assets/images/cards/moon-reflection.webp" alt="返照の月の札" width="1536" height="1024" loading="lazy"><span class="gallery-caption">返照の月</span></a>
+            <a class="gallery-card card-guide-image" href="moon-scale-duel/assets/images/cards/moon-still.webp" target="_blank" rel="noopener" aria-label="静止の月の札を大きく見る"><img src="moon-scale-duel/assets/images/cards/moon-still.webp" alt="静止の月の札" width="1536" height="1024" loading="lazy"><span class="gallery-caption">静止の月</span></a>
+            <a class="gallery-card card-guide-image" href="moon-scale-duel/assets/images/cards/moon-new-oath.webp" target="_blank" rel="noopener" aria-label="新月の誓いの札を大きく見る"><img src="moon-scale-duel/assets/images/cards/moon-new-oath.webp" alt="新月の誓いの札" width="1536" height="1024" loading="lazy"><span class="gallery-caption">新月の誓い</span></a>
+            <a class="gallery-card card-guide-image" href="moon-scale-duel/assets/images/cards/moon-false.webp" target="_blank" rel="noopener" aria-label="偽りの月の札を大きく見る"><img src="moon-scale-duel/assets/images/cards/moon-false.webp" alt="偽りの月の札" width="1536" height="1024" loading="lazy"><span class="gallery-caption">偽りの月</span></a>
           </div>
+          <h3>基本の効果</h3>
+          <dl class="card-effect-list">
+            <div><dt>満ちる月</dt><dd>自分の月影を3増やします。</dd></div>
+            <div><dt>欠ける月</dt><dd>相手の月影を3減らします。</dd></div>
+            <div><dt>返照の月</dt><dd>このラウンドの「＋3」「−3」を逆向きにします。</dd></div>
+            <div><dt>静止の月</dt><dd>相手が出した月札の効果を無効にします。</dd></div>
+            <div><dt>新月の誓い</dt><dd>公開時に劣勢なら、双方の月影を7にします。</dd></div>
+            <div><dt>偽りの月</dt><dd>公開後、未使用で模倣可能な月札の効果を選びます。</dd></div>
+          </dl>
         </article>
 
         <article class="rule-panel">
@@ -372,6 +409,15 @@
             <li>効果解決後に双方とも月影0：引き分け</li>
             <li>第6ラウンド終了時：月影が多い側の勝利。同値は引き分け</li>
           </ul>
+        </article>
+
+        <article class="rule-panel" aria-labelledby="result-guide-heading">
+          <h2 id="result-guide-heading">最終結果</h2>
+          <div class="result-guide">
+            <a class="gallery-card result-guide-image" href="moon-scale-duel/assets/images/results/result-victory.webp" target="_blank" rel="noopener" aria-label="勝利結果の画像を大きく見る"><img src="moon-scale-duel/assets/images/results/result-victory.webp" alt="雲が左右へ開き、中央の大きな月から月光が広がる夜空" width="1536" height="1024" loading="lazy"><span class="gallery-caption">勝利</span></a>
+            <a class="gallery-card result-guide-image" href="moon-scale-duel/assets/images/results/result-defeat.webp" target="_blank" rel="noopener" aria-label="敗北結果の画像を大きく見る"><img src="moon-scale-duel/assets/images/results/result-defeat.webp" alt="丸い月が雲に部分的に覆われ、月光が静かに退く夜空" width="1536" height="1024" loading="lazy"><span class="gallery-caption">敗北</span></a>
+            <a class="gallery-card result-guide-image" href="moon-scale-duel/assets/images/results/result-draw.webp" target="_blank" rel="noopener" aria-label="引き分け結果の画像を大きく見る"><img src="moon-scale-duel/assets/images/results/result-draw.webp" alt="小さな月と左右に均衡した雲、水平の銀色の光が広がる夜空" width="1536" height="1024" loading="lazy"><span class="gallery-caption">引き分け</span></a>
+          </div>
         </article>
 
         <article class="rule-panel">

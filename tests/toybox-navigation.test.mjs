@@ -7,6 +7,7 @@ const home = await readFile(new URL("../index.html", import.meta.url), "utf8");
 const toybox = await readFile(new URL("../toybox/index.html", import.meta.url), "utf8");
 const moonScaleSelect = await readFile(new URL("../moon-scale-duel-select.html", import.meta.url), "utf8");
 const moonScaleCpu = await readFile(new URL("../moon-scale-duel/index.html", import.meta.url), "utf8");
+const moonScaleOnlineState = await readFile(new URL("../moon-scale-duel-online-state.js", import.meta.url), "utf8");
 const moonScaleRules = await readFile(new URL("../functions/moon-scale-duel-online/rules.js", import.meta.url), "utf8");
 
 test("トップページからおもちゃ箱へ移動できる", () => {
@@ -109,18 +110,60 @@ test("月秤の遊び方は実装済みの月影と月札ルールを案内す�
 });
 
 test("月秤の遊び方は既存の6枚の月札画像を使う", () => {
-  for (const image of ["moon-full", "moon-waning", "moon-reflection", "moon-still", "moon-new-oath", "moon-false"]) {
-    assert.match(moonScaleSelect, new RegExp(`moon-scale-duel/assets/images/cards/${image}\\.webp`));
+  const cards = [
+    ["moon-full", "満ちる月"],
+    ["moon-waning", "欠ける月"],
+    ["moon-reflection", "返照の月"],
+    ["moon-still", "静止の月"],
+    ["moon-new-oath", "新月の誓い"],
+    ["moon-false", "偽りの月"],
+  ];
+  for (const [image, name] of cards) {
+    const path = `moon-scale-duel/assets/images/cards/${image}\\.webp`;
+    assert.match(moonScaleSelect, new RegExp(`<a class="gallery-card card-guide-image" href="${path}"[^>]*aria-label="${name}の札を大きく見る"[^>]*><img src="${path}"[^>]*><span class="gallery-caption">${name}</span></a>`));
   }
   assert.equal((moonScaleSelect.match(/src="moon-scale-duel\/assets\/images\/cards\//g) || []).length, 6);
 });
 
 test("月秤の遊び方は月札画像をスマホ向けの固定範囲へ収める", () => {
-  assert.match(moonScaleSelect, /\.card-guide\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s);
-  assert.match(moonScaleSelect, /\.card-guide img\s*\{[^}]*width:\s*100%[^}]*height:\s*clamp\(8\.5rem,\s*42vw,\s*10\.5rem\)[^}]*object-fit:\s*cover/s);
+  assert.match(moonScaleSelect, /\.card-guide,\s*\.result-guide\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s);
+  assert.match(moonScaleSelect, /\.gallery-card img\s*\{[^}]*width:\s*100%[^}]*height:\s*clamp\(8\.5rem,\s*42vw,\s*10\.5rem\)[^}]*object-fit:\s*cover/s);
+  assert.match(moonScaleSelect, /\.gallery-card::after\s*\{[^}]*content:\s*"拡大"/s);
   assert.match(moonScaleSelect, /@media \(max-width:\s*350px\)\s*\{\s*\.card-guide\s*\{\s*grid-template-columns:\s*1fr/s);
-  assert.equal((moonScaleSelect.match(/class="card-guide-image"/g) || []).length, 6);
+  assert.doesNotMatch(moonScaleSelect, /@media \(max-width:\s*350px\)[\s\S]*?\.result-guide\s*\{\s*grid-template-columns:\s*1fr/);
+  assert.equal((moonScaleSelect.match(/card-guide-image/g) || []).length, 6);
   assert.equal((moonScaleSelect.match(/aria-label="[^"]+の札を大きく見る"/g) || []).length, 6);
+});
+
+test("月秤の遊び方は基本6効果を画像カードと分けて案内する", () => {
+  assert.match(moonScaleSelect, /<h3>基本の効果<\/h3>\s*<dl class="card-effect-list">/);
+  for (const description of [
+    "自分の月影を3増やします。",
+    "相手の月影を3減らします。",
+    "このラウンドの「＋3」「−3」を逆向きにします。",
+    "相手が出した月札の効果を無効にします。",
+    "公開時に劣勢なら、双方の月影を7にします。",
+    "公開後、未使用で模倣可能な月札の効果を選びます。",
+  ]) {
+    assert.ok(moonScaleSelect.includes(description));
+  }
+  assert.doesNotMatch(moonScaleSelect, /<span class="gallery-caption">[^<]+<\/span>\s*<p>/);
+});
+
+test("月秤の遊び方は既存の最終結果3画像を2列の拡大ギャラリーで案内する", () => {
+  const results = [
+    ["result-victory", "勝利", "雲が左右へ開き、中央の大きな月から月光が広がる夜空"],
+    ["result-defeat", "敗北", "丸い月が雲に部分的に覆われ、月光が静かに退く夜空"],
+    ["result-draw", "引き分け", "小さな月と左右に均衡した雲、水平の銀色の光が広がる夜空"],
+  ];
+  for (const [image, name, alt] of results) {
+    const path = `moon-scale-duel/assets/images/results/${image}\\.webp`;
+    assert.match(moonScaleSelect, new RegExp(`<a class="gallery-card result-guide-image" href="${path}"[^>]*aria-label="${name}結果の画像を大きく見る"[^>]*><img src="${path}" alt="${alt}"[^>]*><span class="gallery-caption">${name}</span></a>`));
+    assert.match(moonScaleCpu, new RegExp(`src: 'assets/images/results/${image}\\.webp'`));
+    assert.match(moonScaleOnlineState, new RegExp(`src: 'moon-scale-duel/assets/images/results/${image}\\.webp'`));
+  }
+  assert.equal((moonScaleSelect.match(/class="gallery-card result-guide-image"/g) || []).length, 3);
+  assert.match(moonScaleSelect, /使用済み札と決着[\s\S]*id="result-guide-heading">最終結果<[\s\S]*<h2>1人用・2人用<\/h2>/);
 });
 
 test("迷路試作への公開導線を含めない", () => {
