@@ -960,6 +960,69 @@
       return CASKET_IMAGES[`${color}:${casketContentKey(result)}`];
     }
 
+    const SELENE_LINES = Object.freeze({
+      general: Object.freeze([
+        '封印は解かれました。次の選択へ進みましょう。',
+        '光と影、どちらも結果の一部です。',
+        '一手の記憶が、次の読みを深くします。',
+      ]),
+      player: Object.freeze({
+        empty: Object.freeze([
+          '何もない宝匣にも、選んだ理由は残ります。',
+          '空白もまた、次の一手を語ります。',
+        ]),
+        trap: Object.freeze([
+          'その封印には、少し意地悪を仕込んでおきました。',
+        ]),
+        'star-trap': Object.freeze([
+          '光はありました。でも、無傷では渡しません。',
+          '光と罠――両方とも、あなたの選択です。',
+        ]),
+      }),
+      selene: Object.freeze({
+        star: Object.freeze([
+          '……見つけました。あなたの隠した光を。',
+        ]),
+        empty: Object.freeze([
+          '静かな宝匣でしたね。',
+        ]),
+        trap: Object.freeze([
+          '……これは私の読み違いですね。',
+        ]),
+        'star-trap': Object.freeze([
+          '星片は見つけましたが……代償もありましたね。',
+          '完全には読ませてくれませんか。',
+        ]),
+      }),
+      repeatedOpen: '同じ色の封印に、ずいぶん惹かれるのですね。',
+      repeatedStar: 'その色に光を預けるのが、お好きなのですか？',
+    });
+
+    function hasThreeMatching(history, key) {
+      const recent = history.slice(-3);
+      return recent.length === 3 && recent.every((item) => item[key] === recent[0][key]);
+    }
+
+    function seleneLineCandidates(playerResult, seleneResult, history) {
+      const candidates = SELENE_LINES.general.map((line) => [line, 1]);
+      const addResultLines = (lines) => lines?.forEach((line) => candidates.push([line, 2]));
+      addResultLines(SELENE_LINES.player[casketContentKey(playerResult)]);
+      addResultLines(SELENE_LINES.selene[casketContentKey(seleneResult)]);
+      if (hasThreeMatching(history, 'playerOpen')) candidates.push([SELENE_LINES.repeatedOpen, 2]);
+      if (hasThreeMatching(history, 'playerStar')) candidates.push([SELENE_LINES.repeatedStar, 2]);
+      return candidates;
+    }
+
+    function chooseSeleneLine(candidates) {
+      const totalWeight = candidates.reduce((total, [, weight]) => total + weight, 0);
+      let value = Math.floor(Math.random() * totalWeight);
+      for (const [line, weight] of candidates) {
+        if (value < weight) return line;
+        value -= weight;
+      }
+      return candidates.at(-1)[0];
+    }
+
     async function playOpeningReveal(resolution) {
       const reveal = byId('opening-reveal');
       const casket = byId('opening-reveal-casket');
@@ -1053,8 +1116,8 @@
           <p><strong>セレネ：</strong>星片 ${COLORS[state.seleneChoice.star]} ／ 罠 ${positionText(state.seleneChoice.trap)}</p>
         </section>`;
 
-      const lines = ['封印は解かれました。次の選択へ進みましょう。', '光と影、どちらも結果の一部です。', '一手の記憶が、次の読みを深くします。'];
-      byId('selene-line').textContent = `セレネ「${lines[Math.floor(Math.random() * lines.length)]}」`;
+      const lineCandidates = seleneLineCandidates(playerResult, seleneResult, state.history);
+      byId('selene-line').textContent = `セレネ「${chooseSeleneLine(lineCandidates)}」`;
       byId('next-button').textContent = state.round === TOTAL_ROUNDS ? '最終結果を見る' : '次のラウンドへ';
       byId('opening-phase').hidden = true;
       byId('result-phase').hidden = false;
