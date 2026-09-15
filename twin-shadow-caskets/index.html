@@ -381,6 +381,16 @@
       transform: translateY(7px);
     }
 
+    .opening-reveal__image {
+      display: block;
+      width: min(68vw, 210px);
+      height: auto;
+      margin: -2.8rem auto .25rem;
+      aspect-ratio: 1;
+      object-fit: contain;
+      filter: drop-shadow(0 12px 18px rgba(0, 0, 0, .42));
+    }
+
     .opening-reveal__symbols { font-size: 1.75rem; font-weight: 900; letter-spacing: .18em; line-height: 1.15; }
     .opening-reveal__name { font-weight: 900; }
     .opening-reveal__contents--star { color: #fff0b5; text-shadow: 0 0 18px rgba(255, 232, 151, .78); }
@@ -431,6 +441,22 @@
     }
     .result-facts dt { color: var(--muted); font-size: .8rem; font-weight: 700; }
     .result-facts dd { margin: 0; color: var(--text); font-weight: 800; }
+
+    .result-detail {
+      display: grid;
+      align-items: center;
+      grid-template-columns: 112px minmax(0, 1fr);
+      gap: .75rem;
+    }
+
+    .result-casket-image {
+      display: block;
+      width: 112px;
+      height: 112px;
+      aspect-ratio: 1;
+      object-fit: contain;
+      filter: drop-shadow(0 8px 12px rgba(0, 0, 0, .36));
+    }
 
     .breakdown-list {
       display: grid;
@@ -502,6 +528,8 @@
       .round-delta { min-width: 0; padding: .45rem .5rem; }
       .round-delta__value { font-size: 1.5rem; }
       .result-facts { grid-template-columns: 4.8rem minmax(0, 1fr); gap: .4rem; }
+      .result-detail { grid-template-columns: 92px minmax(0, 1fr); gap: .55rem; }
+      .result-casket-image { width: 92px; height: 92px; }
     }
 
     @media (max-width: 760px) {
@@ -663,6 +691,21 @@
     const OPENING_REVEAL_FADE_MS = 280;
     const REDUCED_REVEAL_MS = 70;
     const COLORS = Object.freeze({ red: '赤箱', blue: '青箱' });
+    const CASKET_IMAGES = Object.freeze({
+      'red:empty': 'assets/images/caskets/casket-red-empty.webp',
+      'blue:empty': 'assets/images/caskets/casket-blue-empty.webp',
+      'red:star': 'assets/images/caskets/casket-red-star.webp',
+      'blue:star': 'assets/images/caskets/casket-blue-star.webp',
+      'red:trap': 'assets/images/caskets/casket-red-trap.webp',
+      'blue:trap': 'assets/images/caskets/casket-blue-trap.webp',
+      'red:star-trap': 'assets/images/caskets/casket-red-star-trap.webp',
+      'blue:star-trap': 'assets/images/caskets/casket-blue-star-trap.webp',
+    });
+    const casketImagePreloads = Object.values(CASKET_IMAGES).map((src) => {
+      const image = new Image();
+      image.src = src;
+      return image;
+    });
     const state = {
       round: 1,
       playerScore: 0,
@@ -893,6 +936,17 @@
       return '<span class="opening-reveal__name">空の宝匣</span>';
     }
 
+    function casketContentKey(result) {
+      if (result.label === '星片') return 'star';
+      if (result.label === '罠') return 'trap';
+      if (result.label === '星片と罠') return 'star-trap';
+      return 'empty';
+    }
+
+    function casketImagePath(color, result) {
+      return CASKET_IMAGES[`${color}:${casketContentKey(result)}`];
+    }
+
     async function playOpeningReveal(resolution) {
       const reveal = byId('opening-reveal');
       const casket = byId('opening-reveal-casket');
@@ -902,7 +956,7 @@
 
       casket.className = `opening-reveal__casket opening-reveal__casket--${state.playerOpen}`;
       contents.className = `opening-reveal__contents opening-reveal__contents--${result.label === '星片と罠' ? 'both' : result.label === '星片' ? 'star' : result.label === '罠' ? 'trap' : 'empty'}`;
-      contents.innerHTML = openingRevealContents(result);
+      contents.innerHTML = `<img class="opening-reveal__image" src="${casketImagePath(state.playerOpen, result)}" alt="">${openingRevealContents(result)}`;
       byId('opening-reveal-label').textContent = `セレネの${COLORS[state.playerOpen]}を開封`;
       byId('opening-phase').hidden = true;
       byId('result-phase').hidden = true;
@@ -952,10 +1006,13 @@
               <strong class="round-delta__value">${signed(playerResult.score)}</strong>
             </div>
           </header>
-          <dl class="result-facts">
-            <dt>開けた箱</dt><dd>セレネの${COLORS[state.playerOpen]}</dd>
-            <dt>中身</dt><dd>${resultContents(playerResult)}</dd>
-          </dl>
+          <div class="result-detail">
+            <img class="result-casket-image" src="${casketImagePath(state.playerOpen, playerResult)}" alt="">
+            <dl class="result-facts">
+              <dt>開けた箱</dt><dd>セレネの${COLORS[state.playerOpen]}</dd>
+              <dt>中身</dt><dd>${resultContents(playerResult)}</dd>
+            </dl>
+          </div>
           ${playerResult.label === '星片と罠' ? combinedBreakdown() : ''}
           <p class="running-total"><span>あなたの累計</span><strong>${state.playerScore}点</strong></p>
         </article>
@@ -967,10 +1024,13 @@
               <strong class="round-delta__value">${signed(seleneResult.score)}</strong>
             </div>
           </header>
-          <dl class="result-facts">
-            <dt>開けた箱</dt><dd>あなたの${COLORS[state.seleneChoice.open]}</dd>
-            <dt>中身</dt><dd>${resultContents(seleneResult)}</dd>
-          </dl>
+          <div class="result-detail">
+            <img class="result-casket-image" src="${casketImagePath(state.seleneChoice.open, seleneResult)}" alt="">
+            <dl class="result-facts">
+              <dt>開けた箱</dt><dd>あなたの${COLORS[state.seleneChoice.open]}</dd>
+              <dt>中身</dt><dd>${resultContents(seleneResult)}</dd>
+            </dl>
+          </div>
           ${seleneResult.label === '星片と罠' ? combinedBreakdown() : ''}
           <p class="running-total"><span>セレネの累計</span><strong>${state.seleneScore}点</strong></p>
         </article>
