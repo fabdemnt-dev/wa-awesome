@@ -313,10 +313,74 @@
     .sealed .casket[aria-pressed="true"] { outline: none; transform: none; }
 
     .reveal-grid { display: grid; margin: 1rem 0; gap: .8rem; }
-    .reveal-card { padding: .85rem; border: 1px solid var(--line); border-radius: 9px; background: #0c1120; }
-    .reveal-card p { margin: .25rem 0; color: var(--muted); }
-    .reveal-card strong { color: var(--text); }
-    .breakdown { color: var(--gold) !important; font-weight: 800; }
+    .reveal-card { padding: 1rem; border: 1px solid var(--line); border-radius: 11px; background: #0c1120; }
+    .reveal-card__header {
+      display: grid;
+      margin-bottom: .9rem;
+      align-items: start;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: .75rem;
+    }
+    .reveal-card__header h3 { margin: .2rem 0 0; }
+    .round-delta {
+      display: grid;
+      min-width: 7.2rem;
+      padding: .5rem .65rem;
+      border: 1px solid rgba(224, 202, 139, .35);
+      border-radius: 8px;
+      background: rgba(224, 202, 139, .08);
+      text-align: right;
+    }
+    .round-delta__label { color: var(--muted); font-size: .7rem; font-weight: 700; }
+    .round-delta__value { font-size: 1.65rem; font-weight: 900; letter-spacing: .03em; line-height: 1.15; }
+    .round-delta--positive .round-delta__value { color: #f1d98e; }
+    .round-delta--negative .round-delta__value { color: #ff9ca9; }
+    .round-delta--neutral .round-delta__value { color: #d1d7e2; }
+
+    .result-facts {
+      display: grid;
+      margin: 0;
+      grid-template-columns: 5.5rem minmax(0, 1fr);
+      gap: .45rem .65rem;
+    }
+    .result-facts dt { color: var(--muted); font-size: .8rem; font-weight: 700; }
+    .result-facts dd { margin: 0; color: var(--text); font-weight: 800; }
+
+    .breakdown-list {
+      display: grid;
+      margin: .85rem 0 0;
+      padding: .65rem .75rem;
+      border-left: 3px solid var(--gold);
+      border-radius: 0 7px 7px 0;
+      background: rgba(224, 202, 139, .07);
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: .25rem .75rem;
+    }
+    .breakdown-list dt, .breakdown-list dd { margin: 0; font-weight: 800; }
+    .breakdown-list dd { color: var(--gold); text-align: right; }
+    .breakdown-list__total { padding-top: .25rem; border-top: 1px solid rgba(224, 202, 139, .28); }
+
+    .running-total {
+      display: flex;
+      margin: .85rem 0 0;
+      padding-top: .7rem;
+      border-top: 1px solid rgba(89, 99, 122, .5);
+      align-items: baseline;
+      justify-content: space-between;
+      color: var(--muted);
+      font-size: .82rem;
+    }
+    .running-total strong { color: var(--text); font-size: 1.05rem; }
+
+    .placement-recap {
+      padding: .8rem .9rem;
+      border: 1px solid rgba(89, 99, 122, .65);
+      border-radius: 9px;
+      background: rgba(23, 30, 52, .72);
+    }
+    .placement-recap h3 { margin-bottom: .45rem; font-family: inherit; font-size: .82rem; }
+    .placement-recap p { margin: .2rem 0; color: var(--muted); font-size: .8rem; }
+    .placement-recap strong { color: var(--text); }
 
     .opening-mark { display: inline-block; margin-right: .3rem; animation: unseal .48s ease-out; }
 
@@ -343,6 +407,11 @@
       .casket-grid { gap: .75rem; }
       .casket { min-height: 104px; }
       .trap-grid { grid-template-columns: 1fr; }
+      .reveal-card { padding: .8rem; }
+      .reveal-card__header { grid-template-columns: minmax(0, 1fr) 6.5rem; gap: .45rem; }
+      .round-delta { min-width: 0; padding: .45rem .5rem; }
+      .round-delta__value { font-size: 1.5rem; }
+      .result-facts { grid-template-columns: 4.8rem minmax(0, 1fr); gap: .4rem; }
     }
 
     @media (max-width: 760px) {
@@ -676,6 +745,26 @@
 
     function positionText(value) { return value === 'none' ? '置かない' : COLORS[value]; }
 
+    function scoreTone(score) {
+      return score > 0 ? 'positive' : score < 0 ? 'negative' : 'neutral';
+    }
+
+    function resultContents(result) {
+      if (result.label === '星片') return '✦ 星片';
+      if (result.label === '罠') return '⚠ 罠';
+      if (result.label === '星片と罠') return '✦ 星片 ＋ ⚠ 罠';
+      return '空箱';
+    }
+
+    function combinedBreakdown() {
+      return `
+        <dl class="breakdown-list" aria-label="得点の内訳">
+          <dt>✦ 星片</dt><dd>+3</dd>
+          <dt>⚠ 罠</dt><dd>-2</dd>
+          <dt class="breakdown-list__total">合計</dt><dd class="breakdown-list__total">+1</dd>
+        </dl>`;
+    }
+
     function revealRound() {
       const playerResult = openingResult(state.playerOpen, state.seleneChoice.star, state.seleneChoice.trap);
       const seleneResult = openingResult(state.seleneChoice.open, state.playerStar, state.playerTrap);
@@ -697,19 +786,40 @@
 
       byId('round-result').innerHTML = `
         <article class="reveal-card">
-          <h3><span class="opening-mark">✦</span>あなたの開封結果</h3>
-          <p>セレネ：星片は<strong>${COLORS[state.seleneChoice.star]}</strong>／罠は<strong>${positionText(state.seleneChoice.trap)}</strong></p>
-          <p>あなたが開けた箱：<strong>${COLORS[state.playerOpen]}</strong> — ${playerResult.label}</p>
-          <p class="breakdown">${playerResult.breakdown}</p>
-          <p>このラウンド ${signed(playerResult.score)}点 ／ 累計 ${state.playerScore}点</p>
+          <header class="reveal-card__header">
+            <h3><span class="opening-mark">✦</span>あなたの結果</h3>
+            <div class="round-delta round-delta--${scoreTone(playerResult.score)}">
+              <span class="round-delta__label">このラウンド</span>
+              <strong class="round-delta__value">${signed(playerResult.score)}</strong>
+            </div>
+          </header>
+          <dl class="result-facts">
+            <dt>開けた箱</dt><dd>セレネの${COLORS[state.playerOpen]}</dd>
+            <dt>中身</dt><dd>${resultContents(playerResult)}</dd>
+          </dl>
+          ${playerResult.label === '星片と罠' ? combinedBreakdown() : ''}
+          <p class="running-total"><span>あなたの累計</span><strong>${state.playerScore}点</strong></p>
         </article>
         <article class="reveal-card">
-          <h3><span class="opening-mark">⚠</span>セレネの開封結果</h3>
-          <p>あなた：星片は<strong>${COLORS[state.playerStar]}</strong>／罠は<strong>${positionText(state.playerTrap)}</strong></p>
-          <p>セレネが開けた箱：<strong>${COLORS[state.seleneChoice.open]}</strong> — ${seleneResult.label}</p>
-          <p class="breakdown">${seleneResult.breakdown}</p>
-          <p>このラウンド ${signed(seleneResult.score)}点 ／ 累計 ${state.seleneScore}点</p>
-        </article>`;
+          <header class="reveal-card__header">
+            <h3><span class="opening-mark">⚠</span>セレネの結果</h3>
+            <div class="round-delta round-delta--${scoreTone(seleneResult.score)}">
+              <span class="round-delta__label">このラウンド</span>
+              <strong class="round-delta__value">${signed(seleneResult.score)}</strong>
+            </div>
+          </header>
+          <dl class="result-facts">
+            <dt>開けた箱</dt><dd>あなたの${COLORS[state.seleneChoice.open]}</dd>
+            <dt>中身</dt><dd>${resultContents(seleneResult)}</dd>
+          </dl>
+          ${seleneResult.label === '星片と罠' ? combinedBreakdown() : ''}
+          <p class="running-total"><span>セレネの累計</span><strong>${state.seleneScore}点</strong></p>
+        </article>
+        <section class="placement-recap" aria-label="今回の双方の配置">
+          <h3>今回の配置</h3>
+          <p><strong>あなた：</strong>星片 ${COLORS[state.playerStar]} ／ 罠 ${positionText(state.playerTrap)}</p>
+          <p><strong>セレネ：</strong>星片 ${COLORS[state.seleneChoice.star]} ／ 罠 ${positionText(state.seleneChoice.trap)}</p>
+        </section>`;
 
       const lines = ['封印は解かれました。次の選択へ進みましょう。', '光と影、どちらも結果の一部です。', '一手の記憶が、次の読みを深くします。'];
       byId('selene-line').textContent = `セレネ「${lines[Math.floor(Math.random() * lines.length)]}」`;
