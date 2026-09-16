@@ -29,14 +29,20 @@ jobs:
         run: node diagnostics/instrument-firestore-transaction.cjs
       - name: Prepare Firestore Emulator 1.20.3
         run: |
-          emulator_dir="$RUNNER_TEMP/firestore-emulator-1.20.3"
-          emulator_jar="$emulator_dir/cloud-firestore-emulator-v1.20.3.jar"
-          mkdir -p "$emulator_dir"
+          gcloud_archive="$RUNNER_TEMP/google-cloud-cli-551.0.0-linux-x86_64.tar.gz"
+          gcloud_dir="$RUNNER_TEMP/google-cloud-cli-551.0.0"
+          mkdir -p "$gcloud_dir"
           curl --fail --location --silent --show-error \
-            'https://storage.googleapis.com/firebase-preview-drop/emulator/cloud-firestore-emulator-v1.20.3.jar' \
-            --output "$emulator_jar"
+            'https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-551.0.0-linux-x86_64.tar.gz' \
+            --output "$gcloud_archive"
+          tar -xzf "$gcloud_archive" -C "$gcloud_dir"
+          "$gcloud_dir/google-cloud-sdk/bin/gcloud" --version
+          "$gcloud_dir/google-cloud-sdk/bin/gcloud" components install cloud-firestore-emulator --quiet
+          emulator_jar=$(find "$gcloud_dir/google-cloud-sdk" -type f -name 'cloud-firestore-emulator*.jar' -print -quit)
+          test -n "$emulator_jar"
           sha256sum "$emulator_jar" | tee firestore-emulator-sha256.txt
           java -jar "$emulator_jar" --version | tee firestore-emulator-version.txt
+          grep -qx '1.20.3' firestore-emulator-version.txt
           printf 'FIRESTORE_EMULATOR_BINARY_PATH=%s\n' "$emulator_jar" >> "$GITHUB_ENV"
       - name: Verify diagnostic versions
         run: |
@@ -74,7 +80,7 @@ jobs:
           grep -E 'MOON_SCALE_DUEL_TRANSACTION_DIAGNOSTIC|FIRESTORE_SDK_TRANSACTION_DIAGNOSTIC|Transaction lock timeout|Transaction is invalid or closed|INVALID_ARGUMENT|ABORTED|# tests |# pass |# fail |not ok|ok ' transaction-lifecycle.log \
             | sed -E \
               -e 's/(Bearer +)[^ ]+/\1[REDACTED]/gi' \
-              -e 's/(token|authorization)([=: ]+)[^ ,}]*/\1\2[REDACTED]/gi' \
+              -e 's/(token|authorization)([=: ]+)[^ ,}]*/\1\2[REDAACTED/gi' \
             > transaction-lifecycle-artifact/timeline.log || true
           cp transaction-lifecycle-exit-code.txt transaction-lifecycle-artifact/
           cp transaction-lifecycle-duration-ms.txt transaction-lifecycle-artifact/
