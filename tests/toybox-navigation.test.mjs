@@ -13,6 +13,7 @@ const moonScaleCpu = await readFile(new URL("../moon-scale-duel/index.html", imp
 const moonScaleOnlineState = await readFile(new URL("../moon-scale-duel-online-state.js", import.meta.url), "utf8");
 const moonScaleRules = await readFile(new URL("../functions/moon-scale-duel-online/rules.js", import.meta.url), "utf8");
 const twinShadowCaskets = await readFile(new URL("../twin-shadow-caskets/index.html", import.meta.url), "utf8");
+const birdcageObserver = await readFile(new URL("../birdcage-observer/index.html", import.meta.url), "utf8");
 
 test("トップページからおもちゃ箱へ移動できる", () => {
   assert.match(home, /href="toybox\/"[^>]*class="card-panel"/);
@@ -46,6 +47,17 @@ test("おもちゃ箱から双影の宝匣へ移動して戻れる", () => {
   assert.match(twinShadowCaskets, /🎪 おもちゃ箱へ戻る/);
   assert.match(toybox, /href="\.\.\/shadow-card\.html"[^>]*class="card-panel"/);
   assert.match(toybox, /href="\.\.\/moon-scale-duel-select\.html"[^>]*class="card-panel"/);
+});
+
+test("おもちゃ箱から鳥籠の観測者へ移動して戻れる", () => {
+  assert.match(toybox, /href="\.\.\/birdcage-observer\/"[^>]*class="card-panel"/);
+  assert.match(toybox, /鳥籠の観測者/);
+  assert.match(birdcageObserver, /Birdcage Observer/);
+  assert.match(birdcageObserver, /href="\.\.\/toybox\/"/);
+  assert.match(birdcageObserver, /🎪 おもちゃ箱へ戻る/);
+  assert.match(toybox, /href="\.\.\/shadow-card\.html"[^>]*class="card-panel"/);
+  assert.match(toybox, /href="\.\.\/moon-scale-duel-select\.html"[^>]*class="card-panel"/);
+  assert.match(toybox, /href="\.\.\/twin-shadow-caskets\/"[^>]*class="card-panel"/);
 });
 
 test("月秤の決闘で既存の1人用と2人用を選べる", () => {

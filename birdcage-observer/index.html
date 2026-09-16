@@ -1,0 +1,577 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="届く観測記録を照合し、鳥籠に隠された真実の印を見抜く推理ゲーム。">
+  <title>鳥籠の観測者｜Birdcage Observer</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --soot: #171512;
+      --soot-deep: #0d0c0a;
+      --panel: #24211c;
+      --paper: #e7dcc1;
+      --paper-deep: #d2c29f;
+      --ink: #241f19;
+      --text: #eee8da;
+      --muted: #bbb09c;
+      --brass: #a98a4f;
+      --brass-light: #d0b77d;
+      --mist: #d9dcda;
+      --focus: #f1d690;
+      --danger: #d9a38d;
+      --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --serif: "Yu Mincho", "YuMincho", "Hiragino Mincho ProN", "Hiragino Mincho Pro", "Noto Serif JP", "Noto Serif CJK JP", serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { min-width: 280px; min-height: 100%; background: var(--soot-deep); }
+    body {
+      min-width: 280px;
+      min-height: 100vh;
+      margin: 0;
+      color: var(--text);
+      font-family: var(--sans);
+      line-height: 1.65;
+      background:
+        repeating-linear-gradient(90deg, transparent 0 30px, rgba(0, 0, 0, .2) 31px 34px, transparent 35px 62px),
+        radial-gradient(circle at 22% 5%, rgba(169, 138, 79, .11), transparent 26rem),
+        linear-gradient(150deg, #1b1814, #0d0c0a 68%);
+    }
+    button, a { font: inherit; }
+    button { color: inherit; }
+    button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
+      outline: 3px solid var(--focus);
+      outline-offset: 3px;
+    }
+    [hidden] { display: none !important; }
+    h1, h2, h3, .record-text { font-family: var(--serif); }
+    h1, h2, h3, p { overflow-wrap: anywhere; }
+
+    .app-shell {
+      width: min(100%, 1120px);
+      min-height: 100vh;
+      margin: 0 auto;
+      padding: max(14px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+    }
+    .screen { width: min(100%, 760px); margin: 0 auto; animation: appear .18s ease-out; }
+    .screen--wide { width: 100%; }
+    .eyebrow { margin: 0 0 .35rem; color: var(--brass-light); font-size: .72rem; font-weight: 800; letter-spacing: .18em; }
+    .muted { color: var(--muted); }
+    .small { font-size: .82rem; }
+    .section-title { margin: 0 0 .75rem; font-size: 1.25rem; letter-spacing: .04em; }
+
+    .title-screen {
+      display: flex;
+      min-height: calc(100vh - 28px);
+      align-items: center;
+      justify-content: center;
+    }
+    .title-frame {
+      position: relative;
+      width: min(100%, 680px);
+      padding: clamp(1.5rem, 7vw, 4rem);
+      overflow: hidden;
+      border: 1px solid rgba(169, 138, 79, .56);
+      border-radius: 8px;
+      background: rgba(23, 21, 18, .94);
+      box-shadow: 0 26px 70px rgba(0, 0, 0, .48);
+    }
+    .title-frame::before {
+      position: absolute;
+      inset: 0;
+      background: repeating-linear-gradient(90deg, transparent 0 42px, rgba(0, 0, 0, .32) 43px 47px, transparent 48px 84px);
+      content: "";
+      pointer-events: none;
+    }
+    .title-content { position: relative; }
+    .title-mark { width: 72px; height: 52px; margin-bottom: 1rem; border: 1px solid var(--brass); background: repeating-linear-gradient(90deg, transparent 0 11px, rgba(169,138,79,.5) 12px 13px); }
+    .title-screen h1 { margin: 0; color: var(--paper); font-size: clamp(2rem, 10vw, 3.7rem); font-weight: 600; letter-spacing: .08em; line-height: 1.25; }
+    .english-title { margin: .25rem 0 1.25rem; color: var(--brass-light); font-size: .78rem; letter-spacing: .16em; text-transform: uppercase; }
+    .title-lead { margin: 0 0 1.5rem; color: #d5cbb8; font-family: var(--serif); font-size: 1.03rem; white-space: pre-line; }
+    .actions { display: grid; width: min(100%, 340px); gap: .7rem; }
+    .button {
+      display: inline-flex;
+      min-height: 48px;
+      padding: .72rem 1rem;
+      border: 1px solid #756b59;
+      border-radius: 5px;
+      align-items: center;
+      justify-content: center;
+      color: var(--text);
+      background: #2a261f;
+      cursor: pointer;
+      font-weight: 750;
+      text-decoration: none;
+    }
+    .button:hover { border-color: var(--brass-light); }
+    .button:disabled { cursor: not-allowed; opacity: .42; }
+    .button--primary { border-color: var(--brass-light); color: #1d1811; background: linear-gradient(#d4bd84, #a98a4f); }
+    .button--quiet { min-height: 44px; border-color: transparent; color: var(--muted); background: transparent; }
+    .button--danger { border-color: var(--danger); }
+    .text-link { display: inline-flex; min-height: 44px; align-items: center; color: var(--brass-light); }
+
+    .page-header { display: flex; margin-bottom: 1rem; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+    .page-header h1 { margin: 0; font-size: clamp(1.75rem, 7vw, 2.6rem); font-weight: 600; }
+    .panel {
+      padding: clamp(.9rem, 4vw, 1.35rem);
+      border: 1px solid rgba(169, 138, 79, .45);
+      border-radius: 7px;
+      background: rgba(36, 33, 28, .96);
+      box-shadow: 0 16px 42px rgba(0, 0, 0, .25);
+    }
+    .paper {
+      color: var(--ink);
+      background:
+        linear-gradient(rgba(255,255,255,.12), rgba(0,0,0,.025)),
+        var(--paper);
+      box-shadow: inset 0 0 24px rgba(83, 63, 31, .1), 0 14px 32px rgba(0,0,0,.24);
+    }
+    .paper .muted { color: #665c4d; }
+
+    .scenario-grid { display: grid; gap: .8rem; }
+    .scenario-card { width: 100%; min-height: 116px; padding: 1rem; border: 1px solid #71664f; border-radius: 6px; color: inherit; text-align: left; background: #24211c; cursor: pointer; }
+    .scenario-card:disabled { cursor: not-allowed; opacity: .58; }
+    .scenario-card__top { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
+    .scenario-number { color: var(--brass-light); font-size: .75rem; font-weight: 800; letter-spacing: .12em; }
+    .scenario-card h2 { margin: .25rem 0; font-size: 1.22rem; font-weight: 600; }
+    .status-label { padding: .18rem .45rem; border: 1px solid currentColor; border-radius: 3px; font-size: .72rem; font-weight: 800; }
+    .scenario-footer { display: grid; margin-top: 1.2rem; gap: .6rem; justify-items: start; }
+    .reset-button { margin-top: .8rem; padding: .25rem 0; border: 0; color: #aea390; background: transparent; text-decoration: underline; cursor: pointer; }
+
+    .rules-grid { display: grid; gap: .75rem; }
+    .rules-card h2 { margin: 0 0 .4rem; font-size: 1.08rem; }
+    .intro-body { white-space: pre-line; }
+    .intro-note { margin-top: 1rem; padding: .75rem; border-left: 3px solid var(--brass); color: #d8cdb9; background: rgba(0,0,0,.18); }
+
+    .play-top { display: flex; margin-bottom: .7rem; align-items: center; justify-content: space-between; gap: .75rem; }
+    .menu-button { min-height: 40px; padding: .35rem .7rem; border: 1px solid #665e50; border-radius: 4px; color: var(--muted); background: #211e19; cursor: pointer; }
+    .play-layout { display: grid; gap: 1rem; }
+    .observation-column { min-width: 0; }
+    .progress { margin: 0 0 .8rem; color: var(--brass-light); font-weight: 800; }
+    .observation-card { position: relative; min-height: 210px; margin-bottom: 1rem; padding: 1.15rem; overflow: hidden; border: 1px solid #a58f64; border-radius: 5px; }
+    .observation-card--obscured::after { position: absolute; inset: 0; background: linear-gradient(120deg, transparent 5%, rgba(223,225,220,.18), transparent 78%); content: ""; pointer-events: none; }
+    .observation-label { margin: 0 0 .85rem; font-family: var(--sans); font-size: .84rem; font-weight: 800; }
+    .record-text { position: relative; z-index: 1; margin: 0 0 1rem; font-size: clamp(1.08rem, 4.7vw, 1.3rem); line-height: 1.9; }
+    .result-label { position: relative; z-index: 1; margin: 0; padding-top: .7rem; border-top: 1px solid rgba(36,31,25,.25); font-weight: 850; }
+    .result-label--obscured { letter-spacing: .04em; }
+    .memo-section { margin-top: 1rem; }
+    .memo-grid, .declaration-grid, .sigil-summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .55rem; }
+    .sigil-card { position: relative; min-width: 0; min-height: 105px; padding: .65rem .45rem; border: 1px solid #706653; border-radius: 5px; color: inherit; text-align: center; background: #211e1a; cursor: pointer; }
+    .sigil-card[aria-pressed="true"], .sigil-card.is-selected { border-width: 2px; border-color: var(--brass-light); background: #312b21; }
+    .sigil-card[data-memo="strong"] { border-width: 2px; box-shadow: inset 0 0 0 1px rgba(208,183,125,.28); }
+    .sigil-card[data-memo="excluded"] { color: #9a9285; background: repeating-linear-gradient(135deg, #211e1a 0 8px, #302b24 9px 10px); }
+    .sigil-icon { display: block; width: 42px; height: 42px; margin: 0 auto .2rem; color: var(--brass-light); }
+    .sigil-name { display: block; font-family: var(--serif); font-weight: 700; }
+    .memo-label { display: inline-block; margin-top: .2rem; padding: .05rem .32rem; border: 1px solid currentColor; border-radius: 2px; font-size: .7rem; font-weight: 800; }
+    .memo-controls { display: grid; margin-top: .65rem; grid-template-columns: repeat(3, 1fr); gap: .4rem; }
+    .memo-controls .button { min-height: 44px; padding: .45rem .25rem; font-size: .76rem; }
+    .undo-bar { display: flex; min-height: 48px; margin-top: .65rem; padding: .45rem .6rem; border: 1px solid #74684f; align-items: center; justify-content: space-between; gap: .5rem; background: #171512; font-size: .8rem; }
+    .undo-bar button { min-height: 38px; border: 0; color: var(--focus); background: transparent; cursor: pointer; text-decoration: underline; }
+    .play-actions { display: grid; margin-top: 1rem; gap: .6rem; }
+    .record-book-desktop { display: none; min-width: 0; }
+
+    .record-book-content { display: grid; gap: 1rem; }
+    .received-list { display: grid; gap: .6rem; }
+    .received-record { padding: .65rem; border-left: 3px solid var(--brass); color: var(--ink); background: rgba(255,255,255,.2); }
+    .received-record h4 { margin: 0 0 .25rem; }
+    .received-record p { margin: .15rem 0; }
+    .attribute-table { width: 100%; border-collapse: collapse; color: var(--ink); font-size: clamp(.68rem, 2.9vw, .82rem); }
+    .attribute-table th, .attribute-table td { padding: .35rem .2rem; border: 1px solid rgba(62,52,39,.28); text-align: center; }
+    .attribute-table th:first-child { text-align: left; }
+    .rules-note { margin: 0; white-space: pre-line; }
+    .record-memo-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: .35rem; }
+    .record-memo-list span { padding: .3rem; border: 1px solid rgba(36,31,25,.24); }
+
+    .declaration-note { margin: .8rem 0 1rem; color: var(--muted); white-space: pre-line; }
+    .result-hero { margin-bottom: 1rem; }
+    .result-hero h2 { margin: 0 0 .5rem; font-size: clamp(1.65rem, 7vw, 2.45rem); }
+    .truth-panel { margin-bottom: 1rem; }
+    .truth-panel h3, .result-section h3 { margin: 0 0 .55rem; }
+    .truth-attributes { display: grid; gap: .2rem; margin: .6rem 0 0; }
+    .disturbance-list { display: grid; gap: .4rem; padding: 0; list-style: none; }
+    .disturbance-list li { padding: .45rem .55rem; border-left: 3px solid var(--brass); background: rgba(255,255,255,.04); }
+    .dissection-list { display: grid; gap: .6rem; }
+    .dissection { border: 1px solid #706653; border-radius: 4px; background: #211e1a; }
+    .dissection summary { min-height: 46px; padding: .65rem; cursor: pointer; font-weight: 800; }
+    .dissection-body { padding: 0 .7rem .7rem; }
+    .dissection-body p { margin: .45rem 0; }
+    .solution-list { margin: 0; padding-left: 1.4rem; }
+    .solution-list li + li { margin-top: .45rem; }
+    .result-actions { display: grid; margin-top: 1rem; gap: .6rem; }
+
+    .modal-backdrop { position: fixed; z-index: 20; inset: 0; display: grid; padding: max(12px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left)); place-items: center; background: rgba(7, 6, 5, .78); }
+    .modal { width: min(100%, 620px); max-height: calc(100vh - 24px); overflow: auto; padding: 1rem; border: 1px solid var(--brass); border-radius: 6px; background: #211e19; box-shadow: 0 26px 70px rgba(0,0,0,.55); }
+    .modal--record { width: min(100%, 760px); height: min(94vh, 820px); }
+    .modal__header { display: flex; position: sticky; z-index: 2; top: -1rem; margin: -1rem -1rem .8rem; padding: .8rem 1rem; align-items: center; justify-content: space-between; gap: 1rem; background: #211e19; border-bottom: 1px solid #645942; }
+    .modal__header h2 { margin: 0; font-size: 1.25rem; }
+    .close-button { min-width: 44px; min-height: 44px; border: 1px solid #6e6454; border-radius: 4px; background: #2c2821; cursor: pointer; }
+    .dialog-actions { display: grid; margin-top: 1rem; grid-template-columns: 1fr 1fr; gap: .6rem; }
+    .dialog-actions--stack { grid-template-columns: 1fr; }
+    .live-region { position: fixed; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+    @media (min-width: 620px) {
+      .scenario-grid, .rules-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .result-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .result-actions .button--primary { grid-column: 1 / -1; }
+    }
+    @media (min-width: 768px) {
+      .play-layout { grid-template-columns: minmax(0, .95fr) minmax(330px, 1.05fr); align-items: start; }
+      .record-book-desktop { display: block; position: sticky; top: 1rem; max-height: calc(100vh - 2rem); overflow: auto; }
+      .memo-grid, .declaration-grid { gap: .7rem; }
+      .screen--wide { max-width: 1080px; }
+    }
+    @media (max-width: 359px) {
+      .app-shell { padding-right: 9px; padding-left: 9px; }
+      .panel { padding: .75rem; }
+      .memo-controls { gap: .25rem; }
+      .memo-controls .button { font-size: .7rem; }
+      .sigil-card { min-height: 98px; }
+      .attribute-table { font-size: .64rem; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+    }
+    @keyframes appear { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <main id="app" tabindex="-1"></main>
+  </div>
+  <div id="record-modal" class="modal-backdrop" hidden>
+    <section class="modal modal--record paper" role="dialog" aria-modal="true" aria-labelledby="record-modal-title">
+      <header class="modal__header"><h2 id="record-modal-title">記録帳</h2><button class="close-button" type="button" data-action="close-record" aria-label="記録帳を閉じる">閉じる</button></header>
+      <div id="record-modal-body"></div>
+    </section>
+  </div>
+  <div id="dialog-modal" class="modal-backdrop" hidden>
+    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
+      <h2 id="dialog-title"></h2><div id="dialog-body"></div><div id="dialog-actions" class="dialog-actions"></div>
+    </section>
+  </div>
+  <p id="live-region" class="live-region" aria-live="polite"></p>
+  <script>
+    'use strict';
+
+    const STORAGE_KEY = 'birdcageObserver.completedScenarioIds.v1';
+    const SIGILS = Object.freeze({
+      key: { id: 'key', name: '鍵', symbolLabel: '鍵の印', attributes: { seal: true, sound: false, chipped: false } },
+      feather: { id: 'feather', name: '羽', symbolLabel: '羽の印', attributes: { seal: false, sound: false, chipped: true } },
+      bell: { id: 'bell', name: '鈴', symbolLabel: '鈴の印', attributes: { seal: false, sound: true, chipped: false } },
+      glass: { id: 'glass', name: '硝子', symbolLabel: '硝子の印', attributes: { seal: true, sound: true, chipped: true } },
+    });
+    const ATTRIBUTES = Object.freeze({ seal: '封印に関わる', sound: '音を残す', chipped: '欠けている' });
+    const RESULT_LABELS = Object.freeze({ present: 'ある', absent: 'ない', obscured: '判別不能' });
+    const MEMO_LABELS = Object.freeze({ strong: '有力', hold: '保留', excluded: '除外' });
+    const SIGIL_IDS = Object.freeze(Object.keys(SIGILS));
+
+    function attributeObservation(id, label, attributeId) { return { id, type: 'attribute', label, attributeId }; }
+    function pairObservation(id, label, sigilIds) { return { id, type: 'pair', label, sigilIds }; }
+    function round(number, observation, actualResult, disturbance, displayedResult, recordText) {
+      return { number, observation, actualResult, disturbance, displayedResult, recordText };
+    }
+    const SCENARIOS = Object.freeze([
+      {
+        id: 1, slug: 'closed-key', title: '閉じた鍵', truthSigilId: 'key', difficulty: '導入', cardSubtitle: '導入／撹乱なし',
+        learningFocus: '属性表と二印観測を照合し、候補の共通部分を読む。',
+        intro: 'この局では、撹乱者はまだ記録に触れない。\n属性表と記録を照合し、真実の印を探そう。',
+        introNote: 'この局では、撹乱は起きない。',
+        rounds: [
+          round(1, attributeObservation('s1-seal', '封印の有無', 'seal'), 'present', 'none', 'present', '封印に関わる痕跡が、鳥籠の内側にある。'),
+          round(2, attributeObservation('s1-sound', '音の有無', 'sound'), 'absent', 'none', 'absent', '音を残す気配は、観測されなかった。'),
+          round(3, pairObservation('s1-key-bell', '鍵・鈴を照合', ['key', 'bell']), 'present', 'none', 'present', '鍵と鈴のいずれかに、真実の残響がある。'),
+          round(4, attributeObservation('s1-chipped', '欠けの有無', 'chipped'), 'absent', 'none', 'absent', '欠けた痕跡は、観測されなかった。'),
+          round(5, pairObservation('s1-key-feather', '鍵・羽を照合', ['key', 'feather']), 'present', 'none', 'present', '鍵と羽のいずれかに、真実の残響がある。'),
+        ],
+        solutionSteps: ['第1記録の「封印あり」は、鍵か硝子を示す。', '第2記録の「音なし」は、鍵か羽を示す。', '両方に残る印は、鍵だけだった。'],
+        resultSummary: '真実の印は「鍵」だった。第1記録と第2記録を照合すると、鍵だけが残る。',
+        caution: 'この局では撹乱がない。届いた記録はすべて、そのまま読める。', nextScenarioId: 2,
+      },
+      {
+        id: 2, slug: 'blurred-feather', title: '霞んだ羽', truthSigilId: 'feather', difficulty: '初級', cardSubtitle: '新要素：霞ませ',
+        learningFocus: '判別不能は偽の断定ではなく、決定的な情報を失わせる撹乱である。',
+        intro: 'この局では、記録が読めなくなることがある。\n読めなかった記録は、答えではない。ほかの記録を照合しよう。',
+        introNote: '記録が読めなくなることがある。',
+        rounds: [
+          round(1, attributeObservation('s2-seal', '封印の有無', 'seal'), 'absent', 'none', 'absent', '封印に関わる痕跡は、観測されなかった。'),
+          round(2, attributeObservation('s2-chipped', '欠けの有無', 'chipped'), 'present', 'obscure', 'obscured', '記録面に霞が走り、結果を判別できない。'),
+          round(3, pairObservation('s2-feather-bell', '羽・鈴を照合', ['feather', 'bell']), 'present', 'none', 'present', '羽と鈴のいずれかに、真実の残響がある。'),
+          round(4, pairObservation('s2-key-glass', '鍵・硝子を照合', ['key', 'glass']), 'absent', 'none', 'absent', '鍵と硝子のあいだに、真実はない。'),
+          round(5, attributeObservation('s2-sound', '音の有無', 'sound'), 'absent', 'none', 'absent', '音を残す気配は、観測されなかった。'),
+        ],
+        solutionSteps: ['第1記録の「封印なし」は、羽か鈴を示す。', '第2記録は霞ませにより使えない。第3・第4は羽か鈴の候補を保つ。', '第5記録の「音なし」は鍵か羽を示す。第1と照合すると、羽だけが残る。'],
+        resultSummary: '第2観測では、本来なら羽へ近づく「欠けあり」の結果が霞ませで失われた。それでも第1と第5を照合すると、羽だけが残る。',
+        caution: '判別不能は「ない」ではない。この観測からは候補を絞れない。', nextScenarioId: 3,
+      },
+      {
+        id: 3, slug: 'inverted-bell', title: '逆さの鈴音', truthSigilId: 'bell', difficulty: '初級〜標準', cardSubtitle: '新要素：反転',
+        learningFocus: '「ある／ない」は一度だけ逆になり得るため、単独の記録で断定しない。',
+        intro: 'この局では、記録の意味が逆にされることがある。\n一つの記録だけで、真実を決めないこと。',
+        introNote: '撹乱：反転\n「ある」と「ない」が、1回だけ逆になることがある。\nどの記録が反転されたかは、最後まで分からない。',
+        rounds: [
+          round(1, attributeObservation('s3-seal', '封印の有無', 'seal'), 'absent', 'none', 'absent', '封印に関わる痕跡は、観測されなかった。'),
+          round(2, attributeObservation('s3-sound', '音の有無', 'sound'), 'present', 'invert', 'absent', '音を残す気配は、観測されなかった。'),
+          round(3, pairObservation('s3-key-glass', '鍵・硝子を照合', ['key', 'glass']), 'absent', 'none', 'absent', '鍵と硝子のあいだに、真実はない。'),
+          round(4, pairObservation('s3-feather-bell', '羽・鈴を照合', ['feather', 'bell']), 'present', 'none', 'present', '羽と鈴のいずれかに、真実の残響がある。'),
+          round(5, pairObservation('s3-key-bell', '鍵・鈴を照合', ['key', 'bell']), 'present', 'none', 'present', '鍵と鈴のいずれかに、真実の残響がある。'),
+        ],
+        solutionSteps: ['第1記録は無加工。「封印なし」なので、候補は羽か鈴。', '第2の「音なし」は羽を示すように見えるが、反転なら本来は「音あり」で鈴を示す。', '第5記録は無加工。「鍵か鈴」と第1を照合すると、鈴だけが残る。'],
+        resultSummary: '第2記録の「音なし」は、羽を指すように見えた。しかし第1と第5は無加工であり、両方を満たすのは鈴だけだった。',
+        caution: '第2記録をそのまま信じると羽が有力に見える。反転の可能性を残したまま、第1・第5記録を照合する必要がある。', nextScenarioId: 4,
+      },
+      {
+        id: 4, slug: 'shattered-glass', title: '砕けた硝子', truthSigilId: 'glass', difficulty: '標準〜やや難', cardSubtitle: '二つの撹乱',
+        learningFocus: '反転と霞ませを別々の目的で読み、連続撹乱不可を含めて全記録を照合する。',
+        intro: 'この局では、二つの撹乱が残されている。\n一つは意味を逆にし、一つは記録を霞ませる。\nただし、撹乱は続けて使えない。',
+        introNote: '二つの撹乱が残されている。撹乱は続けて使えない。',
+        rounds: [
+          round(1, attributeObservation('s4-seal', '封印の有無', 'seal'), 'present', 'none', 'present', '封印に関わる痕跡が、鳥籠の内側にある。'),
+          round(2, attributeObservation('s4-sound', '音の有無', 'sound'), 'present', 'invert', 'absent', '音を残す気配は、観測されなかった。'),
+          round(3, pairObservation('s4-key-glass', '鍵・硝子を照合', ['key', 'glass']), 'present', 'none', 'present', '鍵と硝子のいずれかに、真実の残響がある。'),
+          round(4, attributeObservation('s4-chipped', '欠けの有無', 'chipped'), 'present', 'obscure', 'obscured', '記録面に霞が走り、結果を判別できない。'),
+          round(5, pairObservation('s4-bell-glass', '鈴・硝子を照合', ['bell', 'glass']), 'present', 'none', 'present', '鈴と硝子のいずれかに、真実の残響がある。'),
+        ],
+        solutionSteps: ['第1記録は無加工。「封印あり」なので、候補は鍵か硝子。', '第2の「音なし」は鍵を示すように見えるが、反転なら本来は「音あり」で硝子を示すため断定できない。', '第4の「判別不能」で欠けの情報は失われた。それでも第5の「鈴か硝子」と第1を照合すると、硝子だけが残る。'],
+        resultSummary: '第2では「音あり」が反転され、第4では「欠けあり」が霞ませで失われた。それでも第1と第5の無加工記録を照合すると、硝子だけが残る。',
+        caution: '第2の「音なし」だけを見ると鍵が有力に見える。第5を単独で読んでも鈴か硝子の二択であり、第1と照合して初めて硝子に定まる。', nextScenarioId: null,
+      },
+    ]);
+
+    function actualResultFor(truthSigilId, observation) {
+      if (observation.type === 'attribute') return SIGILS[truthSigilId].attributes[observation.attributeId] ? 'present' : 'absent';
+      return observation.sigilIds.includes(truthSigilId) ? 'present' : 'absent';
+    }
+    function displayedResultFor(actualResult, disturbance) {
+      if (disturbance === 'obscure') return 'obscured';
+      if (disturbance === 'invert') return actualResult === 'present' ? 'absent' : 'present';
+      return actualResult;
+    }
+    function recordTextFor(observation, result) {
+      if (result === 'obscured') return '記録面に霞が走り、結果を判別できない。';
+      if (observation.type === 'pair') {
+        const [a, b] = observation.sigilIds.map((id) => SIGILS[id].name);
+        return result === 'present' ? `${a}と${b}のいずれかに、真実の残響がある。` : `${a}と${b}のあいだに、真実はない。`;
+      }
+      const words = { seal: ['封印に関わる痕跡が、鳥籠の内側にある。', '封印に関わる痕跡は、観測されなかった。'], sound: ['音を残す気配が、鳥籠の内側にある。', '音を残す気配は、観測されなかった。'], chipped: ['欠けた痕跡が、鳥籠の内側にある。', '欠けた痕跡は、観測されなかった。'] };
+      return words[observation.attributeId][result === 'present' ? 0 : 1];
+    }
+    function normalizeCompleted(value) {
+      if (!Array.isArray(value)) return [];
+      return [...new Set(value.filter((id) => Number.isInteger(id) && id >= 1 && id <= 4))].sort((a, b) => a - b);
+    }
+    function readCompleted(storage = localStorage) {
+      try { return normalizeCompleted(JSON.parse(storage.getItem(STORAGE_KEY) || '[]')); } catch { return []; }
+    }
+    function writeCompleted(ids, storage = localStorage) {
+      const normalized = normalizeCompleted(ids);
+      storage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+      return normalized;
+    }
+    function isScenarioUnlocked(id, completed) { return id === 1 || completed.includes(id - 1); }
+
+    const state = {
+      screen: 'title', selectedScenarioId: null, currentRoundIndex: 0, receivedRoundIndexes: [],
+      memoBySigil: Object.fromEntries(SIGIL_IDS.map((id) => [id, 'hold'])), selectedMemoSigilId: 'key', memoUndo: null,
+      selectedDeclarationSigilId: null, completedScenarioIds: readCompleted(), tutorialShownThisSession: false,
+      resultWasCorrect: false, recordReturnScreen: 'observation', dialogKind: null,
+    };
+    let undoTimer = null;
+    let lastFocusedBeforeModal = null;
+    const app = document.getElementById('app');
+    const recordModal = document.getElementById('record-modal');
+    const dialogModal = document.getElementById('dialog-modal');
+    const liveRegion = document.getElementById('live-region');
+
+    function scenarioById(id) { return SCENARIOS.find((scenario) => scenario.id === id); }
+    function currentScenario() { return scenarioById(state.selectedScenarioId); }
+    function resetRuntimeForScenario(id) {
+      state.selectedScenarioId = id; state.currentRoundIndex = 0; state.receivedRoundIndexes = [0];
+      state.memoBySigil = Object.fromEntries(SIGIL_IDS.map((sigilId) => [sigilId, 'hold']));
+      state.selectedMemoSigilId = 'key'; state.memoUndo = null; state.selectedDeclarationSigilId = null; state.resultWasCorrect = false;
+      if (undoTimer) clearTimeout(undoTimer);
+    }
+    function sigilIcon(id) {
+      const paths = {
+        key: '<circle cx="22" cy="15" r="8"/><path d="M22 23v22m0-8h9m-9 7h6"/>',
+        feather: '<path d="M12 44c4-18 12-31 29-38 1 17-9 29-25 34"/><path d="M13 45 35 17M21 34l-7-3m13-5-8-3m14-5-7-2"/>',
+        bell: '<path d="M14 36h28l-4-6V19a10 10 0 0 0-20 0v11z"/><path d="M22 41c2 5 8 5 10 0"/>',
+        glass: '<path d="m14 8 24-3 6 15-5 27-26-5-5-20z"/><path d="m27 9-4 15 9 5-6 16m-3-21-12-2m21 7 10-8"/>',
+      };
+      return `<svg class="sigil-icon" viewBox="0 0 52 52" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${paths[id]}</svg>`;
+    }
+    function sigilCard(id, mode = 'memo') {
+      const sigil = SIGILS[id], memo = state.memoBySigil[id], selected = mode === 'memo' ? state.selectedMemoSigilId === id : state.selectedDeclarationSigilId === id;
+      const action = mode === 'memo' ? 'select-memo-sigil' : 'select-declaration';
+      const suffix = mode === 'memo' ? '選択して状態を変更。' : '最終宣言の候補。';
+      return `<button type="button" class="sigil-card${selected ? ' is-selected' : ''}" data-action="${action}" data-sigil-id="${id}" data-memo="${memo}" aria-pressed="${selected}" aria-label="${sigil.name}。推理メモ：${MEMO_LABELS[memo]}。${suffix}">${sigilIcon(id)}<span class="sigil-name">${sigil.name}</span><span class="memo-label">${MEMO_LABELS[memo]}</span></button>`;
+    }
+    function memoMarkup() {
+      return `<section class="memo-section" aria-labelledby="memo-heading"><h3 id="memo-heading" class="section-title">推理メモ</h3><div class="memo-grid">${SIGIL_IDS.map((id) => sigilCard(id)).join('')}</div><div class="memo-controls" aria-label="選択した印の状態変更"><button class="button" type="button" data-action="set-memo" data-memo="strong">有力にする</button><button class="button" type="button" data-action="set-memo" data-memo="hold">保留に戻す</button><button class="button" type="button" data-action="set-memo" data-memo="excluded">除外にする</button></div><div id="undo-slot">${undoMarkup()}</div></section>`;
+    }
+    function undoMarkup() {
+      if (!state.memoUndo) return '';
+      return `<div class="undo-bar" role="status"><span>${SIGILS[state.memoUndo.sigilId].name}を${MEMO_LABELS[state.memoUndo.next]}にしました。</span><button type="button" data-action="undo-memo">取り消す</button></div>`;
+    }
+    function attributeTableMarkup() {
+      return `<table class="attribute-table"><caption class="section-title">4印の属性表</caption><thead><tr><th scope="col">印</th><th scope="col">封印に<br>関わる</th><th scope="col">音を<br>残す</th><th scope="col">欠けて<br>いる</th></tr></thead><tbody>${SIGIL_IDS.map((id) => `<tr><th scope="row">${SIGILS[id].name}</th>${['seal','sound','chipped'].map((key) => `<td>${SIGILS[id].attributes[key] ? 'あり' : 'なし'}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+    }
+    function recordBookMarkup() {
+      const scenario = currentScenario();
+      const received = scenario ? state.receivedRoundIndexes.map((index) => scenario.rounds[index]) : [];
+      return `<div class="record-book-content"><section><h3 class="section-title">届いた記録</h3><div class="received-list">${received.length ? received.map((item) => `<article class="received-record"><h4>第${item.number}観測</h4><p><strong>観測内容：</strong>${item.observation.label}</p><p><strong>結果：</strong>${RESULT_LABELS[item.displayedResult]}</p><p>${item.recordText}</p></article>`).join('') : '<p>まだ記録は届いていません。</p>'}</div></section>${attributeTableMarkup()}<section><h3 class="section-title">撹乱の規則</h3><p class="rules-note">反転：ある／ないを逆にする。1局に1回まで。\n霞ませ：結果を判別不能にする。1局に1回まで。\n撹乱は続けて使えない。\n第1と第5の記録は、必ず無加工。${scenario?.id === 1 ? '\nこの局では、撹乱は起きない。' : ''}</p></section><section><h3 class="section-title">現在の推理メモ</h3><div class="record-memo-list">${SIGIL_IDS.map((id) => `<span><strong>${SIGILS[id].name}</strong>：${MEMO_LABELS[state.memoBySigil[id]]}</span>`).join('')}</div></section></div>`;
+    }
+    function renderTitle() {
+      app.innerHTML = `<section class="screen title-screen" aria-labelledby="title-heading"><div class="title-frame"><div class="title-content"><div class="title-mark" aria-hidden="true"></div><p class="eyebrow">ORIGINAL LOGIC GAME</p><h1 id="title-heading">鳥籠の観測者</h1><p class="english-title">Birdcage Observer</p><p class="title-lead">籠は閉ざされている。\n記録は届く。\nだが、そのすべてが真実とは限らない。</p><p class="small muted">観測済み：${state.completedScenarioIds.length} / 4</p><div class="actions"><button class="button button--primary" type="button" data-action="show-scenarios">観測を始める</button><button class="button" type="button" data-action="show-howto">遊び方</button><a class="text-link" href="../toybox/">🎪 おもちゃ箱へ戻る</a></div></div></div></section>`;
+    }
+    function renderScenarioSelect() {
+      app.innerHTML = `<section class="screen" aria-labelledby="scenario-heading"><header class="page-header"><div><p class="eyebrow">OBSERVATION LOGS</p><h1 id="scenario-heading">シナリオ一覧</h1></div></header><div class="scenario-grid">${SCENARIOS.map((scenario) => { const unlocked = isScenarioUnlocked(scenario.id, state.completedScenarioIds), completed = state.completedScenarioIds.includes(scenario.id), status = completed ? '観測済み' : unlocked ? '観測可能' : '封印中'; return `<button type="button" class="scenario-card" data-action="choose-scenario" data-scenario-id="${scenario.id}" ${unlocked ? '' : 'disabled'} aria-label="第${scenario.id}局 ${scenario.title}。${status}${unlocked ? '' : '。前の局をクリアすると解放'}"><span class="scenario-card__top"><span class="scenario-number">局 ${String(scenario.id).padStart(2,'0')}</span><span class="status-label">${status}</span></span><h2>${scenario.title}</h2><span class="small muted">${scenario.cardSubtitle}</span>${unlocked ? '' : '<span class="small muted">前の局をクリアすると解放</span>'}</button>`; }).join('')}</div><footer class="scenario-footer"><button class="button button--quiet" type="button" data-action="show-howto">遊び方</button><button class="button button--quiet" type="button" data-action="show-title">タイトルへ戻る</button><p class="small muted">進行状況は、この端末のブラウザ内にだけ保存されます。<br>ブラウザの保存データを消すと、解放状況は初期化されます。</p><button class="reset-button" type="button" data-action="confirm-reset">進行状況をリセット</button></footer></section>`;
+    }
+    function renderHowTo() {
+      app.innerHTML = `<section class="screen" aria-labelledby="howto-heading"><header class="page-header"><div><p class="eyebrow">HOW TO OBSERVE</p><h1 id="howto-heading">遊び方</h1></div></header><div class="rules-grid"><article class="panel rules-card"><h2>真実の印</h2><p>鍵・羽・鈴・硝子の4印から、真実は1つ。5件の記録と属性表を照合します。</p></article><article class="panel rules-card"><h2>撹乱</h2><p>反転は「ある／ない」を逆にし、霞ませは結果を「判別不能」にします。第1・第5観測は無加工で、撹乱は連続しません。</p></article><article class="panel rules-card"><h2>推理メモ</h2><p>各印を有力・保留・除外にできます。メモは自分用で、最終宣言できる印を制限しません。</p></article><article class="panel rules-card"><h2>最終宣言</h2><p>5件がそろったら印を1つ宣言します。正解した局だけが観測済みとなり、次局が解放されます。</p></article></div><p class="small muted">進行状況は、この端末のブラウザ内にだけ保存されます。</p><button class="button" type="button" data-action="back-from-howto">戻る</button></section>`;
+    }
+    function renderScenarioIntro() {
+      const scenario = currentScenario();
+      app.innerHTML = `<section class="screen" aria-labelledby="intro-heading"><article class="panel"><p class="eyebrow">局 ${String(scenario.id).padStart(2,'0')} ／ ${scenario.difficulty}</p><h1 id="intro-heading">${scenario.title}</h1><p class="intro-body">${scenario.intro}</p><p class="intro-note">${scenario.introNote}</p><p class="small muted">観測の焦点：${scenario.learningFocus}</p><div class="actions"><button class="button button--primary" type="button" data-action="begin-scenario">観測を開始する</button><button class="button" type="button" data-action="show-scenarios">一覧へ戻る</button></div></article></section>`;
+    }
+    function renderObservation() {
+      const scenario = currentScenario(), current = scenario.rounds[state.currentRoundIndex];
+      app.innerHTML = `<section class="screen screen--wide" aria-labelledby="observation-heading"><div class="play-top"><div><p class="eyebrow">${scenario.title}</p><h1 id="observation-heading" class="section-title">第${current.number}観測 / 全5観測</h1></div><button class="menu-button" type="button" data-action="open-menu">メニュー</button></div><div class="play-layout"><div class="observation-column"><article class="observation-card paper${current.displayedResult === 'obscured' ? ' observation-card--obscured' : ''}"><p class="observation-label">観測内容：${current.observation.label}</p><p class="record-text">${current.recordText}</p><p class="result-label${current.displayedResult === 'obscured' ? ' result-label--obscured' : ''}">結果：${RESULT_LABELS[current.displayedResult]}${current.displayedResult === 'obscured' ? '<span class="small">。この観測から候補は絞れません。</span>' : ''}</p></article>${memoMarkup()}<div class="play-actions"><button class="button" type="button" data-action="open-record">記録帳を開く</button><button class="button button--primary" type="button" data-action="advance-observation">${current.number < 5 ? '次の観測記録を受け取る' : '最終宣言へ進む'}</button>${current.number === 5 ? '<p class="small muted">すべての記録がそろった。記録帳を確かめ、真実の印を宣言する。</p>' : ''}</div></div><aside class="record-book-desktop panel paper" aria-label="記録帳">${recordBookMarkup()}</aside></div></section>`;
+      announce(`第${current.number}観測の記録が届きました。観測内容は${current.observation.label}。結果は${RESULT_LABELS[current.displayedResult]}。`);
+    }
+    function renderFinalDeclaration() {
+      const scenario = currentScenario();
+      app.innerHTML = `<section class="screen screen--wide" aria-labelledby="declaration-heading"><div class="play-top"><div><p class="eyebrow">${scenario.title}</p><h1 id="declaration-heading">真実の印を、一つ選んでください。</h1></div><button class="menu-button" type="button" data-action="open-menu">メニュー</button></div><div class="play-layout"><div><p class="declaration-note">推理メモは、あなたの記録です。\n最後に選ぶ印は、いつでも変えられます。</p><div class="declaration-grid">${SIGIL_IDS.map((id) => sigilCard(id, 'declaration')).join('')}</div><div class="play-actions"><button class="button" type="button" data-action="open-record">記録帳を開く</button><button class="button" type="button" data-action="back-to-observation">観測画面へ戻る</button><button class="button button--primary" type="button" data-action="confirm-declaration" ${state.selectedDeclarationSigilId ? '' : 'disabled'}>この印を宣言する</button></div></div><aside class="record-book-desktop panel paper" aria-label="記録帳">${recordBookMarkup()}</aside></div></section>`;
+    }
+    function actualRecordText(item) { return recordTextFor(item.observation, item.actualResult); }
+    function disturbanceDescription(item) {
+      if (item.disturbance === 'invert') return `反転：本来の「${RESULT_LABELS[item.actualResult]}」を「${RESULT_LABELS[item.displayedResult]}」と表示`;
+      if (item.disturbance === 'obscure') return `霞ませ：本来の「${RESULT_LABELS[item.actualResult]}」を判別不能と表示`;
+      return '無加工';
+    }
+    function renderResult() {
+      const scenario = currentScenario(), truth = SIGILS[scenario.truthSigilId], correct = state.resultWasCorrect;
+      const next = scenario.nextScenarioId ? scenarioById(scenario.nextScenarioId) : null;
+      app.innerHTML = `<section class="screen" aria-labelledby="result-heading"><header class="result-hero"><p class="eyebrow">OBSERVATION RESULT</p><h1 id="result-heading">${correct ? '観測は正しかった。' : '記録は、あと一歩だけあなたを惑わせた。'}</h1><p>真実の印は「${truth.name}」。</p></header><article class="panel paper truth-panel"><h2>真実の印</h2>${sigilIcon(truth.id)}<h3>${truth.name}</h3><div class="truth-attributes">${Object.entries(ATTRIBUTES).map(([key,label]) => `<span>${label}：${truth.attributes[key] ? 'あり' : 'なし'}</span>`).join('')}</div></article><section class="panel result-section"><h2 class="section-title">撹乱の公開</h2><ul class="disturbance-list">${scenario.rounds.map((item) => `<li><strong>第${item.number}観測</strong>　${disturbanceDescription(item)}</li>`).join('')}</ul></section><section class="result-section"><h2 class="section-title">観測ごとの解剖</h2><div class="dissection-list">${scenario.rounds.map((item) => `<details class="dissection"><summary>第${item.number}観測　${item.disturbance === 'none' ? '無加工' : item.disturbance === 'invert' ? '反転' : '霞ませ'}</summary><div class="dissection-body"><p><strong>観測内容</strong><br>${item.observation.label}</p><p><strong>届いた記録</strong><br>${item.recordText}<br>結果：${RESULT_LABELS[item.displayedResult]}</p><p><strong>本来の記録</strong><br>${actualRecordText(item)}<br>結果：${RESULT_LABELS[item.actualResult]}${item.disturbance === 'none' ? '（届いた記録と同じ）' : ''}</p></div></details>`).join('')}</div></section><section class="panel result-section"><h2 class="section-title">解法</h2><ol class="solution-list">${scenario.solutionSteps.map((step) => `<li>${step}</li>`).join('')}</ol><p>${scenario.resultSummary}</p><p class="small muted">${scenario.caution}</p></section><div class="result-actions">${correct && next ? `<button class="button button--primary" type="button" data-action="next-scenario">次の記録へ：${next.title}</button>` : ''}${correct && scenario.id === 4 ? '<button class="button button--primary" type="button" data-action="show-completion">観測完了を見る</button>' : ''}<button class="button" type="button" data-action="retry-scenario">もう一度観測する</button><button class="button" type="button" data-action="show-scenarios">一覧へ戻る</button></div></section>`;
+    }
+    function renderCompletion() {
+      app.innerHTML = `<section class="screen" aria-labelledby="completion-heading"><article class="panel"><p class="eyebrow">ALL RECORDS CLOSED</p><h1 id="completion-heading">観測完了</h1><p class="intro-body">すべての観測記録が閉じられた。\n鳥籠はなお沈黙している。\nだが、あなたは記録の揺らぎを見抜いた。</p><p><strong>観測済み：4 / 4</strong></p><ol>${SCENARIOS.map((scenario) => `<li>第${scenario.id}局　${scenario.title}</li>`).join('')}</ol><div class="actions"><button class="button button--primary" type="button" data-action="show-scenarios">シナリオ一覧へ</button><button class="button" type="button" data-action="show-title">タイトルへ戻る</button></div></article></section>`;
+    }
+    function render() {
+      const renderers = { title: renderTitle, scenarioSelect: renderScenarioSelect, howToPlay: renderHowTo, scenarioIntro: renderScenarioIntro, observation: renderObservation, finalDeclaration: renderFinalDeclaration, result: renderResult, completion: renderCompletion };
+      renderers[state.screen]();
+      app.focus({ preventScroll: true });
+    }
+    function go(screen) { state.screen = screen; window.scrollTo({ top: 0, behavior: 'auto' }); render(); }
+    function announce(message) { liveRegion.textContent = ''; setTimeout(() => { liveRegion.textContent = message; }, 10); }
+
+    function applyMemo(sigilId, next) {
+      const previous = state.memoBySigil[sigilId];
+      if (previous === next) return;
+      state.memoBySigil[sigilId] = next; state.memoUndo = { sigilId, previous, next };
+      if (undoTimer) clearTimeout(undoTimer);
+      undoTimer = setTimeout(() => { state.memoUndo = null; const slot = document.getElementById('undo-slot'); if (slot) slot.innerHTML = ''; }, 4000);
+      render();
+    }
+    function openRecordBook() {
+      state.recordReturnScreen = state.screen; lastFocusedBeforeModal = document.activeElement;
+      document.getElementById('record-modal-body').innerHTML = recordBookMarkup();
+      recordModal.hidden = false; recordModal.querySelector('.close-button').focus();
+    }
+    function closeRecordBook() { recordModal.hidden = true; lastFocusedBeforeModal?.focus?.(); }
+    function showDialog({ kind, title, body, actions, stack = false }) {
+      state.dialogKind = kind; lastFocusedBeforeModal = document.activeElement;
+      document.getElementById('dialog-title').textContent = title;
+      document.getElementById('dialog-body').innerHTML = body;
+      const holder = document.getElementById('dialog-actions'); holder.className = `dialog-actions${stack ? ' dialog-actions--stack' : ''}`;
+      holder.innerHTML = actions.map((action) => `<button class="button${action.primary ? ' button--primary' : ''}${action.danger ? ' button--danger' : ''}" type="button" data-action="${action.action}"${action.value ? ` data-value="${action.value}"` : ''}>${action.label}</button>`).join('');
+      dialogModal.hidden = false; holder.querySelector('button')?.focus();
+    }
+    function closeDialog() { dialogModal.hidden = true; state.dialogKind = null; lastFocusedBeforeModal?.focus?.(); }
+    function showTutorial() {
+      state.tutorialShownThisSession = true;
+      showDialog({ kind: 'tutorial', title: '観測の基本', body: '<p>届いた記録と4つの印の特徴を見比べ、真実の印を探します。</p><p>推理メモは自由に変更できます。</p><p>5つの記録がそろったら、最後に印を1つ宣言します。</p>', actions: [{ action: 'tutorial-start', label: '観測を始める', primary: true }], stack: true });
+    }
+    function startScenario() { resetRuntimeForScenario(state.selectedScenarioId); closeDialog(); go('observation'); }
+    function leaveTo(target) { closeDialog(); state.receivedRoundIndexes = []; state.selectedScenarioId = null; go(target); }
+    function confirmLeave(target) {
+      showDialog({ kind: 'leave', title: '観測を中断しますか？', body: '<p>受け取った記録と推理メモは失われます。進行状況として保存されません。</p>', actions: [{ action: 'close-dialog', label: '観測を続ける' }, { action: 'leave-confirmed', label: target === 'title' ? 'タイトルへ戻る' : 'シナリオ一覧へ戻る', danger: true, value: target }] });
+    }
+    function handleAdvance() {
+      const scenario = currentScenario(), current = scenario.rounds[state.currentRoundIndex];
+      if (current.number === 5) {
+        if (scenario.id === 3) {
+          showDialog({ kind: 'round-help', title: '記録を見比べる', body: '<p>第1と第5の記録は、必ず無加工。<br>反転の可能性がある記録と、並べて見比べよう。</p>', actions: [{ action: 'go-final', label: '最終宣言へ進む', primary: true }], stack: true });
+        } else go('finalDeclaration');
+        return;
+      }
+      if (scenario.id === 2 && current.number === 2) {
+        showDialog({ kind: 'round-help', title: '撹乱：霞ませ', body: '<p>この観測の結果は判別不能です。候補は絞れません。</p><p>霞ませの直後は、撹乱を続けて使えない。<br>次の記録は、無加工として読める。</p>', actions: [{ action: 'reveal-next', label: '記録を受け取る', primary: true }], stack: true });
+        return;
+      }
+      revealNext();
+    }
+    function revealNext() { closeDialog(); state.currentRoundIndex += 1; state.receivedRoundIndexes.push(state.currentRoundIndex); render(); }
+    function declareSelected() {
+      const scenario = currentScenario(), selected = state.selectedDeclarationSigilId;
+      state.resultWasCorrect = selected === scenario.truthSigilId;
+      if (state.resultWasCorrect) state.completedScenarioIds = writeCompleted([...state.completedScenarioIds, scenario.id]);
+      closeDialog(); go('result');
+    }
+
+    document.addEventListener('click', (event) => {
+      const target = event.target.closest('[data-action]'); if (!target) return;
+      const action = target.dataset.action;
+      if (action === 'show-title') go('title');
+      else if (action === 'show-scenarios') go('scenarioSelect');
+      else if (action === 'show-howto') { state.howToReturnScreen = state.screen; go('howToPlay'); }
+      else if (action === 'back-from-howto') go(state.howToReturnScreen || 'title');
+      else if (action === 'choose-scenario') { state.selectedScenarioId = Number(target.dataset.scenarioId); go('scenarioIntro'); }
+      else if (action === 'begin-scenario') { if (state.selectedScenarioId === 1 && !state.tutorialShownThisSession) showTutorial(); else startScenario(); }
+      else if (action === 'tutorial-start') startScenario();
+      else if (action === 'advance-observation') handleAdvance();
+      else if (action === 'reveal-next') revealNext();
+      else if (action === 'go-final') { closeDialog(); go('finalDeclaration'); }
+      else if (action === 'select-memo-sigil') { state.selectedMemoSigilId = target.dataset.sigilId; render(); }
+      else if (action === 'set-memo') { const next = target.dataset.memo; if (next === 'excluded') showDialog({ kind: 'exclude', title: '推理メモの確認', body: `<p>${SIGILS[state.selectedMemoSigilId].name}を「除外」にしますか？ 推理メモは後から戻せます。</p>`, actions: [{ action: 'close-dialog', label: '戻る' }, { action: 'confirm-exclude', label: '除外にする', danger: true }] }); else applyMemo(state.selectedMemoSigilId, next); }
+      else if (action === 'confirm-exclude') { const id = state.selectedMemoSigilId; closeDialog(); applyMemo(id, 'excluded'); }
+      else if (action === 'undo-memo' && state.memoUndo) { const undo = state.memoUndo; state.memoBySigil[undo.sigilId] = undo.previous; state.memoUndo = null; if (undoTimer) clearTimeout(undoTimer); render(); }
+      else if (action === 'open-record') openRecordBook();
+      else if (action === 'close-record') closeRecordBook();
+      else if (action === 'select-declaration') { state.selectedDeclarationSigilId = target.dataset.sigilId; render(); }
+      else if (action === 'back-to-observation') go('observation');
+      else if (action === 'confirm-declaration') { const name = SIGILS[state.selectedDeclarationSigilId].name; showDialog({ kind: 'declaration', title: '最終宣言の確認', body: `<p>「${name}」を、鳥籠の真実として宣言しますか？<br>宣言後は変更できません。</p>`, actions: [{ action: 'close-dialog', label: '戻る' }, { action: 'declare', label: `${name}を宣言する`, primary: true }] }); }
+      else if (action === 'declare') declareSelected();
+      else if (action === 'retry-scenario') go('scenarioIntro');
+      else if (action === 'next-scenario') { state.selectedScenarioId = currentScenario().nextScenarioId; go('scenarioIntro'); }
+      else if (action === 'show-completion') go('completion');
+      else if (action === 'open-menu') showDialog({ kind: 'menu', title: 'メニュー', body: '<p>観測を続けるか、現在の観測を中断して戻ります。</p>', actions: [{ action: 'close-dialog', label: '観測を続ける' }, { action: 'request-leave', label: 'シナリオ一覧へ戻る', value: 'scenarioSelect' }, { action: 'request-leave', label: 'タイトルへ戻る', value: 'title' }], stack: true });
+      else if (action === 'request-leave') confirmLeave(target.dataset.value);
+      else if (action === 'leave-confirmed') leaveTo(target.dataset.value);
+      else if (action === 'confirm-reset') showDialog({ kind: 'reset', title: '進行状況をリセットしますか？', body: '<p>観測済みの局と解放状況を初期化します。この操作は取り消せません。</p>', actions: [{ action: 'close-dialog', label: '戻る' }, { action: 'reset-progress', label: 'リセットする', danger: true }] });
+      else if (action === 'reset-progress') { localStorage.removeItem(STORAGE_KEY); state.completedScenarioIds = []; closeDialog(); render(); }
+      else if (action === 'close-dialog') closeDialog();
+    });
+
+    function activeModal() { return !dialogModal.hidden ? dialogModal : !recordModal.hidden ? recordModal : null; }
+    document.addEventListener('keydown', (event) => {
+      const modal = activeModal(); if (!modal) return;
+      if (event.key === 'Escape') { event.preventDefault(); modal === recordModal ? closeRecordBook() : closeDialog(); return; }
+      if (event.key !== 'Tab') return;
+      const focusable = [...modal.querySelectorAll('button:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])')];
+      if (!focusable.length) return;
+      const first = focusable[0], last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    });
+    window.addEventListener('beforeunload', (event) => {
+      if (!['observation', 'finalDeclaration'].includes(state.screen)) return;
+      event.preventDefault(); event.returnValue = '';
+    });
+
+    window.__birdcageObserver = Object.freeze({ STORAGE_KEY, SIGILS, ATTRIBUTES, SCENARIOS, actualResultFor, displayedResultFor, recordTextFor, normalizeCompleted, readCompleted, writeCompleted, isScenarioUnlocked });
+    render();
+  </script>
+</body>
+</html>
