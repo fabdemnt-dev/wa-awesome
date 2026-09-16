@@ -233,6 +233,11 @@
       .result-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .result-actions .button--primary { grid-column: 1 / -1; }
     }
+    @media (max-width: 767px) {
+      .play-top--declaration { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; }
+      .play-top--declaration .menu-button { white-space: nowrap; }
+    }
+
     @media (min-width: 768px) {
       .play-layout { grid-template-columns: minmax(0, .95fr) minmax(330px, 1.05fr); align-items: start; }
       .record-book-desktop { display: block; position: sticky; top: 1rem; max-height: calc(100vh - 2rem); overflow: auto; }
@@ -459,7 +464,7 @@
     }
     function renderFinalDeclaration() {
       const scenario = currentScenario();
-      app.innerHTML = `<section class="screen screen--wide" aria-labelledby="declaration-heading"><div class="play-top"><div><p class="eyebrow">${scenario.title}</p><h1 id="declaration-heading">真実の印を、一つ選んでください。</h1></div><button class="menu-button" type="button" data-action="open-menu">メニュー</button></div><div class="play-layout"><div><p class="declaration-note">推理メモは、あなたの記録です。\n最後に選ぶ印は、いつでも変えられます。</p><div class="declaration-grid">${SIGIL_IDS.map((id) => sigilCard(id, 'declaration')).join('')}</div><div class="play-actions"><button class="button" type="button" data-action="open-record">記録帳を開く</button><button class="button" type="button" data-action="back-to-observation">観測画面へ戻る</button><button class="button button--primary" type="button" data-action="confirm-declaration" ${state.selectedDeclarationSigilId ? '' : 'disabled'}>この印を宣言する</button></div></div><aside class="record-book-desktop panel paper" aria-label="記録帳">${recordBookMarkup()}</aside></div></section>`;
+      app.innerHTML = `<section class="screen screen--wide" aria-labelledby="declaration-heading"><div class="play-top play-top--declaration"><div><p class="eyebrow">${scenario.title}</p><h1 id="declaration-heading">真実の印を、一つ選んでください。</h1></div><button class="menu-button" type="button" data-action="open-menu">メニュー</button></div><div class="play-layout"><div><p class="declaration-note">推理メモは、あなたの記録です。\n最後に選ぶ印は、いつでも変えられます。</p><div class="declaration-grid">${SIGIL_IDS.map((id) => sigilCard(id, 'declaration')).join('')}</div><div class="play-actions"><button class="button" type="button" data-action="open-record">記録帳を開く</button><button class="button" type="button" data-action="back-to-observation">観測画面へ戻る</button><button class="button button--primary" type="button" data-action="confirm-declaration" ${state.selectedDeclarationSigilId ? '' : 'disabled'}>この印を宣言する</button></div></div><aside class="record-book-desktop panel paper" aria-label="記録帳">${recordBookMarkup()}</aside></div></section>`;
     }
     function actualRecordText(item) { return recordTextFor(item.observation, item.actualResult); }
     function disturbanceDescription(item) {
