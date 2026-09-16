@@ -53,7 +53,7 @@ jobs:
           jar --update --file "$emulator_jar" --manifest "$emulator_manifest"
           sha256sum "$emulator_jar" | tee firestore-emulator-sha256.txt
           java -jar "$emulator_jar" --version | tee firestore-emulator-version.txt
-          grep -qx '1.20.3' firestore-emulator-version.txt
+          grep -qx 'cloud-firestore-emulator 1.20.3' firestore-emulator-version.txt
           printf 'FIRESTORE_EMULATOR_BINARY_PATH=%s\n' "$emulator_jar" >> "$GITHUB_ENV"
       - name: Verify diagnostic versions
         run: |
@@ -93,7 +93,7 @@ jobs:
               -e 's/(Bearer +)[^ ]+/\1[REDACTED]/gi' \
               -e 's/(token|authorization)([=: ]+)[^ ,}]*/\1\2[REDACTED]/gi' \
             > transaction-lifecycle-artifact/timeline.log || true
-          cp transaaction-lifecycle-exit-code.txt transaction-lifecycle-artifact/
+          cp transaction-lifecycle-exit-code.txt transaction-lifecycle-artifact/
           cp transaction-lifecycle-duration-ms.txt transaction-lifecycle-artifact/
           cp firestore-emulator-version.txt firestore-emulator-sha256.txt transaction-lifecycle-artifact/
           if [ -f firestore-debug.log ]; then
