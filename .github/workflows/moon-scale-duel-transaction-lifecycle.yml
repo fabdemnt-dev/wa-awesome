@@ -38,8 +38,14 @@ jobs:
           tar -xzf "$gcloud_archive" -C "$gcloud_dir"
           "$gcloud_dir/google-cloud-sdk/bin/gcloud" --version
           "$gcloud_dir/google-cloud-sdk/bin/gcloud" components install cloud-firestore-emulator --quiet
-          emulator_jar=$(find "$gcloud_dir/google-cloud-sdk" -type f -name 'cloud-firestore-emulator*.jar' -print -quit)
-          test -n "$emulator_jar"
+          component_jar=$(find "$gcloud_dir/google-cloud-sdk" -type f -name 'cloud-firestore-emulator*.jar' -print -quit)
+          test -n "$component_jar"
+          emulator_jar="$RUNNER_TEMP/cloud-firestore-emulator-v1.20.3.jar"
+          emulator_manifest="$RUNNER_TEMP/cloud-firestore-emulator-manifest.txt"
+          cp "$component_jar" "$emulator_jar"
+          printf 'Manifest-Version: 1.0\nMain-Class: com.google.cloud.datastore.emulator.firestore.CloudFirestore\n\n' \
+            > "$emulator_manifest"
+          jar --update --file "$emulator_jar" --manifest "$emulator_manifest"
           sha256sum "$emulator_jar" | tee firestore-emulator-sha256.txt
           java -jar "$emulator_jar" --version | tee firestore-emulator-version.txt
           grep -qx '1.20.3' firestore-emulator-version.txt
@@ -80,7 +86,7 @@ jobs:
           grep -E 'MOON_SCALE_DUEL_TRANSACTION_DIAGNOSTIC|FIRESTORE_SDK_TRANSACTION_DIAGNOSTIC|Transaction lock timeout|Transaction is invalid or closed|INVALID_ARGUMENT|ABORTED|# tests |# pass |# fail |not ok|ok ' transaction-lifecycle.log \
             | sed -E \
               -e 's/(Bearer +)[^ ]+/\1[REDACTED]/gi' \
-              -e 's/(token|authorization)([=: ]+)[^ ,}]*/\1\2[REDAACTED/gi' \
+              -e 's/(token|authorization)([=: ]+)[^ ,}]*/\1\2[REDACTED]/gi' \
             > transaction-lifecycle-artifact/timeline.log || true
           cp transaction-lifecycle-exit-code.txt transaction-lifecycle-artifact/
           cp transaction-lifecycle-duration-ms.txt transaction-lifecycle-artifact/
