@@ -142,6 +142,11 @@
 
     .rules-grid { display: grid; gap: .75rem; }
     .rules-card h2 { margin: 0 0 .4rem; font-size: 1.08rem; }
+    .rules-example { margin: .8rem 0; padding: .75rem; border-left: 3px solid var(--brass); background: rgba(0,0,0,.18); }
+    .rules-example p { margin: .35rem 0; }
+    .rules-example blockquote { margin: .5rem 0; color: #eee3cc; font-family: var(--serif); }
+    .rules-points { margin: .6rem 0 0; padding-left: 1.25rem; }
+    .rules-points li + li { margin-top: .35rem; }
     .intro-body { white-space: pre-line; }
     .intro-note { margin-top: 1rem; padding: .75rem; border-left: 3px solid var(--brass); color: #d8cdb9; background: rgba(0,0,0,.18); }
 
@@ -224,6 +229,7 @@
 
     @media (min-width: 620px) {
       .scenario-grid, .rules-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .rules-card--primary { grid-column: 1 / -1; }
       .result-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .result-actions .button--primary { grid-column: 1 / -1; }
     }
@@ -440,7 +446,7 @@
       app.innerHTML = `<section class="screen" aria-labelledby="scenario-heading"><header class="page-header"><div><p class="eyebrow">OBSERVATION LOGS</p><h1 id="scenario-heading">シナリオ一覧</h1></div></header><div class="scenario-grid">${SCENARIOS.map((scenario) => { const unlocked = isScenarioUnlocked(scenario.id, state.completedScenarioIds), completed = state.completedScenarioIds.includes(scenario.id), status = completed ? '観測済み' : unlocked ? '観測可能' : '封印中'; return `<button type="button" class="scenario-card" data-action="choose-scenario" data-scenario-id="${scenario.id}" ${unlocked ? '' : 'disabled'} aria-label="第${scenario.id}局 ${scenario.title}。${status}${unlocked ? '' : '。前の局をクリアすると解放'}"><span class="scenario-card__top"><span class="scenario-number">局 ${String(scenario.id).padStart(2,'0')}</span><span class="status-label">${status}</span></span><h2>${scenario.title}</h2><span class="small muted">${scenario.cardSubtitle}</span>${unlocked ? '' : '<span class="small muted">前の局をクリアすると解放</span>'}</button>`; }).join('')}</div><footer class="scenario-footer"><button class="button button--quiet" type="button" data-action="show-howto">遊び方</button><button class="button button--quiet" type="button" data-action="show-title">タイトルへ戻る</button><p class="small muted">進行状況は、この端末のブラウザ内にだけ保存されます。<br>ブラウザの保存データを消すと、解放状況は初期化されます。</p><button class="reset-button" type="button" data-action="confirm-reset">進行状況をリセット</button></footer></section>`;
     }
     function renderHowTo() {
-      app.innerHTML = `<section class="screen" aria-labelledby="howto-heading"><header class="page-header"><div><p class="eyebrow">HOW TO OBSERVE</p><h1 id="howto-heading">遊び方</h1></div></header><div class="rules-grid"><article class="panel rules-card"><h2>真実の印</h2><p>鍵・羽・鈴・硝子の4印から、真実は1つ。5件の記録と属性表を照合します。</p></article><article class="panel rules-card"><h2>撹乱</h2><p>反転は「ある／ない」を逆にし、霞ませは結果を「判別不能」にします。第1・第5観測は無加工で、撹乱は連続しません。</p></article><article class="panel rules-card"><h2>推理メモ</h2><p>各印を有力・保留・除外にできます。メモは自分用で、最終宣言できる印を制限しません。</p></article><article class="panel rules-card"><h2>最終宣言</h2><p>5件がそろったら印を1つ宣言します。正解した局だけが観測済みとなり、次局が解放されます。</p></article></div><p class="small muted">進行状況は、この端末のブラウザ内にだけ保存されます。</p><button class="button" type="button" data-action="back-from-howto">戻る</button></section>`;
+      app.innerHTML = `<section class="screen" aria-labelledby="howto-heading"><header class="page-header"><div><p class="eyebrow">HOW TO OBSERVE</p><h1 id="howto-heading">遊び方</h1></div></header><div class="rules-grid"><article class="panel rules-card rules-card--primary"><h2>1. 記録と表を照らし合わせる</h2><p>真実の印は、鍵・羽・鈴・硝子のどれか1つです。届いた記録を4印の属性表と照らし合わせ、候補を絞ります。</p><div class="rules-example" aria-label="基本の推理例"><p><strong>記録</strong></p><blockquote>「封印に関わる痕跡が、鳥籠の内側にある。」</blockquote><p>これは「封印に関わる：あり」という意味です。</p><p><strong>属性表</strong><br>鍵：あり ／ 羽：なし ／ 鈴：なし ／ 硝子：あり</p><p><strong>この記録で残る候補：鍵・硝子</strong></p></div><p>次の記録も同じように照らし合わせ、複数の記録に共通して残る印を探します。</p></article><article class="panel rules-card"><h2>2. 推理メモ</h2><p>迷ったら、推理メモで候補を整理できます。「有力」「保留」「除外」は自分用のメモです。メモの状態にかかわらず、最後は4印すべてから選べます。</p></article><article class="panel rules-card"><h2>3. 撹乱</h2><p>局が進むと、届く記録が乱されることがあります。</p><ul class="rules-points"><li><strong>霞ませ：</strong>結果が「判別不能」になり、その観測からは候補を絞れません。</li><li><strong>反転：</strong>「ある」と「ない」が逆になります。どの記録が反転されたかは結果まで分かりません。</li><li>第1・第5観測は必ず無加工です。</li><li>撹乱は続けて使われません。</li><li>反転と霞ませは、それぞれ1局に1回までです。</li></ul></article><article class="panel rules-card"><h2>4. 最終宣言</h2><p>5つの記録がそろったら、記録帳と属性表を見直し、真実だと思う印を1つ宣言します。推理メモで「除外」にした印も宣言できます。</p></article></div><p class="small muted">進行状況は、この端末のブラウザ内にだけ保存されます。</p><button class="button" type="button" data-action="back-from-howto">戻る</button></section>`;
     }
     function renderScenarioIntro() {
       const scenario = currentScenario();
@@ -502,7 +508,7 @@
     function closeDialog() { dialogModal.hidden = true; state.dialogKind = null; lastFocusedBeforeModal?.focus?.(); }
     function showTutorial() {
       state.tutorialShownThisSession = true;
-      showDialog({ kind: 'tutorial', title: '観測の基本', body: '<p>届いた記録と4つの印の特徴を見比べ、真実の印を探します。</p><p>推理メモは自由に変更できます。</p><p>5つの記録がそろったら、最後に印を1つ宣言します。</p>', actions: [{ action: 'tutorial-start', label: '観測を始める', primary: true }], stack: true });
+      showDialog({ kind: 'tutorial', title: '観測の基本', body: '<p>届いた記録を、4印の属性表と照らし合わせます。</p><p>たとえば「封印に関わる痕跡がある」という記録なら、封印に関わる「鍵」「硝子」が候補です。</p><p>次の記録も重ねて、真実の印を1つに絞っていきましょう。</p>', actions: [{ action: 'tutorial-start', label: '観測を始める', primary: true }], stack: true });
     }
     function startScenario() { resetRuntimeForScenario(state.selectedScenarioId); closeDialog(); go('observation'); }
     function leaveTo(target) { closeDialog(); state.receivedRoundIndexes = []; state.selectedScenarioId = null; go(target); }
