@@ -8,6 +8,7 @@ const { defineSecret } = require('firebase-functions/params');
 const crypto = require('node:crypto');
 const { createInviteCode, parseInviteCode, mac, safeEqual, hashIp } = require('./invite-code');
 const { prepareCopyState, resolveRound } = require('./rules');
+const { createTransactionDiagnostic } = require('./transaction-diagnostic');
 
 if (!getApps().length) initializeApp();
 const db = getFirestore();
@@ -406,6 +407,10 @@ const startGame = onCall(callableOptions, async (request) => {
 });
 
 const submitCard = onCall(callableOptions, async (request) => {
+  const diagnostic = createTransactionDiagnostic('moonScaleDuelSubmitCard');
+  diagnostic.event('callable_start');
+  let transactionStarted = false;
+  try {
   const uid = uidOf(request);
   const requestId = requestIdOf(request);
   const roomId = roomIdOf(request);
@@ -419,15 +424,21 @@ const submitCard = onCall(callableOptions, async (request) => {
 
   const hash = payloadHash('submitCard', { roomId, gameId, round, stateVersion, cardId });
   const action = actionRef(uid, requestId);
+  diagnostic.event('run_transaction_start');
+  transactionStarted = true;
   const result = await db.runTransaction(async (tx) => {
+    diagnostic.nextAttempt();
+    diagnostic.event('callback_start');
     const room = roomRef(roomId);
     const game = room.collection('games').doc(gameId);
     const serverGame = room.collection('serverGames').doc(gameId);
     const member = room.collection('members').doc(uid);
     const privatePlayerRef = room.collection('privatePlayers').doc(uid);
+    diagnostic.event('reads_start');
     const [actionSnap, roomSnap, gameSnap, serverSnap, memberSnap, privateSnap] = await Promise.all([
       tx.get(action), tx.get(room), tx.get(game), tx.get(serverGame), tx.get(member), tx.get(privatePlayerRef),
     ]);
+    diagnostic.event('reads_complete');
     if (actionSnap.exists) return assertReplay(actionSnap.data(), hash);
     if (!roomSnap.exists || roomSnap.data().status !== 'playing' || roomSnap.data().gameId !== gameId || !hasValidExpiry(roomSnap.data())) {
       fail('failed-precondition', 'この決闘には提出できません。');
@@ -482,6 +493,7 @@ const submitCard = onCall(callableOptions, async (request) => {
       submitted: true, revealed: bothSubmitted,
     };
 
+    diagnostic.event('writes_start');
     tx.update(serverGame, {
       privateSelections: selections,
       usedCards,
@@ -527,9 +539,18 @@ const submitCard = onCall(callableOptions, async (request) => {
       uid, type: 'submitCard', payloadHash: hash, result: safeResult,
       createdAt: FieldValue.serverTimestamp(), expiresAt,
     });
+    diagnostic.event('callback_complete');
     return safeResult;
   });
+  diagnostic.event('run_transaction_success');
+  diagnostic.event('callable_success');
   return result;
+  } catch (error) {
+    const state = diagnostic.snapshot();
+    if (transactionStarted) diagnostic.event('run_transaction_error', { ...diagnostic.errorFields(error), last_stage: state.lastStage, callback_attempts: state.attempt });
+    diagnostic.event('callable_error', { ...diagnostic.errorFields(error), last_stage: state.lastStage, callback_attempts: state.attempt });
+    throw error;
+  }
 });
 
 const submitCopyTarget = onCall(callableOptions, async (request) => {
@@ -648,20 +669,30 @@ function verifyRoundWaitState({ roomData, gameData, serverData, memberData, priv
 }
 
 const readyNextRound = onCall(callableOptions, async (request) => {
+  const diagnostic = createTransactionDiagnostic('moonScaleDuelReadyNextRound');
+  diagnostic.event('callable_start');
+  let transactionStarted = false;
+  try {
   const uid = uidOf(request);
   const requestId = requestIdOf(request);
   const input = roundActionInput(request);
   const hash = payloadHash('readyNextRound', input);
   const action = actionRef(uid, requestId);
-  return db.runTransaction(async (tx) => {
+  diagnostic.event('run_transaction_start');
+  transactionStarted = true;
+  const result = await db.runTransaction(async (tx) => {
+    diagnostic.nextAttempt();
+    diagnostic.event('callback_start');
     const room = roomRef(input.roomId);
     const game = room.collection('games').doc(input.gameId);
     const serverGame = room.collection('serverGames').doc(input.gameId);
     const member = room.collection('members').doc(uid);
     const ownPrivate = room.collection('privatePlayers').doc(uid);
+    diagnostic.event('reads_start');
     const [actionSnap, roomSnap, gameSnap, serverSnap, memberSnap, privateSnap] = await Promise.all([
       tx.get(action), tx.get(room), tx.get(game), tx.get(serverGame), tx.get(member), tx.get(ownPrivate),
     ]);
+    diagnostic.event('reads_complete');
     if (actionSnap.exists) return assertReplay(actionSnap.data(), hash);
     const gameData = gameSnap.data();
     const serverData = serverSnap.data();
@@ -673,6 +704,7 @@ const readyNextRound = onCall(callableOptions, async (request) => {
     const expiresAt = expiresAtFromNow();
     const nextVersion = bothReady ? input.stateVersion + 1 : input.stateVersion;
     const safeResult = { roomId: input.roomId, gameId: input.gameId, round: bothReady ? input.round + 1 : input.round, phase: bothReady ? 'selecting-card' : 'round-result', stateVersion: nextVersion, ready: true, advanced: bothReady };
+    diagnostic.event('writes_start');
     if (bothReady) {
       const privateSelections = serverData.privateSelections || {};
       if (!SEAT_IDS.every((id) => privateSelections[id]?.uid)) fail('failed-precondition', '参加者状態を確認できません。');
@@ -701,8 +733,18 @@ const readyNextRound = onCall(callableOptions, async (request) => {
       tx.update(room, { lastValidActionAt: FieldValue.serverTimestamp(), expiresAt });
     }
     tx.set(action, { uid, type: 'readyNextRound', payloadHash: hash, result: safeResult, createdAt: FieldValue.serverTimestamp(), expiresAt });
+    diagnostic.event('callback_complete');
     return safeResult;
   });
+  diagnostic.event('run_transaction_success');
+  diagnostic.event('callable_success');
+  return result;
+  } catch (error) {
+    const state = diagnostic.snapshot();
+    if (transactionStarted) diagnostic.event('run_transaction_error', { ...diagnostic.errorFields(error), last_stage: state.lastStage, callback_attempts: state.attempt });
+    diagnostic.event('callable_error', { ...diagnostic.errorFields(error), last_stage: state.lastStage, callback_attempts: state.attempt });
+    throw error;
+  }
 });
 
 function waitControlCallable(type, handler) {

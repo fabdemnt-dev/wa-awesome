@@ -1,0 +1,85 @@
+name: Moon Scale Duel Transaction Lifecycle Diagnostic
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - diagnostic/moon-scale-duel-transaction-lifecycle
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout diagnostic branch
+        uses: actions/checkout@v5
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm ci --prefix functions
+      - name: Instrument Firestore SDK installed copy
+        run: node diagnostics/instrument-firestore-transaction.cjs
+      - name: Verify diagnostic versions
+        run: |
+          node --version
+          npx firebase --version
+          node -e "console.log(require('./functions/node_modules/@google-cloud/firestore/package.json').version)"
+          grep -q 'FIRESTORE_SDK_TRANSACTION_DIAGNOSTIC' functions/node_modules/@google-cloud/firestore/build/src/transaction.js
+      - name: Create emulator secrets
+        env:
+          LOCAL_MOON_INVITE_KEY: local-test-only-moon-invite-key
+          LOCAL_MOON_IP_KEY: local-test-only-moon-ip-key
+        run: |
+          umask 077
+          printf 'MOON_SCALE_DUEL_INVITE_HMAC_KEY=%s\nMOON_SCALE_DUEL_IP_HMAC_KEY=%s\n' "$LOCAL_MOON_INVITE_KEY" "$LOCAL_MOON_IP_KEY" > functions/.secret.local
+      - name: Run six-round transaction diagnostic
+        env:
+          MOON_SCALE_DUEL_TRANSACTION_DIAGNOSTIC: '1'
+        run: |
+          set +e
+          npx firebase --config firebase.moon-scale-duel-emulator.json emulators:exec \
+            --only auth,firestore,database,functions \
+            --project demo-moon-scale-duel \
+            "node --test --test-force-exit --test-name-pattern='six rounds complete with ordered public history and no seventh round' tests/moon-scale-duel-online-integration.test.mjs" \
+            2>&1 | tee transaction-lifecycle.log
+          test_status=${PIPESTATUS[0]}
+          set -e
+          printf '%s\n' "$test_status" > transaction-lifecycle-exit-code.txt
+      - name: Build sanitized diagnostic artifact
+        if: ${{ always() }}
+        run: |
+          mkdir -p transaction-lifecycle-artifact
+          grep -E 'MOON_SCALE_DUEL_TRANSACTION_DIAGNOSTIC|FIRESTORE_SDK_TRANSACTION_DIAGNOSTIC|Transaction lock timeout|Transaction is invalid or closed|INVALID_ARGUMENT|ABORTED|# tests |# pass |# fail |not ok|ok ' transaction-lifecycle.log \
+            | sed -E \
+              -e 's/(Bearer +)[^ ]+/\1[REDACTED]/gi' \
+              -e 's/(token|authorization)([=: ]+)[^ ,}]*/\1\2[REDACTED]/gi' \
+            > transaction-lifecycle-artifact/timeline.log || true
+          cp transaction-lifecycle-exit-code.txt transaction-lifecycle-artifact/
+          if [ -f firestore-debug.log ]; then
+            grep -Ei 'transaction|lock|retry|timeout|invalid|closed|error|warning' firestore-debug.log \
+              > transaction-lifecycle-artifact/firestore.log || true
+          fi
+      - name: Remove emulator secrets
+        if: ${{ always() }}
+        run: |
+          rm -f functions/.secret.local
+          test ! -e functions/.secret.local
+      - name: Upload transaction lifecycle diagnostic
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: moon-scale-duel-transaction-lifecycle-${{ github.run_id }}
+          path: transaction-lifecycle-artifact/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Preserve test result
+        if: ${{ always() }}
+        run: test "$(cat transaction-lifecycle-exit-code.txt)" = 0
