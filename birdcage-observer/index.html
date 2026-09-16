@@ -173,16 +173,24 @@
     .record-book-desktop { display: none; min-width: 0; }
 
     .record-book-content { display: grid; gap: 1rem; }
+    .record-section { min-width: 0; padding: .75rem; border: 1px solid rgba(70, 57, 39, .42); border-radius: 4px; background: rgba(255, 255, 255, .22); }
+    .record-section .section-title { margin: 0 0 .45rem; color: #352a1d; }
+    .record-purpose { margin: 0 0 .65rem; color: #514534; font-size: .84rem; line-height: 1.65; }
     .received-list { display: grid; gap: .6rem; }
-    .received-record { padding: .65rem; border-left: 3px solid var(--brass); color: var(--ink); background: rgba(255,255,255,.2); }
+    .received-record { padding: .65rem; border: 1px solid rgba(70, 57, 39, .25); border-left: 3px solid var(--brass); color: var(--ink); background: rgba(255,255,255,.34); }
     .received-record h4 { margin: 0 0 .25rem; }
     .received-record p { margin: .15rem 0; }
-    .attribute-table { width: 100%; border-collapse: collapse; color: var(--ink); font-size: clamp(.68rem, 2.9vw, .82rem); }
-    .attribute-table th, .attribute-table td { padding: .35rem .2rem; border: 1px solid rgba(62,52,39,.28); text-align: center; }
-    .attribute-table th:first-child { text-align: left; }
-    .rules-note { margin: 0; white-space: pre-line; }
+    .attribute-table { width: 100%; border-collapse: collapse; table-layout: fixed; color: #282119; font-size: clamp(.72rem, 2.9vw, .84rem); }
+    .attribute-table th, .attribute-table td { padding: .42rem .16rem; border: 1px solid rgba(55, 44, 30, .48); text-align: center; overflow-wrap: anywhere; }
+    .attribute-table thead th { color: #fff7e6; background: #4b4031; font-weight: 800; }
+    .attribute-table th:first-child { width: 19%; text-align: left; }
+    .attribute-table tbody th { color: #30271d; background: rgba(217, 198, 158, .55); }
+    .attribute-table tbody td { background: rgba(255, 252, 239, .55); font-weight: 700; }
+    .record-section--rules { border-left: 4px solid var(--brass); background: rgba(236, 224, 194, .62); }
+    .rules-note { margin: 0; color: #332a20; line-height: 1.75; white-space: pre-line; }
     .record-memo-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: .35rem; }
-    .record-memo-list span { padding: .3rem; border: 1px solid rgba(36,31,25,.24); }
+    .record-memo-list span { display: flex; min-width: 0; padding: .42rem .5rem; border: 1px solid rgba(55, 44, 30, .42); align-items: center; justify-content: space-between; gap: .35rem; color: #30271d; background: rgba(255, 252, 239, .5); }
+    .record-memo-state { padding: .08rem .28rem; border: 1px solid currentColor; border-radius: 2px; font-size: .72rem; white-space: nowrap; }
 
     .declaration-note { margin: .8rem 0 1rem; color: var(--muted); white-space: pre-line; }
     .result-hero { margin-bottom: 1rem; }
@@ -204,9 +212,12 @@
     .modal-backdrop { position: fixed; z-index: 20; inset: 0; display: grid; padding: max(12px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left)); place-items: center; background: rgba(7, 6, 5, .78); }
     .modal { width: min(100%, 620px); max-height: calc(100vh - 24px); overflow: auto; padding: 1rem; border: 1px solid var(--brass); border-radius: 6px; background: #211e19; box-shadow: 0 26px 70px rgba(0,0,0,.55); }
     .modal--record { width: min(100%, 760px); height: min(94vh, 820px); }
+    .modal--record.paper { color: var(--ink); background: linear-gradient(rgba(255,255,255,.12), rgba(255,255,255,.02)), var(--paper); }
     .modal__header { display: flex; position: sticky; z-index: 2; top: -1rem; margin: -1rem -1rem .8rem; padding: .8rem 1rem; align-items: center; justify-content: space-between; gap: 1rem; background: #211e19; border-bottom: 1px solid #645942; }
     .modal__header h2 { margin: 0; font-size: 1.25rem; }
     .close-button { min-width: 44px; min-height: 44px; border: 1px solid #6e6454; border-radius: 4px; background: #2c2821; cursor: pointer; }
+    .modal--record .modal__header { color: #fff7e6; background: #28231c; border-bottom-color: var(--brass); }
+    .modal--record .close-button { padding: .45rem .75rem; border-color: var(--brass-light); color: #fff7e6; background: #443a2d; font-weight: 800; }
     .dialog-actions { display: grid; margin-top: 1rem; grid-template-columns: 1fr 1fr; gap: .6rem; }
     .dialog-actions--stack { grid-template-columns: 1fr; }
     .live-region { position: fixed; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
@@ -228,7 +239,7 @@
       .memo-controls { gap: .25rem; }
       .memo-controls .button { font-size: .7rem; }
       .sigil-card { min-height: 98px; }
-      .attribute-table { font-size: .64rem; }
+      .attribute-table { font-size: .68rem; }
     }
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
@@ -415,12 +426,12 @@
       return `<div class="undo-bar" role="status"><span>${SIGILS[state.memoUndo.sigilId].name}を${MEMO_LABELS[state.memoUndo.next]}にしました。</span><button type="button" data-action="undo-memo">取り消す</button></div>`;
     }
     function attributeTableMarkup() {
-      return `<table class="attribute-table"><caption class="section-title">4印の属性表</caption><thead><tr><th scope="col">印</th><th scope="col">封印に<br>関わる</th><th scope="col">音を<br>残す</th><th scope="col">欠けて<br>いる</th></tr></thead><tbody>${SIGIL_IDS.map((id) => `<tr><th scope="row">${SIGILS[id].name}</th>${['seal','sound','chipped'].map((key) => `<td>${SIGILS[id].attributes[key] ? 'あり' : 'なし'}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+      return `<table class="attribute-table" aria-label="4印の属性表"><thead><tr><th scope="col">印</th><th scope="col">封印に<br>関わる</th><th scope="col">音を<br>残す</th><th scope="col">欠けて<br>いる</th></tr></thead><tbody>${SIGIL_IDS.map((id) => `<tr><th scope="row">${SIGILS[id].name}</th>${['seal','sound','chipped'].map((key) => `<td>${SIGILS[id].attributes[key] ? 'あり' : 'なし'}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
     }
     function recordBookMarkup() {
       const scenario = currentScenario();
       const received = scenario ? state.receivedRoundIndexes.map((index) => scenario.rounds[index]) : [];
-      return `<div class="record-book-content"><section><h3 class="section-title">届いた記録</h3><div class="received-list">${received.length ? received.map((item) => `<article class="received-record"><h4>第${item.number}観測</h4><p><strong>観測内容：</strong>${item.observation.label}</p><p><strong>結果：</strong>${RESULT_LABELS[item.displayedResult]}</p><p>${item.recordText}</p></article>`).join('') : '<p>まだ記録は届いていません。</p>'}</div></section>${attributeTableMarkup()}<section><h3 class="section-title">撹乱の規則</h3><p class="rules-note">反転：ある／ないを逆にする。1局に1回まで。\n霞ませ：結果を判別不能にする。1局に1回まで。\n撹乱は続けて使えない。\n第1と第5の記録は、必ず無加工。${scenario?.id === 1 ? '\nこの局では、撹乱は起きない。' : ''}</p></section><section><h3 class="section-title">現在の推理メモ</h3><div class="record-memo-list">${SIGIL_IDS.map((id) => `<span><strong>${SIGILS[id].name}</strong>：${MEMO_LABELS[state.memoBySigil[id]]}</span>`).join('')}</div></section></div>`;
+      return `<div class="record-book-content"><section class="record-section record-section--received"><h3 class="section-title">これまで届いた記録</h3><div class="received-list">${received.length ? received.map((item) => `<article class="received-record"><h4>第${item.number}観測</h4><p><strong>観測内容：</strong>${item.observation.label}</p><p><strong>結果：</strong>${RESULT_LABELS[item.displayedResult]}</p><p>${item.recordText}</p></article>`).join('') : '<p>まだ記録は届いていません。</p>'}</div></section><section class="record-section record-section--attributes"><h3 class="section-title">4印の属性表</h3><p class="record-purpose">届いた記録と照らし合わせて、真実の印を絞り込みます。</p>${attributeTableMarkup()}</section><section class="record-section record-section--rules"><h3 class="section-title">撹乱の規則</h3><p class="rules-note">反転：ある／ないを逆にする。1局に1回まで。\n霞ませ：結果を判別不能にする。1局に1回まで。\n撹乱は続けて使えない。\n第1と第5の記録は、必ず無加工。${scenario?.id === 1 ? '\nこの局では、撹乱は起きない。' : ''}</p></section><section class="record-section record-section--memo"><h3 class="section-title">現在の推理メモ</h3><div class="record-memo-list">${SIGIL_IDS.map((id) => `<span><strong>${SIGILS[id].name}</strong><b class="record-memo-state">${MEMO_LABELS[state.memoBySigil[id]]}</b></span>`).join('')}</div></section></div>`;
     }
     function renderTitle() {
       app.innerHTML = `<section class="screen title-screen" aria-labelledby="title-heading"><div class="title-frame"><div class="title-content"><div class="title-mark" aria-hidden="true"></div><p class="eyebrow">ORIGINAL LOGIC GAME</p><h1 id="title-heading">鳥籠の観測者</h1><p class="english-title">Birdcage Observer</p><p class="title-lead">籠は閉ざされている。\n記録は届く。\nだが、そのすべてが真実とは限らない。</p><p class="small muted">観測済み：${state.completedScenarioIds.length} / 4</p><div class="actions"><button class="button button--primary" type="button" data-action="show-scenarios">観測を始める</button><button class="button" type="button" data-action="show-howto">遊び方</button><a class="text-link" href="../toybox/">🎪 おもちゃ箱へ戻る</a></div></div></div></section>`;
