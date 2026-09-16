@@ -27,6 +27,17 @@ jobs:
           npm ci --prefix functions
       - name: Instrument Firestore SDK installed copy
         run: node diagnostics/instrument-firestore-transaction.cjs
+      - name: Prepare Firestore Emulator 1.20.3
+        run: |
+          emulator_dir="$RUNNER_TEMP/firestore-emulator-1.20.3"
+          emulator_jar="$emulator_dir/cloud-firestore-emulator-v1.20.3.jar"
+          mkdir -p "$emulator_dir"
+          curl --fail --location --silent --show-error \
+            'https://storage.googleapis.com/firebase-preview-drop/emulator/cloud-firestore-emulator-v1.20.3.jar' \
+            --output "$emulator_jar"
+          sha256sum "$emulator_jar" | tee firestore-emulator-sha256.txt
+          java -jar "$emulator_jar" --version | tee firestore-emulator-version.txt
+          printf 'FIRESTORE_EMULATOR_BINARY_PATH=%s\n' "$emulator_jar" >> "$GITHUB_ENV"
       - name: Verify diagnostic versions
         run: |
           node --version
@@ -45,14 +56,17 @@ jobs:
           MOON_SCALE_DUEL_TRANSACTION_DIAGNOSTIC: '1'
         run: |
           set +e
+          test_started_ms=$(date +%s%3N)
           npx firebase --config firebase.moon-scale-duel-emulator.json emulators:exec \
             --only auth,firestore,database,functions \
             --project demo-moon-scale-duel \
             "node --test --test-force-exit --test-name-pattern='six rounds complete with ordered public history and no seventh round' tests/moon-scale-duel-online-integration.test.mjs" \
             2>&1 | tee transaction-lifecycle.log
           test_status=${PIPESTATUS[0]}
+          test_finished_ms=$(date +%s%3N)
           set -e
           printf '%s\n' "$test_status" > transaction-lifecycle-exit-code.txt
+          printf '%s\n' "$((test_finished_ms - test_started_ms))" > transaction-lifecycle-duration-ms.txt
       - name: Build sanitized diagnostic artifact
         if: ${{ always() }}
         run: |
@@ -63,6 +77,8 @@ jobs:
               -e 's/(token|authorization)([=: ]+)[^ ,}]*/\1\2[REDACTED]/gi' \
             > transaction-lifecycle-artifact/timeline.log || true
           cp transaction-lifecycle-exit-code.txt transaction-lifecycle-artifact/
+          cp transaction-lifecycle-duration-ms.txt transaction-lifecycle-artifact/
+          cp firestore-emulator-version.txt firestore-emulator-sha256.txt transaction-lifecycle-artifact/
           if [ -f firestore-debug.log ]; then
             grep -Ei 'transaction|lock|retry|timeout|invalid|closed|error|warning' firestore-debug.log \
               > transaction-lifecycle-artifact/firestore.log || true
