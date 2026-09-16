@@ -21,6 +21,11 @@ jobs:
         with:
           node-version: 24
           cache: npm
+      - name: Set up Java 21 for Firestore Emulator 1.20.3
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
       - name: Install dependencies
         run: |
           npm ci
@@ -88,7 +93,7 @@ jobs:
               -e 's/(Bearer +)[^ ]+/\1[REDACTED]/gi' \
               -e 's/(token|authorization)([=: ]+)[^ ,}]*/\1\2[REDACTED]/gi' \
             > transaction-lifecycle-artifact/timeline.log || true
-          cp transaction-lifecycle-exit-code.txt transaction-lifecycle-artifact/
+          cp transaaction-lifecycle-exit-code.txt transaction-lifecycle-artifact/
           cp transaction-lifecycle-duration-ms.txt transaction-lifecycle-artifact/
           cp firestore-emulator-version.txt firestore-emulator-sha256.txt transaction-lifecycle-artifact/
           if [ -f firestore-debug.log ]; then
