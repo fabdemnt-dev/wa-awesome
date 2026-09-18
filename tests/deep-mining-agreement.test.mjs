@@ -30,6 +30,7 @@ const css = await readFile(new URL("../deep-mining-agreement/style.css", import.
 const app = await readFile(new URL("../deep-mining-agreement/app.js", import.meta.url), "utf8");
 const engineSource = await readFile(new URL("../deep-mining-agreement/engine.js", import.meta.url), "utf8");
 const toybox = await readFile(new URL("../toybox/index.html", import.meta.url), "utf8");
+const cover = await readFile(new URL("../deep-mining-agreement/assets/cover.png", import.meta.url));
 const portraits = Object.fromEntries(await Promise.all(["minato", "gaku", "shion"].map(async (name) => [
   name,
   await readFile(new URL(`../deep-mining-agreement/assets/characters/${name}.png`, import.meta.url)),
@@ -413,6 +414,16 @@ test("独立ページは外部依存・保存・オンライン導線を持た�
   assert.match(app + engineSource, /シオン/);
 });
 
+test("タイトル画面は正式な横長表紙を単一画像で表示する", () => {
+  assert.ok(cover.length > 0, "cover.png is empty");
+  assert.deepEqual([...cover.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10], "cover.png is not PNG");
+  assert.match(app, /<div class="mine-mark" aria-hidden="true"><img class="mine-cover" src="assets\/cover\.png" alt="" width="1586" height="992"><\/div>/);
+  assert.doesNotMatch(app, /<div class="mine-mark"[^>]*>\s*⛏\s*<\/div>/);
+  assert.match(css, /\.mine-mark\s*\{[^}]*width:\s*min\(320px,\s*100%\)[^}]*aspect-ratio:\s*320\s*\/\s*200[^}]*overflow:\s*hidden/s);
+  assert.match(css, /\.mine-cover\s*\{[^}]*width:\s*100%[^}]*height:\s*100%[^}]*object-fit:\s*cover[^}]*object-position:\s*50%\s+50%/s);
+  assert.doesNotMatch(css, /\.mine-cover\s*\{[^}]*object-fit:\s*contain/s);
+});
+
 test("スマホ幅向けの最小幅固定がなく、タップ領域と横あふれ対策を持つ", () => {
   assert.match(html, /width=device-width/);
   assert.match(css, /\*\s*\{\s*box-sizing:\s*border-box/);
@@ -470,7 +481,11 @@ test("NPC3席だけに正しい透過PNGポートレートを表示する", asyn
   try {
     await import(`../deep-mining-agreement/app.js?portrait-test=${Date.now()}`);
     const document = dom.window.document;
+    const titleCover = document.querySelector(".mine-mark > .mine-cover");
+    assert.ok(titleCover, "title cover missing");
+    assert.equal(titleCover.getAttribute("src"), "assets/cover.png");
     document.querySelector('[data-action="new-game"]').click();
+    assert.ok(document.querySelector("#game-heading"), "game did not start from the covered title screen");
     const expected = {
       safety: ["ミナト", "assets/characters/minato.png"],
       greedy: ["ガク", "assets/characters/gaku.png"],
