@@ -74,7 +74,7 @@ test("おもちゃ箱から1人用の深層採掘協定へ移動して戻れる"
 
 test("全5ゲームの現在対応人数を文字入りピルで表示する", () => {
   const cards = [
-    ["影札の交渉", "1〜2人用", "player-count--1-2"],
+    ["影札の交渉", "1〜4人用", "player-count--1-4"],
     ["月秤の決闘", "1〜2人用", "player-count--1-2"],
     ["双影の宝匣", "1人用", "player-count--1"],
     ["鳥籠の観測者", "1人用", "player-count--1"],
@@ -87,8 +87,12 @@ test("全5ゲームの現在対応人数を文字入りピルで表示する", (
   }
 
   assert.equal((toybox.match(/class="player-count /g) || []).length, 5);
-  assert.equal((toybox.match(/player-count--1-2">1〜2人用/g) || []).length, 2);
+  assert.equal((toybox.match(/player-count--1-4">1〜4人用/g) || []).length, 1);
+  assert.equal((toybox.match(/player-count--1-2">1〜2人用/g) || []).length, 1);
   assert.equal((toybox.match(/player-count--1">1人用/g) || []).length, 3);
+  assert.match(toybox, /\.player-count--1\s*\{[^}]*background:\s*#ecfdf5[^}]*color:\s*#166534/s);
+  assert.match(toybox, /\.player-count--1-2\s*\{[^}]*background:\s*#f5f3ff[^}]*color:\s*#5b21b6/s);
+  assert.match(toybox, /\.player-count--1-4\s*\{[^}]*background:\s*#fff7ed[^}]*color:\s*#9a3412/s);
   assert.doesNotMatch(toybox, /👤|👥/);
   assert.match(toybox, /\.game-heading\s*\{[^}]*display:\s*flex[^}]*flex-wrap:\s*wrap/s);
   assert.match(toybox, /\.player-count\s*\{[^}]*border-radius:\s*999px[^}]*white-space:\s*nowrap/s);
