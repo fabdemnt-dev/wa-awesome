@@ -15,6 +15,16 @@ const moonScaleRules = await readFile(new URL("../functions/moon-scale-duel-onli
 const twinShadowCaskets = await readFile(new URL("../twin-shadow-caskets/index.html", import.meta.url), "utf8");
 const birdcageObserver = await readFile(new URL("../birdcage-observer/index.html", import.meta.url), "utf8");
 const deepMiningAgreement = await readFile(new URL("../deep-mining-agreement/index.html", import.meta.url), "utf8");
+const deepMiningApp = await readFile(new URL("../deep-mining-agreement/app.js", import.meta.url), "utf8");
+const deepMiningCss = await readFile(new URL("../deep-mining-agreement/style.css", import.meta.url), "utf8");
+
+function sourceBetween(source, start, end) {
+  const startIndex = source.indexOf(start);
+  const endIndex = source.indexOf(end, startIndex);
+  assert.ok(startIndex >= 0, `missing start marker: ${start}`);
+  assert.ok(endIndex > startIndex, `missing end marker: ${end}`);
+  return source.slice(startIndex, endIndex);
+}
 
 test("トップページからおもちゃ箱へ移動できる", () => {
   assert.match(home, /href="toybox\/"[^>]*class="card-panel"/);
@@ -43,7 +53,8 @@ test("おもちゃ箱から双影の宝匣へ移動して戻れる", () => {
   assert.match(toybox, /href="\.\.\/twin-shadow-caskets\/"[^>]*class="card-panel"/);
   assert.match(toybox, /🗝️ 双影の宝匣/);
   assert.doesNotMatch(toybox, /Twin Shadow Caskets/);
-  assert.match(twinShadowCaskets, /Twin Shadow Caskets/);
+  assert.doesNotMatch(twinShadowCaskets, /<p class="eyebrow">Twin Shadow Caskets<\/p>/);
+  assert.match(twinShadowCaskets, /ORIGINAL DEDUCTION GAME/);
   assert.match(twinShadowCaskets, /href="\.\.\/toybox\/"/);
   assert.match(twinShadowCaskets, /🎪 おもちゃ箱へ戻る/);
   assert.match(toybox, /href="\.\.\/shadow-card\.html"[^>]*class="card-panel"/);
@@ -53,7 +64,8 @@ test("おもちゃ箱から双影の宝匣へ移動して戻れる", () => {
 test("おもちゃ箱から鳥籠の観測者へ移動して戻れる", () => {
   assert.match(toybox, /href="\.\.\/birdcage-observer\/"[^>]*class="card-panel"/);
   assert.match(toybox, /鳥籠の観測者/);
-  assert.match(birdcageObserver, /Birdcage Observer/);
+  assert.doesNotMatch(birdcageObserver, /<p class="english-title">Birdcage Observer<\/p>/);
+  assert.match(birdcageObserver, /ORIGINAL LOGIC GAME/);
   assert.match(birdcageObserver, /href="\.\.\/toybox\/"/);
   assert.match(birdcageObserver, /🎪 おもちゃ箱へ戻る/);
   assert.match(toybox, /href="\.\.\/shadow-card\.html"[^>]*class="card-panel"/);
@@ -136,6 +148,62 @@ test("月秤の決闘の入口をオリジナルカードゲームのタイト�
   assert.match(moonScaleSelect, /\.mode-link\s*\{[^}]*min-height:\s*50px/s);
   assert.match(moonScaleSelect, /\.mode-link--primary\s*\{[^}]*background:\s*linear-gradient/s);
   assert.match(moonScaleSelect, /id="show-rules-button" class="mode-link mode-link--secondary"/);
+});
+
+test("5ゲームの開始画面はゲーム種別ラベルと左上のおもちゃ箱ナビを統一する", () => {
+  const starts = [
+    {
+      name: "影札の交渉",
+      source: sourceBetween(shadowCard, "<body>", '<section id="partner-screen"'),
+      label: "ORIGINAL CARD GAME",
+      href: "toybox/",
+    },
+    {
+      name: "月秤の決闘",
+      source: sourceBetween(moonScaleSelect, "<body>", '<section id="rules-screen"'),
+      label: "ORIGINAL CARD GAME",
+      href: "toybox/",
+    },
+    {
+      name: "双影の宝匣",
+      source: sourceBetween(twinShadowCaskets, "<body>", '<section id="game-screen"'),
+      label: "ORIGINAL DEDUCTION GAME",
+      href: "../toybox/",
+    },
+    {
+      name: "鳥籠の観測者",
+      source: sourceBetween(birdcageObserver, "function renderTitle()", "function renderScenarioSelect()"),
+      label: "ORIGINAL LOGIC GAME",
+      href: "../toybox/",
+    },
+    {
+      name: "深層採掘協定",
+      source: sourceBetween(deepMiningApp, "function renderTitle()", "function renderRules("),
+      label: "ORIGINAL STRATEGY GAME",
+      href: "../toybox/",
+    },
+  ];
+
+  for (const { name, source, label, href } of starts) {
+    assert.match(source, new RegExp(label), `${name} label`);
+    assert.match(source, new RegExp(`href="${href.replaceAll("/", "\\/")}"[^>]*>← 🎪 おもちゃ箱へ戻る<\\/a>`), `${name} navigation`);
+    assert.equal((source.match(/おもちゃ箱へ戻る/g) || []).length, 1, `${name} title navigation count`);
+  }
+
+  assert.doesNotMatch(starts[2].source, /Twin Shadow Caskets/i);
+  assert.doesNotMatch(starts[3].source, /<p class="english-title">|BIRDCAGE OBSERVER/);
+  assert.doesNotMatch(starts[4].source, /LOCAL CPU PROTOTYPE/);
+
+  assert.match(shadowCard, /<a class="button button--text" href="toybox\/">🎪 おもちゃ箱へ戻る<\/a>/);
+  assert.match(moonScaleCpu, /<a href="\.\.\/toybox\/">🎪 おもちゃ箱へ戻る<\/a>/);
+  assert.match(twinShadowCaskets, /<section id="final-screen"[\s\S]*?<a class="button" href="\.\.\/toybox\/">🎪 おもちゃ箱へ戻る<\/a>/);
+  assert.match(deepMiningApp, /function renderResult\([\s\S]*?<a class="text-link" href="\.\.\/toybox\/">🎪 おもちゃ箱へ戻る<\/a>/);
+
+  assert.match(shadowCardCss, /\.toybox-return-link\s*\{[^}]*min-height:\s*44px[^}]*font-size:\s*0\.82rem[^}]*font-weight:\s*700/s);
+  assert.match(moonScaleSelect, /\.top-link\s*\{[^}]*min-height:\s*44px[^}]*font-size:\s*\.82rem[^}]*font-weight:\s*700/s);
+  assert.match(twinShadowCaskets, /\.back-link\s*\{[^}]*min-height:\s*44px[^}]*font-size:\s*\.82rem[^}]*font-weight:\s*700/s);
+  assert.match(birdcageObserver, /\.title-return-link\s*\{[^}]*min-height:\s*44px[^}]*font-size:\s*\.82rem[^}]*font-weight:\s*700/s);
+  assert.match(deepMiningCss, /\.title-return-link\s*\{[^}]*min-height:\s*44px[^}]*font-size:\s*\.82rem[^}]*font-weight:\s*700/s);
 });
 
 test("月秤の決闘の入口から遊び方を開いてタイトルへ戻れる", () => {

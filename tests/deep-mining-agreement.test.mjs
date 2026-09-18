@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { JSDOM } from "jsdom";
@@ -417,11 +418,38 @@ test("独立ページは外部依存・保存・オンライン導線を持た�
 test("タイトル画面は正式な横長表紙を単一画像で表示する", () => {
   assert.ok(cover.length > 0, "cover.png is empty");
   assert.deepEqual([...cover.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10], "cover.png is not PNG");
+  assert.equal(createHash("sha256").update(cover).digest("hex"), "f571da4db278ebaf2ad9c71620bcb798aaf124b03aea94610b4378975447c617");
   assert.match(app, /<div class="mine-mark" aria-hidden="true"><img class="mine-cover" src="assets\/cover\.png" alt="" width="1586" height="992"><\/div>/);
   assert.doesNotMatch(app, /<div class="mine-mark"[^>]*>\s*⛏\s*<\/div>/);
   assert.match(css, /\.mine-mark\s*\{[^}]*width:\s*min\(320px,\s*100%\)[^}]*aspect-ratio:\s*320\s*\/\s*200[^}]*overflow:\s*hidden/s);
   assert.match(css, /\.mine-cover\s*\{[^}]*width:\s*100%[^}]*height:\s*100%[^}]*object-fit:\s*cover[^}]*object-position:\s*50%\s+50%/s);
   assert.doesNotMatch(css, /\.mine-cover\s*\{[^}]*object-fit:\s*contain/s);
+});
+
+test("タイトル画面は戦略ゲーム表記と左上のおもちゃ箱ナビを1つだけ持つ", async () => {
+  const dom = new JSDOM(html, { url: "https://example.test/deep-mining-agreement/", pretendToBeVisual: true });
+  dom.window.scrollTo = () => {};
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
+  try {
+    await import(`../deep-mining-agreement/app.js?title-navigation=${Date.now()}`);
+    const document = dom.window.document;
+    assert.equal(document.querySelector(".eyebrow").textContent, "ORIGINAL STRATEGY GAME");
+    assert.equal(document.body.textContent.includes("LOCAL CPU PROTOTYPE"), false);
+    const links = [...document.querySelectorAll('a[href="../toybox/"]')];
+    assert.equal(links.length, 1);
+    assert.equal(links[0].textContent, "← 🎪 おもちゃ箱へ戻る");
+    assert.ok(links[0].closest("nav.title-navigation"));
+    assert.equal(links[0].closest(".title-panel"), null);
+    document.querySelector('[data-action="new-game"]').click();
+    assert.equal(document.querySelector(".title-navigation"), null, "ゲーム開始後へタイトルナビを持ち込まない");
+  } finally {
+    globalThis.window = previousWindow;
+    globalThis.document = previousDocument;
+    dom.window.close();
+  }
 });
 
 test("スマホ幅向けの最小幅固定がなく、タップ領域と横あふれ対策を持つ", () => {

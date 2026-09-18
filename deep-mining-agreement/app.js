@@ -47,16 +47,15 @@ function focusApp() {
 }
 
 function renderTitle() {
-  app.innerHTML = `<section class="screen title-screen" aria-labelledby="title-heading">
+  app.innerHTML = `<nav class="title-navigation" aria-label="ゲーム外への移動"><a class="title-return-link" href="../toybox/">← 🎪 おもちゃ箱へ戻る</a></nav><section class="screen title-screen" aria-labelledby="title-heading">
     <div class="title-panel">
       <div class="mine-mark" aria-hidden="true"><img class="mine-cover" src="assets/cover.png" alt="" width="1586" height="992"></div>
-      <p class="eyebrow">LOCAL CPU PROTOTYPE</p>
+      <p class="eyebrow">ORIGINAL STRATEGY GAME</p>
       <h1 id="title-heading">深層採掘協定</h1>
       <p class="subtitle">掘るほど稼げる。だが、深層は全員まとめて崩れる。</p>
       <div class="button-stack">
         <button class="button button--primary" type="button" data-action="new-game">ひとりで試す</button>
         <button class="button" type="button" data-action="show-rules" data-return="title">遊び方</button>
-        <a class="text-link" href="../toybox/">🎪 おもちゃ箱へ戻る</a>
       </div>
     </div>
   </section>`;

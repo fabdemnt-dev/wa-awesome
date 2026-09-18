@@ -71,6 +71,21 @@ function legalCandidate(api, scenario, truthSigilId) {
   return true;
 }
 
+test("タイトル画面は論理ゲーム表記と左上のおもちゃ箱ナビを1つだけ持つ", () => {
+  const dom = loadGame();
+  const { document } = dom.window;
+  assert.equal(document.querySelector(".eyebrow").textContent, "ORIGINAL LOGIC GAME");
+  assert.equal(document.querySelector(".english-title"), null);
+  const links = [...document.querySelectorAll('a[href="../toybox/"]')];
+  assert.equal(links.length, 1);
+  assert.equal(links[0].textContent, "← 🎪 おもちゃ箱へ戻る");
+  assert.ok(links[0].closest("nav.title-navigation"));
+  assert.equal(links[0].closest(".title-frame"), null);
+  clickText(document, "観測を始める");
+  assert.equal(document.querySelector(".title-navigation"), null, "開始画面後へタイトルナビを持ち込まない");
+  dom.window.close();
+});
+
 test("固定4局のデータ、観測結果、撹乱位置が確定仕様と一致する", () => {
   const dom = loadGame();
   const { SCENARIOS, SIGILS, actualResultFor, displayedResultFor, recordTextFor } = dom.window.__birdcageObserver;
