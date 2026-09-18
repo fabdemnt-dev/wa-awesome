@@ -29,8 +29,14 @@ button, select { font: inherit; }
 button { touch-action: manipulation; }
 
 #app { width: min(100%, 760px); min-height: 100svh; margin: 0 auto; padding: 18px 14px 36px; outline: none; }
+.title-navigation { width: 100%; }
+.title-return-link {
+  display: inline-flex; min-height: 44px; padding: .45rem 0; align-items: center;
+  color: var(--copper-light); font-size: .82rem; font-weight: 700;
+  text-decoration-color: var(--copper); text-underline-offset: .25em;
+}
 .screen { display: grid; gap: 14px; min-width: 0; }
-.title-screen { min-height: calc(100svh - 54px); align-content: center; }
+.title-screen { min-height: calc(100svh - 98px); align-content: center; }
 .title-panel, .panel {
   min-width: 0;
   border: 1px solid rgba(195, 140, 84, .36);
