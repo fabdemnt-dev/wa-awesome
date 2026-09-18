@@ -49,7 +49,7 @@ function focusApp() {
 function renderTitle() {
   app.innerHTML = `<section class="screen title-screen" aria-labelledby="title-heading">
     <div class="title-panel">
-      <div class="mine-mark" aria-hidden="true">⛏</div>
+      <div class="mine-mark" aria-hidden="true"><img class="mine-cover" src="assets/cover.png" alt="" width="1586" height="992"></div>
       <p class="eyebrow">LOCAL CPU PROTOTYPE</p>
       <h1 id="title-heading">深層採掘協定</h1>
       <p class="subtitle">掘るほど稼げる。だが、深層は全員まとめて崩れる。</p>

@@ -40,10 +40,14 @@ button { touch-action: manipulation; }
 }
 .title-panel { padding: 28px 20px; text-align: center; }
 .mine-mark {
-  width: 92px; height: 72px; margin: 0 auto 18px; border: 1px solid var(--copper);
-  border-radius: 46px 46px 8px 8px; display: grid; place-items: center;
-  background: repeating-linear-gradient(120deg, transparent 0 15px, rgba(195,140,84,.12) 16px 18px);
-  color: var(--copper-light); font-size: 38px;
+  width: min(320px, 100%); aspect-ratio: 320 / 200; margin: 0 auto 18px;
+  overflow: hidden; border: 1px solid var(--copper);
+  border-radius: 50% 50% 8.7% 8.7% / 63.9% 63.9% 11.1% 11.1%;
+  background: #101923;
+}
+.mine-cover {
+  display: block; width: 100%; height: 100%;
+  object-fit: cover; object-position: 50% 50%;
 }
 .eyebrow { margin: 0 0 5px; color: var(--copper-light); font-size: 11px; font-weight: 700; letter-spacing: .2em; }
 h1, h2, h3, p { overflow-wrap: anywhere; }
