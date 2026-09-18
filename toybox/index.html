@@ -32,11 +32,41 @@
       border-color: #2563eb;
       transform: scale(0.98);
     }
+    .game-heading {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: center;
+      gap: 6px 10px;
+      margin-bottom: 8px;
+    }
     .game-title {
       font-size: 20px;
       font-weight: bold;
       color: #2563eb;
-      margin-bottom: 8px;
+      min-width: 0;
+    }
+    .player-count {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 3px 10px;
+      border: 1px solid transparent;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      line-height: 1.4;
+      white-space: nowrap;
+    }
+    .player-count--1 {
+      border-color: #bbf7d0;
+      background: #ecfdf5;
+      color: #166534;
+    }
+    .player-count--1-2 {
+      border-color: #ddd6fe;
+      background: #f5f3ff;
+      color: #5b21b6;
     }
     .game-desc {
       font-size: 13px;
@@ -56,28 +86,28 @@
   <p class="lead">あそぶゲームをえらんでね！</p>
 
   <a href="../shadow-card.html" class="card-panel">
-    <div class="game-title">🃏 影札の交渉</div>
+    <div class="game-heading"><div class="game-title">🃏 影札の交渉</div><span class="player-count player-count--1-2">1〜2人用</span></div>
     <p class="game-desc">相棒とカードを選び、五度の交渉を勝ち抜こう！</p>
   </a>
 
   <a href="../moon-scale-duel-select.html" class="card-panel">
-    <div class="game-title">⚖️ 月秤の決闘</div>
+    <div class="game-heading"><div class="game-title">⚖️ 月秤の決闘</div><span class="player-count player-count--1-2">1〜2人用</span></div>
     <p class="game-desc">月影を賭ける、1対1の伏せ札決闘。残る札と相手の思惑を読み、月秤をこちらへ傾けよう。</p>
   </a>
 
   <a href="../twin-shadow-caskets/" class="card-panel">
-    <div class="game-title">🗝️ 双影の宝匣</div>
+    <div class="game-heading"><div class="game-title">🗝️ 双影の宝匣</div><span class="player-count player-count--1">1人用</span></div>
     <p class="game-desc">二つの封印箱に星片と罠を隠し、相手の選択を読む1対1の心理戦。</p>
   </a>
 
   <a href="../birdcage-observer/" class="card-panel">
-    <div class="game-title">📜 鳥籠の観測者</div>
+    <div class="game-heading"><div class="game-title">📜 鳥籠の観測者</div><span class="player-count player-count--1">1人用</span></div>
     <p class="game-desc">五つの観測記録を照合し、撹乱を見抜いて真実の印を宣言する推理ゲーム。</p>
   </a>
 
   <a href="../deep-mining-agreement/" class="card-panel">
-    <div class="game-title">⛏️ 深層採掘協定</div>
-    <p class="game-desc">1人｜4人で深層を採掘。崩落と駆け引きをくぐり抜け、最も高い価値を持ち帰ろう。</p>
+    <div class="game-heading"><div class="game-title">⛏️ 深層採掘協定</div><span class="player-count player-count--1">1人用</span></div>
+    <p class="game-desc">崩落と駆け引きをくぐり抜け、最も高い価値を持ち帰ろう。</p>
   </a>
 
   <a href="../" class="back-link">トップページへ戻る</a>
