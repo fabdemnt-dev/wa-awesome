@@ -64,12 +64,41 @@ test("おもちゃ箱から鳥籠の観測者へ移動して戻れる", () => {
 test("おもちゃ箱から1人用の深層採掘協定へ移動して戻れる", () => {
   assert.match(toybox, /href="\.\.\/deep-mining-agreement\/"[^>]*class="card-panel"/);
   assert.match(toybox, /⛏️ 深層採掘協定/);
-  assert.match(toybox, /<p class="game-desc">1人｜4人で深層を採掘。崩落と駆け引きをくぐり抜け、最も高い価値を持ち帰ろう。<\/p>/);
+  assert.match(toybox, /<p class="game-desc">崩落と駆け引きをくぐり抜け、最も高い価値を持ち帰ろう。<\/p>/);
   assert.match(deepMiningAgreement, /<title>深層採掘協定｜初版プロトタイプ<\/title>/);
   assert.match(toybox, /href="\.\.\/shadow-card\.html"[^>]*class="card-panel"/);
   assert.match(toybox, /href="\.\.\/moon-scale-duel-select\.html"[^>]*class="card-panel"/);
   assert.match(toybox, /href="\.\.\/twin-shadow-caskets\/"[^>]*class="card-panel"/);
   assert.match(toybox, /href="\.\.\/birdcage-observer\/"[^>]*class="card-panel"/);
+});
+
+test("全5ゲームの現在対応人数を文字入りピルで表示する", () => {
+  const cards = [
+    ["影札の交渉", "1〜4人用", "player-count--1-4"],
+    ["月秤の決闘", "1〜2人用", "player-count--1-2"],
+    ["双影の宝匣", "1人用", "player-count--1"],
+    ["鳥籠の観測者", "1人用", "player-count--1"],
+    ["深層採掘協定", "1人用", "player-count--1"],
+  ];
+
+  for (const [title, count, colorClass] of cards) {
+    const pattern = new RegExp(`<div class="game-heading"><div class="game-title">[^<]*${title}</div><span class="player-count ${colorClass}">${count}</span></div>`);
+    assert.match(toybox, pattern);
+  }
+
+  assert.equal((toybox.match(/class="player-count /g) || []).length, 5);
+  assert.equal((toybox.match(/player-count--1-4">1〜4人用/g) || []).length, 1);
+  assert.equal((toybox.match(/player-count--1-2">1〜2人用/g) || []).length, 1);
+  assert.equal((toybox.match(/player-count--1">1人用/g) || []).length, 3);
+  assert.match(toybox, /\.player-count--1\s*\{[^}]*background:\s*#ecfdf5[^}]*color:\s*#166534/s);
+  assert.match(toybox, /\.player-count--1-2\s*\{[^}]*background:\s*#f5f3ff[^}]*color:\s*#5b21b6/s);
+  assert.match(toybox, /\.player-count--1-4\s*\{[^}]*background:\s*#fff7ed[^}]*color:\s*#9a3412/s);
+  assert.doesNotMatch(toybox, /👤|👥/);
+  assert.match(toybox, /\.game-heading\s*\{[^}]*display:\s*flex[^}]*flex-wrap:\s*wrap/s);
+  assert.match(toybox, /\.player-count\s*\{[^}]*border-radius:\s*999px[^}]*white-space:\s*nowrap/s);
+  assert.doesNotMatch(toybox, /\.game-heading\s*\{[^}]*min-width:/s);
+  assert.doesNotMatch(toybox, /\.player-count\s*\{[^}]*min-width:/s);
+  assert.doesNotMatch(toybox, /1人｜|NPCたちと|4人で深層を採掘/);
 });
 
 test("月秤の決闘で既存の1人用と2人用を選べる", () => {
