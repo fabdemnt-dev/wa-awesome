@@ -96,7 +96,9 @@ test("全5ゲームの現在対応人数を文字入りピルで表示する", (
   assert.doesNotMatch(toybox, /👤|👥/);
   assert.match(toybox, /\.card-panel\s*\{[^}]*position:\s*relative/s);
   assert.match(toybox, /\.player-count\s*\{[^}]*position:\s*absolute[^}]*top:\s*16px[^}]*right:\s*16px/s);
-  assert.match(toybox, /\.game-heading\s*\{[^}]*display:\s*flex[^}]*box-sizing:\s*border-box[^}]*min-height:\s*32px[^}]*padding-right:\s*78px/s);
+  assert.match(toybox, /\.game-heading\s*\{[^}]*display:\s*flex[^}]*justify-content:\s*center[^}]*box-sizing:\s*border-box[^}]*min-height:\s*32px/s);
+  assert.doesNotMatch(toybox, /\.game-heading\s*\{[^}]*(?:padding-right|padding-inline-end):/s);
+  assert.match(toybox, /@media \(max-width:\s*360px\)\s*\{\s*\.game-heading\s*\{[^}]*padding-top:\s*32px/s);
   assert.match(toybox, /\.game-title\s*\{[^}]*min-width:\s*0[^}]*max-width:\s*100%[^}]*overflow-wrap:\s*anywhere/s);
   assert.match(toybox, /\.player-count\s*\{[^}]*border-radius:\s*999px[^}]*white-space:\s*nowrap/s);
   assert.doesNotMatch(toybox, /\.game-heading\s*\{[^}]*position:\s*absolute/s);
