@@ -1,0 +1,103 @@
+name: Moon Scale Duel Transaction Lifecycle Diagnostic
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - diagnostic/moon-scale-duel-transaction-lifecycle-main-35357288935
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install test dependencies
+        run: npm ci
+      - name: Run unit tests
+        run: npm test
+      - name: Run Firestore rules emulator tests
+        run: npm run test:rules
+      - name: Install additional Functions dependencies
+        run: |
+          npm install --prefix functions-manus-test
+          npm install --prefix functions-ai-room
+      - name: Run Functions emulator tests
+        run: npm run test:functions
+      - name: Run Moon Scale Duel rules tests
+        run: npm run test:moon-scale-duel:rules
+      - name: Create Moon Scale Duel emulator secrets
+        env:
+          LOCAL_MOON_INVITE_KEY: local-test-only-moon-invite-key
+          LOCAL_MOON_IP_KEY: local-test-only-moon-ip-key
+        run: |
+          umask 077
+          printf 'MOON_SCALE_DUEL_INVITE_HMAC_KEY=%s\nMOON_SCALE_DUEL_IP_HMAC_KEY=%s\n' "$LOCAL_MOON_INVITE_KEY" "$LOCAL_MOON_IP_KEY" > functions/.secret.local
+      - name: Run Moon Scale Duel integration tests with lifecycle observation
+        id: moon-integration
+        continue-on-error: true
+        env:
+          MOON_SCALE_DUEL_TRANSACTION_LIFECYCLE_DIAGNOSTIC: '1'
+        run: |
+          set +e
+          npm run test:moon-scale-duel:integration 2>&1 | tee moon-scale-duel-integration.raw.log
+          status=${PIPESTATUS[0]}
+          printf '%s\n' "$status" > moon-scale-duel-integration.exit-code
+          exit "$status"
+      - name: Remove Moon Scale Duel emulator secrets
+        if: ${{ always() }}
+        run: |
+          rm -f functions/.secret.local
+          test ! -e functions/.secret.local
+      - name: Record diagnostic environment
+        if: ${{ always() }}
+        run: |
+          mkdir -p diagnostic-artifacts
+          {
+            printf 'node=' && node --version
+            printf 'npm=' && npm --version
+            printf 'java=' && java -version 2>&1 | head -n 1
+            printf 'firebase-tools=' && npx firebase --version
+            node -e "for (const p of ['firebase-admin','firebase-functions','@google-cloud/firestore']) { console.log(p + '=' + require('./functions/node_modules/' + p + '/package.json').version); }"
+          } > diagnostic-artifacts/environment.txt
+      - name: Collect and sanitize diagnostic logs
+        if: ${{ always() }}
+        run: |
+          mkdir -p diagnostic-artifacts
+          cp moon-scale-duel-integration.exit-code diagnostic-artifacts/integration-exit-code.txt 2>/dev/null || true
+          for source in moon-scale-duel-integration.raw.log firebase-debug.log firestore-debug.log functions-debug.log database-debug.log ui-debug.log; do
+            if [ -f "$source" ]; then
+              destination="diagnostic-artifacts/${source%.raw.log}.log"
+              sed -E \
+                -e 's/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}/[redacted-id]/g' \
+                -e 's/(Authorization: (Bearer|Basic) )[A-Za-z0-9._~+\/-]+/\1[redacted-token]/g' \
+                -e 's/("(uid|roomId|gameId|requestId|cardId|token|secret)"[[:space:]]*:[[:space:]]*")[^"]+"/\1[redacted]"/g' \
+                "$source" > "$destination"
+            fi
+          done
+          if [ -f diagnostic-artifacts/moon-scale-duel-integration.log ]; then
+            grep 'MOON_SCALE_DUEL_TRANSACTION_LIFECYCLE ' diagnostic-artifacts/moon-scale-duel-integration.log \
+              | sed 's/^.*MOON_SCALE_DUEL_TRANSACTION_LIFECYCLE //' \
+              > diagnostic-artifacts/transaction-lifecycle.jsonl || true
+          fi
+          find diagnostic-artifacts -maxdepth 1 -type f -printf '%f\n' | sort > diagnostic-artifacts/manifest.txt
+      - name: Upload transaction diagnostic artifact
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: moon-scale-duel-transaction-lifecycle-${{ github.run_id }}
+          path: diagnostic-artifacts/
+          if-no-files-found: error
+      - name: Preserve Moon Scale Duel integration result
+        if: ${{ always() }}
+        run: |
+          status=$(cat moon-scale-duel-integration.exit-code 2>/dev/null || printf '1')
+          exit "$status"

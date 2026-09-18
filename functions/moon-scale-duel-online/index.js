@@ -61,6 +61,68 @@ function requestIp(request) { return request.rawRequest?.ip || request.rawReques
 function randomId() { return crypto.randomUUID(); }
 function roomRef(roomId) { return db.collection('moonScaleDuelRooms').doc(roomId); }
 function actionRef(uid, requestId) { return db.collection('moonScaleDuelActionRequests').doc(`${uid}_${requestId}`); }
+const TRANSACTION_DIAGNOSTIC_ENABLED = process.env.MOON_SCALE_DUEL_TRANSACTION_LIFECYCLE_DIAGNOSTIC === '1';
+function transactionDiagnostic(callable, roomId, gameId) {
+  if (!TRANSACTION_DIAGNOSTIC_ENABLED) {
+    return {
+      beginAttempt: () => 0,
+      read: (_attempt, _label, read) => read(),
+      writePlan: () => {},
+      callbackComplete: () => {},
+      success: () => {},
+      reject: () => {},
+    };
+  }
+  const correlationId = crypto.randomUUID();
+  const scope = crypto.createHash('sha256').update(`${roomId}\0${gameId}`).digest('hex').slice(0, 12);
+  const startedAt = Date.now();
+  let attempts = 0;
+  let lastStage = 'created';
+  const safeError = (error) => ({
+    errorCode: String(error?.code || error?.name || 'unknown').slice(0, 80),
+    errorMessage: String(error?.message || 'unknown')
+      .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/gi, '[redacted-id]')
+      .replace(/[A-Za-z0-9_-]{32,}/g, '[redacted-token]')
+      .slice(0, 240),
+  });
+  const emit = (stage, details = {}) => {
+    lastStage = stage;
+    console.log(`MOON_SCALE_DUEL_TRANSACTION_LIFECYCLE ${JSON.stringify({
+      callable, correlationId, scope, stage, elapsedMs: Date.now() - startedAt, ...details,
+    })}`);
+  };
+  emit('run_transaction_start', { startedAt: new Date(startedAt).toISOString() });
+  return {
+    beginAttempt() {
+      attempts += 1;
+      emit('callback_start', { attempt: attempts, startedAt: new Date().toISOString() });
+      return attempts;
+    },
+    async read(attempt, label, read) {
+      emit('read_start', { attempt, documentType: label });
+      try {
+        const snapshot = await read();
+        emit('read_complete', { attempt, documentType: label });
+        return snapshot;
+      } catch (error) {
+        emit('read_failure', { attempt, documentType: label, ...safeError(error) });
+        throw error;
+      }
+    },
+    writePlan(attempt, documentTypes) {
+      emit('write_plan', { attempt, documentTypes });
+    },
+    callbackComplete(attempt, outcome = 'normal') {
+      emit('callback_complete', { attempt, outcome });
+    },
+    success() {
+      emit('run_transaction_success', { attempts });
+    },
+    reject(error) {
+      emit('run_transaction_reject', { attempts, lastStage, ...safeError(error) });
+    },
+  };
+}
 function payloadHash(type, payload) {
   return crypto.createHash('sha256').update(JSON.stringify({ type, ...payload })).digest('base64url');
 }
@@ -419,16 +481,29 @@ const submitCard = onCall(callableOptions, async (request) => {
 
   const hash = payloadHash('submitCard', { roomId, gameId, round, stateVersion, cardId });
   const action = actionRef(uid, requestId);
-  const result = await db.runTransaction(async (tx) => {
-    const room = roomRef(roomId);
-    const game = room.collection('games').doc(gameId);
-    const serverGame = room.collection('serverGames').doc(gameId);
-    const member = room.collection('members').doc(uid);
-    const privatePlayerRef = room.collection('privatePlayers').doc(uid);
-    const [actionSnap, roomSnap, gameSnap, serverSnap, memberSnap, privateSnap] = await Promise.all([
-      tx.get(action), tx.get(room), tx.get(game), tx.get(serverGame), tx.get(member), tx.get(privatePlayerRef),
-    ]);
-    if (actionSnap.exists) return assertReplay(actionSnap.data(), hash);
+  const diagnostic = transactionDiagnostic('moonScaleDuelSubmitCard', roomId, gameId);
+  let result;
+  try {
+    result = await db.runTransaction(async (tx) => {
+      const attempt = diagnostic.beginAttempt();
+      const room = roomRef(roomId);
+      const game = room.collection('games').doc(gameId);
+      const serverGame = room.collection('serverGames').doc(gameId);
+      const member = room.collection('members').doc(uid);
+      const privatePlayerRef = room.collection('privatePlayers').doc(uid);
+      const [actionSnap, roomSnap, gameSnap, serverSnap, memberSnap, privateSnap] = await Promise.all([
+        diagnostic.read(attempt, 'action', () => tx.get(action)),
+        diagnostic.read(attempt, 'room', () => tx.get(room)),
+        diagnostic.read(attempt, 'game', () => tx.get(game)),
+        diagnostic.read(attempt, 'serverGame', () => tx.get(serverGame)),
+        diagnostic.read(attempt, 'member', () => tx.get(member)),
+        diagnostic.read(attempt, 'privatePlayer', () => tx.get(privatePlayerRef)),
+      ]);
+      if (actionSnap.exists) {
+        const replay = assertReplay(actionSnap.data(), hash);
+        diagnostic.callbackComplete(attempt, 'idempotent-replay');
+        return replay;
+      }
     if (!roomSnap.exists || roomSnap.data().status !== 'playing' || roomSnap.data().gameId !== gameId || !hasValidExpiry(roomSnap.data())) {
       fail('failed-precondition', 'この決闘には提出できません。');
     }
@@ -482,6 +557,9 @@ const submitCard = onCall(callableOptions, async (request) => {
       submitted: true, revealed: bothSubmitted,
     };
 
+    diagnostic.writePlan(attempt, bothSubmitted
+      ? ['serverGame', 'privatePlayer', 'game', 'privatePlayers', 'room', 'action']
+      : ['serverGame', 'privatePlayer', 'game', 'room', 'action']);
     tx.update(serverGame, {
       privateSelections: selections,
       usedCards,
@@ -527,8 +605,14 @@ const submitCard = onCall(callableOptions, async (request) => {
       uid, type: 'submitCard', payloadHash: hash, result: safeResult,
       createdAt: FieldValue.serverTimestamp(), expiresAt,
     });
-    return safeResult;
-  });
+      diagnostic.callbackComplete(attempt);
+      return safeResult;
+    });
+    diagnostic.success();
+  } catch (error) {
+    diagnostic.reject(error);
+    throw error;
+  }
   return result;
 });
 
@@ -653,16 +737,28 @@ const readyNextRound = onCall(callableOptions, async (request) => {
   const input = roundActionInput(request);
   const hash = payloadHash('readyNextRound', input);
   const action = actionRef(uid, requestId);
-  return db.runTransaction(async (tx) => {
-    const room = roomRef(input.roomId);
-    const game = room.collection('games').doc(input.gameId);
-    const serverGame = room.collection('serverGames').doc(input.gameId);
-    const member = room.collection('members').doc(uid);
-    const ownPrivate = room.collection('privatePlayers').doc(uid);
-    const [actionSnap, roomSnap, gameSnap, serverSnap, memberSnap, privateSnap] = await Promise.all([
-      tx.get(action), tx.get(room), tx.get(game), tx.get(serverGame), tx.get(member), tx.get(ownPrivate),
-    ]);
-    if (actionSnap.exists) return assertReplay(actionSnap.data(), hash);
+  const diagnostic = transactionDiagnostic('moonScaleDuelReadyNextRound', input.roomId, input.gameId);
+  try {
+    const result = await db.runTransaction(async (tx) => {
+      const attempt = diagnostic.beginAttempt();
+      const room = roomRef(input.roomId);
+      const game = room.collection('games').doc(input.gameId);
+      const serverGame = room.collection('serverGames').doc(input.gameId);
+      const member = room.collection('members').doc(uid);
+      const ownPrivate = room.collection('privatePlayers').doc(uid);
+      const [actionSnap, roomSnap, gameSnap, serverSnap, memberSnap, privateSnap] = await Promise.all([
+        diagnostic.read(attempt, 'action', () => tx.get(action)),
+        diagnostic.read(attempt, 'room', () => tx.get(room)),
+        diagnostic.read(attempt, 'game', () => tx.get(game)),
+        diagnostic.read(attempt, 'serverGame', () => tx.get(serverGame)),
+        diagnostic.read(attempt, 'member', () => tx.get(member)),
+        diagnostic.read(attempt, 'privatePlayer', () => tx.get(ownPrivate)),
+      ]);
+      if (actionSnap.exists) {
+        const replay = assertReplay(actionSnap.data(), hash);
+        diagnostic.callbackComplete(attempt, 'idempotent-replay');
+        return replay;
+      }
     const gameData = gameSnap.data();
     const serverData = serverSnap.data();
     const seatId = verifyRoundWaitState({ roomData: roomSnap.data(), gameData, serverData, memberData: memberSnap.data(), privateData: privateSnap.data(), input });
@@ -673,6 +769,9 @@ const readyNextRound = onCall(callableOptions, async (request) => {
     const expiresAt = expiresAtFromNow();
     const nextVersion = bothReady ? input.stateVersion + 1 : input.stateVersion;
     const safeResult = { roomId: input.roomId, gameId: input.gameId, round: bothReady ? input.round + 1 : input.round, phase: bothReady ? 'selecting-card' : 'round-result', stateVersion: nextVersion, ready: true, advanced: bothReady };
+    diagnostic.writePlan(attempt, bothReady
+      ? ['game', 'serverGame', 'privatePlayers', 'room', 'action']
+      : ['game', 'room', 'action']);
     if (bothReady) {
       const privateSelections = serverData.privateSelections || {};
       if (!SEAT_IDS.every((id) => privateSelections[id]?.uid)) fail('failed-precondition', '参加者状態を確認できません。');
@@ -701,8 +800,15 @@ const readyNextRound = onCall(callableOptions, async (request) => {
       tx.update(room, { lastValidActionAt: FieldValue.serverTimestamp(), expiresAt });
     }
     tx.set(action, { uid, type: 'readyNextRound', payloadHash: hash, result: safeResult, createdAt: FieldValue.serverTimestamp(), expiresAt });
-    return safeResult;
-  });
+      diagnostic.callbackComplete(attempt);
+      return safeResult;
+    });
+    diagnostic.success();
+    return result;
+  } catch (error) {
+    diagnostic.reject(error);
+    throw error;
+  }
 });
 
 function waitControlCallable(type, handler) {
