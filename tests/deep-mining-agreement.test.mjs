@@ -398,12 +398,13 @@ test("結果は順位・全所持・崩落損失・分配・信用・隠匿・�
   assert.equal(state.players[2].accusationSuccesses, 1);
 });
 
-test("独立ページは外部依存・保存・オンライン導線を持たず、おもちゃ箱から未導線", () => {
+test("独立ページは外部依存・保存・オンライン導線を持たず、おもちゃ箱から正式導線", () => {
   assert.match(html, /<script type="module" src="app\.js"><\/script>/);
   assert.match(html, /<link rel="stylesheet" href="style\.css">/);
   assert.doesNotMatch(html + app, /firebase|localStorage|sessionStorage|https?:\/\//i);
   assert.doesNotMatch(html + app, /ログイン|ランキング|オンライン対戦/);
-  assert.doesNotMatch(toybox, /deep-mining-agreement|深層採掘協定/);
+  assert.match(toybox, /href="\.\.\/deep-mining-agreement\/"[^>]*class="card-panel"/);
+  assert.match(toybox, /深層採掘協定/);
   assert.doesNotMatch(app, /秘密採掘/);
   assert.match(app, /隠匿採掘/);
   assert.doesNotMatch(app + engineSource, /セーフ|ゴウ|サク/);

@@ -14,6 +14,7 @@ const moonScaleOnlineState = await readFile(new URL("../moon-scale-duel-online-s
 const moonScaleRules = await readFile(new URL("../functions/moon-scale-duel-online/rules.js", import.meta.url), "utf8");
 const twinShadowCaskets = await readFile(new URL("../twin-shadow-caskets/index.html", import.meta.url), "utf8");
 const birdcageObserver = await readFile(new URL("../birdcage-observer/index.html", import.meta.url), "utf8");
+const deepMiningAgreement = await readFile(new URL("../deep-mining-agreement/index.html", import.meta.url), "utf8");
 
 test("トップページからおもちゃ箱へ移動できる", () => {
   assert.match(home, /href="toybox\/"[^>]*class="card-panel"/);
@@ -58,6 +59,17 @@ test("おもちゃ箱から鳥籠の観測者へ移動して戻れる", () => {
   assert.match(toybox, /href="\.\.\/shadow-card\.html"[^>]*class="card-panel"/);
   assert.match(toybox, /href="\.\.\/moon-scale-duel-select\.html"[^>]*class="card-panel"/);
   assert.match(toybox, /href="\.\.\/twin-shadow-caskets\/"[^>]*class="card-panel"/);
+});
+
+test("おもちゃ箱から1人用の深層採掘協定へ移動して戻れる", () => {
+  assert.match(toybox, /href="\.\.\/deep-mining-agreement\/"[^>]*class="card-panel"/);
+  assert.match(toybox, /⛏️ 深層採掘協定/);
+  assert.match(toybox, /<p class="game-desc">1人｜4人で深層を採掘。崩落と駆け引きをくぐり抜け、最も高い価値を持ち帰ろう。<\/p>/);
+  assert.match(deepMiningAgreement, /<title>深層採掘協定｜初版プロトタイプ<\/title>/);
+  assert.match(toybox, /href="\.\.\/shadow-card\.html"[^>]*class="card-panel"/);
+  assert.match(toybox, /href="\.\.\/moon-scale-duel-select\.html"[^>]*class="card-panel"/);
+  assert.match(toybox, /href="\.\.\/twin-shadow-caskets\/"[^>]*class="card-panel"/);
+  assert.match(toybox, /href="\.\.\/birdcage-observer\/"[^>]*class="card-panel"/);
 });
 
 test("月秤の決闘で既存の1人用と2人用を選べる", () => {
