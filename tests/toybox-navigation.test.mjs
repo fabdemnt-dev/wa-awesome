@@ -94,9 +94,12 @@ test("全5ゲームの現在対応人数を文字入りピルで表示する", (
   assert.match(toybox, /\.player-count--1-2\s*\{[^}]*background:\s*#f5f3ff[^}]*color:\s*#5b21b6/s);
   assert.match(toybox, /\.player-count--1-4\s*\{[^}]*background:\s*#fff7ed[^}]*color:\s*#9a3412/s);
   assert.doesNotMatch(toybox, /👤|👥/);
-  assert.match(toybox, /\.game-heading\s*\{[^}]*display:\s*flex[^}]*flex-wrap:\s*wrap/s);
+  assert.match(toybox, /\.card-panel\s*\{[^}]*position:\s*relative/s);
+  assert.match(toybox, /\.player-count\s*\{[^}]*position:\s*absolute[^}]*top:\s*16px[^}]*right:\s*16px/s);
+  assert.match(toybox, /\.game-heading\s*\{[^}]*display:\s*flex[^}]*box-sizing:\s*border-box[^}]*min-height:\s*32px[^}]*padding-right:\s*78px/s);
+  assert.match(toybox, /\.game-title\s*\{[^}]*min-width:\s*0[^}]*max-width:\s*100%[^}]*overflow-wrap:\s*anywhere/s);
   assert.match(toybox, /\.player-count\s*\{[^}]*border-radius:\s*999px[^}]*white-space:\s*nowrap/s);
-  assert.doesNotMatch(toybox, /\.game-heading\s*\{[^}]*min-width:/s);
+  assert.doesNotMatch(toybox, /\.game-heading\s*\{[^}]*position:\s*absolute/s);
   assert.doesNotMatch(toybox, /\.player-count\s*\{[^}]*min-width:/s);
   assert.doesNotMatch(toybox, /1人｜|NPCたちと|4人で深層を採掘/);
 });
