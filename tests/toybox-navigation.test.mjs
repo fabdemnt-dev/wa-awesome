@@ -95,7 +95,8 @@ test("全5ゲームの現在対応人数を文字入りピルで表示する", (
   assert.match(toybox, /\.player-count--1-4\s*\{[^}]*background:\s*#fff7ed[^}]*color:\s*#9a3412/s);
   assert.doesNotMatch(toybox, /👤|👥/);
   assert.match(toybox, /\.card-panel\s*\{[^}]*position:\s*relative/s);
-  assert.match(toybox, /\.player-count\s*\{[^}]*position:\s*absolute[^}]*top:\s*16px[^}]*right:\s*16px/s);
+  assert.match(toybox, /\.player-count\s*\{[^}]*position:\s*absolute[^}]*top:\s*12px[^}]*right:\s*12px/s);
+  assert.match(toybox, /\.player-count\s*\{[^}]*padding:\s*2px 8px[^}]*font-size:\s*10px/s);
   assert.match(toybox, /\.game-heading\s*\{[^}]*display:\s*flex[^}]*justify-content:\s*center[^}]*box-sizing:\s*border-box[^}]*min-height:\s*32px/s);
   assert.doesNotMatch(toybox, /\.game-heading\s*\{[^}]*(?:padding-right|padding-inline-end):/s);
   assert.match(toybox, /@media \(max-width:\s*360px\)\s*\{\s*\.game-heading\s*\{[^}]*padding-top:\s*32px/s);
