@@ -73,7 +73,7 @@ function transactionDiagnostic(callable, roomId, gameId) {
       reject: () => {},
     };
   }
-  const correlationId = crypto.randomUUID();
+  const correlationId = `corr-${crypto.randomBytes(8).toString('hex')}`;
   const scope = crypto.createHash('sha256').update(`${roomId}\0${gameId}`).digest('hex').slice(0, 12);
   const startedAt = Date.now();
   let attempts = 0;

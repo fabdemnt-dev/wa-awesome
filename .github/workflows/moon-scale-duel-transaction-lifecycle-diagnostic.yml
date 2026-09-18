@@ -2,9 +2,6 @@ name: Moon Scale Duel Transaction Lifecycle Diagnostic
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - diagnostic/moon-scale-duel-transaction-lifecycle-main-35357288935
 
 permissions:
   contents: read
