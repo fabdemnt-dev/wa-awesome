@@ -280,3 +280,13 @@ test("レスポンシブ、SVG、途中離脱、reduced-motion要件を静的に
   assert.doesNotMatch(html, /https?:\/\/(?:fonts|cdn|api)\./i);
   assert.doesNotMatch(html, /firebase/i);
 });
+
+
+test("タイトル画面だけに共通フッターを表示する", () => {
+  const dom = loadGame();
+  const { document } = dom.window;
+  assert.equal(document.querySelector(".title-site-footer")?.textContent, "鳥籠の観測者 — Original Web Card Game");
+  clickText(document, "観測を始める");
+  assert.equal(document.querySelector(".title-site-footer"), null);
+  dom.window.close();
+});

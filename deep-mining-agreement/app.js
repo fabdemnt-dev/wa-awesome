@@ -58,7 +58,7 @@ function renderTitle() {
         <button class="button" type="button" data-action="show-rules" data-return="title">遊び方</button>
       </div>
     </div>
-  </section>`;
+  </section><footer class="title-site-footer"><small>深層採掘協定 — Original Web Card Game</small></footer>`;
   focusApp();
 }
 

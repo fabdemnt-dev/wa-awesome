@@ -72,6 +72,16 @@
 
     main { flex: 1; }
 
+    .title-site-footer {
+      width: 100%;
+      padding-top: 1rem;
+      padding-bottom: max(1rem, env(safe-area-inset-bottom));
+      color: #aeb7ca;
+      font-size: .72rem;
+      text-align: center;
+      overflow-wrap: anywhere;
+    }
+
     .game-screen, .final-screen {
       width: min(100%, 620px);
       margin-right: auto;
@@ -610,6 +620,7 @@
             <img src="assets/selene-title.webp" alt="封印された書庫にたたずむ対戦相手セレネ" width="1024" height="1536">
           </div>
         </div>
+        <footer class="title-site-footer"><small>双影の宝匣 — Original Web Card Game</small></footer>
       </section>
 
       <section id="game-screen" class="screen game-screen" aria-labelledby="phase-title" hidden>
