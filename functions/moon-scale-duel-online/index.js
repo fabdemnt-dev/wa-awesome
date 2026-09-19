@@ -75,6 +75,30 @@ function assertReplay(action, expectedHash) {
   return action.result;
 }
 
+function readyNextRoundDiagnostic(event, context, startedAt) {
+  if (process.env.MOON_SCALE_DUEL_TRANSACTION_DIAGNOSTICS !== '1') return;
+  const error = context.error;
+  console.log(JSON.stringify({
+    diagnostic: 'moonScaleDuelReadyNextRound',
+    diagnosticRunId: process.env.MOON_SCALE_DUEL_DIAGNOSTIC_RUN_ID || 'local',
+    event,
+    timestamp: new Date().toISOString(),
+    elapsedMillis: Date.now() - startedAt,
+    roomId: context.input.roomId,
+    gameId: context.input.gameId,
+    round: context.input.round,
+    seatId: context.seatId || null,
+    requestId: context.requestId,
+    stateVersion: context.input.stateVersion,
+    transactionAttempt: context.transactionAttempt || 0,
+    nextRoundReady: context.nextRoundReady || null,
+    bothReady: typeof context.bothReady === 'boolean' ? context.bothReady : null,
+    errorCode: error?.code ?? null,
+    errorMessage: error?.message ?? null,
+    errorStack: error?.stack ?? null,
+  }));
+}
+
 async function consumeRateLimit(key, limit, windowSeconds) {
   const ref = db.collection('moonScaleDuelRateLimits').doc(key);
   await db.runTransaction(async (tx) => {
@@ -647,12 +671,21 @@ function verifyRoundWaitState({ roomData, gameData, serverData, memberData, priv
 }
 
 const readyNextRound = onCall(callableOptions, async (request) => {
+  const startedAt = Date.now();
   const uid = uidOf(request);
   const requestId = requestIdOf(request);
   const input = roundActionInput(request);
   const hash = payloadHash('readyNextRound', input);
   const action = actionRef(uid, requestId);
-  return db.runTransaction(async (tx) => {
+  let transactionAttempt = 0;
+  const diagnostic = (event, context = {}) => readyNextRoundDiagnostic(event, {
+    input, requestId, transactionAttempt, ...context,
+  }, startedAt);
+  diagnostic('callable-start');
+  try {
+    const result = await db.runTransaction(async (tx) => {
+      transactionAttempt += 1;
+      diagnostic('transaction-attempt-start');
     const room = roomRef(input.roomId);
     const game = room.collection('games').doc(input.gameId);
     const serverGame = room.collection('serverGames').doc(input.gameId);
@@ -661,6 +694,7 @@ const readyNextRound = onCall(callableOptions, async (request) => {
     const [actionSnap, roomSnap, gameSnap, serverSnap, memberSnap, privateSnap] = await Promise.all([
       tx.get(action), tx.get(room), tx.get(game), tx.get(serverGame), tx.get(member), tx.get(ownPrivate),
     ]);
+    diagnostic('transaction-reads-complete');
     if (actionSnap.exists) return assertReplay(actionSnap.data(), hash);
     const gameData = gameSnap.data();
     const serverData = serverSnap.data();
@@ -669,6 +703,7 @@ const readyNextRound = onCall(callableOptions, async (request) => {
     const other = seatId === 'seat1' ? 'seat2' : 'seat1';
     const ready = { seat1: gameData.nextRoundReady?.seat1 === true, seat2: gameData.nextRoundReady?.seat2 === true, [seatId]: true };
     const bothReady = ready[other] === true;
+    diagnostic('ready-state-evaluated', { seatId, nextRoundReady: ready, bothReady });
     const expiresAt = expiresAtFromNow();
     const nextVersion = bothReady ? input.stateVersion + 1 : input.stateVersion;
     const safeResult = { roomId: input.roomId, gameId: input.gameId, round: bothReady ? input.round + 1 : input.round, phase: bothReady ? 'selecting-card' : 'round-result', stateVersion: nextVersion, ready: true, advanced: bothReady };
@@ -700,8 +735,16 @@ const readyNextRound = onCall(callableOptions, async (request) => {
       tx.update(room, { lastValidActionAt: FieldValue.serverTimestamp(), expiresAt });
     }
     tx.set(action, { uid, type: 'readyNextRound', payloadHash: hash, result: safeResult, createdAt: FieldValue.serverTimestamp(), expiresAt });
+    diagnostic('transaction-writes-registered', { seatId, nextRoundReady: ready, bothReady });
+    diagnostic('transaction-callback-end', { seatId, nextRoundReady: ready, bothReady });
     return safeResult;
   });
+    diagnostic('callable-success');
+    return result;
+  } catch (error) {
+    diagnostic('callable-failure', { error });
+    throw error;
+  }
 });
 
 function waitControlCallable(type, handler) {
