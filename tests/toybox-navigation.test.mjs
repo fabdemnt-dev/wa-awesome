@@ -347,3 +347,16 @@ test("既存の創作系導線を維持する", () => {
   assert.match(home, /href="haiku\.html"/);
   assert.match(home, /href="wordset\.html"/);
 });
+
+
+test("5ゲームのタイトル画面は共通フッターを持つ", () => {
+  assert.match(shadowCard, /影札の交渉 — Original Web Card Game/);
+  assert.match(moonScaleSelect, /月秤の決闘 — Original Web Card Game/);
+  assert.match(twinShadowCaskets, /双影の宝匣 — Original Web Card Game/);
+  assert.match(birdcageObserver, /鳥籠の観測者 — Original Web Card Game/);
+  assert.match(deepMiningApp, /深層採掘協定 — Original Web Card Game/);
+  assert.match(moonScaleSelect, /\.top-link\s*\{[^}]*text-decoration-color:\s*currentColor[^}]*text-underline-offset:\s*\.25em/s);
+  assert.match(twinShadowCaskets, /\.title-site-footer\s*\{[^}]*font-size:\s*\.72rem[^}]*text-align:\s*center[^}]*overflow-wrap:\s*anywhere/s);
+  assert.match(birdcageObserver, /\.title-site-footer\s*\{[^}]*font-size:\s*\.72rem[^}]*text-align:\s*center[^}]*overflow-wrap:\s*anywhere/s);
+  assert.match(deepMiningCss, /\.title-site-footer\s*\{[^}]*font-size:\s*\.72rem[^}]*text-align:\s*center[^}]*overflow-wrap:\s*anywhere/s);
+});

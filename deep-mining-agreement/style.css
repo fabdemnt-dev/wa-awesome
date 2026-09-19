@@ -36,6 +36,7 @@ button { touch-action: manipulation; }
   text-decoration-color: var(--copper); text-underline-offset: .25em;
 }
 .screen { display: grid; gap: 14px; min-width: 0; }
+.title-site-footer { width: 100%; padding-top: 1rem; padding-bottom: max(1rem, env(safe-area-inset-bottom)); color: var(--muted); font-size: .72rem; text-align: center; overflow-wrap: anywhere; }
 .title-screen { min-height: calc(100svh - 98px); align-content: center; }
 .title-panel, .panel {
   min-width: 0;

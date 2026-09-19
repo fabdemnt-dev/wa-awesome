@@ -914,3 +914,9 @@ test("画面操作で遊び方を開き、8Rを完走して結果画面へ進め
     dom.window.close();
   }
 });
+
+
+test("タイトル画面用フッターの文言とスタイルを持つ", () => {
+  assert.match(app, /深層採掘協定 — Original Web Card Game/);
+  assert.match(css, /\.title-site-footer\s*\{[^}]*font-size:\s*\.72rem[^}]*text-align:\s*center[^}]*overflow-wrap:\s*anywhere/s);
+});
