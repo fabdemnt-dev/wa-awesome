@@ -156,3 +156,10 @@ button { font: inherit; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; scroll-behavior: auto !important; }
 }
+
+.build-id {
+  margin: 12px 0 0;
+  color: #7a6c84;
+  font-size: .7rem;
+  text-align: center;
+}
