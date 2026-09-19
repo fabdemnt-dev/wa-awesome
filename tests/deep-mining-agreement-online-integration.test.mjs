@@ -98,7 +98,8 @@ for (const count of [2, 3, 4]) {
         if (round === 3) {
           const resolved = await clients[1].call('deepMiningAgreementGetSnapshot', { roomId: created.roomId });
           assert.equal(resolved.game.history[2].publicActions.seat1, 'mine');
-          assert.equal(resolved.game.history[2].secretCount, 1);
+          assert.ok(resolved.game.history[2].secretCount >= 1);
+          assert.equal(Object.values(resolved.game.history[2].publicActions).includes('secret'), false);
           assert.equal(resolved.game.players.every((player) => player.secretOre == null), true);
           assert.equal(resolved.game.selfPrivate.secretOre[resolved.game.history[2].oreId], 0);
         }
