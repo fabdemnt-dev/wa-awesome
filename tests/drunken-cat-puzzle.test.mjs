@@ -118,7 +118,9 @@ test("試作ページは必要な操作UIとスマホ向けスワイプ設定を
   assert.match(script, /groupDrag/);\n  assert.doesNotMatch(script, /structuredClone/);
   assert.match(script, /requestAnimationFrame\(dragStep\)/);
   assert.match(script, /latestPointer/);
-  assert.match(script, /cellSize \* 0\.82/);
+  assert.match(script, /stageOneCellSize = boardWidth \/ 6/);
+  assert.match(script, /stageOneCellSize \* 0\.82/);
+  assert.doesNotMatch(script, /cellSize \* 0\.82/);
   assert.match(script, /dragAxis/);
   assert.match(script, /session\.history = \[dragHistoryStart\]/);
   assert.match(css, /touch-action:\s*none/);

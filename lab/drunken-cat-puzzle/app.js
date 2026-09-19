@@ -121,9 +121,9 @@ function dragStep() {
   dragFrame = 0;
   if (!pointerStart || !latestPointer || session.state.cleared) return;
 
-  const cell = board.querySelector(".cell");
-  const cellSize = cell?.getBoundingClientRect().width ?? 48;
-  const threshold = Math.max(30, cellSize * 0.82);
+  const boardWidth = board.getBoundingClientRect().width;
+  const stageOneCellSize = boardWidth / 6;
+  const threshold = Math.max(30, stageOneCellSize * 0.82);
   const dx = latestPointer.x - pointerStart.x;
   const dy = latestPointer.y - pointerStart.y;
 
