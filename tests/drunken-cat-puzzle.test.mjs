@@ -109,7 +109,7 @@ test("試作ページは必要な操作UIとスマホ向けスワイプ設定を
     assert.match(html, new RegExp(`id=["']${id}["']`));
   }
   assert.match(html, /遊び方/);
-  assert.match(html, /noindex, nofollow/);
+  assert.match(html, /noindex, nofollow/);\n  assert.doesNotMatch(html, /\\\\n/);\n  assert.doesNotMatch(script, /\\\\n/);\n  assert.doesNotMatch(css, /\\\\n/);
   assert.doesNotMatch(script, /\\nlet latestPointer/);
   assert.match(script, /let dragMoved = false;\s+let latestPointer = null;\s+let dragFrame = 0;\s+let dragAxis = null;/);
   assert.match(script, /pointerdown/);
