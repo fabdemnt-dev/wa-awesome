@@ -49,6 +49,11 @@ service cloud.firestore {
     match /moonScaleDuelRateLimits/{docId} { allow read, write: if false; }
     match /moonScaleDuelActionRequests/{docId} { allow read, write: if false; }
 
+    match /deepMiningAgreementRooms/{roomId} { allow read, write: if false; }
+    match /deepMiningAgreementRooms/{roomId}/{document=**} { allow read, write: if false; }
+    match /deepMiningAgreementRoomLocators/{docId} { allow read, write: if false; }
+    match /deepMiningAgreementActionRequests/{docId} { allow read, write: if false; }
+
     // ============================================================
     // 1) 訪問カウンタ counter/visits
     // ============================================================
