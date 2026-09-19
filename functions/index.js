@@ -1466,3 +1466,10 @@ exports.moonScaleDuelExtendNextRoundWait = moonScaleDuelOnline.extendNextRoundWa
 exports.moonScaleDuelAbortAfterWait = moonScaleDuelOnline.abortAfterWait;
 exports.moonScaleDuelRequestRematch = moonScaleDuelOnline.requestRematch;
 exports.moonScaleDuelCancelRematch = moonScaleDuelOnline.cancelRematch;
+
+const deepMiningAgreementOnline = require('./deep-mining-agreement-online');
+exports.deepMiningAgreementCreateRoom = deepMiningAgreementOnline.createRoom;
+exports.deepMiningAgreementJoinRoom = deepMiningAgreementOnline.joinRoom;
+exports.deepMiningAgreementGetSnapshot = deepMiningAgreementOnline.getSnapshot;
+exports.deepMiningAgreementStartGame = deepMiningAgreementOnline.startGame;
+exports.deepMiningAgreementSubmitAction = deepMiningAgreementOnline.submitAction;

@@ -49,6 +49,7 @@ function setup(overrides = {}) {
       if (name === './manus-config') return {};
       if (name === './shadow-card-online') return {};
       if (name === './moon-scale-duel-online') return {};
+      if (name === './deep-mining-agreement-online') return {};
       throw new Error(name);
     },
   };

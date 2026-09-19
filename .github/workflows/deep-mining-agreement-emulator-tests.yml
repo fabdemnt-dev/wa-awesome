@@ -1,0 +1,137 @@
+name: Deep Mining Agreement Emulator Tests
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/deep-mining-agreement-emulator-tests.yml"
+      - "firebase.deep-mining-agreement-emulator.json"
+      - "firestore.rules"
+      - "functions/**"
+      - "package.json"
+      - "package-lock.json"
+      - "tests/deep-mining-agreement-online-integration.test.mjs"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deep-mining-agreement-emulator-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  emulator-tests:
+    name: Firebase Emulator integration (2-4 players)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      GCLOUD_PROJECT: demo-deep-mining-agreement
+      GOOGLE_CLOUD_PROJECT: demo-deep-mining-agreement
+      FIREBASE_PROJECT_ID: demo-deep-mining-agreement
+      FIREBASE_CONFIG: '{"projectId":"demo-deep-mining-agreement"}'
+
+    steps:
+      - name: Check out test source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            functions/package-lock.json
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Firebase CLI 14.27.0
+        run: npm install --global firebase-tools@14.27.0
+
+      - name: Verify isolated Emulator configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test "$(node --version | cut -d. -f1)" = "v20"
+          test "$(firebase --version)" = "14.27.0"
+          test -f functions/package-lock.json
+          test -f firebase.deep-mining-agreement-emulator.json
+
+          node <<'NODE'
+          const fs = require('node:fs');
+
+          const functionsPackage =
+            JSON.parse(fs.readFileSync('functions/package.json', 'utf8'));
+          const rootPackage =
+            JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          const emulatorConfig =
+            JSON.parse(fs.readFileSync(
+              'firebase.deep-mining-agreement-emulator.json',
+              'utf8',
+            ));
+
+          if (!functionsPackage.dependencies?.['firebase-admin']) {
+            throw new Error('firebase-admin is missing');
+          }
+
+          if (!functionsPackage.dependencies?.['firebase-functions']) {
+            throw new Error('firebase-functions is missing');
+          }
+
+          if (emulatorConfig.firestore?.rules !== 'firestore.rules') {
+            throw new Error('Emulator configuration must use firestore.rules');
+          }
+
+          const script =
+            rootPackage.scripts?.['test:deep-mining-agreement:integration'];
+
+          if (!script) {
+            throw new Error('Missing dedicated integration test script');
+          }
+
+          if (!script.includes('--project demo-deep-mining-agreement')) {
+            throw new Error('Integration tests must use the isolated demo project');
+          }
+
+          if (/firebase deploy|gcloud|firebaseio\.com/.test(script)) {
+            throw new Error('Test script contains a prohibited production operation or URL');
+          }
+          NODE
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install Functions dependencies
+        run: npm --prefix functions ci
+
+      - name: Create local-only dummy HMAC file
+        shell: bash
+        env:
+          LOCAL_INVITE_HMAC_KEY: local-test-only-deep-mining-key-not-production
+        run: |
+          set -euo pipefail
+
+          echo "::add-mask::$LOCAL_INVITE_HMAC_KEY"
+          umask 077
+          printf 'DEEP_MINING_AGREEMENT_INVITE_HMAC_KEY=%s\n' \
+            "$LOCAL_INVITE_HMAC_KEY" > functions/.secret.local
+
+      - name: Run 2-4 player Firebase integration tests
+        run: timeout --signal=INT 300s npm run test:deep-mining-agreement:integration
+
+      - name: Remove local-only HMAC file
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          rm -f functions/.secret.local
+          test ! -e functions/.secret.local
