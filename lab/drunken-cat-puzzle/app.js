@@ -24,7 +24,10 @@ let session = createSession(stageIndex);
 let pointerStart = null;
 let suppressClick = false;
 let dragHistoryStart = null;
-let dragMoved = false;\nlet latestPointer = null;\nlet dragFrame = 0;\nlet dragAxis = null;
+let dragMoved = false;
+let latestPointer = null;
+let dragFrame = 0;
+let dragAxis = null;
 
 const eventMessages = {
   start: "盤面をスワイプして穴を動かそう",
