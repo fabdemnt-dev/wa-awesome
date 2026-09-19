@@ -8,6 +8,7 @@ const { defineSecret } = require('firebase-functions/params');
 const crypto = require('node:crypto');
 const { createInviteCode, parseInviteCode, mac, safeEqual, hashIp } = require('./invite-code');
 const { prepareCopyState, resolveRound } = require('./rules');
+const { emulatorRetryDetails, isInvalidClosedTransactionError } = require('./emulator-transaction-error');
 
 if (!getApps().length) initializeApp();
 const db = getFirestore();
@@ -652,7 +653,8 @@ const readyNextRound = onCall(callableOptions, async (request) => {
   const input = roundActionInput(request);
   const hash = payloadHash('readyNextRound', input);
   const action = actionRef(uid, requestId);
-  return db.runTransaction(async (tx) => {
+  try {
+    return await db.runTransaction(async (tx) => {
     const room = roomRef(input.roomId);
     const game = room.collection('games').doc(input.gameId);
     const serverGame = room.collection('serverGames').doc(input.gameId);
@@ -701,7 +703,13 @@ const readyNextRound = onCall(callableOptions, async (request) => {
     }
     tx.set(action, { uid, type: 'readyNextRound', payloadHash: hash, result: safeResult, createdAt: FieldValue.serverTimestamp(), expiresAt });
     return safeResult;
-  });
+    });
+  } catch (error) {
+    if (process.env.FIRESTORE_EMULATOR_HOST && isInvalidClosedTransactionError(error)) {
+      throw new HttpsError('internal', 'Firestore Emulator transaction retry is safe for this request.', emulatorRetryDetails());
+    }
+    throw error;
+  }
 });
 
 function waitControlCallable(type, handler) {

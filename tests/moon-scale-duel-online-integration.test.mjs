@@ -6,6 +6,7 @@ import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'firebase/
 import { getFirestore, connectFirestoreEmulator, doc, getDoc, terminate } from 'firebase/firestore';
 import { getDatabase, connectDatabaseEmulator, goOffline } from 'firebase/database';
 import { createRequire } from 'node:module';
+import { callReadyNextRoundWithEmulatorRetry } from './helpers/moon-scale-duel-emulator-retry.mjs';
 
 const functionRequire = createRequire(new URL('../functions/package.json', import.meta.url));
 const { initializeApp: initializeAdminApp, getApps: getAdminApps, deleteApp: deleteAdminApp } = functionRequire('firebase-admin/app');
@@ -28,7 +29,13 @@ function client(name) {
   connectFirestoreEmulator(fs, '127.0.0.1', 8080);
   connectFunctionsEmulator(fn, '127.0.0.1', 5001);
   connectDatabaseEmulator(rt, '127.0.0.1', 9000);
-  const value = { app, auth, fs, fn, rt, call: (name, data) => httpsCallable(fn, name)(data).then((response) => response.data) };
+  const invoke = (callableName, data) => httpsCallable(fn, callableName)(data).then((response) => response.data);
+  const value = {
+    app, auth, fs, fn, rt,
+    call: (callableName, data) => callableName === 'moonScaleDuelReadyNextRound'
+      ? callReadyNextRoundWithEmulatorRetry((payload) => invoke(callableName, payload), data)
+      : invoke(callableName, data),
+  };
   clients.push(value);
   return value;
 }
@@ -420,6 +427,46 @@ test('next-round readiness preserves durable state and advances exactly once', {
     cardId: 'waxing', requestId: 'next-round-reuse-card',
   }), 'functions/failed-precondition');
   await denied(room.host.call('moonScaleDuelReadyNextRound', roundPayload(room, result, 'next-round-stale')), 'functions/failed-precondition');
+});
+
+test('known emulator failure after commit retries the same request without double application', { timeout: 120000 }, async () => {
+  const room = await startedRoom('emulator-retry');
+  const result = await playRound(room, 'waxing', 'waxing', 'emulator-retry-r1');
+  const payload = roundPayload(room, result, 'emulator-retry-host');
+  let attempts = 0;
+  const hostResult = await callReadyNextRoundWithEmulatorRetry(async (samePayload) => {
+    attempts += 1;
+    const committed = await httpsCallable(room.host.fn, 'moonScaleDuelReadyNextRound')(samePayload)
+      .then((response) => response.data);
+    if (attempts === 1) {
+      throw Object.assign(new Error('INTERNAL'), {
+        code: 'functions/internal',
+        details: {
+          kind: 'moon-scale-duel/firestore-emulator-invalid-transaction',
+          firestoreCode: 'INVALID_ARGUMENT',
+          firestoreMessage: 'Transaction is invalid or closed.',
+        },
+      });
+    }
+    return committed;
+  }, payload);
+
+  assert.equal(attempts, 2);
+  assert.equal(hostResult.advanced, false);
+  assert.equal(hostResult.round, 1);
+  const hostAction = await adminDb.doc(`moonScaleDuelActionRequests/${room.host.auth.currentUser.uid}_${payload.requestId}`).get();
+  assert.equal(hostAction.exists, true);
+  assert.deepEqual(hostAction.data().result, hostResult);
+
+  const guestResult = await room.guest.call(
+    'moonScaleDuelReadyNextRound',
+    roundPayload(room, result, 'emulator-retry-guest'),
+  );
+  assert.equal(guestResult.advanced, true);
+  const advanced = await room.host.call('moonScaleDuelGetSnapshot', { roomId: room.roomId });
+  assert.equal(advanced.game.round, 2);
+  assert.equal(advanced.game.stateVersion, result.game.stateVersion + 1);
+  assert.deepEqual(advanced.game.nextRoundReady, { seat1: false, seat2: false });
 });
 
 test('expired readiness can be extended idempotently only by the waiting player', { timeout: 120000 }, async () => {
