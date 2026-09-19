@@ -24,7 +24,7 @@ let session = createSession(stageIndex);
 let pointerStart = null;
 let suppressClick = false;
 let dragHistoryStart = null;
-let dragMoved = false;\nlet latestPointer = null;\nlet dragFrame = 0;
+let dragMoved = false;\nlet latestPointer = null;\nlet dragFrame = 0;\nlet dragAxis = null;
 
 const eventMessages = {
   start: "盤面をスワイプして穴を動かそう",
@@ -119,22 +119,28 @@ function dragStep() {
   if (!pointerStart || !latestPointer || session.state.cleared) return;
 
   const cell = board.querySelector(".cell");
-  const step = Math.max(22, (cell?.getBoundingClientRect().width ?? 48) * 0.52);
+  const cellSize = cell?.getBoundingClientRect().width ?? 48;
+  const threshold = Math.max(30, cellSize * 0.82);
   const dx = latestPointer.x - pointerStart.x;
   const dy = latestPointer.y - pointerStart.y;
 
-  if (Math.max(Math.abs(dx), Math.abs(dy)) >= step) {
-    const direction = Math.abs(dx) > Math.abs(dy)
-      ? (dx > 0 ? "right" : "left")
-      : (dy > 0 ? "down" : "up");
+  if (!dragAxis && Math.max(Math.abs(dx), Math.abs(dy)) >= threshold * 0.45) {
+    dragAxis = Math.abs(dx) >= Math.abs(dy) ? "x" : "y";
+  }
+
+  const axisDelta = dragAxis === "x" ? dx : dragAxis === "y" ? dy : 0;
+  if (Math.abs(axisDelta) >= threshold) {
+    const direction = dragAxis === "x"
+      ? (axisDelta > 0 ? "right" : "left")
+      : (axisDelta > 0 ? "down" : "up");
     const moved = act(direction, { groupDrag: true });
     dragMoved ||= moved;
 
     if (moved) {
-      if (direction === "right") pointerStart.x += step;
-      if (direction === "left") pointerStart.x -= step;
-      if (direction === "down") pointerStart.y += step;
-      if (direction === "up") pointerStart.y -= step;
+      if (direction === "right") pointerStart.x += threshold;
+      if (direction === "left") pointerStart.x -= threshold;
+      if (direction === "down") pointerStart.y += threshold;
+      if (direction === "up") pointerStart.y -= threshold;
     } else {
       pointerStart.x = latestPointer.x;
       pointerStart.y = latestPointer.y;
