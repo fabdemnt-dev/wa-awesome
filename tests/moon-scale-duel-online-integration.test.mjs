@@ -198,6 +198,9 @@ function assertNoCardLeak(snapshot) {
 test('one-sided submissions stay private in either seat and request replay is idempotent', { timeout: 120000 }, async () => {
   const hostFirst = await startedRoom('secret-a');
   const hostPayload = submitPayload(hostFirst, 'waxing', 'secret-a-submit');
+  const roomRef = adminDb.doc(`moonScaleDuelRooms/${hostFirst.roomId}`);
+  const gameRef = roomRef.collection('games').doc(hostFirst.started.gameId);
+  const [roomBefore, gameBefore] = await Promise.all([roomRef.get(), gameRef.get()]);
   const first = await hostFirst.host.call('moonScaleDuelSubmitCard', hostPayload);
   assert.deepEqual(first, {
     roomId: hostFirst.roomId,
@@ -209,17 +212,28 @@ test('one-sided submissions stay private in either seat and request replay is id
     revealed: false,
   });
   assert.deepEqual(await hostFirst.host.call('moonScaleDuelSubmitCard', hostPayload), first);
-  const [hostView, guestView, publicGame, serverGame] = await Promise.all([
+  const [hostView, guestView, roomAfter, publicGame, serverGame, privatePlayer, action] = await Promise.all([
     hostFirst.host.call('moonScaleDuelGetSnapshot', { roomId: hostFirst.roomId }),
     hostFirst.guest.call('moonScaleDuelGetSnapshot', { roomId: hostFirst.roomId }),
-    adminDb.doc(`moonScaleDuelRooms/${hostFirst.roomId}/games/${hostFirst.started.gameId}`).get(),
-    adminDb.doc(`moonScaleDuelRooms/${hostFirst.roomId}/serverGames/${hostFirst.started.gameId}`).get(),
+    roomRef.get(),
+    gameRef.get(),
+    roomRef.collection('serverGames').doc(hostFirst.started.gameId).get(),
+    roomRef.collection('privatePlayers').doc(hostFirst.host.auth.currentUser.uid).get(),
+    adminDb.doc(`moonScaleDuelActionRequests/${hostFirst.host.auth.currentUser.uid}_secret-a-submit`).get(),
   ]);
+  assert.ok(roomAfter.data().lastValidActionAt.toMillis() > roomBefore.data().lastValidActionAt.toMillis());
+  assert.ok(roomAfter.data().expiresAt.toMillis() > roomBefore.data().expiresAt.toMillis());
+  assert.equal(publicGame.data().lastValidActionAt.toMillis(), gameBefore.data().lastValidActionAt.toMillis());
+  assert.equal(publicGame.data().expiresAt.toMillis(), gameBefore.data().expiresAt.toMillis());
   assert.equal(hostView.private.submitted, true);
   assert.equal(hostView.private.selectedCardId, 'waxing');
   assertNoCardLeak(guestView);
   assert.equal(JSON.stringify(publicGame.data()).includes('waxing'), false);
   assert.equal(serverGame.data().privateSelections.seat1.cardId, 'waxing');
+  assert.equal(privatePlayer.data().submitted, true);
+  assert.equal(privatePlayer.data().selectedCardId, 'waxing');
+  assert.equal(action.data().type, 'submitCard');
+  assert.deepEqual(action.data().result, first);
   assert.equal(hostView.private.usedCards.length, 0);
   await denied(hostFirst.host.call('moonScaleDuelSubmitCard', { ...hostPayload, cardId: 'waning' }), 'functions/already-exists');
 

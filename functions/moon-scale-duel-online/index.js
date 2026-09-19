@@ -520,7 +520,6 @@ const submitCard = onCall(callableOptions, async (request) => {
         lastValidActionAt: FieldValue.serverTimestamp(), expiresAt,
       });
     } else {
-      tx.update(game, { lastValidActionAt: FieldValue.serverTimestamp(), expiresAt });
       tx.update(room, { lastValidActionAt: FieldValue.serverTimestamp(), expiresAt });
     }
     tx.set(action, {
