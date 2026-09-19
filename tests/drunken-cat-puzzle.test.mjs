@@ -111,6 +111,6 @@ test("試作ページは必要な操作UIとスマホ向けスワイプ設定を
   assert.match(html, /遊び方/);
   assert.match(html, /noindex, nofollow/);
   assert.match(script, /pointerdown/);
-  assert.match(script, /pointerup/);
+  assert.match(script, /pointerup/);\n  assert.match(script, /pointermove/);\n  assert.match(script, /groupDrag/);\n  assert.match(script, /session\\.history = \\[dragHistoryStart\\]/);
   assert.match(css, /touch-action:\s*none/);
 });

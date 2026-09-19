@@ -23,6 +23,8 @@ let stageIndex = 0;
 let session = createSession(stageIndex);
 let pointerStart = null;
 let suppressClick = false;
+let dragHistoryStart = null;
+let dragMoved = false;
 
 const eventMessages = {
   start: "盤面をスワイプして穴を動かそう",
@@ -91,12 +93,19 @@ function render() {
   nextButton.textContent = stageIndex === STAGES.length - 1 ? "最初のステージへ ↺" : "次のステージへ →";
 }
 
-function act(direction) {
-  if (!DIRECTIONS[direction] || session.state.cleared) return;
+function act(direction, { groupDrag = false } = {}) {
+  if (!DIRECTIONS[direction] || session.state.cleared) return false;
   const previousMoves = session.state.moves;
+  const before = structuredClone(session.state);
   session = performMove(session, direction);
+  const moved = session.state.moves !== previousMoves;
+  if (moved && groupDrag) {
+    if (!dragHistoryStart) dragHistoryStart = before;
+    session.history = [dragHistoryStart];
+  }
   render();
-  if (session.state.moves === previousMoves) message.textContent = "その方向へは動かせない";
+  if (!moved) message.textContent = "その方向へは動かせない";
+  return moved;
 }
 
 function directionFromDelta(dx, dy) {
@@ -107,18 +116,51 @@ function directionFromDelta(dx, dy) {
 
 board.addEventListener("pointerdown", (event) => {
   pointerStart = { id: event.pointerId, x: event.clientX, y: event.clientY };
+  dragHistoryStart = null;
+  dragMoved = false;
   board.setPointerCapture?.(event.pointerId);
+});
+
+board.addEventListener("pointermove", (event) => {
+  if (!pointerStart || pointerStart.id !== event.pointerId || session.state.cleared) return;
+  const cell = board.querySelector(".cell");
+  const step = Math.max(24, (cell?.getBoundingClientRect().width ?? 48) * 0.58);
+  let dx = event.clientX - pointerStart.x;
+  let dy = event.clientY - pointerStart.y;
+  let safety = 0;
+  while (Math.max(Math.abs(dx), Math.abs(dy)) >= step && safety < 12) {
+    const direction = Math.abs(dx) > Math.abs(dy)
+      ? (dx > 0 ? "right" : "left")
+      : (dy > 0 ? "down" : "up");
+    const moved = act(direction, { groupDrag: true });
+    dragMoved ||= moved;
+    if (!moved) break;
+    if (direction === "right") pointerStart.x += step;
+    if (direction === "left") pointerStart.x -= step;
+    if (direction === "down") pointerStart.y += step;
+    if (direction === "up") pointerStart.y -= step;
+    dx = event.clientX - pointerStart.x;
+    dy = event.clientY - pointerStart.y;
+    safety += 1;
+  }
 });
 
 board.addEventListener("pointerup", (event) => {
   if (!pointerStart || pointerStart.id !== event.pointerId) return;
-  const direction = directionFromDelta(event.clientX - pointerStart.x, event.clientY - pointerStart.y);
+  if (!dragMoved) {
+    const direction = directionFromDelta(event.clientX - pointerStart.x, event.clientY - pointerStart.y);
+    if (direction) dragMoved = act(direction, { groupDrag: true });
+  }
+  suppressClick = dragMoved;
   pointerStart = null;
-  suppressClick = Boolean(direction);
-  if (direction) act(direction);
+  dragHistoryStart = null;
 });
 
-board.addEventListener("pointercancel", () => { pointerStart = null; });
+board.addEventListener("pointercancel", () => {
+  pointerStart = null;
+  dragHistoryStart = null;
+  dragMoved = false;
+});
 
 board.addEventListener("click", (event) => {
   if (suppressClick) {
