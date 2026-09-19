@@ -119,14 +119,14 @@ export function createPlayer({ id, name, role = null, isHuman = false, profile =
   };
 }
 
-export function createGame({ seed = Date.now(), oreSequence = null } = {}) {
+export function createGame({ seed = Date.now(), oreSequence = null, players = null } = {}) {
   const rng = mulberry32(Number(seed) || 1);
   return {
     seed,
     round: 1,
     danger: CONFIG.startingDanger,
     oreSequence: oreSequence ? [...oreSequence] : generateOreSequence(rng),
-    players: [
+    players: players ? players.map((player) => createPlayer(player)) : [
       createPlayer({ id: "human", name: "あなた", isHuman: true }),
       createPlayer({ id: "safety", ...NPC_PROFILES.safety, profile: "safety" }),
       createPlayer({ id: "greedy", ...NPC_PROFILES.greedy, profile: "greedy" }),
@@ -134,7 +134,9 @@ export function createGame({ seed = Date.now(), oreSequence = null } = {}) {
     ],
     vault: [],
     detectedSecretMining: false,
-    suspicion: { human: 0, safety: 0, greedy: 0, tactician: 0 },
+    suspicion: Object.fromEntries((players || [
+      { id: "human" }, { id: "safety" }, { id: "greedy" }, { id: "tactician" },
+    ]).map(({ id }) => [id, 0])),
     history: [],
     ended: false,
     endReason: null,
@@ -343,22 +345,37 @@ export function finaliseGame(state) {
   return state;
 }
 
-export function resolveRound(state, { humanAction, humanScout = false, humanAccusationTarget = null, npcActions = null, npcScouts = null, npcAccusations = null } = {}) {
+export function resolveRound(state, { humanAction, humanScout = false, humanAccusationTarget = null, playerActions = null, playerScouts = null, playerAccusations = null, npcActions = null, npcScouts = null, npcAccusations = null } = {}) {
   if (state.ended) throw new Error("game already ended");
   const human = state.players[0];
+  const multiplayer = playerActions !== null;
   const availability = actionAvailability(state, human);
-  if (human.active && !availability[humanAction]) throw new Error(`action unavailable: ${humanAction}`);
-  if (humanScout && !canScout(state, human)) throw new Error("scout unavailable");
+  if (!multiplayer && human.active && !availability[humanAction]) throw new Error(`action unavailable: ${humanAction}`);
+  if (!multiplayer && humanScout && !canScout(state, human)) throw new Error("scout unavailable");
   const oreId = state.oreSequence[state.round - 1];
   const actions = {};
-  if (human.active) actions.human = humanAction;
-  for (const player of state.players.slice(1)) actions[player.id] = npcActions?.[player.id] ?? chooseNpcAction(state, player);
+  if (multiplayer) {
+    for (const player of state.players) {
+      const action = playerActions?.[player.id] ?? null;
+      if (player.active && !actionAvailability(state, player)[action]) throw new Error(`action unavailable: ${action}`);
+      if (player.active) actions[player.id] = action;
+    }
+  } else {
+    if (human.active) actions.human = humanAction;
+    for (const player of state.players.slice(1)) actions[player.id] = npcActions?.[player.id] ?? chooseNpcAction(state, player);
+  }
   const scouts = {};
-  if (human.active) scouts.human = Boolean(humanScout);
-  for (const player of state.players.slice(1)) {
-    scouts[player.id] = npcScouts && Object.hasOwn(npcScouts, player.id)
-      ? Boolean(npcScouts[player.id]) && canScout(state, player)
-      : chooseNpcScout(state, player);
+  if (multiplayer) {
+    for (const player of state.players) {
+      scouts[player.id] = Boolean(playerScouts?.[player.id]) && canScout(state, player);
+    }
+  } else {
+    if (human.active) scouts.human = Boolean(humanScout);
+    for (const player of state.players.slice(1)) {
+      scouts[player.id] = npcScouts && Object.hasOwn(npcScouts, player.id)
+        ? Boolean(npcScouts[player.id]) && canScout(state, player)
+        : chooseNpcScout(state, player);
+    }
   }
 
   const dangerBefore = state.danger;
@@ -395,12 +412,19 @@ export function resolveRound(state, { humanAction, humanScout = false, humanAccu
   }
 
   const accusations = [];
-  if (humanAccusationTarget) accusations.push({ accuserId: "human", targetId: humanAccusationTarget });
-  for (const player of state.players.slice(1)) {
-    const targetId = npcAccusations && Object.hasOwn(npcAccusations, player.id)
-      ? npcAccusations[player.id]
-      : chooseNpcAccusation(state, player);
-    if (targetId) accusations.push({ accuserId: player.id, targetId });
+  if (multiplayer) {
+    for (const player of state.players) {
+      const targetId = playerAccusations?.[player.id];
+      if (targetId) accusations.push({ accuserId: player.id, targetId });
+    }
+  } else {
+    if (humanAccusationTarget) accusations.push({ accuserId: "human", targetId: humanAccusationTarget });
+    for (const player of state.players.slice(1)) {
+      const targetId = npcAccusations && Object.hasOwn(npcAccusations, player.id)
+        ? npcAccusations[player.id]
+        : chooseNpcAccusation(state, player);
+      if (targetId) accusations.push({ accuserId: player.id, targetId });
+    }
   }
   const accusationResults = accusations.map((accusation) => resolveAccusation(state, accusation)).filter(Boolean);
 

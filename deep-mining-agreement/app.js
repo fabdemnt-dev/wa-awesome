@@ -54,7 +54,10 @@ function renderTitle() {
       <h1 id="title-heading">深層採掘協定</h1>
       <p class="subtitle">掘るほど稼げる。だが、深層は全員まとめて崩れる。</p>
       <div class="button-stack">
-        <button class="button button--primary" type="button" data-action="new-game">ひとりで試す</button>
+        <button class="button button--primary" type="button" data-action="new-game">1人で遊ぶ（CPU対戦）</button>
+        <a class="button online-link" href="online.html?players=2">2人で遊ぶ</a>
+        <a class="button online-link" href="online.html?players=3">3人で遊ぶ</a>
+        <a class="button online-link" href="online.html?players=4">4人で遊ぶ</a>
         <button class="button" type="button" data-action="show-rules" data-return="title">遊び方</button>
       </div>
     </div>
