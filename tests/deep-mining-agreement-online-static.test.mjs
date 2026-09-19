@@ -23,6 +23,18 @@ test('server snapshot exposes only the caller private state before completion', 
   assert.doesNotMatch(source, /oreSequence:\s*game\.oreSequence/);
 });
 
+test('online rooms treat the selected count as humans and fill four seats with server NPCs', () => {
+  const server = fs.readFileSync(new URL('../functions/deep-mining-agreement-online/index.js', import.meta.url), 'utf8');
+  const rules = fs.readFileSync(new URL('../functions/deep-mining-agreement-online/rules.js', import.meta.url), 'utf8');
+  const client = fs.readFileSync(new URL('../deep-mining-agreement/online.js', import.meta.url), 'utf8');
+  assert.match(server, /humanPlayerCount/);
+  assert.match(server, /rules\.addNpcSubmissions\(room\.game\)/);
+  assert.match(rules, /seatNumber <= 4/);
+  assert.match(rules, /NPC_PROFILES/);
+  assert.match(client, /humanPlayerCount: desiredCount/);
+  assert.match(client, /4席対戦/);
+});
+
 test('server requires an explicit HMAC secret and uses a dedicated TTL member collection', () => {
   const source = fs.readFileSync(new URL('../functions/deep-mining-agreement-online/index.js', import.meta.url), 'utf8');
   assert.match(source, /requireInviteHmacKey/);

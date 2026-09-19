@@ -42,7 +42,7 @@ for (const count of [2, 3, 4]) {
   test(`${count} players create, join, start, recover, and finish`, async () => {
     const clients = await Promise.all(Array.from({ length: count + 1 }, (_, i) => client(`${count}-${i}`)));
     try {
-      const host = clients[0]; const created = await host.call('deepMiningAgreementCreateRoom', { displayName: 'Host', playerCount: count, requestId: rid('create') });
+      const host = clients[0]; const created = await host.call('deepMiningAgreementCreateRoom', { displayName: 'Host', humanPlayerCount: count, requestId: rid('create') });
       await assertMemberExpiryMatchesRoom(created.roomId, [host.auth.currentUser.uid]);
       await denied(host.call('deepMiningAgreementStartGame', { roomId: created.roomId, stateVersion: 1, requestId: rid('early') }), 'failed-precondition');
       for (let index = 1; index < count; index += 1) await clients[index].call('deepMiningAgreementJoinRoom', { displayName: `P${index + 1}`, inviteCode: created.inviteCode, requestId: rid(`join${index}`) });
@@ -53,7 +53,11 @@ for (const count of [2, 3, 4]) {
       await assertMemberExpiryMatchesRoom(created.roomId, clients.slice(0, count).map(({ auth }) => auth.currentUser.uid));
       const recovered = await clients[1].call('deepMiningAgreementGetSnapshot', { roomId: created.roomId });
       assert.equal(recovered.room.status, 'playing');
-      assert.equal(recovered.game.players.length, count);
+      assert.equal(recovered.room.humanPlayerCount, count);
+      assert.equal(recovered.game.players.length, 4);
+      assert.equal(recovered.game.players.filter((player) => player.isHuman).length, count);
+      assert.equal(recovered.game.players.filter((player) => !player.isHuman).length, 4 - count);
+      assert.deepEqual(recovered.game.players.filter((player) => !player.isHuman).map((player) => player.name), ['ミナト', 'ガク', 'シオン'].slice(count - 1));
       assert.equal(recovered.game.players.every((player) => player.secretOre == null), true);
       assert.equal(recovered.game.players.every((player) => player.vaultOre == null), true);
       const recoveredAgain = await clients[1].call('deepMiningAgreementGetSnapshot', { roomId: created.roomId });
@@ -74,6 +78,11 @@ for (const count of [2, 3, 4]) {
             assert.deepEqual(await clients[index].call('deepMiningAgreementSubmitAction', payload), result);
             await denied(clients[index].call('deepMiningAgreementSubmitAction', { ...payload, action: 'mine' }), 'already-exists');
           }
+          if (index < count - 1) {
+            const waiting = await clients[index].call('deepMiningAgreementGetSnapshot', { roomId: created.roomId });
+            assert.equal(waiting.game.round, round);
+            assert.equal(waiting.game.submittedSeatIds.every((seatId) => Number(seatId.slice(4)) <= count), true);
+          }
           if (round === 3 && index === 0) {
             const otherPlayerView = await clients[1].call('deepMiningAgreementGetSnapshot', { roomId: created.roomId });
             assert.deepEqual(otherPlayerView.game.submittedSeatIds, ['seat1']);
@@ -91,6 +100,10 @@ for (const count of [2, 3, 4]) {
           assert.equal(resolved.game.players.every((player) => player.secretOre == null), true);
           assert.equal(resolved.game.selfPrivate.secretOre[resolved.game.history[2].oreId], 0);
         }
+        const afterRound = await host.call('deepMiningAgreementGetSnapshot', { roomId: created.roomId });
+        const record = afterRound.game.history[round - 1];
+        assert.equal(Object.keys(record.publicActions).length, 4);
+        assert.equal(record.submittedSeatIds.length, 4);
       }
       snapshot = await host.call('deepMiningAgreementGetSnapshot', { roomId: created.roomId });
       await assertMemberExpiryMatchesRoom(created.roomId, clients.slice(0, count).map(({ auth }) => auth.currentUser.uid));
@@ -99,6 +112,7 @@ for (const count of [2, 3, 4]) {
       assert.equal(snapshot.game.history.length, 8);
       assert.equal(snapshot.game.players[0].secretActions, 1);
       assert.equal(snapshot.game.players[0].secretOre[snapshot.game.history[2].oreId], 1);
+      assert.ok(snapshot.game.players.every((player) => Number.isInteger(player.rank)));
       await denied(host.call('deepMiningAgreementSubmitAction', { ...duplicatePayload, requestId: rid('after-end'), round: 8 }), 'failed-precondition');
     } finally {
       await Promise.allSettled(clients.map(({ firestore }) => terminate(firestore)));
