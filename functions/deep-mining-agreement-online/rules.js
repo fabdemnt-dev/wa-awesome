@@ -3,6 +3,11 @@
 const CONFIG = Object.freeze({ totalRounds: 8, startingDanger: 20, collapseDanger: 100, reinforceReduction: 12, maxAccusations: 2, maxScouts: 2, secretUnlockRound: 3, retreatUnlockRound: 5, collapsePublicLoss: [0.5, 0.4, 0.3, 0.2], secretLossReduction: 0.1 });
 const ORES = Object.freeze({ iron: { value: 1, danger: 7 }, azure: { value: 2, danger: 10 }, gold: { value: 3, danger: 13 } });
 const ACTIONS = new Set(['mine', 'reinforce', 'secret', 'retreat']);
+const NPC_PROFILES = Object.freeze([
+  Object.freeze({ name: 'ミナト', role: '坑道整備士', profile: 'safety' }),
+  Object.freeze({ name: 'ガク', role: '採掘師', profile: 'greedy' }),
+  Object.freeze({ name: 'シオン', role: '鉱脈調査員', profile: 'tactician' }),
+]);
 const emptyBag = () => ({ iron: 0, azure: 0, gold: 0 });
 const oreCount = (bag) => Object.values(bag).reduce((sum, count) => sum + count, 0);
 const oreValue = (bag) => Object.entries(bag).reduce((sum, [id, count]) => sum + ORES[id].value * count, 0);
@@ -19,11 +24,35 @@ function oreSequence(seed) {
   }
   return ['iron', 'azure', 'gold', 'iron', 'azure', 'gold', 'iron', 'azure'];
 }
-function createPlayer(id, name) { return { id, name, active: true, retreated: false, publicOre: emptyBag(), secretOre: emptyBag(), vaultOre: emptyBag(), reinforcement: 0, accusationsUsed: 0, scoutsUsed: 0, discredit: 0, secretActions: 0, accusationSuccesses: 0, accusationFailures: 0, collapseLoss: 0, scoutedRound: null, scoutedOre: null }; }
-function createGame(members, seed = Date.now()) { const players = members.map(({ seatId, displayName }) => createPlayer(seatId, displayName)); return { seed, round: 1, danger: CONFIG.startingDanger, oreSequence: oreSequence(seed), players, vault: [], detectedSecretMining: false, suspicion: Object.fromEntries(players.map(({ id }) => [id, 0])), history: [], submissions: {}, ended: false, endReason: null, collapsed: false, finalised: false }; }
+function createPlayer(id, name, { isHuman, role = null, profile = null }) { return { id, name, role, profile, isHuman, active: true, retreated: false, publicOre: emptyBag(), secretOre: emptyBag(), vaultOre: emptyBag(), reinforcement: 0, accusationsUsed: 0, scoutsUsed: 0, discredit: 0, secretActions: 0, accusationSuccesses: 0, accusationFailures: 0, collapseLoss: 0, scoutedRound: null, scoutedOre: null }; }
+function createGame(members, seed = Date.now()) {
+  if (!Array.isArray(members) || members.length < 2 || members.length > 4) throw new Error('人間プレイヤー数は2〜4人です。');
+  const players = members.map(({ seatId, displayName }) => createPlayer(seatId, displayName, { isHuman: true }));
+  for (let seatNumber = 2; seatNumber <= 4; seatNumber += 1) {
+    const seatId = `seat${seatNumber}`;
+    if (players.some((player) => player.id === seatId)) continue;
+    const profile = NPC_PROFILES[seatNumber - 2];
+    players.push(createPlayer(seatId, profile.name, { isHuman: false, role: profile.role, profile: profile.profile }));
+  }
+  return { seed, round: 1, danger: CONFIG.startingDanger, oreSequence: oreSequence(seed), players, vault: [], detectedSecretMining: false, suspicion: Object.fromEntries(players.map(({ id }) => [id, 0])), history: [], submissions: {}, ended: false, endReason: null, collapsed: false, finalised: false };
+}
 function availability(game, player, action) { return player.active && ACTIONS.has(action) && (action !== 'secret' || game.round >= 3) && (action !== 'retreat' || game.round >= 5); }
 function canScout(game, player) { return player.active && game.round < 8 && player.scoutsUsed < 2; }
 function canAccuse(game, player) { return player.active && game.round >= 3 && game.detectedSecretMining && player.accusationsUsed < 2; }
+function weightedChoice(weights, random) { const entries = Object.entries(weights).filter(([, weight]) => weight > 0); const total = entries.reduce((sum, [, weight]) => sum + weight, 0); let cursor = random() * total; for (const [id, weight] of entries) { cursor -= weight; if (cursor <= 0) return id; } return entries.at(-1)?.[0] || 'mine'; }
+function npcRandom(game, player, salt) { const playerIndex = game.players.findIndex(({ id }) => id === player.id) + 1; return rng(((Number(game.seed) || 1) ^ (game.round * 0x9E3779B1) ^ (playerIndex * 0x85EBCA6B) ^ salt) >>> 0); }
+function npcWeights(game, player) {
+  const oreId = game.oreSequence[game.round - 1]; const value = totalValue(player); const highDanger = game.danger >= 72;
+  const weights = { mine: 45, reinforce: 20, secret: game.round >= 3 ? 8 : 0, retreat: game.round >= 5 ? 5 : 0 };
+  if (player.profile === 'safety') { weights.reinforce += game.danger >= 55 ? 55 : 18; weights.mine -= highDanger ? 25 : 5; weights.secret = game.round >= 3 ? 3 : 0; if (game.round >= 5 && (value >= 11 || game.danger >= 83)) weights.retreat += 48; }
+  if (player.profile === 'greedy') { weights.mine += oreId === 'gold' ? 55 : 22; weights.reinforce = highDanger ? 14 : 5; weights.secret += game.round >= 3 ? (oreId === 'gold' ? 15 : 4) : 0; if (game.round >= 7 && value >= 16) weights.retreat += 15; }
+  if (player.profile === 'tactician') { weights.reinforce += game.round <= 2 ? 28 : 5; weights.secret += game.round >= 3 ? 30 : 0; if (game.round >= 5 && (game.danger >= 86 || value >= 16)) weights.retreat += 32; }
+  return Object.fromEntries(Object.entries(weights).map(([id, weight]) => [id, Math.max(0, availability(game, player, id) ? weight : 0)]));
+}
+function chooseNpcAction(game, player) { return player.active ? weightedChoice(npcWeights(game, player), npcRandom(game, player, 0x13A5BA1D)) : null; }
+function chooseNpcScout(game, player) { if (!canScout(game, player)) return false; const chance = player.profile === 'tactician' ? 0.24 : player.profile === 'safety' ? 0.12 : 0.08; const bonus = game.round <= 3 || game.danger < 45 ? 0.04 : 0; return npcRandom(game, player, 0x5C017)() < chance + bonus; }
+function chooseNpcAccusation(game, player) { if (!canAccuse(game, player)) return null; const random = npcRandom(game, player, 0xACC05E); const chance = player.profile === 'tactician' ? 0.45 : player.profile === 'safety' ? 0.12 : 0.18; if (random() >= chance) return null; const targets = game.players.filter((target) => target.active && target.id !== player.id); if (!targets.length) return null; const maxSuspicion = Math.max(...targets.map((target) => game.suspicion[target.id])); const likely = targets.filter((target) => game.suspicion[target.id] === maxSuspicion); return likely[Math.floor(random() * likely.length)].id; }
+function addNpcSubmissions(game) { for (const player of game.players.filter((item) => item.active && !item.isHuman)) game.submissions[player.id] = { action: chooseNpcAction(game, player), scout: chooseNpcScout(game, player), accusationTarget: chooseNpcAccusation(game, player) }; }
 function removeSecret(player) { const id = Object.keys(ORES).sort((a, b) => ORES[b].value - ORES[a].value).find((key) => player.secretOre[key] > 0); if (id) player.secretOre[id] -= 1; return id || null; }
 function lose(bag, rate) { let remaining = Math.floor(oreCount(bag) * rate + 1e-9); let value = 0; for (const id of Object.keys(ORES).sort((a, b) => ORES[b].value - ORES[a].value)) { const count = Math.min(bag[id], remaining); bag[id] -= count; value += count * ORES[id].value; remaining -= count; } return value; }
 function finish(game) { if (game.finalised) return; const eligible = game.players.filter((p) => p.reinforcement > 0); const random = rng((game.seed ^ 0xA5A5A5A5) >>> 0); while (game.vault.length && eligible.length) { const order = [...eligible].sort((a, b) => b.reinforcement - a.reinforcement || random() - 0.5); for (const player of order) { const id = game.vault.shift(); if (!id) break; player.vaultOre[id] += 1; } } const ranked = [...game.players].sort((a, b) => totalValue(b) - totalValue(a)); let rank = 0; let previous = null; ranked.forEach((player, index) => { const value = totalValue(player); if (value !== previous) rank = index + 1; player.rank = rank; previous = value; }); game.ended = true; game.finalised = true; game.submissions = {}; }
@@ -42,4 +71,4 @@ function resolveRound(game) {
   return game;
 }
 
-module.exports = { CONFIG, ORES, createGame, validateSubmission, resolveRound, totalValue };
+module.exports = { CONFIG, ORES, NPC_PROFILES, createGame, validateSubmission, resolveRound, totalValue, npcWeights, chooseNpcAction, chooseNpcScout, chooseNpcAccusation, addNpcSubmissions };

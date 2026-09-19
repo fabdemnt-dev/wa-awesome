@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { lobbyCapacity, roomCountPayload } from '../deep-mining-agreement/online-compat.js';
 
 test('title offers solo plus two-to-four player modes', () => {
   const app = fs.readFileSync(new URL('../deep-mining-agreement/app.js', import.meta.url), 'utf8');
@@ -21,6 +22,30 @@ test('server snapshot exposes only the caller private state before completion', 
   assert.match(source, /selfPrivate/);
   assert.match(source, /publicPlayer\(p, game\.ended\)/);
   assert.doesNotMatch(source, /oreSequence:\s*game\.oreSequence/);
+});
+
+test('online rooms treat the selected count as humans and fill four seats with server NPCs', () => {
+  const server = fs.readFileSync(new URL('../functions/deep-mining-agreement-online/index.js', import.meta.url), 'utf8');
+  const rules = fs.readFileSync(new URL('../functions/deep-mining-agreement-online/rules.js', import.meta.url), 'utf8');
+  const client = fs.readFileSync(new URL('../deep-mining-agreement/online.js', import.meta.url), 'utf8');
+  assert.match(server, /humanPlayerCount/);
+  assert.match(server, /rules\.addNpcSubmissions\(room\.game\)/);
+  assert.match(rules, /seatNumber <= 4/);
+  assert.match(rules, /NPC_PROFILES/);
+  assert.match(client, /roomCountPayload\(desiredCount\)/);
+  assert.match(client, /4席対戦/);
+});
+
+test('online client remains compatible while old and new Functions versions overlap', () => {
+  for (const humanPlayerCount of [2, 3, 4]) {
+    assert.deepEqual(roomCountPayload(humanPlayerCount), {
+      humanPlayerCount,
+      playerCount: humanPlayerCount,
+    });
+    assert.equal(lobbyCapacity({ humanPlayerCount, playerCount: 4 }), humanPlayerCount);
+    assert.equal(lobbyCapacity({ playerCount: humanPlayerCount }), humanPlayerCount);
+    assert.equal(4 - lobbyCapacity({ playerCount: humanPlayerCount }), 4 - humanPlayerCount);
+  }
 });
 
 test('server requires an explicit HMAC secret and uses a dedicated TTL member collection', () => {
