@@ -44,6 +44,7 @@ jobs:
           MOON_SCALE_DUEL_TRANSACTION_DIAGNOSTICS: '1'
           MOON_SCALE_DUEL_DIAGNOSTIC_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
           MOON_SCALE_DUEL_DIAGNOSTIC_CASE: ${{ matrix.case }}
+          MOON_SCALE_DUEL_DIAGNOSTIC_READ_DELAY_MS: '1500'
         run: npx --no-install firebase --config firebase.moon-scale-duel-emulator.json emulators:exec --only auth,firestore,database,functions --project demo-moon-scale-duel "node --test --test-force-exit tests/moon-scale-duel-ready-next-round-diagnostic.test.mjs"
       - name: Remove emulator secrets
         if: ${{ always() }}
