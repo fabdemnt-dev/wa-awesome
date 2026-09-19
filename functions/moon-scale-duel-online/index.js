@@ -99,6 +99,15 @@ function readyNextRoundDiagnostic(event, context, startedAt) {
   }));
 }
 
+async function holdReadyNextRoundDiagnosticAfterReads(diagnostic) {
+  if (process.env.MOON_SCALE_DUEL_TRANSACTION_DIAGNOSTICS !== '1') return;
+  const delayMillis = Number(process.env.MOON_SCALE_DUEL_DIAGNOSTIC_READ_DELAY_MS || 0);
+  if (!Number.isInteger(delayMillis) || delayMillis < 1 || delayMillis > 5000) return;
+  diagnostic('transaction-diagnostic-hold-start');
+  await new Promise((resolve) => setTimeout(resolve, delayMillis));
+  diagnostic('transaction-diagnostic-hold-end');
+}
+
 async function consumeRateLimit(key, limit, windowSeconds) {
   const ref = db.collection('moonScaleDuelRateLimits').doc(key);
   await db.runTransaction(async (tx) => {
@@ -695,6 +704,7 @@ const readyNextRound = onCall(callableOptions, async (request) => {
       tx.get(action), tx.get(room), tx.get(game), tx.get(serverGame), tx.get(member), tx.get(ownPrivate),
     ]);
     diagnostic('transaction-reads-complete');
+    await holdReadyNextRoundDiagnosticAfterReads(diagnostic);
     if (actionSnap.exists) return assertReplay(actionSnap.data(), hash);
     const gameData = gameSnap.data();
     const serverData = serverSnap.data();
