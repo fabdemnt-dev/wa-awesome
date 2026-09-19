@@ -115,7 +115,7 @@ test("試作ページは必要な操作UIとスマホ向けスワイプ設定を
   assert.match(script, /pointerdown/);
   assert.match(script, /pointerup/);
   assert.match(script, /pointermove/);
-  assert.match(script, /groupDrag/);
+  assert.match(script, /groupDrag/);\n  assert.doesNotMatch(script, /structuredClone/);
   assert.match(script, /requestAnimationFrame\(dragStep\)/);
   assert.match(script, /latestPointer/);
   assert.match(script, /cellSize \* 0\.82/);
