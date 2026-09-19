@@ -1,0 +1,78 @@
+name: Moon Scale Duel Transaction Diagnostic
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/moon-scale-duel-transaction-diagnostic.yml'
+      - 'functions/moon-scale-duel-online/index.js'
+      - 'tests/moon-scale-duel-ready-next-round-diagnostic.test.mjs'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ready-next-round-diagnostic:
+    name: ReadyNextRound diagnostic ${{ matrix.case }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        case: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Create emulator secrets
+        env:
+          LOCAL_MOON_INVITE_KEY: local-test-only-moon-invite-key
+          LOCAL_MOON_IP_KEY: local-test-only-moon-ip-key
+        run: |
+          umask 077
+          printf 'MOON_SCALE_DUEL_INVITE_HMAC_KEY=%s\nMOON_SCALE_DUEL_IP_HMAC_KEY=%s\n' "$LOCAL_MOON_INVITE_KEY" "$LOCAL_MOON_IP_KEY" > functions/.secret.local
+      - name: Run readyNextRound transaction diagnostic
+        env:
+          MOON_SCALE_DUEL_TRANSACTION_DIAGNOSTICS: '1'
+          MOON_SCALE_DUEL_DIAGNOSTIC_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+          MOON_SCALE_DUEL_DIAGNOSTIC_CASE: ${{ matrix.case }}
+        run: firebase --config firebase.moon-scale-duel-emulator.json emulators:exec --only auth,firestore,database,functions --project demo-moon-scale-duel "node --test --test-force-exit tests/moon-scale-duel-ready-next-round-diagnostic.test.mjs"
+      - name: Remove emulator secrets
+        if: ${{ always() }}
+        run: |
+          rm -f functions/.secret.local
+          test ! -e functions/.secret.local
+
+  existing-integration:
+    name: Existing Moon Scale Duel integration
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Create emulator secrets
+        env:
+          LOCAL_MOON_INVITE_KEY: local-test-only-moon-invite-key
+          LOCAL_MOON_IP_KEY: local-test-only-moon-ip-key
+        run: |
+          umask 077
+          printf 'MOON_SCALE_DUEL_INVITE_HMAC_KEY=%s\nMOON_SCALE_DUEL_IP_HMAC_KEY=%s\n' "$LOCAL_MOON_INVITE_KEY" "$LOCAL_MOON_IP_KEY" > functions/.secret.local
+      - name: Run existing integration tests
+        run: npm run test:moon-scale-duel:integration
+      - name: Remove emulator secrets
+        if: ${{ always() }}
+        run: |
+          rm -f functions/.secret.local
+          test ! -e functions/.secret.local
