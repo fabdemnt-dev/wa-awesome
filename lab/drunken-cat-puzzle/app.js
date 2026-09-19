@@ -99,7 +99,7 @@ function render() {
 function act(direction, { groupDrag = false } = {}) {
   if (!DIRECTIONS[direction] || session.state.cleared) return false;
   const previousMoves = session.state.moves;
-  const before = structuredClone(session.state);
+  const before = {\n    ...session.state,\n    walls: session.state.walls.map((wall) => ({ ...wall })),\n    hole: session.state.hole ? { ...session.state.hole } : null,\n    cat: session.state.cat ? { ...session.state.cat } : null,\n    alcohol: session.state.alcohol ? { ...session.state.alcohol } : null,\n  };
   session = performMove(session, direction);
   const moved = session.state.moves !== previousMoves;
   if (moved && groupDrag) {
