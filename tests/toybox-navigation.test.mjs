@@ -360,3 +360,18 @@ test("5ゲームのタイトル画面は共通フッターを持つ", () => {
   assert.match(birdcageObserver, /\.title-site-footer\s*\{[^}]*font-size:\s*\.72rem[^}]*text-align:\s*center[^}]*overflow-wrap:\s*anywhere/s);
   assert.match(deepMiningCss, /\.title-site-footer\s*\{[^}]*font-size:\s*\.72rem[^}]*text-align:\s*center[^}]*overflow-wrap:\s*anywhere/s);
 });
+
+test("双影のタイトルカードとフッターは縦配置を維持する", () => {
+  const titleScreen = sourceBetween(
+    twinShadowCaskets,
+    '<section id="title-screen"',
+    '<section id="game-screen"',
+  );
+
+  assert.match(twinShadowCaskets, /\.title-screen\s*\{[^}]*display:\s*flex[^}]*align-items:\s*stretch[^}]*flex-direction:\s*column[^}]*justify-content:\s*center/s);
+  assert.match(titleScreen, /<div class="title-layout">[\s\S]*?<\/div>\s*<footer class="title-site-footer"><small>双影の宝匣 — Original Web Card Game<\/small><\/footer>/);
+  assert.match(twinShadowCaskets, /\.title-layout\s*\{[^}]*display:\s*grid[^}]*grid-template-columns:\s*minmax\(0,\s*\.94fr\)\s+minmax\(330px,\s*1\.06fr\)/s);
+  assert.match(twinShadowCaskets, /@media \(max-width:\s*760px\)[\s\S]*?\.title-layout\s*\{[^}]*grid-template-columns:\s*1fr/s);
+  assert.match(titleScreen, /<p class="eyebrow">ORIGINAL DEDUCTION GAME<\/p>/);
+  assert.match(twinShadowCaskets, /<a class="back-link" href="\.\.\/toybox\/">← 🎪 おもちゃ箱へ戻る<\/a>/);
+});
