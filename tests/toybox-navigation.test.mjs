@@ -73,11 +73,11 @@ test("おもちゃ箱から鳥籠の観測者へ移動して戻れる", () => {
   assert.match(toybox, /href="\.\.\/twin-shadow-caskets\/"[^>]*class="card-panel"/);
 });
 
-test("おもちゃ箱から1人用の深層採掘協定へ移動して戻れる", () => {
+test("おもちゃ箱から1〜4人用の深層採掘協定へ移動して戻れる", () => {
   assert.match(toybox, /href="\.\.\/deep-mining-agreement\/"[^>]*class="card-panel"/);
   assert.match(toybox, /⛏️ 深層採掘協定/);
   assert.match(toybox, /<p class="game-desc">崩落と駆け引きをくぐり抜け、最も高い価値を持ち帰ろう。<\/p>/);
-  assert.match(deepMiningAgreement, /<title>深層採掘協定｜初版プロトタイプ<\/title>/);
+  assert.match(deepMiningAgreement, /<title>深層採掘協定｜1〜4人用<\/title>/);
   assert.match(toybox, /href="\.\.\/shadow-card\.html"[^>]*class="card-panel"/);
   assert.match(toybox, /href="\.\.\/moon-scale-duel-select\.html"[^>]*class="card-panel"/);
   assert.match(toybox, /href="\.\.\/twin-shadow-caskets\/"[^>]*class="card-panel"/);
@@ -90,7 +90,7 @@ test("全5ゲームの現在対応人数を文字入りピルで表示する", (
     ["月秤の決闘", "1〜2人用", "player-count--1-2"],
     ["双影の宝匣", "1人用", "player-count--1"],
     ["鳥籠の観測者", "1人用", "player-count--1"],
-    ["深層採掘協定", "1人用", "player-count--1"],
+    ["深層採掘協定", "1〜4人用", "player-count--1-4"],
   ];
 
   for (const [title, count, colorClass] of cards) {
@@ -99,9 +99,9 @@ test("全5ゲームの現在対応人数を文字入りピルで表示する", (
   }
 
   assert.equal((toybox.match(/class="player-count /g) || []).length, 5);
-  assert.equal((toybox.match(/player-count--1-4">1〜4人用/g) || []).length, 1);
+  assert.equal((toybox.match(/player-count--1-4">1〜4人用/g) || []).length, 2);
   assert.equal((toybox.match(/player-count--1-2">1〜2人用/g) || []).length, 1);
-  assert.equal((toybox.match(/player-count--1">1人用/g) || []).length, 3);
+  assert.equal((toybox.match(/player-count--1">1人用/g) || []).length, 2);
   assert.match(toybox, /\.player-count--1\s*\{[^}]*background:\s*#ecfdf5[^}]*color:\s*#166534/s);
   assert.match(toybox, /\.player-count--1-2\s*\{[^}]*background:\s*#f5f3ff[^}]*color:\s*#5b21b6/s);
   assert.match(toybox, /\.player-count--1-4\s*\{[^}]*background:\s*#fff7ed[^}]*color:\s*#9a3412/s);
