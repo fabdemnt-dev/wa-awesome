@@ -38,6 +38,23 @@ async function assertMemberExpiryMatchesRoom(roomId, uids) {
 
 test.after(async () => { if (ownedAdminApp) await deleteAdminApp(ownedAdminApp); });
 
+test('legacy playerCount clients can create rooms against the new Functions', async () => {
+  const host = await client('legacy-create');
+  try {
+    const created = await host.call('deepMiningAgreementCreateRoom', {
+      displayName: 'Legacy Host',
+      playerCount: 2,
+      requestId: rid('legacy-create'),
+    });
+    const snapshot = await host.call('deepMiningAgreementGetSnapshot', { roomId: created.roomId });
+    assert.equal(snapshot.room.humanPlayerCount, 2);
+    assert.equal(snapshot.room.playerCount, 2);
+  } finally {
+    await terminate(host.firestore);
+    await deleteApp(host.app);
+  }
+});
+
 for (const count of [2, 3, 4]) {
   test(`${count} players create, join, start, recover, and finish`, async () => {
     const clients = await Promise.all(Array.from({ length: count + 1 }, (_, i) => client(`${count}-${i}`)));
