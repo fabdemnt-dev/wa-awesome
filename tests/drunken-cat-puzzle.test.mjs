@@ -110,7 +110,16 @@ test("試作ページは必要な操作UIとスマホ向けスワイプ設定を
   }
   assert.match(html, /遊び方/);
   assert.match(html, /noindex, nofollow/);
-  assert.doesNotMatch(script, /\\\\nlet latestPointer/);\n  assert.match(script, /let dragMoved = false;\\s+let latestPointer = null;\\s+let dragFrame = 0;\\s+let dragAxis = null;/);\n  assert.match(script, /pointerdown/);
-  assert.match(script, /pointerup/);\n  assert.match(script, /pointermove/);\n  assert.match(script, /groupDrag/);\n  assert.match(script, /requestAnimationFrame\\(dragStep\\)/);\n  assert.match(script, /latestPointer/);\n  assert.match(script, /cellSize \\* 0\\.82/);\n  assert.match(script, /dragAxis/);\n  assert.match(script, /session\\.history = \\[dragHistoryStart\\]/);
+  assert.doesNotMatch(script, /\\nlet latestPointer/);
+  assert.match(script, /let dragMoved = false;\s+let latestPointer = null;\s+let dragFrame = 0;\s+let dragAxis = null;/);
+  assert.match(script, /pointerdown/);
+  assert.match(script, /pointerup/);
+  assert.match(script, /pointermove/);
+  assert.match(script, /groupDrag/);
+  assert.match(script, /requestAnimationFrame\(dragStep\)/);
+  assert.match(script, /latestPointer/);
+  assert.match(script, /cellSize \* 0\.82/);
+  assert.match(script, /dragAxis/);
+  assert.match(script, /session\.history = \[dragHistoryStart\]/);
   assert.match(css, /touch-action:\s*none/);
 });
