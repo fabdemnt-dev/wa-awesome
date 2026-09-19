@@ -22,3 +22,11 @@ test('server snapshot exposes only the caller private state before completion', 
   assert.match(source, /publicPlayer\(p, game\.ended\)/);
   assert.doesNotMatch(source, /oreSequence:\s*game\.oreSequence/);
 });
+
+test('server requires an explicit HMAC secret and uses a dedicated TTL member collection', () => {
+  const source = fs.readFileSync(new URL('../functions/deep-mining-agreement-online/index.js', import.meta.url), 'utf8');
+  assert.match(source, /requireInviteHmacKey/);
+  assert.doesNotMatch(source, /emulator-dma-key/);
+  assert.match(source, /collection\('deepMiningAgreementMembers'\)/);
+  assert.doesNotMatch(source, /collection\('members'\)/);
+});
