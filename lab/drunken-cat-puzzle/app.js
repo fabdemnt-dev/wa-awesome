@@ -24,7 +24,7 @@ let session = createSession(stageIndex);
 let pointerStart = null;
 let suppressClick = false;
 let dragHistoryStart = null;
-let dragMoved = false;
+let dragMoved = false;\nlet latestPointer = null;\nlet dragFrame = 0;
 
 const eventMessages = {
   start: "盤面をスワイプして穴を動かそう",
@@ -114,50 +114,78 @@ function directionFromDelta(dx, dy) {
   return dy > 0 ? "down" : "up";
 }
 
-board.addEventListener("pointerdown", (event) => {
-  pointerStart = { id: event.pointerId, x: event.clientX, y: event.clientY };
-  dragHistoryStart = null;
-  dragMoved = false;
-  board.setPointerCapture?.(event.pointerId);
-});
+function dragStep() {
+  dragFrame = 0;
+  if (!pointerStart || !latestPointer || session.state.cleared) return;
 
-board.addEventListener("pointermove", (event) => {
-  if (!pointerStart || pointerStart.id !== event.pointerId || session.state.cleared) return;
   const cell = board.querySelector(".cell");
-  const step = Math.max(24, (cell?.getBoundingClientRect().width ?? 48) * 0.58);
-  let dx = event.clientX - pointerStart.x;
-  let dy = event.clientY - pointerStart.y;
-  let safety = 0;
-  while (Math.max(Math.abs(dx), Math.abs(dy)) >= step && safety < 12) {
+  const step = Math.max(22, (cell?.getBoundingClientRect().width ?? 48) * 0.52);
+  const dx = latestPointer.x - pointerStart.x;
+  const dy = latestPointer.y - pointerStart.y;
+
+  if (Math.max(Math.abs(dx), Math.abs(dy)) >= step) {
     const direction = Math.abs(dx) > Math.abs(dy)
       ? (dx > 0 ? "right" : "left")
       : (dy > 0 ? "down" : "up");
     const moved = act(direction, { groupDrag: true });
     dragMoved ||= moved;
-    if (!moved) break;
-    if (direction === "right") pointerStart.x += step;
-    if (direction === "left") pointerStart.x -= step;
-    if (direction === "down") pointerStart.y += step;
-    if (direction === "up") pointerStart.y -= step;
-    dx = event.clientX - pointerStart.x;
-    dy = event.clientY - pointerStart.y;
-    safety += 1;
+
+    if (moved) {
+      if (direction === "right") pointerStart.x += step;
+      if (direction === "left") pointerStart.x -= step;
+      if (direction === "down") pointerStart.y += step;
+      if (direction === "up") pointerStart.y -= step;
+    } else {
+      pointerStart.x = latestPointer.x;
+      pointerStart.y = latestPointer.y;
+    }
   }
+
+  if (pointerStart) dragFrame = requestAnimationFrame(dragStep);
+}
+
+function startDragLoop() {
+  if (!dragFrame) dragFrame = requestAnimationFrame(dragStep);
+}
+
+function stopDragLoop() {
+  if (dragFrame) cancelAnimationFrame(dragFrame);
+  dragFrame = 0;
+}
+
+board.addEventListener("pointerdown", (event) => {
+  pointerStart = { id: event.pointerId, x: event.clientX, y: event.clientY };
+  latestPointer = { x: event.clientX, y: event.clientY };
+  dragHistoryStart = null;
+  dragMoved = false;
+  board.setPointerCapture?.(event.pointerId);
+  startDragLoop();
+});
+
+board.addEventListener("pointermove", (event) => {
+  if (!pointerStart || pointerStart.id !== event.pointerId) return;
+  latestPointer = { x: event.clientX, y: event.clientY };
+  startDragLoop();
 });
 
 board.addEventListener("pointerup", (event) => {
   if (!pointerStart || pointerStart.id !== event.pointerId) return;
+  latestPointer = { x: event.clientX, y: event.clientY };
   if (!dragMoved) {
     const direction = directionFromDelta(event.clientX - pointerStart.x, event.clientY - pointerStart.y);
     if (direction) dragMoved = act(direction, { groupDrag: true });
   }
   suppressClick = dragMoved;
+  stopDragLoop();
   pointerStart = null;
+  latestPointer = null;
   dragHistoryStart = null;
 });
 
 board.addEventListener("pointercancel", () => {
+  stopDragLoop();
   pointerStart = null;
+  latestPointer = null;
   dragHistoryStart = null;
   dragMoved = false;
 });
