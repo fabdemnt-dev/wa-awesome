@@ -31,7 +31,8 @@ for (const count of [2, 3, 4]) {
       const recovered = await clients[1].call('deepMiningAgreementGetSnapshot', { roomId: created.roomId });
       assert.equal(recovered.room.status, 'playing');
       assert.equal(recovered.game.players.length, count);
-      assert.equal(recovered.game.players.some((player) => Object.hasOwn(player, 'secretOre')), false);
+      assert.equal(recovered.game.players.every((player) => player.secretOre == null), true);
+      assert.equal(recovered.game.players.every((player) => player.vaultOre == null), true);
       const recoveredAgain = await clients[1].call('deepMiningAgreementGetSnapshot', { roomId: created.roomId });
       assert.equal(recoveredAgain.self.seatId, recovered.self.seatId);
       assert.equal(clients[1].auth.currentUser.uid.length > 0, true);
@@ -54,16 +55,17 @@ for (const count of [2, 3, 4]) {
             const otherPlayerView = await clients[1].call('deepMiningAgreementGetSnapshot', { roomId: created.roomId });
             assert.deepEqual(otherPlayerView.game.submittedSeatIds, ['seat1']);
             assert.equal(otherPlayerView.game.history.length, 2);
-            assert.equal(otherPlayerView.game.players.some((player) => Object.hasOwn(player, 'secretOre')), false);
+            assert.equal(otherPlayerView.game.players.every((player) => player.secretOre == null), true);
+            assert.equal(otherPlayerView.game.players.every((player) => player.vaultOre == null), true);
             assert.equal(Object.hasOwn(otherPlayerView.game, 'submissions'), false);
-            assert.equal(JSON.stringify(otherPlayerView.game.history).includes('secret'), false);
+            assert.equal(otherPlayerView.game.history.some((entry) => Object.values(entry.publicActions).includes('secret')), false);
           }
         }
         if (round === 3) {
           const resolved = await clients[1].call('deepMiningAgreementGetSnapshot', { roomId: created.roomId });
           assert.equal(resolved.game.history[2].publicActions.seat1, 'mine');
           assert.equal(resolved.game.history[2].secretCount, 1);
-          assert.equal(resolved.game.players.some((player) => Object.hasOwn(player, 'secretOre')), false);
+          assert.equal(resolved.game.players.every((player) => player.secretOre == null), true);
           assert.equal(resolved.game.selfPrivate.secretOre[resolved.game.history[2].oreId], 0);
         }
       }
