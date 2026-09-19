@@ -99,7 +99,13 @@ function render() {
 function act(direction, { groupDrag = false } = {}) {
   if (!DIRECTIONS[direction] || session.state.cleared) return false;
   const previousMoves = session.state.moves;
-  const before = {\n    ...session.state,\n    walls: session.state.walls.map((wall) => ({ ...wall })),\n    hole: session.state.hole ? { ...session.state.hole } : null,\n    cat: session.state.cat ? { ...session.state.cat } : null,\n    alcohol: session.state.alcohol ? { ...session.state.alcohol } : null,\n  };
+  const before = {
+    ...session.state,
+    walls: session.state.walls.map((wall) => ({ ...wall })),
+    hole: session.state.hole ? { ...session.state.hole } : null,
+    cat: session.state.cat ? { ...session.state.cat } : null,
+    alcohol: session.state.alcohol ? { ...session.state.alcohol } : null,
+  };
   session = performMove(session, direction);
   const moved = session.state.moves !== previousMoves;
   if (moved && groupDrag) {
