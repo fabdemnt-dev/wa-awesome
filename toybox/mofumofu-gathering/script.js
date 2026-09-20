@@ -280,8 +280,9 @@ function resolveJudge(saysTrue) {
   receiver.faceUp[offer.card.id]++;
   flash(success?"✨ 判定成功！":"💭 判定失敗！");
   game.offer=null;
+  $("offerCard").classList.add("revealed");
   $("offerCardMain").textContent=animal(offer.card.id).emoji;
-  $("offerCardSub").textContent=`正体：${animal(offer.card.id).name}`;
+  $("offerCardSub").textContent="";
   $("offerText").textContent=`${receiver.name}が受け取りました`;
   render();
   if(receiver.faceUp[offer.card.id]>=4) return later(()=>eliminate(receiver,offer.card.id),700);
@@ -307,7 +308,7 @@ function eliminate(player, animalId) {
 
 function finishByHandEmpty(alive) {
   const counts=alive.map(p=>({p,n:faceCards(p)}));
-  game.finalSnapshot=game.players.map(p=>({id:p.id,name:p.name,face:p.face,count:faceCards(p),out:p.out}));
+  game.finalSnapshot=game.players.map(p=>({id:p.id,name:p.name,face:p.face,count:faceCards(p),out:p.out,faceUp:{...p.faceUp}}));
   if(counts[0].n===counts[1].n) {
     finishResult(null,`手札切れで終了。表向きカードは両者とも${counts[0].n}枚。引き分けです！`,"🤝 引き分け！");
   } else {
@@ -325,8 +326,11 @@ function finishResult(winner,text,title) {
   game.ended=true; clearTimers();
   $("resultTitle").textContent=title;
   $("resultText").textContent=text;
-  const snapshot=game.finalSnapshot || game.players.map(p=>({id:p.id,name:p.name,face:p.face,count:faceCards(p),out:p.out}));
-  $("resultDetails").innerHTML=snapshot.map(p=>`<div class="result-row"><strong>${p.face} ${p.name}</strong><span>表向き ${p.count}枚${p.out?" ／ 脱落":""}</span></div>`).join("");
+  const snapshot=game.finalSnapshot || game.players.map(p=>({id:p.id,name:p.name,face:p.face,count:faceCards(p),out:p.out,faceUp:{...p.faceUp}}));
+  $("resultDetails").innerHTML=snapshot.map(p=>{
+    const detail=ANIMALS.filter(a=>(p.faceUp?.[a.id]||0)>0).map(a=>`<span class="result-chip">${a.emoji}${a.name} ×${p.faceUp[a.id]}</span>`).join("") || '<span class="result-chip">なし</span>';
+    return `<div class="result-player"><div class="result-row"><strong>${p.face} ${p.name}</strong><span>表向き ${p.count}枚${p.out?" ／ 脱落":""}</span></div><div class="result-breakdown">${detail}</div></div>`;
+  }).join("");
   $("resultAnimals").innerHTML="<span>🐾</span><span>✨</span><span>🐾</span>";
   $("resultAnimals").classList.remove("bounce");
   showScreen("resultScreen");
