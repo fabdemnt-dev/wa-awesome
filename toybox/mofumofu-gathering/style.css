@@ -41,7 +41,7 @@ h1{margin:10px 0;font-size:clamp(38px,11vw,58px);line-height:1.05;color:#d96c8c;
 .offer-area{text-align:center;max-width:210px}.offer-card{margin:auto}.offer-area p{margin:6px 0 0;padding:4px 8px;border-radius:10px;background:rgba(255,255,255,.82);font-size:13px;font-weight:900}
 .flying-card{display:none;position:absolute;z-index:10;left:50%;top:35%;transform:translate(-50%,-50%)}
 .flying-card.fly-left{display:grid;animation:flyLeft .55s ease both}.flying-card.fly-right{display:grid;animation:flyRight .55s ease both}
-.flash{position:absolute;inset:auto 14px 8px;text-align:center;font-weight:900;pointer-events:none}
+.flash{position:absolute;left:50%;bottom:8px;z-index:12;max-width:calc(100% - 28px);padding:6px 12px;border-radius:999px;background:rgba(255,253,248,.96);box-shadow:0 4px 12px rgba(80,55,40,.14);text-align:center;font-weight:900;pointer-events:none;transform:translateX(-50%)}
 .flash.show{animation:pop .8s ease}
 .log-panel,.collections,.action-panel{margin-top:12px;padding:12px;background:rgba(255,253,248,.92);border-radius:var(--radius);box-shadow:var(--shadow)}
 .log-panel h2,.step h2{font-size:15px;margin:0 0 8px}
@@ -55,7 +55,7 @@ h1{margin:10px 0;font-size:clamp(38px,11vw,58px);line-height:1.05;color:#d96c8c;
 .hand-card{flex:0 0 64px;height:88px;border:3px solid #fff;border-radius:15px;background:#fff;box-shadow:0 4px 10px rgba(80,55,40,.12);font-size:31px;display:flex;flex-direction:column;align-items:center;justify-content:center}
 .hand-card small{font-size:10px;font-weight:900}.hand-card.selected{outline:4px solid #e981a0;transform:translateY(-4px)}
 .animal-buttons,.target-buttons{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
-.animal-buttons button,.target-buttons button{min-height:46px;border:0;border-radius:14px;background:#fff;border:2px solid #eadbd2;font-weight:800}
+.animal-buttons button,.target-buttons button{min-height:46px;border:0;border-radius:14px;background:#fff;border:2px solid #eadbd2;font-weight:800}.animal-buttons button.selected{background:#fff0f5;border-color:#e981a0;box-shadow:0 0 0 3px rgba(233,129,160,.18) inset}
 .judge-buttons{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .judge-buttons button{min-height:62px;border:0;border-radius:18px;font-size:18px;font-weight:900}
 .truth{background:var(--mint)}.lie{background:var(--pink)}
@@ -66,7 +66,7 @@ dialog::backdrop{background:rgba(65,49,43,.45);backdrop-filter:blur(2px)}
 .result-animals{min-height:80px;font-size:46px}.result-animals.bounce span{display:inline-block;animation:bounce .55s ease infinite alternate}.result-animals span:nth-child(2){animation-delay:.1s}.result-animals span:nth-child(3){animation-delay:.2s}.result-animals span:nth-child(4){animation-delay:.3s}
 .result-card h1{font-size:40px}.result-card p{line-height:1.7;font-weight:700}
 @keyframes fade{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
-@keyframes pop{0%{opacity:0;transform:scale(.85)}25%,70%{opacity:1;transform:scale(1)}100%{opacity:0}}
+@keyframes pop{0%{opacity:0;transform:translateX(-50%) scale(.85)}25%,70%{opacity:1;transform:translateX(-50%) scale(1)}100%{opacity:0;transform:translateX(-50%) scale(1)}}
 @keyframes flyLeft{0%{transform:translate(-50%,-20%) scale(.8)}100%{transform:translate(-210%,-95%) rotate(-12deg) scale(.7);opacity:0}}
 @keyframes flyRight{0%{transform:translate(-50%,-20%) scale(.8)}100%{transform:translate(110%,-95%) rotate(12deg) scale(.7);opacity:0}}
 @keyframes bounce{to{transform:translateY(-16px) rotate(4deg)}}
