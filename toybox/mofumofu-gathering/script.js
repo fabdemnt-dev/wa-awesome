@@ -193,7 +193,10 @@ function renderCollections() {
       const n=p.faceUp[a.id];
       return `<span class="chip ${n>=3?"danger":""}">${a.emoji}${a.name} ×${n}</span>`;
     }).join("") || '<span class="chip">まだ0枚</span>';
-    return `<div class="collection-row ${p.out?"out":""}"><strong>${p.face} ${p.name}${p.out?"（脱落）":""}</strong><div class="chips">${chips}</div></div>`;
+    return `<section class="collection-player ${p.out?"out":""}">
+      <div class="collection-owner"><span class="collection-face">${p.face}</span><strong>${p.name}${p.out?"（脱落）":""}</strong><span class="collection-total">表向き ${faceCards(p)}枚</span></div>
+      <div class="chips">${chips}</div>
+    </section>`;
   }).join("");
 }
 function renderLog() {
