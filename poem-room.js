@@ -342,9 +342,15 @@ function connectPoemRoom() {
     historyUnsubscribe = subscribeRoomHistory(state.roomRef, (history) => {
       state.roomHistory = history;
       if (state.currentData) {
+        // 履歴だけの更新ではroom全体を再描画しない。
+        // 現在のroom状態へ履歴を合成し、CSV/コピーなど履歴利用機能の参照だけを最新化する。
         const roomData = { ...state.currentData };
         delete roomData.history;
-        applyRoomData(roomData);
+        const embeddedHistory = state.legacyHistory || [];
+        state.currentData = {
+          ...roomData,
+          history: [...embeddedHistory, ...state.roomHistory],
+        };
       }
     }, (error) => {
       console.error('[history-onSnapshot]', error);
