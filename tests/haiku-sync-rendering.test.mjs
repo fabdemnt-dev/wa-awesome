@@ -25,15 +25,15 @@ test('hand Snapshotは手札だけを描画し、room更新と盤面を二重描
   const apply = between(source, 'function applyRoomData', '\n// ブラウザがバックグラウンド');
   assert.match(apply, /renderBoards\(\);/);
 });
-test('履歴Snapshotは現在のroomデータをapplyRoomDataへ再投入する', async () => {
+test('履歴Snapshotは得点履歴だけを更新しroom全体を再描画しない', async () => {
   const source = await fs.readFile(new URL('../haiku-room.js', import.meta.url), 'utf8');
   const join = between(source, 'window.joinRoom =', '\nwindow.removeSubmittedWord');
-  assert.match(join, /subscribeRoomHistory\(state\.roomRef/);
-  assert.match(join, /const roomData = \{ \.\.\.state\.currentData \}/);
-  assert.match(join, /delete roomData\.history/);
-  assert.match(join, /applyRoomData\(roomData\)/);
+  const history = between(join, 'subscribeRoomHistory(state.roomRef', "}, (error) => {");
+  assert.match(history, /state\.roomHistory = history/);
+  assert.match(history, /updateScoreHistory\(state\.currentData\)/);
+  assert.doesNotMatch(history, /applyRoomData\(/);
+  assert.match(history, /history: \[\.\.\.embeddedHistory, \.\.\.state\.roomHistory\]/);
 });
-
 test('5秒再同期はonSnapshotと並行する補助経路として残っている', async () => {
   const source = await fs.readFile(new URL('../haiku-room.js', import.meta.url), 'utf8');
   const polling = between(source, 'function startRoomResyncPolling()', '\nwindow.manualResync');
