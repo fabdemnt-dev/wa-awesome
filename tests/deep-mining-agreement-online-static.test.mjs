@@ -4,10 +4,20 @@ import fs from 'node:fs';
 import { lobbyCapacity, roomCountPayload } from '../deep-mining-agreement/online-compat.js';
 import { npcPortrait } from '../deep-mining-agreement/online-portraits.js';
 
-test('title offers solo plus two-to-four player modes', () => {
+test('title keeps player counts behind a compact online selection screen', () => {
   const app = fs.readFileSync(new URL('../deep-mining-agreement/app.js', import.meta.url), 'utf8');
-  for (const count of [2, 3, 4]) assert.match(app, new RegExp(`online\\.html\\?players=${count}`));
-  assert.match(app, /1人で遊ぶ（CPU対戦）/);
+  const title = app.slice(app.indexOf('function renderTitle()'), app.indexOf('function renderOnlinePlayerCount()'));
+  const onlineSelection = app.slice(app.indexOf('function renderOnlinePlayerCount()'), app.indexOf('function renderRules('));
+  assert.match(title, /1人で遊ぶ（CPU対戦）/);
+  assert.match(title, /data-action="show-online-player-count">オンラインで遊ぶ/);
+  assert.match(title, /data-action="show-rules"[^>]*>遊び方/);
+  assert.doesNotMatch(title, /online\.html\?players=/);
+  assert.match(onlineSelection, /id="online-player-count-heading">オンラインで遊ぶ/);
+  assert.match(onlineSelection, /参加する人間の人数を選んでください。/);
+  for (const count of [2, 3, 4]) {
+    assert.match(onlineSelection, new RegExp(`href="online\\.html\\?players=${count}">${count}人</a>`));
+  }
+  assert.match(onlineSelection, /data-action="back-to-title">タイトルへ戻る/);
 });
 
 test('online client uses server callable state and stores only recovery room id', () => {
