@@ -116,3 +116,12 @@ test('最終結果は各プレイヤーが集めた動物ごとの枚数も保�
   assert.match(script, /class="result-breakdown"/);
   assert.match(script, /class="result-chip"/);
 });
+
+
+test('もう一回あそぶ時は前ゲームのカード表面と判定表示をリセットする', () => {
+  assert.match(script, /function resetOfferVisual\(\)/);
+  assert.match(script, /offerCard"\)\.classList\.remove\("revealed"\)/);
+  assert.match(script, /offerCardMain"\)\.textContent="？"/);
+  assert.match(script, /flash"\)\.textContent=""/);
+  assert.match(script, /function startGame\(\) \{\s*clearTimers\(\);\s*resetOfferVisual\(\);/);
+});
