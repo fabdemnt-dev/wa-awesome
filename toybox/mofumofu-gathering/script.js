@@ -224,7 +224,7 @@ function createOffer(from,to,card,claim) {
   addLog(`${giver.name}「これは『${a.name}』だよ」→ ${receiver.name}`);
   $("offerText").textContent=`${giver.name}「${a.name}だよ」`;
   $("offerCardMain").textContent="？";
-  $("offerCardSub").textContent=`宣言：${a.name}`;
+  $("offerCardSub").textContent="";
   animateCard(to);
   render();
   if(to!=="you") later(()=>cpuJudge(to),800);
