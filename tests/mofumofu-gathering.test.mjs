@@ -63,8 +63,8 @@ test('手札の自動整列は動物の固定順で並べ替え、選択IDを変
 });
 
 test('判定結果はテーブルの絶対配置から分離し、表向きカードはプレイヤー別エリアにする', () => {
-  assert.doesNotMatch(script, /class="collection-row"><strong>/);
-  assert.match(script, /class="collection-row \$\{p\.out/);
+  assert.doesNotMatch(script, /class="collection-row/);
+  assert.match(script, /class="collection-player/);
   assert.match(html, /id="flash"/);
 });
 
@@ -79,15 +79,40 @@ test('結果画面に文字列の改行コードを表示しない', () => {
   assert.doesNotMatch(html, /<\/p>\\n\s*<div id="resultDetails"/);
 });
 
-test('判定中は宣言と正体をカード欄で区別し、自分の手札も表示する', () => {
-  assert.match(html, /id="offerCardSub"/);
+test('判定中は宣言アイコンと判定後の表向きカードを区別し、自分の手札も表示する', () => {
   assert.match(html, /id="judgeHand"/);
-  assert.match(script, /宣言：/);
-  assert.match(script, /正体：/);
+  assert.match(script, /offerCard"\)\.classList\.remove\("revealed"\)/);
+  assert.match(script, /offerCardMain"\)\.textContent=a\.emoji/);
+  assert.match(script, /offerCard"\)\.classList\.add\("revealed"\)/);
+  assert.match(script, /offerCardMain"\)\.textContent=animal\(offer\.card\.id\)\.emoji/);
+  assert.doesNotMatch(script, /宣言：/);
+  assert.doesNotMatch(script, /正体：/);
   assert.match(script, /function renderJudgeHand/);
 });
 
 test('CPUアイコンはカード8種の動物と重複しない', () => {
   assert.match(script, /name:"こはる", face:"🌸"/);
   assert.match(script, /name:"みつき", face:"🌙"/);
+});
+
+
+test('集まったカードはプレイヤーごとの独立パネルで表示する', () => {
+  assert.match(script, /class="collection-player/);
+  assert.match(script, /class="collection-owner"/);
+  assert.match(script, /class="collection-total">表向き/);
+  assert.doesNotMatch(script, /class="collection-row \$\{p\.out/);
+});
+
+
+test('宣言カードの補助文字は空で、判定後だけ表面クラスになる', () => {
+  assert.match(script, /offerCardSub"\)\.textContent=""/);
+  assert.match(script, /offerCard"\)\.classList\.add\("revealed"\)/);
+  assert.doesNotMatch(script, /offerCardSub"\)\.textContent=\`宣言：/);
+  assert.doesNotMatch(script, /offerCardSub"\)\.textContent=\`正体：/);
+});
+
+test('最終結果は各プレイヤーが集めた動物ごとの枚数も保存して表示する', () => {
+  assert.match(script, /faceUp:\{\.\.\.p\.faceUp\}/);
+  assert.match(script, /class="result-breakdown"/);
+  assert.match(script, /class="result-chip"/);
 });
