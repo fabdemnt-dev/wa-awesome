@@ -37,8 +37,9 @@
           <div id="offerCard" class="offer-card">？</div>
           <p id="offerText">カードを選んでね</p>
         </div>
-        <div id="flash" class="flash" role="status" aria-live="polite"></div>
       </section>
+
+      <div id="flash" class="flash" role="status" aria-live="polite"></div>
 
       <section class="log-panel">
         <h2>おはなし</h2>
@@ -49,7 +50,7 @@
 
       <section class="action-panel">
         <div id="handStep" class="step">
-          <h2>① 渡すカードを選ぶ</h2>
+          <div class="step-heading"><h2>① 渡すカードを選ぶ</h2><button class="sort-btn" id="sortHandBtn">↕ 自動整列</button></div>
           <div id="hand" class="hand"></div>
         </div>
         <div id="claimStep" class="step hidden">
@@ -74,7 +75,7 @@
       <div class="result-card">
         <div id="resultAnimals" class="result-animals" aria-hidden="true"></div>
         <h1 id="resultTitle">結果</h1>
-        <p id="resultText"></p>
+        <p id="resultText"></p>\n        <div id="resultDetails" class="result-details"></div>
         <button class="primary big" id="retryBtn">もう一回あそぶ</button>
         <button class="secondary big" id="titleBtn">タイトルへ</button>
       </div>
