@@ -213,8 +213,10 @@ function subscribeOwnHand(data) {
     state.myHand7 = Array.isArray(hand.hand7) ? hand.hand7 : [];
     if (hand.redrawUsed === true) state.redrawSuccessKey = snapshotKey;
     state.redrawUsed = state.redrawSuccessKey === snapshotKey || hand.redrawUsed === true;
+    // v2の盤面はroom Snapshotだけを参照して描画する。
+    // hand Snapshotは自分の手札・引き直し状態だけを更新し、room更新と同じ盤面を
+    // 二重描画しない。カード選択中の盤面DOMを不要に作り直すことも避ける。
     renderHand();
-    renderBoards();
   }, (error) => {
     console.error('[hand-onSnapshot]', error);
     showGameError(error, '手札の同期');
@@ -645,9 +647,16 @@ window.joinRoom = async function() {
     subscribeRoomHistory(state.roomRef, (history) => {
       state.roomHistory = history;
       if (state.currentData) {
+        // 履歴だけの更新ではroom全体を再描画しない。
+        // 現在のroom状態と履歴を合成して得点履歴表示だけを更新する。
         const roomData = { ...state.currentData };
         delete roomData.history;
-        applyRoomData(roomData);
+        const embeddedHistory = state.legacyHistory || [];
+        state.currentData = {
+          ...roomData,
+          history: [...embeddedHistory, ...state.roomHistory],
+        };
+        updateScoreHistory(state.currentData);
       }
     }, (error) => {
       console.error('[history-onSnapshot]', error);
