@@ -71,8 +71,18 @@ function freshHistory(players) {
   return Object.fromEntries(players.map(p => [p.id,{truth:0,total:0}]));
 }
 
+function resetOfferVisual() {
+  $("offerCard").classList.remove("revealed");
+  $("offerCardMain").textContent="？";
+  $("offerCardSub").textContent="";
+  $("offerText").textContent="カードを選んでね";
+  $("flash").textContent="";
+  $("flash").classList.remove("show");
+}
+
 function startGame() {
   clearTimers();
+  resetOfferVisual();
   const deck=makeDeck();
   const players=PLAYER_DATA.map(freshPlayer);
   // 10枚ずつ配り、余り2枚は使わない山札へ。
