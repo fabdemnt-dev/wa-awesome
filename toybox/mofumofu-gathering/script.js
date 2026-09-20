@@ -39,7 +39,6 @@ function shuffle(arr) {
 }
 function showScreen(id) {
   screens.forEach(s => $(s).classList.toggle("active", s === id));
-  window.scrollTo({top:0,behavior:"smooth"});
 }
 function activePlayers() { return game.players.filter(p => !p.out); }
 function getPlayer(id) { return game.players.find(p => p.id === id); }
