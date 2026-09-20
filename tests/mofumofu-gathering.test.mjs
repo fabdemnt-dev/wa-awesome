@@ -134,3 +134,11 @@ test('3人生存時も3人目を含めて最少枚数を選ぶ実装である', 
   assert.match(script, /const minCount=Math\.min\(\.\.\.counts\.map/);
   assert.match(script, /const leaders=counts\.filter/);
 });
+
+
+test('公開更新時にCSSとJSの古いキャッシュを使わず、ゲーム中に自動スクロールしない', () => {
+  assert.match(html, /style\.css\?v=20260921-1/);
+  assert.match(html, /script\.js\?v=20260921-1/);
+  assert.doesNotMatch(script, /window\.scrollTo/);
+  assert.doesNotMatch(script, /scrollIntoView/);
+});
