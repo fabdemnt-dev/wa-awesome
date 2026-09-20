@@ -63,6 +63,9 @@ function makeDeck() {
 function freshPlayer(data) {
   return {...data, hand:[], faceUp:Object.fromEntries(ANIMALS.map(a=>[a.id,0])), out:false};
 }
+function freshHistory(players) {
+  return Object.fromEntries(players.map(p => [p.id,{truth:0,total:0}]));
+}
 
 function startGame() {
   clearTimers();
@@ -73,7 +76,7 @@ function startGame() {
   game={
     players, deck, discard:[], turnIndex:0, selectedUid:null, claim:null,
     offer:null, log:["ゲームスタート！ あなたからどうぞ。"],
-    history:{you:{truth:0,total:0},koharu:{truth:0,total:0},mitsuki:{truth:0,total:0}},
+    history:freshHistory(players),
     ended:false
   };
   showScreen("gameScreen");
@@ -211,8 +214,9 @@ function animateCard(targetId) {
   const el=$("flyingCard");
   el.className="flying-card";
   void el.offsetWidth;
-  const right=targetId==="mitsuki";
-  el.classList.add(right?"fly-right":"fly-left");
+  const targets=activePlayers().filter(p=>p.id!==game.offer.from);
+  const targetIndex=Math.max(0,targets.findIndex(p=>p.id===targetId));
+  el.classList.add(targetIndex % 2 ? "fly-right" : "fly-left");
 }
 
 function cpuTurn() {
@@ -226,8 +230,8 @@ function cpuTurn() {
   else claim=pick(ANIMALS.filter(a=>a.id!==card.id)).id;
   const targets=activePlayers().filter(p=>p.id!==cpu.id);
   // 初心者向けに、CPUは人間を極端に集中攻撃しない。
-  const target=Math.random()<.48 && targets.some(p=>p.id==="you")
-    ? getPlayer("you") : pick(targets);
+  const humanTarget=targets.find(p=>p.personality==="player");
+  const target=Math.random()<.48 && humanTarget ? humanTarget : pick(targets);
   cpu.hand.splice(cpu.hand.findIndex(c=>c.uid===card.uid),1);
   createOffer(cpu.id,target.id,card,claim);
 }
@@ -298,12 +302,8 @@ function finishResult(winner,text,title) {
   game.ended=true; clearTimers();
   $("resultTitle").textContent=title;
   $("resultText").textContent=text;
-  const you=getPlayer("you");
-  const four=ANIMALS.find(a=>you.faceUp[a.id]>=4);
-  $("resultAnimals").innerHTML=four
-    ? Array(4).fill(`<span>${four.emoji}</span>`).join("")
-    : "<span>🐾</span><span>✨</span><span>🐾</span>";
-  $("resultAnimals").classList.toggle("bounce",!!four);
+  $("resultAnimals").innerHTML="<span>🐾</span><span>✨</span><span>🐾</span>";
+  $("resultAnimals").classList.remove("bounce");
   showScreen("resultScreen");
 }
 
