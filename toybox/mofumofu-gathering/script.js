@@ -320,11 +320,14 @@ function eliminate(player, animalId) {
 function finishByHandEmpty(alive) {
   const counts=alive.map(p=>({p,n:faceCards(p)}));
   game.finalSnapshot=game.players.map(p=>({id:p.id,name:p.name,face:p.face,count:faceCards(p),out:p.out,faceUp:{...p.faceUp}}));
-  if(counts[0].n===counts[1].n) {
-    finishResult(null,`手札切れで終了。表向きカードは両者とも${counts[0].n}枚。引き分けです！`,"🤝 引き分け！");
+  const minCount=Math.min(...counts.map(x=>x.n));
+  const leaders=counts.filter(x=>x.n===minCount);
+  if(leaders.length>1) {
+    const names=leaders.map(x=>x.p.name).join("・");
+    finishResult(null,`手札切れで終了。最少は${minCount}枚で${names}が同数。引き分けです！`,"🤝 引き分け！");
   } else {
-    const winner=counts[0].n<counts[1].n?counts[0].p:counts[1].p;
-    finishWinner(winner,`手札切れで終了。表向きカードが少ない${winner.name}の勝ち！`);
+    const winner=leaders[0].p;
+    finishWinner(winner,`手札切れで終了。表向きカードが最も少ない${winner.name}（${minCount}枚）の勝ち！`);
   }
 }
 
