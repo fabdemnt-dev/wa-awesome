@@ -88,7 +88,7 @@ function beginTurn() {
   if (!game || game.ended) return;
   const alive=activePlayers();
   if (alive.length === 1) return finishWinner(alive[0], "最後まで残りました！");
-  if (alive.length === 2 && alive.some(p => p.hand.length === 0)) return finishByHandEmpty(alive);
+  if (alive.some(p => p.hand.length === 0)) return finishByHandEmpty(alive);
 
   let guard=0;
   while (game.players[game.turnIndex].out && guard++ < game.players.length) {
@@ -159,7 +159,7 @@ function renderHand() {
 
 function renderClaims() {
   $("claimButtons").innerHTML=ANIMALS.map(a =>
-    `<button data-claim="${a.id}">${a.emoji} ${a.name}</button>`
+    `<button class="${game.claim===a.id?"selected":""}" aria-pressed="${game.claim===a.id}" data-claim="${a.id}">${game.claim===a.id?"✓ ":""}${a.emoji} ${a.name}</button>`
   ).join("");
   document.querySelectorAll("[data-claim]").forEach(btn=>btn.addEventListener("click",()=>{
     game.claim=btn.dataset.claim; render();
