@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#fff5e8">
+  <title>もふもふ大集合！</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="app" id="app">
+    <section class="screen active" id="titleScreen">
+      <div class="title-card">
+        <div class="animal-ring" aria-hidden="true">🐱 🐰 🐻 🐤<br>🦊 🐧 🐼 🐻‍❄️</div>
+        <h1>もふもふ<br>大集合！</h1>
+        <p class="catch">ほんと？ うそ？ もふもふのひみつ！</p>
+        <button class="primary big" id="startBtn">はじめる</button>
+        <button class="secondary big" id="howBtn">あそびかた</button>
+      </div>
+    </section>
+
+    <section class="screen" id="gameScreen">
+      <header class="game-header">
+        <div id="turnBadge" class="turn-badge">あなたの番</div>
+        <button class="mini" id="gameHowBtn" aria-label="あそびかたを開く">？</button>
+      </header>
+
+      <section class="cpu-row" id="cpuRow"></section>
+
+      <section class="table-center">
+        <div class="deck-area">
+          <div class="deck-card">？</div>
+          <span>山札 <b id="deckCount">2</b>枚</span>
+        </div>
+        <div id="flyingCard" class="flying-card" aria-hidden="true">？</div>
+        <div id="offerArea" class="offer-area">
+          <div id="offerCard" class="offer-card">？</div>
+          <p id="offerText">カードを選んでね</p>
+        </div>
+        <div id="flash" class="flash" role="status" aria-live="polite"></div>
+      </section>
+
+      <section class="log-panel">
+        <h2>おはなし</h2>
+        <div id="log" class="log" aria-live="polite"></div>
+      </section>
+
+      <section id="collections" class="collections"></section>
+
+      <section class="action-panel">
+        <div id="handStep" class="step">
+          <h2>① 渡すカードを選ぶ</h2>
+          <div id="hand" class="hand"></div>
+        </div>
+        <div id="claimStep" class="step hidden">
+          <h2>② 何の動物だと言う？</h2>
+          <div id="claimButtons" class="animal-buttons"></div>
+        </div>
+        <div id="targetStep" class="step hidden">
+          <h2>③ 誰に渡す？</h2>
+          <div id="targetButtons" class="target-buttons"></div>
+        </div>
+        <div id="judgeStep" class="step hidden">
+          <h2>この宣言は……？</h2>
+          <div class="judge-buttons">
+            <button class="truth" id="truthBtn">○ ほんと？</button>
+            <button class="lie" id="lieBtn">× うそ！</button>
+          </div>
+        </div>
+      </section>
+    </section>
+
+    <section class="screen" id="resultScreen">
+      <div class="result-card">
+        <div id="resultAnimals" class="result-animals" aria-hidden="true"></div>
+        <h1 id="resultTitle">結果</h1>
+        <p id="resultText"></p>
+        <button class="primary big" id="retryBtn">もう一回あそぶ</button>
+        <button class="secondary big" id="titleBtn">タイトルへ</button>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="howDialog">
+    <div class="dialog-body">
+      <h2>あそびかた</h2>
+      <p>手札から1枚を裏向きで渡し、動物の名前を宣言します。宣言は本当でも、うそでもOK！</p>
+      <p>受け取った人は「ほんと？」か「うそ！」で判定します。</p>
+      <ul>
+        <li>判定成功 → <b>渡した側</b>が表向きで受け取る</li>
+        <li>判定失敗 → <b>受け取った側</b>が表向きで受け取る</li>
+        <li>同じ動物が4枚 → 「もふもふ大集合！」で脱落</li>
+        <li>最後の1人になれば勝ち</li>
+      </ul>
+      <p>残り2人で誰かの手札が0枚になったら、表向きカードの合計が少ない方の勝ち。同数は引き分けです。</p>
+      <button class="primary big" id="closeHowBtn">わかった！</button>
+    </div>
+  </dialog>
+
+  <script src="script.js"></script>
+</body>
+</html>
