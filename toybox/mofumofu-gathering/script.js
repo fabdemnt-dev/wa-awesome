@@ -44,6 +44,10 @@ function showScreen(id) {
 function activePlayers() { return game.players.filter(p => !p.out); }
 function getPlayer(id) { return game.players.find(p => p.id === id); }
 function faceCards(p) { return Object.values(p.faceUp).reduce((sum,n) => sum+n,0); }
+function sortHand(player) {
+  const order=Object.fromEntries(ANIMALS.map((a,i)=>[a.id,i]));
+  player.hand.sort((a,b)=>order[a.id]-order[b.id] || a.uid.localeCompare(b.uid));
+}
 function addLog(text) {
   game.log.push(text);
   if (game.log.length > 14) game.log.shift();
@@ -178,7 +182,7 @@ function renderCollections() {
       const n=p.faceUp[a.id];
       return `<span class="chip ${n>=3?"danger":""}">${a.emoji}${a.name} ×${n}</span>`;
     }).join("") || '<span class="chip">まだ0枚</span>';
-    return `<div class="collection-row"><strong>${p.face} ${p.name}</strong><div class="chips">${chips}</div></div>`;
+    return `<div class="collection-row ${p.out?"out":""}"><strong>${p.face} ${p.name}${p.out?"（脱落）":""}</strong><div class="chips">${chips}</div></div>`;
   }).join("");
 }
 function renderLog() {
@@ -285,6 +289,7 @@ function eliminate(player, animalId) {
 
 function finishByHandEmpty(alive) {
   const counts=alive.map(p=>({p,n:faceCards(p)}));
+  game.finalSnapshot=game.players.map(p=>({id:p.id,name:p.name,face:p.face,count:faceCards(p),out:p.out}));
   if(counts[0].n===counts[1].n) {
     finishResult(null,`手札切れで終了。表向きカードは両者とも${counts[0].n}枚。引き分けです！`,"🤝 引き分け！");
   } else {
@@ -302,11 +307,20 @@ function finishResult(winner,text,title) {
   game.ended=true; clearTimers();
   $("resultTitle").textContent=title;
   $("resultText").textContent=text;
+  const snapshot=game.finalSnapshot || game.players.map(p=>({id:p.id,name:p.name,face:p.face,count:faceCards(p),out:p.out}));
+  $("resultDetails").innerHTML=snapshot.map(p=>`<div class="result-row"><strong>${p.face} ${p.name}</strong><span>表向き ${p.count}枚${p.out?" ／ 脱落":""}</span></div>`).join("");
   $("resultAnimals").innerHTML="<span>🐾</span><span>✨</span><span>🐾</span>";
   $("resultAnimals").classList.remove("bounce");
   showScreen("resultScreen");
 }
 
+$("sortHandBtn").addEventListener("click",()=>{
+  if(!game || game.ended) return;
+  const you=getPlayer("you");
+  sortHand(you);
+  renderHand();
+  flash("手札を自動整列しました");
+});
 $("truthBtn").addEventListener("click",()=>resolveJudge(true));
 $("lieBtn").addEventListener("click",()=>resolveJudge(false));
 $("startBtn").addEventListener("click",startGame);
