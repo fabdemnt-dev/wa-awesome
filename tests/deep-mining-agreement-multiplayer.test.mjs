@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { createGame, npcWeights as soloNpcWeights, simulateRemaining } from '../deep-mining-agreement/engine.js';
+import { npcPortrait } from '../deep-mining-agreement/online-portraits.js';
 
 const require = createRequire(import.meta.url);
 const onlineRules = require('../functions/deep-mining-agreement-online/rules.js');
@@ -33,6 +34,11 @@ for (const humanCount of [2, 3, 4]) {
     }
     assert.equal(game.players.length, 4);
     assert.equal(game.players.filter((player) => player.isHuman).length, humanCount);
+    assert.deepEqual(game.players.map(npcPortrait).filter(Boolean).map(({ src }) => src), {
+      2: ['assets/characters/gaku.png', 'assets/characters/shion.png'],
+      3: ['assets/characters/shion.png'],
+      4: [],
+    }[humanCount]);
     assert.equal(game.history.length, 8);
     assert.ok(game.players.every((player) => Number.isInteger(player.rank)));
   });
