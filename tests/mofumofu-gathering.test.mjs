@@ -99,3 +99,17 @@ test('集まったカードはプレイヤーごとの独立パネルで表示�
   assert.match(script, /class="collection-total">表向き/);
   assert.doesNotMatch(script, /class="collection-row \$\{p\.out/);
 });
+
+
+test('宣言中は動物アイコンだけを裏向きカードに表示し、判定後は白地の表面に正体アイコンを表示する', () => {
+  assert.match(script, /offerCardMain"\)\.textContent=a\.emoji/);
+  assert.match(script, /offerCard"\)\.classList\.add\("revealed"\)/);
+  assert.doesNotMatch(script, /offerCardSub"\)\.textContent=\`宣言：/);
+  assert.doesNotMatch(script, /offerCardSub"\)\.textContent=\`正体：/);
+});
+
+test('最終結果は各プレイヤーが集めた動物ごとの枚数も保存して表示する', () => {
+  assert.match(script, /faceUp:\{\.\.\.p\.faceUp\}/);
+  assert.match(script, /class="result-breakdown"/);
+  assert.match(script, /class="result-chip"/);
+});
