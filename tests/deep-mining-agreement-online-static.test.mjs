@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { lobbyCapacity, roomCountPayload } from '../deep-mining-agreement/online-compat.js';
+import { npcPortrait } from '../deep-mining-agreement/online-portraits.js';
 
 test('title offers solo plus two-to-four player modes', () => {
   const app = fs.readFileSync(new URL('../deep-mining-agreement/app.js', import.meta.url), 'utf8');
@@ -46,6 +47,20 @@ test('online client remains compatible while old and new Functions versions over
     assert.equal(lobbyCapacity({ playerCount: humanPlayerCount }), humanPlayerCount);
     assert.equal(4 - lobbyCapacity({ playerCount: humanPlayerCount }), 4 - humanPlayerCount);
   }
+});
+
+test('online NPC seats reuse the existing portraits without assigning them to humans', () => {
+  const portraits = [
+    ['坑道整備士', 'assets/characters/minato.png', 'ミナト'],
+    ['採掘師', 'assets/characters/gaku.png', 'ガク'],
+    ['鉱脈調査員', 'assets/characters/shion.png', 'シオン'],
+  ];
+  for (const [role, src, alt] of portraits) {
+    assert.deepEqual(npcPortrait({ isHuman: false, role }), { src, alt });
+    assert.equal(fs.existsSync(new URL(`../deep-mining-agreement/${src}`, import.meta.url)), true);
+  }
+  assert.equal(npcPortrait({ isHuman: true, role: '採掘師' }), null);
+  assert.equal(npcPortrait({ isHuman: true, role: '鉱脈調査員' }), null);
 });
 
 test('server requires an explicit HMAC secret and uses a dedicated TTL member collection', () => {
