@@ -78,3 +78,11 @@ dialog::backdrop{background:rgba(65,49,43,.45);backdrop-filter:blur(2px)}
 .collection-row+.collection-row{margin-top:0!important}
 .collection-row strong{display:block!important;padding:4px 0!important;border-right:1px solid #eadbd2!important}
 .judge-hand{margin-bottom:14px;padding-bottom:12px;border-bottom:1px dashed #e5cec7}.compact-hand{padding-bottom:4px}.compact-hand .hand-card{flex-basis:52px;height:70px;font-size:24px}.compact-hand .hand-card small{font-size:9px}.hand-card.read-only{pointer-events:none}
+
+/* 集まったカードは、折り返しても所属が混ざらない独立パネルにする */
+.collections{display:grid!important;gap:12px!important;padding:0!important;background:transparent!important;box-shadow:none!important}
+.collection-player{display:block!important;padding:12px!important;background:#fffdf8!important;border:2px solid #ead6dd!important;border-radius:18px!important;box-shadow:var(--shadow)!important;overflow:hidden}
+.collection-player.out{opacity:.55}
+.collection-owner{display:flex;align-items:center;gap:7px;padding-bottom:8px;margin-bottom:8px;border-bottom:1px solid #eadbd2}
+.collection-face{font-size:18px}.collection-owner strong{font-size:14px}.collection-total{margin-left:auto;font-size:11px;font-weight:800;color:#796963;white-space:nowrap}
+.collection-player .chips{display:flex!important;gap:5px!important;flex-wrap:wrap!important;padding-left:0!important}
