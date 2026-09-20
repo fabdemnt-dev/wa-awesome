@@ -54,3 +54,22 @@ test('宣言した動物は選択中であることを見た目と文章で示�
   assert.match(script, /aria-pressed/);
   assert.match(script, /game\.claim===a\.id\?"✓ ":""/);
 });
+
+
+test('手札の自動整列は動物の固定順で並べ替え、選択IDを変更しない', () => {
+  assert.match(script, /function sortHand\(player\)/);
+  assert.match(script, /player\.hand\.sort/);
+  assert.match(html, /id="sortHandBtn"/);
+});
+
+test('判定結果はテーブルの絶対配置から分離し、表向きカードはプレイヤー別エリアにする', () => {
+  assert.doesNotMatch(script, /class="collection-row"><strong>/);
+  assert.match(script, /class="collection-row \$\{p\.out/);
+  assert.match(html, /id="flash"/);
+});
+
+test('結果画面に各プレイヤーの表向き枚数を表示する', () => {
+  assert.match(html, /id="resultDetails"/);
+  assert.match(script, /finalSnapshot/);
+  assert.match(script, /class="result-row"/);
+});
