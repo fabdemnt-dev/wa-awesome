@@ -63,8 +63,8 @@ test('手札の自動整列は動物の固定順で並べ替え、選択IDを変
 });
 
 test('判定結果はテーブルの絶対配置から分離し、表向きカードはプレイヤー別エリアにする', () => {
-  assert.doesNotMatch(script, /class="collection-row"><strong>/);
-  assert.match(script, /class="collection-row \$\{p\.out/);
+  assert.doesNotMatch(script, /class="collection-row/);
+  assert.match(script, /class="collection-player/);
   assert.match(html, /id="flash"/);
 });
 
@@ -79,11 +79,13 @@ test('結果画面に文字列の改行コードを表示しない', () => {
   assert.doesNotMatch(html, /<\/p>\\n\s*<div id="resultDetails"/);
 });
 
-test('判定中は宣言と正体をカード欄で区別し、自分の手札も表示する', () => {
+test('判定中は宣言アイコンと判定後の表向きカードを区別し、自分の手札も表示する', () => {
   assert.match(html, /id="offerCardSub"/);
   assert.match(html, /id="judgeHand"/);
-  assert.match(script, /宣言：/);
-  assert.match(script, /正体：/);
+  assert.match(script, /classList\.remove\("revealed"\)/);
+  assert.match(script, /classList\.add\("revealed"\)/);
+  assert.doesNotMatch(script, /宣言：/);
+  assert.doesNotMatch(script, /正体：/);
   assert.match(script, /function renderJudgeHand/);
 });
 
