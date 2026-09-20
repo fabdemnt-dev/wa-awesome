@@ -17,14 +17,14 @@ test('俳句のroom更新はplaying中に盤面を再描画する', async () => 
   assert.match(playing, /renderBoards\(\);/);
 });
 
-test('俳句のhand Snapshotも盤面を再描画するためroom更新と重なる経路が存在する', async () => {
+test('hand Snapshotは手札だけを描画し、room更新と盤面を二重描画しない', async () => {
   const source = await fs.readFile(new URL('../haiku-room.js', import.meta.url), 'utf8');
   const hand = between(source, 'function subscribeOwnHand', 'async function resyncOwnHandFromFirestore');
-  assert.match(hand, /renderHand\(\);\s*renderBoards\(\);/);
+  assert.match(hand, /renderHand\(\);/);
+  assert.doesNotMatch(hand, /renderBoards\(\);/);
   const apply = between(source, 'function applyRoomData', '\n// ブラウザがバックグラウンド');
   assert.match(apply, /renderBoards\(\);/);
 });
-
 test('履歴Snapshotは現在のroomデータをapplyRoomDataへ再投入する', async () => {
   const source = await fs.readFile(new URL('../haiku-room.js', import.meta.url), 'utf8');
   const join = between(source, 'window.joinRoom =', '\nwindow.removeSubmittedWord');
