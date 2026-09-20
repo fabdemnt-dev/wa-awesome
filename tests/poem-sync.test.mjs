@@ -123,6 +123,14 @@ test('T5: 旧投稿の成功・失敗・同期完了は次の回や別ルーム�
   }
 });
 
+test('履歴Snapshotはstateだけを更新しroom全体を再描画しない', () => {
+  const connect = between(roomSource, 'function connectPoemRoom()', '\nasync function restorePoemRoom');
+  const history = between(connect, 'historyUnsubscribe = subscribeRoomHistory', "}, (error) => {");
+  assert.match(history, /state\.roomHistory = history/);
+  assert.match(history, /history: \[\.\.\.embeddedHistory, \.\.\.state\.roomHistory\]/);
+  assert.doesNotMatch(history, /applyRoomData\(/);
+});
+
 test('履歴はキャッシュ後のサーバー確認通知で反映し、購読エラーも渡す', () => {
   const source = readFileSync(new URL('../room-history.js', import.meta.url), 'utf8');
   let options, receive, fail;
