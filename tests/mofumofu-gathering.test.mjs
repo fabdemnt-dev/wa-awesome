@@ -91,3 +91,11 @@ test('CPUアイコンはカード8種の動物と重複しない', () => {
   assert.match(script, /name:"こはる", face:"🌸"/);
   assert.match(script, /name:"みつき", face:"🌙"/);
 });
+
+
+test('集まったカードはプレイヤーごとの独立パネルで表示する', () => {
+  assert.match(script, /class="collection-player/);
+  assert.match(script, /class="collection-owner"/);
+  assert.match(script, /class="collection-total">表向き/);
+  assert.doesNotMatch(script, /class="collection-row \$\{p\.out/);
+});
