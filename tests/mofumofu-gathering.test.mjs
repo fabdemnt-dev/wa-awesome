@@ -80,10 +80,11 @@ test('結果画面に文字列の改行コードを表示しない', () => {
 });
 
 test('判定中は宣言アイコンと判定後の表向きカードを区別し、自分の手札も表示する', () => {
-  assert.match(html, /id="offerCardSub"/);
   assert.match(html, /id="judgeHand"/);
-  assert.match(script, /classList\.remove\("revealed"\)/);
-  assert.match(script, /classList\.add\("revealed"\)/);
+  assert.match(script, /offerCard"\)\.classList\.remove\("revealed"\)/);
+  assert.match(script, /offerCardMain"\)\.textContent=a\.emoji/);
+  assert.match(script, /offerCard"\)\.classList\.add\("revealed"\)/);
+  assert.match(script, /offerCardMain"\)\.textContent=animal\(offer\.card\.id\)\.emoji/);
   assert.doesNotMatch(script, /宣言：/);
   assert.doesNotMatch(script, /正体：/);
   assert.match(script, /function renderJudgeHand/);
@@ -103,8 +104,8 @@ test('集まったカードはプレイヤーごとの独立パネルで表示�
 });
 
 
-test('宣言中は動物アイコンだけを裏向きカードに表示し、判定後は白地の表面に正体アイコンを表示する', () => {
-  assert.match(script, /offerCardMain"\)\.textContent=a\.emoji/);
+test('宣言カードの補助文字は空で、判定後だけ表面クラスになる', () => {
+  assert.match(script, /offerCardSub"\)\.textContent=""/);
   assert.match(script, /offerCard"\)\.classList\.add\("revealed"\)/);
   assert.doesNotMatch(script, /offerCardSub"\)\.textContent=\`宣言：/);
   assert.doesNotMatch(script, /offerCardSub"\)\.textContent=\`正体：/);
