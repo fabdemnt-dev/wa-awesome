@@ -142,3 +142,9 @@ test('公開更新時にCSSとJSの古いキャッシュを使わず、ゲーム
   assert.doesNotMatch(script, /window\.scrollTo/);
   assert.doesNotMatch(script, /scrollIntoView/);
 });
+
+
+test('山札は枚数だけ表示し、操作を連想させる？カードは表示しない', () => {
+  assert.match(html, /山札 <b id="deckCount">2<\/b>枚/);
+  assert.doesNotMatch(html, /class="deck-card"/);
+});
