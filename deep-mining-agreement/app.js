@@ -55,13 +55,27 @@ function renderTitle() {
       <p class="subtitle">掘るほど稼げる。だが、深層は全員まとめて崩れる。</p>
       <div class="button-stack">
         <button class="button button--primary" type="button" data-action="new-game">1人で遊ぶ（CPU対戦）</button>
-        <a class="button online-link" href="online.html?players=2">2人で遊ぶ</a>
-        <a class="button online-link" href="online.html?players=3">3人で遊ぶ</a>
-        <a class="button online-link" href="online.html?players=4">4人で遊ぶ</a>
+        <button class="button" type="button" data-action="show-online-player-count">オンラインで遊ぶ</button>
         <button class="button" type="button" data-action="show-rules" data-return="title">遊び方</button>
       </div>
     </div>
   </section><footer class="title-site-footer"><small>深層採掘協定 — Original Web Card Game</small></footer>`;
+  focusApp();
+}
+
+function renderOnlinePlayerCount() {
+  app.innerHTML = `<section class="screen" aria-labelledby="online-player-count-heading">
+    <header class="topbar"><div><p class="eyebrow">ONLINE PLAY</p><h1 id="online-player-count-heading">オンラインで遊ぶ</h1></div></header>
+    <div class="panel">
+      <p>参加する人間の人数を選んでください。</p>
+      <div class="button-stack">
+        <a class="button online-link" href="online.html?players=2">2人</a>
+        <a class="button online-link" href="online.html?players=3">3人</a>
+        <a class="button online-link" href="online.html?players=4">4人</a>
+      </div>
+    </div>
+    <button class="button button--quiet" type="button" data-action="back-to-title">タイトルへ戻る</button>
+  </section>`;
   focusApp();
 }
 
@@ -354,6 +368,8 @@ app.addEventListener("click", (event) => {
   if (!control) return;
   const action = control.dataset.action;
   if (action === "new-game") beginGame();
+  if (action === "show-online-player-count") renderOnlinePlayerCount();
+  if (action === "back-to-title") renderTitle();
   if (action === "show-rules") renderRules(control.dataset.return);
   if (action === "back-from-rules") control.dataset.return === "game" ? renderGame() : renderTitle();
   if (action === "choose-action") { selectedAction = control.dataset.actionId; updateCurrentSelection(); }

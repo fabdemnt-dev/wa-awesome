@@ -452,6 +452,39 @@ test("タイトル画面は戦略ゲーム表記と左上のおもちゃ箱ナ�
   }
 });
 
+test("タイトルからオンライン人数を選択し、タイトルへ戻れる", async () => {
+  const dom = new JSDOM(html, { url: "https://example.test/deep-mining-agreement/", pretendToBeVisual: true });
+  dom.window.scrollTo = () => {};
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
+  try {
+    await import(`../deep-mining-agreement/app.js?online-player-count=${Date.now()}`);
+    const document = dom.window.document;
+    const titleActions = [...document.querySelectorAll(".title-panel .button-stack > *")];
+    assert.deepEqual(titleActions.map((control) => control.textContent), ["1人で遊ぶ（CPU対戦）", "オンラインで遊ぶ", "遊び方"]);
+    assert.equal(document.querySelector('.title-panel a[href^="online.html?players="]'), null);
+
+    document.querySelector('[data-action="show-online-player-count"]').click();
+    assert.equal(document.querySelector("#online-player-count-heading").textContent, "オンラインで遊ぶ");
+    assert.match(document.body.textContent, /参加する人間の人数を選んでください。/);
+    assert.deepEqual(
+      [...document.querySelectorAll('a[href^="online.html?players="]')].map((link) => [link.textContent, link.getAttribute("href")]),
+      [["2人", "online.html?players=2"], ["3人", "online.html?players=3"], ["4人", "online.html?players=4"]],
+    );
+
+    document.querySelector('[data-action="back-to-title"]').click();
+    assert.ok(document.querySelector("#title-heading"));
+    assert.ok(document.querySelector('[data-action="new-game"]'));
+    assert.ok(document.querySelector('[data-action="show-rules"]'));
+  } finally {
+    globalThis.window = previousWindow;
+    globalThis.document = previousDocument;
+    dom.window.close();
+  }
+});
+
 test("スマホ幅向けの最小幅固定がなく、タップ領域と横あふれ対策を持つ", () => {
   assert.match(html, /width=device-width/);
   assert.match(css, /\*\s*\{\s*box-sizing:\s*border-box/);
