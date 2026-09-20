@@ -223,7 +223,8 @@ function createOffer(from,to,card,claim) {
   const giver=getPlayer(from), receiver=getPlayer(to), a=animal(claim);
   addLog(`${giver.name}「これは『${a.name}』だよ」→ ${receiver.name}`);
   $("offerText").textContent=`${giver.name}「${a.name}だよ」`;
-  $("offerCardMain").textContent="？";
+  $("offerCard").classList.remove("revealed");
+  $("offerCardMain").textContent=a.emoji;
   $("offerCardSub").textContent="";
   animateCard(to);
   render();
