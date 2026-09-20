@@ -29,8 +29,9 @@ test('同種4枚で脱落し、手札と表向きカードを捨て札へ移す'
   assert.match(script, /activePlayers\(\).*filter\(p=>p\.id!==/s);
 });
 
-test('残り2人で手札0枚なら表向き総数の少ない側を勝者にし、同数は引き分け', () => {
-  assert.match(script, /alive\.length === 2 && alive\.some\(p => p\.hand\.length === 0\)/);
+test('手札0枚が出たら表向き総数で終了判定し、同数は引き分け', () => {
+  assert.match(script, /alive\.some\(p => p\.hand\.length === 0\)/);
+  assert.doesNotMatch(script, /alive\.length === 2 && alive\.some/);
   assert.match(script, /counts\[0\]\.n===counts\[1\]\.n/);
   assert.match(script, /counts\[0\]\.n<counts\[1\]\.n\?counts\[0\]\.p:counts\[1\]\.p/);
   assert.match(script, /引き分けです！/);
