@@ -34,7 +34,7 @@
         </div>
         <div id="flyingCard" class="flying-card" aria-hidden="true">？</div>
         <div id="offerArea" class="offer-area">
-          <div id="offerCard" class="offer-card">？</div>
+          <div id="offerCard" class="offer-card"><span id="offerCardMain">？</span><small id="offerCardSub">裏向き</small></div>
           <p id="offerText">カードを選んでね</p>
         </div>
       </section>
@@ -62,6 +62,10 @@
           <div id="targetButtons" class="target-buttons"></div>
         </div>
         <div id="judgeStep" class="step hidden">
+          <div class="judge-hand">
+            <h2>あなたの手札</h2>
+            <div id="judgeHand" class="hand compact-hand"></div>
+          </div>
           <h2>この宣言は……？</h2>
           <div class="judge-buttons">
             <button class="truth" id="truthBtn">○ ほんと？</button>
@@ -75,7 +79,8 @@
       <div class="result-card">
         <div id="resultAnimals" class="result-animals" aria-hidden="true"></div>
         <h1 id="resultTitle">結果</h1>
-        <p id="resultText"></p>\n        <div id="resultDetails" class="result-details"></div>
+        <p id="resultText"></p>
+        <div id="resultDetails" class="result-details"></div>
         <button class="primary big" id="retryBtn">もう一回あそぶ</button>
         <button class="secondary big" id="titleBtn">タイトルへ</button>
       </div>
