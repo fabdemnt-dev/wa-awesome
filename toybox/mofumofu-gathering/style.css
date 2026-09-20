@@ -72,3 +72,9 @@ dialog::backdrop{background:rgba(65,49,43,.45);backdrop-filter:blur(2px)}
 @keyframes bounce{to{transform:translateY(-16px) rotate(4deg)}}
 @media(min-width:700px){body{padding:22px 0}.app{min-height:calc(100dvh - 44px);border-radius:28px}.screen{min-height:calc(100dvh - 44px)}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important}}
+.offer-card{grid-template-rows:1fr auto;padding:8px 3px 5px}.offer-card small{max-width:100%;font-size:8px;line-height:1.1;text-align:center;background:rgba(255,255,255,.88);border-radius:7px;padding:2px 3px}
+.collections{display:grid!important;gap:10px!important;padding:0!important;background:transparent!important;box-shadow:none!important}
+.collection-row{display:grid!important;grid-template-columns:92px minmax(0,1fr)!important;gap:8px!important;align-items:start!important;padding:11px!important;background:#fffdf8!important;border:2px solid #f0ded7!important;border-radius:16px!important;box-shadow:0 5px 12px rgba(93,66,50,.09)!important}
+.collection-row+.collection-row{margin-top:0!important}
+.collection-row strong{display:block!important;padding:4px 0!important;border-right:1px solid #eadbd2!important}
+.judge-hand{margin-bottom:14px;padding-bottom:12px;border-bottom:1px dashed #e5cec7}.compact-hand{padding-bottom:4px}.compact-hand .hand-card{flex-basis:52px;height:70px;font-size:24px}.compact-hand .hand-card small{font-size:9px}.hand-card.read-only{pointer-events:none}
