@@ -13,8 +13,8 @@ const ANIMALS = [
 
 const PLAYER_DATA = [
   { id:"you", name:"あなた", face:"🙂", personality:"player" },
-  { id:"koharu", name:"こはる", face:"🐰", personality:"honest" },
-  { id:"mitsuki", name:"みつき", face:"🦊", personality:"mischief" }
+  { id:"koharu", name:"こはる", face:"🌸", personality:"honest" },
+  { id:"mitsuki", name:"みつき", face:"🌙", personality:"mischief" }
 ];
 
 const $ = (id) => document.getElementById(id);
@@ -123,6 +123,7 @@ function render() {
   $("deckCount").textContent=game.deck.length;
   renderCpus();
   renderHand();
+  renderJudgeHand();
   renderClaims();
   renderTargets();
   renderCollections();
@@ -159,6 +160,16 @@ function renderHand() {
     if(game.players[game.turnIndex].id!=="you" || game.offer) return;
     game.selectedUid=btn.dataset.uid; game.claim=null; render();
   }));
+}
+
+function renderJudgeHand() {
+  const box=$("judgeHand");
+  if(!box) return;
+  const you=getPlayer("you");
+  box.innerHTML=you.hand.length ? you.hand.map(c=>{
+    const a=animal(c.id);
+    return `<div class="hand-card read-only"><span>${a.emoji}</span><small>${a.name}</small></div>`;
+  }).join("") : "<p>手札はありません。</p>";
 }
 
 function renderClaims() {
@@ -209,6 +220,8 @@ function createOffer(from,to,card,claim) {
   const giver=getPlayer(from), receiver=getPlayer(to), a=animal(claim);
   addLog(`${giver.name}「これは『${a.name}』だよ」→ ${receiver.name}`);
   $("offerText").textContent=`${giver.name}「${a.name}だよ」`;
+  $("offerCardMain").textContent="？";
+  $("offerCardSub").textContent=`宣言：${a.name}`;
   animateCard(to);
   render();
   if(to!=="you") later(()=>cpuJudge(to),800);
@@ -264,7 +277,9 @@ function resolveJudge(saysTrue) {
   receiver.faceUp[offer.card.id]++;
   flash(success?"✨ 判定成功！":"💭 判定失敗！");
   game.offer=null;
-  $("offerText").textContent=`${receiver.name}が${animal(offer.card.id).name}を受け取りました`;
+  $("offerCardMain").textContent=animal(offer.card.id).emoji;
+  $("offerCardSub").textContent=`正体：${animal(offer.card.id).name}`;
+  $("offerText").textContent=`${receiver.name}が受け取りました`;
   render();
   if(receiver.faceUp[offer.card.id]>=4) return later(()=>eliminate(receiver,offer.card.id),700);
   later(nextTurn,700);
