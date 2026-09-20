@@ -46,3 +46,10 @@ test('将来の人数拡張に備え履歴はプレイヤー配列から生成�
   assert.match(script, /Object\.fromEntries\(players\.map\(p => \[p\.id,\{truth:0,total:0\}\]\)\)/);
   assert.doesNotMatch(script, /history:\{you:/);
 });
+
+
+test('宣言した動物は選択中であることを見た目と文章で示す', () => {
+  assert.match(script, /game\.claim===a\.id\?"selected":""/);
+  assert.match(script, /aria-pressed/);
+  assert.match(script, /game\.claim===a\.id\?"✓ ":""/);
+});
