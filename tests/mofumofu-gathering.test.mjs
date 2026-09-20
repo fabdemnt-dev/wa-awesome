@@ -29,12 +29,14 @@ test('同種4枚で脱落し、手札と表向きカードを捨て札へ移す'
   assert.match(script, /activePlayers\(\).*filter\(p=>p\.id!==/s);
 });
 
-test('手札0枚が出たら表向き総数で終了判定し、同数は引き分け', () => {
+test('手札0枚が出たら生存者全員の表向き総数を比較し、最少同数は引き分け', () => {
   assert.match(script, /alive\.some\(p => p\.hand\.length === 0\)/);
-  assert.doesNotMatch(script, /alive\.length === 2 && alive\.some/);
-  assert.match(script, /counts\[0\]\.n===counts\[1\]\.n/);
-  assert.match(script, /counts\[0\]\.n<counts\[1\]\.n\?counts\[0\]\.p:counts\[1\]\.p/);
-  assert.match(script, /引き分けです！/);
+  assert.match(script, /Math\.min\(\.\.\.counts\.map\(x=>x\.n\)\)/);
+  assert.match(script, /counts\.filter\(x=>x\.n===minCount\)/);
+  assert.match(script, /leaders\.length>1/);
+  assert.match(script, /const winner=leaders\[0\]\.p/);
+  assert.doesNotMatch(script, /counts\[0\]\.n===counts\[1\]\.n/);
+  assert.doesNotMatch(script, /counts\[0\]\.n<counts\[1\]\.n/);
 });
 
 test('CPUは性格と宣言履歴を使い、判断確率に上限下限がある', () => {
@@ -124,4 +126,11 @@ test('もう一回あそぶ時は前ゲームのカード表面と判定表示�
   assert.match(script, /offerCardMain"\)\.textContent="？"/);
   assert.match(script, /flash"\)\.textContent=""/);
   assert.match(script, /function startGame\(\) \{\s*clearTimers\(\);\s*resetOfferVisual\(\);/);
+});
+
+
+test('3人生存時も3人目を含めて最少枚数を選ぶ実装である', () => {
+  assert.match(script, /const counts=alive\.map/);
+  assert.match(script, /const minCount=Math\.min\(\.\.\.counts\.map/);
+  assert.match(script, /const leaders=counts\.filter/);
 });
