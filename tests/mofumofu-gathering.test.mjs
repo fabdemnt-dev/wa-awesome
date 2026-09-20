@@ -73,3 +73,21 @@ test('結果画面に各プレイヤーの表向き枚数を表示する', () =>
   assert.match(script, /finalSnapshot/);
   assert.match(script, /class="result-row"/);
 });
+
+
+test('結果画面に文字列の改行コードを表示しない', () => {
+  assert.doesNotMatch(html, /<\/p>\\n\s*<div id="resultDetails"/);
+});
+
+test('判定中は宣言と正体をカード欄で区別し、自分の手札も表示する', () => {
+  assert.match(html, /id="offerCardSub"/);
+  assert.match(html, /id="judgeHand"/);
+  assert.match(script, /宣言：/);
+  assert.match(script, /正体：/);
+  assert.match(script, /function renderJudgeHand/);
+});
+
+test('CPUアイコンはカード8種の動物と重複しない', () => {
+  assert.match(script, /name:"こはる", face:"🌸"/);
+  assert.match(script, /name:"みつき", face:"🌙"/);
+});
