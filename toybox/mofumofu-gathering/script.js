@@ -11,16 +11,22 @@ const ANIMALS = [
   { id:"polar", name:"しろくま", emoji:"🐻‍❄️" }
 ];
 
-const PLAYER_DATA = [
-  { id:"you", name:"あなた", face:"🙂", personality:"player" },
-  { id:"koharu", name:"こはる", face:"🌸", personality:"honest" },
-  { id:"mitsuki", name:"みつき", face:"🌙", personality:"mischief" }
+const SOLO_PLAYERS = [
+  { id:"you", name:"あなた", face:"🙂", personality:"player", human:true },
+  { id:"koharu", name:"こはる", face:"🌸", personality:"honest", human:false },
+  { id:"mitsuki", name:"みつき", face:"🌙", personality:"mischief", human:false }
+];
+const DUO_PLAYERS = [
+  { id:"playerA", name:"プレイヤーA", face:"🙂", personality:"player", human:true },
+  { id:"playerB", name:"プレイヤーB", face:"😊", personality:"player", human:true },
+  { id:"koharu", name:"こはる", face:"🌸", personality:"honest", human:false }
 ];
 
 const $ = (id) => document.getElementById(id);
 const screens = ["titleScreen","gameScreen","resultScreen"];
 let game = null;
 let timers = [];
+let selectedMode = "solo";
 
 function later(fn, ms) {
   const id = setTimeout(() => { timers = timers.filter(x => x !== id); fn(); }, ms);
@@ -42,6 +48,9 @@ function showScreen(id) {
 }
 function activePlayers() { return game.players.filter(p => !p.out); }
 function getPlayer(id) { return game.players.find(p => p.id === id); }
+function currentPlayer() { return game.players[game.turnIndex]; }
+function isHuman(p) { return !!p?.human; }
+function visibleHuman() { return game?.visibleHumanId ? getPlayer(game.visibleHumanId) : null; }
 function faceCards(p) { return Object.values(p.faceUp).reduce((sum,n) => sum+n,0); }
 function sortHand(player) {
   const order=Object.fromEntries(ANIMALS.map((a,i)=>[a.id,i]));
@@ -79,18 +88,19 @@ function resetOfferVisual() {
   $("flash").classList.remove("show");
 }
 
-function startGame() {
+function startGame(mode=selectedMode) {
   clearTimers();
   resetOfferVisual();
+  selectedMode=mode;
   const deck=makeDeck();
-  const players=PLAYER_DATA.map(freshPlayer);
+  const players=(mode==="duo"?DUO_PLAYERS:SOLO_PLAYERS).map(freshPlayer);
   // 10枚ずつ配り、余り2枚は使わない山札へ。
   for(let i=0;i<10;i++) players.forEach(p => p.hand.push(deck.pop()));
   game={
     players, deck, discard:[], turnIndex:0, selectedUid:null, claim:null,
     offer:null, log:["ゲームスタート！ あなたからどうぞ。"],
     history:freshHistory(players),
-    ended:false
+    mode, visibleHumanId:null, pendingHumanId:null, ended:false
   };
   showScreen("gameScreen");
   render();
@@ -116,7 +126,15 @@ function beginTurn() {
   }
   game.selectedUid=null; game.claim=null; game.offer=null;
   render();
-  if (actor.id !== "you") later(cpuTurn, 650);
+  if (isHuman(actor)) {
+    if(game.mode==="duo") return showPassOverlay(actor,"turn");
+    game.visibleHumanId=actor.id;
+    render();
+  } else {
+    game.visibleHumanId=null;
+    render();
+    later(cpuTurn,650);
+  }
 }
 
 function nextTurn() {
@@ -138,18 +156,20 @@ function render() {
   renderCollections();
   renderLog();
 
-  const yourTurn=actor.id==="you" && !game.offer;
-  $("handStep").classList.toggle("hidden",!yourTurn);
-  $("claimStep").classList.toggle("hidden",!yourTurn || !game.selectedUid);
-  $("targetStep").classList.toggle("hidden",!yourTurn || !game.selectedUid || !game.claim);
-  $("judgeStep").classList.toggle("hidden",!(game.offer && game.offer.to==="you"));
+  const viewer=visibleHuman();
+  const humanTurn=isHuman(actor) && viewer?.id===actor.id && !game.offer;
+  $("handStep").classList.toggle("hidden",!humanTurn);
+  $("claimStep").classList.toggle("hidden",!humanTurn || !game.selectedUid);
+  $("targetStep").classList.toggle("hidden",!humanTurn || !game.selectedUid || !game.claim);
+  $("judgeStep").classList.toggle("hidden",!(game.offer && viewer?.id===game.offer.to));
   if (!game.offer) {
-    $("offerText").textContent=yourTurn ? "カードを選んでね" : actor.name+"が考えています…";
+    $("offerText").textContent=humanTurn ? "カードを選んでね" : actor.name+"が考えています…";
   }
 }
 
 function renderCpus() {
-  $("cpuRow").innerHTML=game.players.filter(p=>p.id!=="you").map(p =>
+  const viewer=visibleHuman();
+  $("cpuRow").innerHTML=game.players.filter(p=>p.id!==viewer?.id).map(p =>
     `<div class="player-box ${game.players[game.turnIndex].id===p.id?"current":""} ${p.out?"out":""}">
       <div class="face">${p.face}</div><div class="name">${p.name}${p.out?"（脱落）":""}</div>
       <div class="count">手札 ${p.hand.length}枚 ／ 表向き ${faceCards(p)}枚</div>
@@ -158,7 +178,8 @@ function renderCpus() {
 }
 
 function renderHand() {
-  const you=getPlayer("you");
+  const you=visibleHuman();
+  if(!you){ $("hand").innerHTML=""; return; }
   $("hand").innerHTML=you.hand.length ? you.hand.map(c => {
     const a=animal(c.id);
     return `<button class="hand-card ${game.selectedUid===c.uid?"selected":""}" data-uid="${c.uid}" aria-label="${a.name}のカード">
@@ -166,7 +187,7 @@ function renderHand() {
     </button>`;
   }).join("") : "<p>手札はありません。</p>";
   document.querySelectorAll(".hand-card").forEach(btn => btn.addEventListener("click",()=>{
-    if(game.players[game.turnIndex].id!=="you" || game.offer) return;
+    if(currentPlayer().id!==you.id || game.offer) return;
     game.selectedUid=btn.dataset.uid; game.claim=null; render();
   }));
 }
@@ -174,7 +195,8 @@ function renderHand() {
 function renderJudgeHand() {
   const box=$("judgeHand");
   if(!box) return;
-  const you=getPlayer("you");
+  const you=visibleHuman();
+  if(!you){ box.innerHTML=""; return; }
   box.innerHTML=you.hand.length ? you.hand.map(c=>{
     const a=animal(c.id);
     return `<div class="hand-card read-only"><span>${a.emoji}</span><small>${a.name}</small></div>`;
@@ -191,7 +213,8 @@ function renderClaims() {
 }
 
 function renderTargets() {
-  const targets=activePlayers().filter(p=>p.id!=="you");
+  const actor=currentPlayer();
+  const targets=activePlayers().filter(p=>p.id!==actor.id);
   $("targetButtons").innerHTML=targets.map(p=>`<button data-target="${p.id}">${p.face} ${p.name}に渡す</button>`).join("");
   document.querySelectorAll("[data-target]").forEach(btn=>btn.addEventListener("click",()=>playerOffer(btn.dataset.target)));
 }
@@ -218,11 +241,12 @@ function escapeHtml(s) {
 }
 
 function playerOffer(targetId) {
-  const you=getPlayer("you");
+  const you=currentPlayer();
+  if(!isHuman(you) || game.visibleHumanId!==you.id) return;
   const idx=you.hand.findIndex(c=>c.uid===game.selectedUid);
   if(idx<0 || !game.claim) return;
   const card=you.hand.splice(idx,1)[0];
-  createOffer("you",targetId,card,game.claim);
+  createOffer(you.id,targetId,card,game.claim);
 }
 
 function createOffer(from,to,card,claim) {
@@ -237,7 +261,10 @@ function createOffer(from,to,card,claim) {
   $("offerCardSub").textContent="";
   animateCard(to);
   render();
-  if(to!=="you") later(()=>cpuJudge(to),800);
+  const target=getPlayer(to);
+  if(isHuman(target)) {
+    if(game.mode==="duo") later(()=>showPassOverlay(target,"judge"),500);
+  } else later(()=>cpuJudge(to),800);
 }
 
 function animateCard(targetId) {
@@ -260,7 +287,8 @@ function cpuTurn() {
   else claim=pick(ANIMALS.filter(a=>a.id!==card.id)).id;
   const targets=activePlayers().filter(p=>p.id!==cpu.id);
   // 初心者向けに、CPUは人間を極端に集中攻撃しない。
-  const humanTarget=targets.find(p=>p.personality==="player");
+  const humanTargets=targets.filter(p=>isHuman(p));
+  const humanTarget=humanTargets.length ? pick(humanTargets) : null;
   const target=Math.random()<.48 && humanTarget ? humanTarget : pick(targets);
   cpu.hand.splice(cpu.hand.findIndex(c=>c.uid===card.uid),1);
   createOffer(cpu.id,target.id,card,claim);
@@ -331,8 +359,9 @@ function finishByHandEmpty(alive) {
 }
 
 function finishWinner(winner, reason) {
-  const youWon=winner.id==="you";
-  finishResult(winner,reason,youWon?"🎉 もふもふ回避！ あなたの勝ち！":`${winner.face} ${winner.name}の勝ち！`);
+  const humanWinner=isHuman(winner);
+  const title=game.mode==="solo" && winner.id==="you" ? "🎉 もふもふ回避！ あなたの勝ち！" : `${winner.face} ${winner.name}の勝ち！`;
+  finishResult(winner,reason,title);
 }
 
 function finishResult(winner,text,title) {
@@ -351,15 +380,33 @@ function finishResult(winner,text,title) {
 
 $("sortHandBtn").addEventListener("click",()=>{
   if(!game || game.ended) return;
-  const you=getPlayer("you");
+  const you=visibleHuman();
+  if(!you) return;
   sortHand(you);
   renderHand();
   flash("手札を自動整列しました");
 });
 $("truthBtn").addEventListener("click",()=>resolveJudge(true));
 $("lieBtn").addEventListener("click",()=>resolveJudge(false));
-$("startBtn").addEventListener("click",startGame);
-$("retryBtn").addEventListener("click",startGame);
+function showPassOverlay(player,purpose) {
+  game.visibleHumanId=null;
+  game.pendingHumanId=player.id;
+  render();
+  $("passTitle").textContent=`${player.name}に端末を渡してね`;
+  $("passText").textContent=purpose==="judge" ? "相手の手札を見ないように端末を渡して、準備できたら判定してください。" : "相手の手札を見ないように端末を渡してください。";
+  $("passOverlay").classList.remove("hidden");
+}
+function acceptPass() {
+  if(!game?.pendingHumanId) return;
+  game.visibleHumanId=game.pendingHumanId;
+  game.pendingHumanId=null;
+  $("passOverlay").classList.add("hidden");
+  render();
+}
+$("soloBtn").addEventListener("click",()=>startGame("solo"));
+$("duoBtn").addEventListener("click",()=>startGame("duo"));
+$("passReadyBtn").addEventListener("click",acceptPass);
+$("retryBtn").addEventListener("click",()=>startGame(selectedMode));
 $("titleBtn").addEventListener("click",()=>{clearTimers();game=null;showScreen("titleScreen");});
 $("howBtn").addEventListener("click",()=>$("howDialog").showModal());
 $("gameHowBtn").addEventListener("click",()=>$("howDialog").showModal());
