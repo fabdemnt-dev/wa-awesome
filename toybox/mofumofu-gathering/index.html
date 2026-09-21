@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#fff5e8">
   <title>もふもふ大集合！</title>
-  <link rel="stylesheet" href="style.css?v=20260921-1">
+  <link rel="stylesheet" href="style.css?v=20260921-2">
 </head>
 <body>
   <main class="app" id="app">
@@ -14,7 +14,8 @@
         <div class="animal-ring" aria-hidden="true">🐱 🐰 🐻 🐤<br>🦊 🐧 🐼 🐻‍❄️</div>
         <h1>もふもふ<br>大集合！</h1>
         <p class="catch">ほんと？ うそ？ もふもふのひみつ！</p>
-        <button class="primary big" id="startBtn">はじめる</button>
+        <button class="primary big" id="soloBtn">ひとりであそぶ</button>
+        <button class="secondary big" id="duoBtn">ふたりであそぶ</button>
         <button class="secondary big" id="howBtn">あそびかた</button>
       </div>
     </section>
@@ -87,6 +88,15 @@
     </section>
   </main>
 
+  <div id="passOverlay" class="pass-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="passTitle">
+    <div class="pass-card">
+      <div class="pass-icon" aria-hidden="true">🙈</div>
+      <h2 id="passTitle">端末を渡してね</h2>
+      <p id="passText">次のプレイヤーに端末を渡してください。</p>
+      <button class="primary big" id="passReadyBtn">準備できたらタップ</button>
+    </div>
+  </div>
+
   <dialog id="howDialog">
     <div class="dialog-body">
       <h2>あそびかた</h2>
@@ -98,11 +108,12 @@
         <li>同じ動物が4枚 → 「もふもふ大集合！」で脱落</li>
         <li>最後の1人になれば勝ち</li>
       </ul>
-      <p>残り2人で誰かの手札が0枚になったら、表向きカードの合計が少ない方の勝ち。同数は引き分けです。</p>
+      <p>誰かの手札が0枚になったら、残っている全員の表向きカード合計を比べ、最も少ない人が勝ち。同数なら引き分けです。</p>
+      <p>「ふたりであそぶ」では、プレイヤーA・プレイヤーB・こはるの3人戦です。人間の手番前には交代画面が出るので、端末を渡してからタップしてください。</p>
       <button class="primary big" id="closeHowBtn">わかった！</button>
     </div>
   </dialog>
 
-  <script src="script.js?v=20260921-1"></script>
+  <script src="script.js?v=20260921-2"></script>
 </body>
 </html>
