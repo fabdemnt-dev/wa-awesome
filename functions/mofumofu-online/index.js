@@ -77,10 +77,14 @@ function chooseNpcJudgment(history = {}, roll = randomUnit()) {
   const estimatedTruth = Math.max(0.28, Math.min(0.72, total ? truth / total : 0.5));
   return roll < estimatedTruth ? 'truth' : 'lie';
 }
-function nextPlayerId(fromPlayerId) {
+function nextPlayerId(fromPlayerId, playerStatus = { A: 'active', B: 'active', koharu: 'active' }) {
   const index = PLAYERS.indexOf(fromPlayerId);
   if (index < 0) throw new Error('invalid player');
-  return PLAYERS[(index + 1) % PLAYERS.length];
+  for (let offset = 1; offset <= PLAYERS.length; offset += 1) {
+    const candidate = PLAYERS[(index + offset) % PLAYERS.length];
+    if (playerStatus[candidate] === 'active') return candidate;
+  }
+  return null;
 }
 function refs(roomId) {
   const store = db();
@@ -112,6 +116,11 @@ function publicRoom(roomId, hostUid, now, expiresAt) {
     turnNumber: 0,
     publicOffer: null,
     faceUpCards: { A: [], B: [], koharu: [] },
+    eliminationSnapshots: {},
+    winnerPlayerId: null,
+    draw: false,
+    finishReason: null,
+    finalResult: null,
   };
 }
 function publicResult(room, seatId, handStatus, cards) {
@@ -159,6 +168,78 @@ function safeOffer(offer) {
     });
   }
   return result;
+}
+
+function countByAnimal(cards = []) {
+  const counts = Object.fromEntries(ANIMALS.map((animal) => [animal, 0]));
+  for (const card of cards) if (ANIMALS.includes(card?.animalType)) counts[card.animalType] += 1;
+  return counts;
+}
+function publicPlayerSnapshot(playerId, status, cards, elimination = null) {
+  const faceUpCardsByAnimal = countByAnimal(cards);
+  return {
+    playerId,
+    status,
+    eliminated: status === 'eliminated',
+    eliminationAnimal: elimination?.eliminationAnimal || null,
+    faceUpCardsByAnimal,
+    faceUpCardsTotal: Object.values(faceUpCardsByAnimal).reduce((sum, count) => sum + count, 0),
+    eliminatedAt: elimination?.eliminatedAt || null,
+  };
+}
+function buildFinalResult(room, finishReason, winnerPlayerId, draw, finishedAt) {
+  const players = PLAYERS.map((playerId) => room.eliminationSnapshots?.[playerId]
+    || publicPlayerSnapshot(playerId, room.playerStatus[playerId], room.faceUpCards[playerId]));
+  return { winnerPlayerId, draw, finishReason, players, finishedAt };
+}
+function handFor(playerId, server, hands) {
+  return playerId === 'koharu' ? server.npcHand || [] : hands[playerId] || [];
+}
+function finishIfNeeded(room, server, hands) {
+  const active = PLAYERS.filter((playerId) => room.playerStatus[playerId] === 'active');
+  if (active.length === 1) return { finishReason: 'last-player-standing', winnerPlayerId: active[0], draw: false };
+  // The offline beginTurn ends immediately when any active player's hand is empty,
+  // including while all three players remain active.
+  if (active.some((playerId) => handFor(playerId, server, hands).length === 0)) {
+    const totals = active.map((playerId) => ({ playerId, total: (room.faceUpCards[playerId] || []).length }));
+    const minimum = Math.min(...totals.map(({ total }) => total));
+    const winners = totals.filter(({ total }) => total === minimum).map(({ playerId }) => playerId);
+    return { finishReason: 'hand-empty', winnerPlayerId: winners.length === 1 ? winners[0] : null, draw: winners.length > 1 };
+  }
+  return null;
+}
+function resolveFaceUp(roomValue, serverValue, handsValue, pending, judgment, now) {
+  const room = structuredClone(roomValue);
+  const server = structuredClone(serverValue);
+  const hands = { A: [...handsValue.A], B: [...handsValue.B] };
+  const offer = completedOffer(pending, judgment);
+  const recipient = offer.faceUpRecipientPlayerId;
+  room.faceUpCards[recipient] = [...(room.faceUpCards[recipient] || []), pending.card];
+  server.pendingOffer = null;
+  let eliminatedPlayerId = null;
+  if (room.faceUpCards[recipient].filter((card) => card.animalType === pending.card.animalType).length >= 4) {
+    eliminatedPlayerId = recipient;
+    const publicCards = room.faceUpCards[recipient];
+    const snapshot = publicPlayerSnapshot(recipient, 'eliminated', publicCards, { eliminationAnimal: pending.card.animalType, eliminatedAt: now });
+    room.eliminationSnapshots = { ...(room.eliminationSnapshots || {}), [recipient]: snapshot };
+    room.playerStatus = { ...room.playerStatus, [recipient]: 'eliminated' };
+    const secretCards = recipient === 'koharu' ? server.npcHand || [] : hands[recipient];
+    server.discard = [...(server.discard || []), ...secretCards, ...publicCards];
+    if (recipient === 'koharu') server.npcHand = [];
+    else hands[recipient] = [];
+    room.faceUpCards[recipient] = [];
+  }
+  const finish = finishIfNeeded(room, server, hands);
+  let advance;
+  if (finish) {
+    advance = { currentTurnPlayerId: null, turnState: 'finished', turnNumber: (room.turnNumber || 0) + 1 };
+    Object.assign(room, advance, { status: 'finished', ...finish, finalResult: buildFinalResult(room, finish.finishReason, finish.winnerPlayerId, finish.draw, now) });
+  } else {
+    const next = nextPlayerId(pending.fromPlayerId, room.playerStatus);
+    advance = { currentTurnPlayerId: next, turnState: next === 'koharu' ? 'awaitingNpcPhase' : 'awaitingOffer', turnNumber: (room.turnNumber || 0) + 1 };
+    Object.assign(room, advance);
+  }
+  return { room, server, hands, offer, eliminatedPlayerId, finish, advance };
 }
 
 async function createHandler(request) {
@@ -279,7 +360,7 @@ async function startHandler(request) {
     const leftovers = shuffled.slice(30);
     tx.set(r.hand(room.playerUids.A), { cards: handA });
     tx.set(r.hand(room.playerUids.B), { cards: handB });
-    tx.set(r.server, { npcHand, leftovers, pendingOffer: null, claimHistory: { A: { truth: 0, total: 0 }, B: { truth: 0, total: 0 } } });
+    tx.set(r.server, { npcHand, leftovers, discard: [], pendingOffer: null, claimHistory: { A: { truth: 0, total: 0 }, B: { truth: 0, total: 0 } } });
     tx.update(r.room, { status: 'playing', startedAt: now, dealt: true, currentTurnPlayerId: 'A', turnState: 'awaitingOffer', turnNumber: 0 });
     tx.update(inviteRef, { status: 'started', revokedAt: now });
     return { roomId, status: 'playing', currentTurnPlayerId: 'A' };
@@ -298,11 +379,16 @@ async function resumeHandler(request) {
     const seatId = requireMember(room, uid);
     let cards = null;
     let handStatus = 'pending';
-    if (room.status === 'playing' && room.dealt) {
+    if ((room.status === 'playing' || room.status === 'finished') && room.dealt) {
       const handSnap = await tx.get(r.hand(uid));
       if (!handSnap.exists) return publicResult({ ...room, publicOffer: safeOffer(room.publicOffer) }, seatId, 'retry', null);
-      cards = handSnap.data().cards || [];
-      handStatus = 'ready';
+      if (room.status === 'finished' || room.playerStatus?.[seatId] === 'eliminated') {
+        cards = [];
+        handStatus = room.playerStatus?.[seatId] === 'eliminated' ? 'eliminated' : 'finished';
+      } else {
+        cards = handSnap.data().cards || [];
+        handStatus = 'ready';
+      }
     }
     return publicResult({ ...room, publicOffer: safeOffer(room.publicOffer) }, seatId, handStatus, cards);
   });
@@ -329,7 +415,9 @@ async function makeHandler(request) {
     const stateToken = `${room.turnNumber}:${room.currentTurnPlayerId}:${room.turnState}`;
     if (actionSnap.exists) return replayAction(actionSnap.data(), fingerprint);
     if (room.status !== 'playing' || room.turnState !== 'awaitingOffer' || room.currentTurnPlayerId !== seatId) fail('failed-precondition', '現在はカードを渡せません。');
+    if (room.playerStatus?.[seatId] !== 'active') fail('failed-precondition', '脱落後はカードを渡せません。');
     if (targetPlayerId === seatId || (targetPlayerId !== 'koharu' && !room.players?.[targetPlayerId]?.joined)) fail('invalid-argument', '相手が正しくありません。');
+    if (room.playerStatus?.[targetPlayerId] !== 'active') fail('failed-precondition', '脱落した相手にはカードを渡せません。');
     const server = serverSnap.data();
     if (server.pendingOffer || room.publicOffer?.status === 'pending') fail('failed-precondition', '判定待ちのカードがあります。');
     const cards = handSnap.data().cards || [];
@@ -363,11 +451,6 @@ function completedOffer(pending, judgment) {
     faceUpRecipientPlayerId,
   };
 }
-function advanceRoom(room, offer) {
-  const next = nextPlayerId(offer.fromPlayerId);
-  return { currentTurnPlayerId: next, turnState: next === 'koharu' ? 'awaitingNpcPhase' : 'awaitingOffer', turnNumber: (room.turnNumber || 0) + 1 };
-}
-
 async function judgeHandler(request) {
   exactFields(request.data, ['roomId', 'actionId', 'judgment']);
   const uid = authUid(request);
@@ -378,18 +461,25 @@ async function judgeHandler(request) {
   const r = refs(roomId);
   const fingerprint = actionFingerprint('judge', uid, roomId, { actionId, judgment });
   return db().runTransaction(async (tx) => {
-    const [judgeActionSnap, roomSnap, serverSnap] = await Promise.all([tx.get(r.action(`judge-${actionId}`)), tx.get(r.room), tx.get(r.server)]);
-    if (!roomSnap.exists || !serverSnap.exists) fail('failed-precondition', 'ゲーム状態がありません。');
+    const roomSnap = await tx.get(r.room);
+    if (!roomSnap.exists) fail('failed-precondition', 'ゲーム状態がありません。');
     const room = roomSnap.data();
+    const [judgeActionSnap, serverSnap, handASnap, handBSnap, secretSnap] = await Promise.all([
+      tx.get(r.action(`judge-${actionId}`)), tx.get(r.server), tx.get(r.hand(room.playerUids.A)), tx.get(r.hand(room.playerUids.B)), tx.get(r.secret),
+    ]);
+    if (!serverSnap.exists || !handASnap.exists || !handBSnap.exists || !secretSnap.exists) fail('failed-precondition', 'ゲーム状態がありません。');
+    const inviteRef = db().collection('mofumofuOnlineRoomInvites').doc(secretSnap.data().inviteDigest);
+    const inviteSnap = await tx.get(inviteRef);
     const seatId = requireMember(room, uid);
     const stateToken = `${room.turnNumber}:${actionId}:judge`;
     if (judgeActionSnap.exists) return replayAction(judgeActionSnap.data(), fingerprint);
     if (room.status !== 'playing' || room.turnState !== 'awaitingJudgment') fail('failed-precondition', '現在は判定できません。');
+    if (room.playerStatus?.[seatId] !== 'active') fail('failed-precondition', '脱落後は判定できません。');
     const pending = serverSnap.data().pendingOffer;
     if (!pending || pending.actionId !== actionId || pending.toPlayerId !== seatId || room.publicOffer?.status !== 'pending') fail('permission-denied', 'この判定は行えません。');
-    const offer = completedOffer(pending, judgment);
-    const faceUpCards = { ...room.faceUpCards, [offer.faceUpRecipientPlayerId]: [...(room.faceUpCards?.[offer.faceUpRecipientPlayerId] || []), pending.card] };
-    const advance = advanceRoom(room, offer);
+    if (room.playerStatus?.[pending.fromPlayerId] !== 'active' || room.playerStatus?.[pending.toPlayerId] !== 'active') fail('failed-precondition', '脱落した参加者の判定はできません。');
+    const now = Date.now();
+    const resolved = resolveFaceUp(room, serverSnap.data(), { A: handASnap.data().cards || [], B: handBSnap.data().cards || [] }, pending, judgment, now);
     const history = { ...(serverSnap.data().claimHistory || {}) };
     if (pending.fromPlayerId !== 'koharu') {
       const entry = { ...(history[pending.fromPlayerId] || { truth: 0, total: 0 }) };
@@ -397,10 +487,15 @@ async function judgeHandler(request) {
       if (pending.claimAnimal === pending.card.animalType) entry.truth += 1;
       history[pending.fromPlayerId] = entry;
     }
-    const result = { roomId, actionId, offer, ...advance };
-    tx.update(r.server, { pendingOffer: null, claimHistory: history });
-    tx.update(r.room, { publicOffer: offer, faceUpCards, ...advance });
-    tx.create(r.action(`judge-${actionId}`), { fingerprint, stateToken, result, completedAt: Date.now() });
+    resolved.server.claimHistory = history;
+    resolved.room.publicOffer = resolved.offer;
+    const result = { roomId, actionId, offer: resolved.offer, eliminatedPlayerId: resolved.eliminatedPlayerId, finish: resolved.finish, ...resolved.advance };
+    tx.set(r.server, resolved.server);
+    tx.update(r.hand(room.playerUids.A), { cards: resolved.hands.A });
+    tx.update(r.hand(room.playerUids.B), { cards: resolved.hands.B });
+    tx.set(r.room, resolved.room);
+    if (resolved.finish && inviteSnap.exists) tx.update(inviteRef, { status: 'ended', revokedAt: now });
+    tx.create(r.action(`judge-${actionId}`), { fingerprint, stateToken, result, completedAt: now });
     return result;
   });
 }
@@ -413,46 +508,70 @@ async function npcHandler(request) {
   const r = refs(roomId);
   const fingerprint = actionFingerprint('npc', uid, roomId, { actionId });
   return db().runTransaction(async (tx) => {
-    const [actionSnap, roomSnap, serverSnap] = await Promise.all([tx.get(r.action(actionId)), tx.get(r.room), tx.get(r.server)]);
-    if (!roomSnap.exists || !serverSnap.exists) fail('failed-precondition', 'ゲーム状態がありません。');
+    const roomSnap = await tx.get(r.room);
+    if (!roomSnap.exists) fail('failed-precondition', 'ゲーム状態がありません。');
     const room = roomSnap.data();
+    const [actionSnap, serverSnap, handASnap, handBSnap, secretSnap] = await Promise.all([
+      tx.get(r.action(actionId)), tx.get(r.server), tx.get(r.hand(room.playerUids.A)), tx.get(r.hand(room.playerUids.B)), tx.get(r.secret),
+    ]);
+    if (!serverSnap.exists || !handASnap.exists || !handBSnap.exists || !secretSnap.exists) fail('failed-precondition', 'ゲーム状態がありません。');
+    const inviteRef = db().collection('mofumofuOnlineRoomInvites').doc(secretSnap.data().inviteDigest);
+    const inviteSnap = await tx.get(inviteRef);
     requireMember(room, uid);
     const stateToken = `${room.turnNumber}:${room.currentTurnPlayerId}:${room.turnState}:${room.publicOffer?.actionId || 'none'}`;
     if (actionSnap.exists) return replayAction(actionSnap.data(), fingerprint);
     if (room.status !== 'playing' || room.turnState !== 'awaitingNpcPhase') fail('failed-precondition', 'こはるの処理は必要ありません。');
     const server = serverSnap.data();
+    const hands = { A: handASnap.data().cards || [], B: handBSnap.data().cards || [] };
+    const now = Date.now();
     let result;
     if (server.pendingOffer?.toPlayerId === 'koharu') {
       const pending = server.pendingOffer;
+      if (room.playerStatus?.koharu !== 'active' || room.playerStatus?.[pending.fromPlayerId] !== 'active') fail('failed-precondition', '脱落した参加者の判定はできません。');
       const judgment = chooseNpcJudgment(server.claimHistory?.[pending.fromPlayerId]);
-      const offer = completedOffer(pending, judgment);
-      const faceUpCards = { ...room.faceUpCards, [offer.faceUpRecipientPlayerId]: [...(room.faceUpCards?.[offer.faceUpRecipientPlayerId] || []), pending.card] };
-      const advance = advanceRoom(room, offer);
+      const resolved = resolveFaceUp(room, server, hands, pending, judgment, now);
       const history = { ...(server.claimHistory || {}) };
       const entry = { ...(history[pending.fromPlayerId] || { truth: 0, total: 0 }) };
       entry.total += 1;
       if (pending.claimAnimal === pending.card.animalType) entry.truth += 1;
       history[pending.fromPlayerId] = entry;
-      result = { roomId, actionId, mode: 'npcJudgment', offer, ...advance };
-      tx.update(r.server, { pendingOffer: null, claimHistory: history });
-      tx.update(r.room, { publicOffer: offer, faceUpCards, ...advance });
+      resolved.server.claimHistory = history;
+      resolved.room.publicOffer = resolved.offer;
+      result = { roomId, actionId, mode: 'npcJudgment', offer: resolved.offer, eliminatedPlayerId: resolved.eliminatedPlayerId, finish: resolved.finish, ...resolved.advance };
+      tx.set(r.server, resolved.server);
+      tx.update(r.hand(room.playerUids.A), { cards: resolved.hands.A });
+      tx.update(r.hand(room.playerUids.B), { cards: resolved.hands.B });
+      tx.set(r.room, resolved.room);
+      if (resolved.finish && inviteSnap.exists) tx.update(inviteRef, { status: 'ended', revokedAt: now });
     } else if (room.currentTurnPlayerId === 'koharu' && !server.pendingOffer) {
+      if (room.playerStatus?.koharu !== 'active') fail('failed-precondition', '脱落したこはるは行動できません。');
       const npcHand = [...(server.npcHand || [])];
-      if (!npcHand.length) fail('failed-precondition', 'こはるの手札がありません。');
+      if (!npcHand.length) {
+        const finish = finishIfNeeded(room, server, hands);
+        if (!finish) fail('failed-precondition', 'こはるの手札がありません。');
+        const finishedRoom = structuredClone(room);
+        const advance = { currentTurnPlayerId: null, turnState: 'finished', turnNumber: (room.turnNumber || 0) + 1 };
+        Object.assign(finishedRoom, advance, { status: 'finished', ...finish, finalResult: buildFinalResult(finishedRoom, finish.finishReason, finish.winnerPlayerId, finish.draw, now) });
+        result = { roomId, actionId, mode: 'npcFinish', finish, ...advance };
+        tx.set(r.room, finishedRoom);
+        if (inviteSnap.exists) tx.update(inviteRef, { status: 'ended', revokedAt: now });
+      } else {
       const index = crypto.randomInt(npcHand.length);
       const [card] = npcHand.splice(index, 1);
       const claimAnimal = chooseNpcClaim(card.animalType);
-      const humans = ['A', 'B'].filter((seat) => room.players?.[seat]?.joined);
+      const humans = ['A', 'B'].filter((seat) => room.players?.[seat]?.joined && room.playerStatus?.[seat] === 'active');
+      if (!humans.length) fail('failed-precondition', 'カードを渡せる相手がいません。');
       const targetPlayerId = humans[(room.turnNumber || 0) % humans.length];
       const pending = { actionId, fromPlayerId: 'koharu', toPlayerId: targetPlayerId, claimAnimal, card };
       const offer = { actionId, fromPlayerId: 'koharu', toPlayerId: targetPlayerId, claimAnimal, status: 'pending' };
       result = { roomId, actionId, mode: 'npcOffer', offer, turnState: 'awaitingJudgment' };
       tx.update(r.server, { npcHand, pendingOffer: pending });
       tx.update(r.room, { publicOffer: offer, turnState: 'awaitingJudgment' });
+      }
     } else {
       fail('failed-precondition', 'こはるの処理は必要ありません。');
     }
-    tx.create(r.action(actionId), { fingerprint, stateToken, result, completedAt: Date.now() });
+    tx.create(r.action(actionId), { fingerprint, stateToken, result, completedAt: now });
     return result;
   });
 }
@@ -474,5 +593,5 @@ module.exports = {
   judgeMofumofuOffer,
   runMofumofuNpcTurn,
   _handlers: { createHandler, joinHandler, startHandler, resumeHandler, makeHandler, judgeHandler, npcHandler },
-  _test: { ANIMALS, PROJECT_ID, chooseNpcClaim, chooseNpcJudgment, nextPlayerId, judgeSuccess, digest, sameFingerprint },
+  _test: { ANIMALS, PROJECT_ID, chooseNpcClaim, chooseNpcJudgment, nextPlayerId, judgeSuccess, digest, sameFingerprint, countByAnimal, finishIfNeeded, resolveFaceUp },
 };

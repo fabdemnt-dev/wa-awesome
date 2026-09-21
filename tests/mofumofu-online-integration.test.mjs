@@ -53,6 +53,32 @@ async function setTurn(roomId, playerId, state = 'awaitingOffer') {
   await adminDb.doc(`mofumofuOnlineRooms/${roomId}/serverState/current`).update({ pendingOffer: null });
 }
 function digest(code) { return createHash('sha256').update(code).digest('hex'); }
+function testCard(animalType, suffix = randomUUID()) { return { cardId: `${animalType}-${suffix}`, animalType }; }
+async function roomDocs(roomId) {
+  const room = (await adminDb.doc(`mofumofuOnlineRooms/${roomId}`).get()).data();
+  const server = (await adminDb.doc(`mofumofuOnlineRooms/${roomId}/serverState/current`).get()).data();
+  const handA = (await adminDb.doc(`mofumofuOnlineRooms/${roomId}/privateHands/${room.playerUids.A}`).get()).data();
+  const handB = (await adminDb.doc(`mofumofuOnlineRooms/${roomId}/privateHands/${room.playerUids.B}`).get()).data();
+  return { room, server, handA, handB };
+}
+async function injectPending(roomId, { from, to, animal = 'cat', claim = animal, faceUpCards = {}, handA, handB, npcHand, statuses }) {
+  const docs = await roomDocs(roomId); const actionId = randomUUID(); const card = testCard(animal, `pending-${actionId}`);
+  const roomPatch = {
+    status: 'playing', currentTurnPlayerId: from, turnState: to === 'koharu' ? 'awaitingNpcPhase' : 'awaitingJudgment',
+    publicOffer: { actionId, fromPlayerId: from, toPlayerId: to, claimAnimal: claim, status: 'pending' },
+    faceUpCards: { A: [], B: [], koharu: [], ...faceUpCards },
+    playerStatus: { A: 'active', B: 'active', koharu: 'active', ...(statuses || {}) },
+    eliminationSnapshots: {}, finalResult: null, winnerPlayerId: null, draw: false, finishReason: null,
+  };
+  const pendingOffer = { actionId, fromPlayerId: from, toPlayerId: to, claimAnimal: claim, card };
+  await Promise.all([
+    adminDb.doc(`mofumofuOnlineRooms/${roomId}`).update(roomPatch),
+    adminDb.doc(`mofumofuOnlineRooms/${roomId}/serverState/current`).update({ pendingOffer, npcHand: npcHand ?? docs.server.npcHand, discard: [] }),
+    adminDb.doc(`mofumofuOnlineRooms/${roomId}/privateHands/${docs.room.playerUids.A}`).update({ cards: handA ?? docs.handA.cards }),
+    adminDb.doc(`mofumofuOnlineRooms/${roomId}/privateHands/${docs.room.playerUids.B}`).update({ cards: handB ?? docs.handB.cards }),
+  ]);
+  return { actionId, card, docs };
+}
 
 test.after(async () => {
   await Promise.allSettled(clients.map(({ fs }) => terminate(fs)));
@@ -259,4 +285,118 @@ test('16 client code stores only room/seat and never handles pre-judgment actual
   assert.match(source, /runMofumofuNpcTurn', state\.npcRequest/);
   assert.equal(/npcRequest\s*\|\|=\s*\{[^}]+(cardId|claimAnimal|targetPlayerId|judgment|nextPlayerId)/s.test(source), false);
   assert.equal(source.includes('console.'), false); assert.equal(source.includes('dataset.actualAnimal'), false);
+});
+
+test('17-25 Phase 4 A elimination is atomic, secret-safe, idempotent, and blocks future actions', async () => {
+  const game = await startedRoom('phase4-a'); const prior = [testCard('cat', 'up-1'), testCard('cat', 'up-2'), testCard('cat', 'up-3')];
+  const injected = await injectPending(game.roomId, { from: 'A', to: 'B', animal: 'cat', faceUpCards: { A: prior } });
+  const payload = { roomId: game.roomId, actionId: injected.actionId, judgment: 'truth' };
+  const [first, replay] = await Promise.all([game.b.call('judgeMofumofuOffer', payload), game.b.call('judgeMofumofuOffer', payload)]);
+  assert.deepEqual(first, replay); assert.equal(first.eliminatedPlayerId, 'A');
+  const after = await roomDocs(game.roomId); const snapshot = after.room.eliminationSnapshots.A;
+  assert.equal(after.room.playerStatus.A, 'eliminated'); assert.equal(after.handA.cards.length, 0); assert.equal(after.room.faceUpCards.A.length, 0);
+  assert.equal(snapshot.eliminationAnimal, 'cat'); assert.equal(snapshot.faceUpCardsByAnimal.cat, 4); assert.equal(snapshot.faceUpCardsTotal, 4);
+  assert.equal(after.server.discard.length, injected.docs.handA.cards.length + 4); assert.equal(new Set(after.server.discard.map((card) => card.cardId)).size, after.server.discard.length);
+  assert.equal(JSON.stringify(after.room).includes('privateHands'), false); assert.equal(JSON.stringify(first).includes('discard'), false);
+  const resumed = await game.a.call('resumeMofumofuRoom', { roomId: game.roomId }); assert.equal(resumed.handStatus, 'eliminated'); assert.deepEqual(resumed.cards, []);
+  await rejects(game.a.call('makeMofumofuOffer', { roomId: game.roomId, cardId: 'cat-x', claimAnimal: 'cat', targetPlayerId: 'B', actionId: randomUUID() }), 'failed-precondition');
+  const beforeReplay = JSON.stringify(after.server.discard); await game.b.call('judgeMofumofuOffer', payload); assert.equal(JSON.stringify((await roomDocs(game.roomId)).server.discard), beforeReplay);
+});
+
+test('26-32 B elimination skips B and rotation starts from original offer maker', async () => {
+  const game = await startedRoom('phase4-b'); const prior = [testCard('rabbit', 'up-1'), testCard('rabbit', 'up-2'), testCard('rabbit', 'up-3')];
+  const injected = await injectPending(game.roomId, { from: 'A', to: 'B', animal: 'rabbit', faceUpCards: { B: prior } });
+  const result = await game.b.call('judgeMofumofuOffer', { roomId: game.roomId, actionId: injected.actionId, judgment: 'lie' });
+  assert.equal(result.eliminatedPlayerId, 'B'); assert.equal(result.currentTurnPlayerId, 'koharu');
+  const after = await roomDocs(game.roomId); assert.equal(after.room.playerStatus.B, 'eliminated'); assert.equal(after.room.currentTurnPlayerId, 'koharu');
+  await setTurn(game.roomId, 'A'); await rejects(game.a.call('makeMofumofuOffer', { roomId: game.roomId, cardId: after.handA.cards[0].cardId, claimAnimal: 'cat', targetPlayerId: 'B', actionId: randomUUID() }), 'failed-precondition');
+});
+
+test('33-37 koharu elimination clears NPC hand and rotation skips koharu', async () => {
+  const game = await startedRoom('phase4-koharu'); const prior = [testCard('bear', 'up-1'), testCard('bear', 'up-2'), testCard('bear', 'up-3')];
+  const injected = await injectPending(game.roomId, { from: 'koharu', to: 'A', animal: 'bear', faceUpCards: { koharu: prior } });
+  const result = await game.a.call('judgeMofumofuOffer', { roomId: game.roomId, actionId: injected.actionId, judgment: 'truth' });
+  assert.equal(result.eliminatedPlayerId, 'koharu'); assert.equal(result.currentTurnPlayerId, 'A');
+  const after = await roomDocs(game.roomId); assert.deepEqual(after.server.npcHand, []); assert.equal(after.room.faceUpCards.koharu.length, 0);
+  await adminDb.doc(`mofumofuOnlineRooms/${game.roomId}`).update({ currentTurnPlayerId: 'koharu', turnState: 'awaitingNpcPhase' });
+  await rejects(game.a.call('runMofumofuNpcTurn', { roomId: game.roomId, actionId: randomUUID() }), 'failed-precondition');
+});
+
+test('38-46 three active players: any empty server-side hand ends game and compares every active face-up total', async () => {
+  // Offline beginTurn checks alive.some(hand.length === 0), so three survivors also finish immediately.
+  const game = await startedRoom('phase4-empty');
+  const injected = await injectPending(game.roomId, { from: 'A', to: 'B', animal: 'fox', faceUpCards: { A: [testCard('cat')], B: [testCard('cat'), testCard('bear')], koharu: [testCard('rabbit')] }, handA: [testCard('fox', 'last')] });
+  // Use the actual injected pending card as A's sole offered card state: make has already removed it, hence empty.
+  await adminDb.doc(`mofumofuOnlineRooms/${game.roomId}/privateHands/${injected.docs.room.playerUids.A}`).update({ cards: [] });
+  const result = await game.b.call('judgeMofumofuOffer', { roomId: game.roomId, actionId: injected.actionId, judgment: 'truth' });
+  assert.equal(result.finish.finishReason, 'hand-empty'); assert.equal(result.finish.winnerPlayerId, 'koharu'); assert.equal(result.finish.draw, false);
+  const after = await roomDocs(game.roomId); assert.equal(after.room.status, 'finished'); assert.equal(after.room.finalResult.players.length, 3);
+});
+
+test('47-56 hand-empty ties are draws and final result contains public collections but no hands', () => {
+  const room = { playerStatus: { A: 'active', B: 'active', koharu: 'active' }, faceUpCards: { A: [testCard('cat')], B: [], koharu: [testCard('fox'), testCard('fox')] }, eliminationSnapshots: {}, turnNumber: 4 };
+  const pending = { actionId: randomUUID(), fromPlayerId: 'A', toPlayerId: 'B', claimAnimal: 'rabbit', card: testCard('rabbit') };
+  const resolved = module._test.resolveFaceUp(room, { npcHand: [testCard('cat')], discard: [], pendingOffer: pending }, { A: [], B: [testCard('bear')] }, pending, 'lie', Date.now());
+  assert.equal(resolved.finish.finishReason, 'hand-empty'); assert.equal(resolved.finish.winnerPlayerId, null); assert.equal(resolved.finish.draw, true);
+  assert.equal(resolved.room.finalResult.players.length, 3); assert.equal(JSON.stringify(resolved.room.finalResult).includes('cardId'), false); assert.equal(JSON.stringify(resolved.room.finalResult).includes('npcHand'), false);
+});
+
+test('57-66 last player standing finishes, invite ends, finished operations reject, replay and resume are stable', async () => {
+  const game = await startedRoom('phase4-last'); const secret = (await adminDb.doc(`mofumofuOnlineRoomSecrets/${game.roomId}`).get()).data();
+  const prior = [testCard('panda', 'up-1'), testCard('panda', 'up-2'), testCard('panda', 'up-3')];
+  const injected = await injectPending(game.roomId, { from: 'A', to: 'B', animal: 'panda', faceUpCards: { B: prior }, statuses: { koharu: 'eliminated' } });
+  const payload = { roomId: game.roomId, actionId: injected.actionId, judgment: 'lie' }; const result = await game.b.call('judgeMofumofuOffer', payload);
+  assert.equal(result.finish.finishReason, 'last-player-standing'); assert.equal(result.finish.winnerPlayerId, 'A'); assert.equal(result.finish.draw, false);
+  const after = await roomDocs(game.roomId); assert.equal(after.room.status, 'finished'); assert.equal(after.room.finalResult.winnerPlayerId, 'A');
+  assert.equal((await adminDb.doc(`mofumofuOnlineRoomInvites/${secret.inviteDigest}`).get()).data().status, 'ended');
+  await rejects(game.a.call('makeMofumofuOffer', { roomId: game.roomId, cardId: after.handA.cards[0].cardId, claimAnimal: 'cat', targetPlayerId: 'B', actionId: randomUUID() }), 'failed-precondition');
+  await rejects(game.b.call('judgeMofumofuOffer', { roomId: game.roomId, actionId: randomUUID(), judgment: 'truth' }), 'failed-precondition');
+  await rejects(game.a.call('runMofumofuNpcTurn', { roomId: game.roomId, actionId: randomUUID() }), 'failed-precondition');
+  assert.deepEqual(await game.b.call('judgeMofumofuOffer', payload), result);
+  const resumed = await game.a.call('resumeMofumofuRoom', { roomId: game.roomId }); assert.equal(resumed.room.status, 'finished'); assert.ok(resumed.room.finalResult); assert.deepEqual(resumed.cards, []);
+});
+
+test('67-75 Phase 4 rules and static client secrecy/controls remain closed', async () => {
+  const game = await startedRoom('phase4-rules');
+  for (const who of [game.a, game.b]) {
+    await rejects(getDoc(doc(who.fs, `mofumofuOnlineRooms/${game.roomId}/serverState/current`)), 'permission-denied');
+    await rejects(getDoc(doc(who.fs, `mofumofuOnlineRooms/${game.roomId}/serverState/discard`)), 'permission-denied');
+    await rejects(setDoc(doc(who.fs, `mofumofuOnlineRooms/${game.roomId}`), { playerStatus: { A: 'eliminated' } }, { merge: true }), 'permission-denied');
+    await rejects(setDoc(doc(who.fs, `mofumofuOnlineRooms/${game.roomId}`), { finalResult: { winnerPlayerId: 'A' } }, { merge: true }), 'permission-denied');
+  }
+  const source = await readFile(new URL('../toybox/mofumofu-gathering/online/script.js', import.meta.url), 'utf8');
+  assert.equal(source.includes('console.'), false); assert.equal(/localStorage\.setItem\([^)]*(cards|actualAnimal|finalResult)/.test(source), false);
+  assert.match(source, /ownStatus === 'active'/); assert.match(source, /renderFinalResult/); assert.match(source, /room\.status === 'finished'/);
+});
+
+test('Phase 4 boundary: three matching or four mixed face-up cards do not eliminate', () => {
+  for (const faceUp of [
+    [testCard('cat'), testCard('cat')],
+    [testCard('cat'), testCard('rabbit'), testCard('bear')],
+  ]) {
+    const room = { playerStatus: { A: 'active', B: 'active', koharu: 'active' }, faceUpCards: { A: faceUp, B: [], koharu: [] }, eliminationSnapshots: {}, turnNumber: 1 };
+    const pending = { actionId: randomUUID(), fromPlayerId: 'A', toPlayerId: 'B', claimAnimal: 'cat', card: testCard('cat') };
+    const resolved = module._test.resolveFaceUp(room, { npcHand: [testCard('fox')], discard: [], pendingOffer: pending }, { A: [testCard('bear')], B: [testCard('rabbit')] }, pending, 'truth', Date.now());
+    assert.equal(resolved.eliminatedPlayerId, null); assert.equal(resolved.room.playerStatus.A, 'active');
+  }
+});
+
+test('Phase 4 NPC judgment elimination is atomic and same actionId replay has no duplicate discard', async () => {
+  const game = await startedRoom('phase4-npc-elim'); const priorA = [testCard('polar'), testCard('polar'), testCard('polar')]; const priorK = [testCard('polar'), testCard('polar'), testCard('polar')];
+  const injected = await injectPending(game.roomId, { from: 'A', to: 'koharu', animal: 'polar', claim: 'polar', faceUpCards: { A: priorA, koharu: priorK } });
+  const npcActionId = randomUUID(); const payload = { roomId: game.roomId, actionId: npcActionId };
+  const [one, two] = await Promise.all([game.a.call('runMofumofuNpcTurn', payload), game.a.call('runMofumofuNpcTurn', payload)]);
+  assert.deepEqual(one, two); assert.ok(['A', 'koharu'].includes(one.eliminatedPlayerId));
+  const before = await roomDocs(game.roomId); const discardIds = before.server.discard.map((card) => card.cardId);
+  assert.equal(new Set(discardIds).size, discardIds.length); assert.equal(Object.keys(before.room.eliminationSnapshots).length, 1);
+  assert.deepEqual(await game.a.call('runMofumofuNpcTurn', payload), one);
+  const after = await roomDocs(game.roomId); assert.deepEqual(after.server.discard, before.server.discard); assert.deepEqual(after.room.eliminationSnapshots, before.room.eliminationSnapshots);
+  assert.equal(JSON.stringify(one).includes('discard'), false); assert.equal(JSON.stringify(one).includes('npcHand'), false);
+});
+
+test('Phase 4 NPC offer targets only active humans', async () => {
+  const game = await startedRoom('phase4-npc-target'); await setTurn(game.roomId, 'koharu', 'awaitingNpcPhase');
+  await adminDb.doc(`mofumofuOnlineRooms/${game.roomId}`).update({ 'playerStatus.B': 'eliminated' });
+  const result = await game.a.call('runMofumofuNpcTurn', { roomId: game.roomId, actionId: randomUUID() });
+  assert.equal(result.mode, 'npcOffer'); assert.equal(result.offer.toPlayerId, 'A');
 });

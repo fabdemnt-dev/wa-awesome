@@ -21,7 +21,8 @@
       <button id="start-game">ゲーム開始</button>
     </section>
     <section id="game" hidden>
-      <h2>接続・秘密手札分離テスト</h2>
+      <h2>オンライン対戦</h2>
+      <section id="elimination-notice" class="notice" hidden></section>
       <p id="turn"></p><p id="npc-status" hidden>こはるが考えています…</p>
       <div id="hand"></div>
       <form id="offer-form" hidden>
@@ -32,6 +33,11 @@
       </form>
       <section id="offer" hidden><p id="offer-message"></p><div id="judge-buttons" hidden><button data-judgment="truth">ほんと？</button><button data-judgment="lie">うそ！</button></div></section>
       <section id="result" hidden></section>
+      <section id="final-result" class="final-result" hidden>
+        <h2 id="final-title"></h2>
+        <p id="final-reason"></p>
+        <div id="final-players"></div>
+      </section>
     </section>
   </main>
   <script type="module" src="./script.js"></script>
