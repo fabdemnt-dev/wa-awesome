@@ -2,6 +2,7 @@
 
 const crypto = require('node:crypto');
 const { getFirestore } = require('firebase-admin/firestore');
+const { getDatabase } = require('firebase-admin/database');
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
 
 const PROJECT_ID = 'demo-mofumofu-online';
@@ -14,9 +15,12 @@ const INVITE_RETRIES = 3;
 const WAITING_TTL_MS = 30 * 60 * 1000;
 const RATE_WINDOW_MS = 10 * 60 * 1000;
 const RATE_FAILURE_LIMIT = 8;
+const PRESENCE_ACCESS_TTL_MS = 5 * 60 * 1000;
+const PRESENCE_STALE_MS = 2 * 60 * 1000;
 const callableOptions = { region: REGION, cors: true };
 
 function db() { return getFirestore(); }
+function presenceDb() { return getDatabase(undefined, `https://${PROJECT_ID}.firebaseio.com`); }
 function fail(code, message) { throw new HttpsError(code, message); }
 function authUid(request) {
   const uid = request.auth?.uid;
@@ -37,6 +41,7 @@ function uuid(value, label = 'ID') {
 }
 function roomIdFrom(data) { return uuid(data?.roomId, 'ルームID'); }
 function actionIdFrom(data) { return uuid(data?.actionId, 'アクションID'); }
+function connectionIdFrom(data) { return uuid(data?.connectionId, '接続ID'); }
 function inviteCode(value) {
   if (typeof value !== 'string') fail('invalid-argument', '招待コードを入力してください。');
   const code = value.trim().toUpperCase();
@@ -135,6 +140,24 @@ function requireMember(room, uid) {
   const seat = memberSeat(room, uid);
   if (!seat) fail('permission-denied', 'この部屋の参加者ではありません。');
   return seat;
+}
+function presenceConnectionOnline(connection, now = Date.now()) {
+  return plain(connection)
+    && connection.state === 'online'
+    && Number.isFinite(connection.lastHeartbeatAt)
+    && connection.lastHeartbeatAt >= now - PRESENCE_STALE_MS;
+}
+function uidPresenceOnline(value, now = Date.now()) {
+  return plain(value?.connections)
+    && Object.values(value.connections).some((connection) => presenceConnectionOnline(connection, now));
+}
+async function onlineHumanSeats(room, now = Date.now()) {
+  const snapshot = await presenceDb().ref(`mofumofuOnlinePresence/${room.roomId}`).get();
+  const presence = snapshot.val() || {};
+  return ['A', 'B'].filter((seatId) => {
+    const uid = room.playerUids?.[seatId];
+    return uid && uidPresenceOnline(presence[uid], now);
+  });
 }
 function actionFingerprint(type, uid, roomId, fields) { return { type, uid, roomId, ...fields }; }
 function sameFingerprint(a, b) {
@@ -394,6 +417,19 @@ async function resumeHandler(request) {
   });
 }
 
+async function authorizePresenceHandler(request) {
+  exactFields(request.data, ['roomId', 'connectionId']);
+  const uid = authUid(request);
+  const roomId = roomIdFrom(request.data);
+  const connectionId = connectionIdFrom(request.data);
+  const roomSnap = await refs(roomId).room.get();
+  if (!roomSnap.exists) fail('not-found', '部屋が見つかりません。');
+  const seatId = requireMember(roomSnap.data(), uid);
+  const expiresAt = Date.now() + PRESENCE_ACCESS_TTL_MS;
+  await presenceDb().ref(`mofumofuOnlinePresenceAccess/${roomId}/${uid}`).set({ uid, roomId, seatId, expiresAt });
+  return { roomId, seatId, connectionId, expiresAt };
+}
+
 async function makeHandler(request) {
   exactFields(request.data, ['roomId', 'cardId', 'claimAnimal', 'targetPlayerId', 'actionId']);
   const uid = authUid(request);
@@ -507,6 +543,15 @@ async function npcHandler(request) {
   const actionId = actionIdFrom(request.data);
   const r = refs(roomId);
   const fingerprint = actionFingerprint('npc', uid, roomId, { actionId });
+  const initialRoomSnap = await r.room.get();
+  if (!initialRoomSnap.exists) fail('failed-precondition', 'ゲーム状態がありません。');
+  requireMember(initialRoomSnap.data(), uid);
+  let onlineSeats = null;
+  if (initialRoomSnap.data().status === 'playing'
+      && initialRoomSnap.data().turnState === 'awaitingNpcPhase'
+      && initialRoomSnap.data().currentTurnPlayerId === 'koharu') {
+    onlineSeats = await onlineHumanSeats(initialRoomSnap.data());
+  }
   return db().runTransaction(async (tx) => {
     const roomSnap = await tx.get(r.room);
     if (!roomSnap.exists) fail('failed-precondition', 'ゲーム状態がありません。');
@@ -559,8 +604,10 @@ async function npcHandler(request) {
       const index = crypto.randomInt(npcHand.length);
       const [card] = npcHand.splice(index, 1);
       const claimAnimal = chooseNpcClaim(card.animalType);
-      const humans = ['A', 'B'].filter((seat) => room.players?.[seat]?.joined && room.playerStatus?.[seat] === 'active');
-      if (!humans.length) fail('failed-precondition', 'カードを渡せる相手がいません。');
+      const humans = ['A', 'B'].filter((seat) => room.players?.[seat]?.joined
+        && room.playerStatus?.[seat] === 'active'
+        && onlineSeats?.includes(seat));
+      if (!humans.length) fail('failed-precondition', '接続中の相手を待っています。');
       const targetPlayerId = humans[(room.turnNumber || 0) % humans.length];
       const pending = { actionId, fromPlayerId: 'koharu', toPlayerId: targetPlayerId, claimAnimal, card };
       const offer = { actionId, fromPlayerId: 'koharu', toPlayerId: targetPlayerId, claimAnimal, status: 'pending' };
@@ -580,6 +627,7 @@ const createMofumofuRoom = onCall(callableOptions, createHandler);
 const joinMofumofuRoom = onCall(callableOptions, joinHandler);
 const startMofumofuGame = onCall(callableOptions, startHandler);
 const resumeMofumofuRoom = onCall(callableOptions, resumeHandler);
+const authorizeMofumofuPresence = onCall(callableOptions, authorizePresenceHandler);
 const makeMofumofuOffer = onCall(callableOptions, makeHandler);
 const judgeMofumofuOffer = onCall(callableOptions, judgeHandler);
 const runMofumofuNpcTurn = onCall(callableOptions, npcHandler);
@@ -589,9 +637,10 @@ module.exports = {
   joinMofumofuRoom,
   startMofumofuGame,
   resumeMofumofuRoom,
+  authorizeMofumofuPresence,
   makeMofumofuOffer,
   judgeMofumofuOffer,
   runMofumofuNpcTurn,
-  _handlers: { createHandler, joinHandler, startHandler, resumeHandler, makeHandler, judgeHandler, npcHandler },
-  _test: { ANIMALS, PROJECT_ID, chooseNpcClaim, chooseNpcJudgment, nextPlayerId, judgeSuccess, digest, sameFingerprint, countByAnimal, finishIfNeeded, resolveFaceUp },
+  _handlers: { createHandler, joinHandler, startHandler, resumeHandler, authorizePresenceHandler, makeHandler, judgeHandler, npcHandler },
+  _test: { ANIMALS, PROJECT_ID, PRESENCE_ACCESS_TTL_MS, PRESENCE_STALE_MS, presenceConnectionOnline, uidPresenceOnline, chooseNpcClaim, chooseNpcJudgment, nextPlayerId, judgeSuccess, digest, sameFingerprint, countByAnimal, finishIfNeeded, resolveFaceUp },
 };

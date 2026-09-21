@@ -7,32 +7,37 @@ import { initializeApp, deleteApp } from 'firebase/app';
 import { getAuth, connectAuthEmulator, signInAnonymously } from 'firebase/auth';
 import { getFirestore, connectFirestoreEmulator, doc, getDoc, setDoc, terminate } from 'firebase/firestore';
 import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'firebase/functions';
+import { getDatabase, connectDatabaseEmulator, ref, set } from 'firebase/database';
 
 const direct = process.env.MOFUMOFU_DIRECT_HANDLERS === '1';
 const projectId = 'demo-mofumofu-online';
 const functionRequire = createRequire(new URL('../functions/package.json', import.meta.url));
 const { initializeApp: initializeAdminApp, getApps: getAdminApps, deleteApp: deleteAdminApp } = functionRequire('firebase-admin/app');
 const { getFirestore: getAdminFirestore } = functionRequire('firebase-admin/firestore');
+const { getDatabase: getAdminDatabase } = functionRequire('firebase-admin/database');
 let ownedAdminApp = null;
-if (!getAdminApps().length) ownedAdminApp = initializeAdminApp({ projectId });
+if (!getAdminApps().length) ownedAdminApp = initializeAdminApp({ projectId, databaseURL: `https://${projectId}.firebaseio.com` });
 const adminDb = getAdminFirestore();
+const adminRtdb = getAdminDatabase();
 const module = functionRequire('./mofumofu-online');
 const clients = [];
-const config = { projectId, apiKey: 'demo', appId: 'demo' };
+const config = { projectId, apiKey: 'demo', appId: 'demo', databaseURL: `https://${projectId}.firebaseio.com` };
 
 function client(name, authenticate = true) {
   const app = initializeApp(config, `${name}-${randomUUID()}`);
   const auth = getAuth(app);
   const fs = getFirestore(app);
   const fn = getFunctions(app, 'asia-northeast1');
+  const rtdb = getDatabase(app);
   connectAuthEmulator(auth, 'http://127.0.0.1:9199', { disableWarnings: true });
   connectFirestoreEmulator(fs, '127.0.0.1', 8180);
   connectFunctionsEmulator(fn, '127.0.0.1', 5101);
-  const value = { app, auth, fs, fn, ready: authenticate ? signInAnonymously(auth) : Promise.resolve() };
+  connectDatabaseEmulator(rtdb, '127.0.0.1', 9103);
+  const value = { app, auth, fs, fn, rtdb, ready: authenticate ? signInAnonymously(auth) : Promise.resolve() };
   value.call = async (name, data) => {
     await value.ready;
     if (!direct) return httpsCallable(fn, name)(data).then((response) => response.data);
-    const handlerName = ({ createMofumofuRoom: 'createHandler', joinMofumofuRoom: 'joinHandler', startMofumofuGame: 'startHandler', resumeMofumofuRoom: 'resumeHandler', makeMofumofuOffer: 'makeHandler', judgeMofumofuOffer: 'judgeHandler', runMofumofuNpcTurn: 'npcHandler' })[name];
+    const handlerName = ({ createMofumofuRoom: 'createHandler', joinMofumofuRoom: 'joinHandler', startMofumofuGame: 'startHandler', resumeMofumofuRoom: 'resumeHandler', authorizeMofumofuPresence: 'authorizePresenceHandler', makeMofumofuOffer: 'makeHandler', judgeMofumofuOffer: 'judgeHandler', runMofumofuNpcTurn: 'npcHandler' })[name];
     return module._handlers[handlerName]({ data, auth: auth.currentUser ? { uid: auth.currentUser.uid } : null });
   };
   clients.push(value);
@@ -45,8 +50,19 @@ async function startedRoom(prefix = 'room') {
   const created = await a.call('createMofumofuRoom', {});
   await b.call('joinMofumofuRoom', { inviteCode: created.inviteCode });
   await a.call('startMofumofuGame', { roomId: created.roomId });
+  await Promise.all([connectPresence(a, created.roomId), connectPresence(b, created.roomId)]);
   const [ra, rb] = await Promise.all([a.call('resumeMofumofuRoom', { roomId: created.roomId }), b.call('resumeMofumofuRoom', { roomId: created.roomId })]);
   return { a, b, roomId: created.roomId, created, ra, rb };
+}
+async function connectPresence(who, roomId, connectionId = randomUUID(), heartbeat = Date.now()) {
+  const admission = await who.call('authorizeMofumofuPresence', { roomId, connectionId });
+  const access = await adminRtdb.ref(`mofumofuOnlinePresenceAccess/${roomId}/${who.auth.currentUser.uid}`).get();
+  assert.equal(access.exists(), true, 'presence admission must be written to the shared RTDB namespace');
+  await set(ref(who.rtdb, `mofumofuOnlinePresence/${roomId}/${who.auth.currentUser.uid}/connections/${connectionId}`), {
+    uid: who.auth.currentUser.uid, roomId, seatId: admission.seatId, connectionId,
+    state: 'online', lastHeartbeatAt: heartbeat, connectedAt: heartbeat,
+  });
+  return { ...admission, connectionId };
 }
 async function setTurn(roomId, playerId, state = 'awaitingOffer') {
   await adminDb.doc(`mofumofuOnlineRooms/${roomId}`).update({ currentTurnPlayerId: playerId, turnState: state, publicOffer: null });
@@ -400,4 +416,146 @@ test('Phase 4 NPC offer targets only active humans', async () => {
   await adminDb.doc(`mofumofuOnlineRooms/${game.roomId}`).update({ 'playerStatus.B': 'eliminated' });
   const result = await game.a.call('runMofumofuNpcTurn', { roomId: game.roomId, actionId: randomUUID() });
   assert.equal(result.mode, 'npcOffer'); assert.equal(result.offer.toPlayerId, 'A');
+});
+
+test('Phase 5 1-19 presence admission authenticates membership and exposes no game secrets', async () => {
+  const a = client('p5-admit-a'); const b = client('p5-admit-b'); const outsider = client('p5-admit-x'); const unauth = client('p5-admit-none', false);
+  await Promise.all([a.ready, b.ready, outsider.ready]);
+  const created = await a.call('createMofumofuRoom', {});
+  await b.call('joinMofumofuRoom', { inviteCode: created.inviteCode });
+  const aConnection = randomUUID(); const bConnection = randomUUID();
+  const [aAdmission, bAdmission] = await Promise.all([
+    a.call('authorizeMofumofuPresence', { roomId: created.roomId, connectionId: aConnection }),
+    b.call('authorizeMofumofuPresence', { roomId: created.roomId, connectionId: bConnection }),
+  ]);
+  assert.equal(aAdmission.seatId, 'A'); assert.equal(bAdmission.seatId, 'B');
+  assert.deepEqual(Object.keys(aAdmission).sort(), ['connectionId', 'expiresAt', 'roomId', 'seatId']);
+  assert.equal(JSON.stringify(aAdmission).match(/cards|cardId|animalType|actualAnimal|pendingOffer|npcHand|discard|invite/i), null);
+  await rejects(unauth.call('authorizeMofumofuPresence', { roomId: created.roomId, connectionId: randomUUID() }), 'unauthenticated');
+  await rejects(outsider.call('authorizeMofumofuPresence', { roomId: created.roomId, connectionId: randomUUID() }), 'permission-denied');
+  await rejects(a.call('authorizeMofumofuPresence', { roomId: created.roomId, connectionId: randomUUID(), seatId: 'B' }), 'invalid-argument');
+  await rejects(a.call('authorizeMofumofuPresence', { roomId: randomUUID(), connectionId: aConnection }), 'not-found');
+  await rejects(a.call('authorizeMofumofuPresence', { roomId: created.roomId, connectionId: 'not-a-uuid' }), 'invalid-argument');
+});
+
+test('Phase 5 20-35 heartbeat, stale and multiple connection semantics', async () => {
+  const now = Date.now();
+  assert.equal(module._test.PRESENCE_STALE_MS, 120_000);
+  assert.equal(module._test.PRESENCE_ACCESS_TTL_MS, 300_000);
+  assert.equal(module._test.presenceConnectionOnline({ state: 'online', lastHeartbeatAt: now - 15_000 }, now), true);
+  assert.equal(module._test.presenceConnectionOnline({ state: 'online', lastHeartbeatAt: now - 119_999 }, now), true);
+  assert.equal(module._test.presenceConnectionOnline({ state: 'online', lastHeartbeatAt: now - 120_001 }, now), false);
+  assert.equal(module._test.presenceConnectionOnline({ state: 'disconnected', lastHeartbeatAt: now }, now), false);
+  assert.equal(module._test.uidPresenceOnline({ connections: { old: { state: 'disconnected', lastHeartbeatAt: now }, live: { state: 'online', lastHeartbeatAt: now } } }, now), true);
+  assert.equal(module._test.uidPresenceOnline({ connections: { old: { state: 'online', lastHeartbeatAt: now - 120_001 }, gone: { state: 'disconnected', lastHeartbeatAt: now } } }, now), false);
+  const room = await startedRoom('p5-multi');
+  const second = await connectPresence(room.a, room.roomId);
+  const snapshot = await adminRtdb.ref(`mofumofuOnlinePresence/${room.roomId}/${room.a.auth.currentUser.uid}/connections`).get();
+  assert.ok(snapshot.child(second.connectionId).exists()); assert.equal(Object.keys(snapshot.val()).length, 2);
+});
+
+test('Phase 5 36-50 reconnect preserves seat and authoritative game state', async () => {
+  const room = await startedRoom('p5-resume');
+  const before = await roomDocs(room.roomId);
+  const admission = await connectPresence(room.a, room.roomId);
+  const resumed = await room.a.call('resumeMofumofuRoom', { roomId: room.roomId });
+  const after = await roomDocs(room.roomId);
+  assert.equal(admission.seatId, 'A'); assert.equal(resumed.seatId, 'A');
+  assert.deepEqual(after.room.currentTurnPlayerId, before.room.currentTurnPlayerId);
+  assert.deepEqual(after.room.turnState, before.room.turnState);
+  assert.deepEqual(after.room.faceUpCards, before.room.faceUpCards);
+  assert.deepEqual(after.room.publicOffer, before.room.publicOffer);
+  assert.deepEqual(after.handA.cards, before.handA.cards);
+  assert.deepEqual(after.server, before.server);
+  const differentUid = client('p5-new-uid'); await differentUid.ready;
+  await rejects(differentUid.call('resumeMofumofuRoom', { roomId: room.roomId }), 'permission-denied');
+});
+
+test('Phase 5 51-63 pending offers survive either participant disconnect and retain judge authorization', async () => {
+  const room = await startedRoom('p5-pending');
+  const card = room.ra.cards[0]; const actionId = randomUUID();
+  await room.a.call('makeMofumofuOffer', { roomId: room.roomId, cardId: card.cardId, claimAnimal: card.animalType, targetPlayerId: 'B', actionId });
+  const before = await roomDocs(room.roomId);
+  const bUid = room.b.auth.currentUser.uid;
+  const bConnections = (await adminRtdb.ref(`mofumofuOnlinePresence/${room.roomId}/${bUid}/connections`).get()).val();
+  for (const [id, value] of Object.entries(bConnections)) await adminRtdb.ref(`mofumofuOnlinePresence/${room.roomId}/${bUid}/connections/${id}`).set({ ...value, state: 'disconnected', lastHeartbeatAt: Date.now() });
+  const disconnected = await roomDocs(room.roomId);
+  assert.deepEqual(disconnected.room.publicOffer, before.room.publicOffer);
+  assert.deepEqual(disconnected.server.pendingOffer, before.server.pendingOffer);
+  assert.deepEqual(disconnected.handA.cards, before.handA.cards);
+  await rejects(room.a.call('judgeMofumofuOffer', { roomId: room.roomId, actionId, judgment: 'truth' }), 'permission-denied');
+  await connectPresence(room.b, room.roomId);
+  const resumed = await room.b.call('resumeMofumofuRoom', { roomId: room.roomId });
+  assert.equal(resumed.room.publicOffer.actionId, actionId);
+  await room.b.call('judgeMofumofuOffer', { roomId: room.roomId, actionId, judgment: 'truth' });
+});
+
+test('Phase 5 64-70 NPC waits without side effects, prefers online active humans, and retries', async () => {
+  const room = await startedRoom('p5-npc-target'); await setTurn(room.roomId, 'koharu', 'awaitingNpcPhase');
+  const aUid = room.a.auth.currentUser.uid; const bUid = room.b.auth.currentUser.uid;
+  const aPath = `mofumofuOnlinePresence/${room.roomId}/${aUid}/connections`;
+  const bPath = `mofumofuOnlinePresence/${room.roomId}/${bUid}/connections`;
+  const aValue = (await adminRtdb.ref(aPath).get()).val(); const bValue = (await adminRtdb.ref(bPath).get()).val();
+  for (const [id, value] of Object.entries(aValue)) await adminRtdb.ref(`${aPath}/${id}`).set({ ...value, state: 'disconnected' });
+  const chosen = await room.a.call('runMofumofuNpcTurn', { roomId: room.roomId, actionId: randomUUID() });
+  assert.equal(chosen.offer.toPlayerId, 'B');
+  await setTurn(room.roomId, 'koharu', 'awaitingNpcPhase');
+  for (const [id, value] of Object.entries(bValue)) await adminRtdb.ref(`${bPath}/${id}`).set({ ...value, state: 'disconnected' });
+  const before = await roomDocs(room.roomId); const retryId = randomUUID();
+  await rejects(room.a.call('runMofumofuNpcTurn', { roomId: room.roomId, actionId: retryId }), 'failed-precondition');
+  const unchanged = await roomDocs(room.roomId);
+  assert.deepEqual(unchanged.server.npcHand, before.server.npcHand); assert.equal(unchanged.room.turnNumber, before.room.turnNumber);
+  assert.equal(unchanged.server.pendingOffer, null);
+  await connectPresence(room.a, room.roomId);
+  const retried = await room.a.call('runMofumofuNpcTurn', { roomId: room.roomId, actionId: retryId });
+  assert.equal(retried.offer.toPlayerId, 'A');
+});
+
+test('Phase 5 59-63 and 71-75 NPC pending, eliminated, and finished boundaries remain authoritative', async () => {
+  const humanToNpc = await startedRoom('p5-human-npc-disconnect');
+  const card = humanToNpc.ra.cards[0]; const offerId = randomUUID();
+  await humanToNpc.a.call('makeMofumofuOffer', { roomId: humanToNpc.roomId, cardId: card.cardId, claimAnimal: card.animalType, targetPlayerId: 'koharu', actionId: offerId });
+  const aUid = humanToNpc.a.auth.currentUser.uid;
+  const aPath = `mofumofuOnlinePresence/${humanToNpc.roomId}/${aUid}/connections`;
+  const aConnections = (await adminRtdb.ref(aPath).get()).val();
+  for (const [id, value] of Object.entries(aConnections)) await adminRtdb.ref(`${aPath}/${id}`).set({ ...value, state: 'disconnected' });
+  const pendingBeforeNpc = await roomDocs(humanToNpc.roomId);
+  assert.equal(pendingBeforeNpc.server.pendingOffer.actionId, offerId);
+  const npcJudgment = await humanToNpc.b.call('runMofumofuNpcTurn', { roomId: humanToNpc.roomId, actionId: randomUUID() });
+  assert.equal(npcJudgment.mode, 'npcJudgment');
+
+  const npcToHuman = await startedRoom('p5-npc-human-disconnect'); await setTurn(npcToHuman.roomId, 'koharu', 'awaitingNpcPhase');
+  const npcOffer = await npcToHuman.a.call('runMofumofuNpcTurn', { roomId: npcToHuman.roomId, actionId: randomUUID() });
+  const target = npcOffer.offer.toPlayerId === 'A' ? npcToHuman.a : npcToHuman.b;
+  const other = target === npcToHuman.a ? npcToHuman.b : npcToHuman.a;
+  const targetUid = target.auth.currentUser.uid;
+  const targetPath = `mofumofuOnlinePresence/${npcToHuman.roomId}/${targetUid}/connections`;
+  const targetConnections = (await adminRtdb.ref(targetPath).get()).val();
+  for (const [id, value] of Object.entries(targetConnections)) await adminRtdb.ref(`${targetPath}/${id}`).set({ ...value, state: 'disconnected' });
+  const pendingNpcOffer = await roomDocs(npcToHuman.roomId);
+  assert.equal(pendingNpcOffer.server.pendingOffer.actionId, npcOffer.offer.actionId);
+  assert.equal(JSON.stringify(pendingNpcOffer.room.publicOffer).includes('actualAnimal'), false);
+  await rejects(other.call('judgeMofumofuOffer', { roomId: npcToHuman.roomId, actionId: npcOffer.offer.actionId, judgment: 'truth' }), 'permission-denied');
+
+  await adminDb.doc(`mofumofuOnlineRooms/${npcToHuman.roomId}`).update({ status: 'finished', turnState: 'finished', currentTurnPlayerId: null, winnerPlayerId: 'A', finalResult: { winnerPlayerId: 'A', players: [], finishedAt: Date.now() } });
+  const beforeHeartbeat = await roomDocs(npcToHuman.roomId);
+  await connectPresence(target, npcToHuman.roomId);
+  const afterHeartbeat = await roomDocs(npcToHuman.roomId);
+  assert.deepEqual(afterHeartbeat.room, beforeHeartbeat.room);
+  await rejects(target.call('makeMofumofuOffer', { roomId: npcToHuman.roomId, cardId: 'cat-forbidden', claimAnimal: 'cat', targetPlayerId: 'koharu', actionId: randomUUID() }), 'failed-precondition');
+  await rejects(target.call('runMofumofuNpcTurn', { roomId: npcToHuman.roomId, actionId: randomUUID() }), 'failed-precondition');
+});
+
+test('Phase 5 71-84 status boundaries and UI avoid secret or automatic scrolling behavior', async () => {
+  const source = await readFile(new URL('../toybox/mofumofu-gathering/online/script.js', import.meta.url), 'utf8');
+  const html = await readFile(new URL('../toybox/mofumofu-gathering/online/index.html', import.meta.url), 'utf8');
+  assert.match(source, /HEARTBEAT_MS = 15_000/); assert.match(source, /STALE_MS = 120_000/);
+  assert.match(source, /connections\/\$\{state\.connectionId\}/); assert.match(source, /onDisconnect\(state\.presenceRef\)/);
+  assert.match(source, /authorizeMofumofuPresence/); assert.match(source, /resumeMofumofuRoom/);
+  assert.match(html, /id="presence-list"/); assert.match(html, /id="reconnect-wait"/);
+  assert.equal(source.includes('scrollIntoView'), false); assert.equal(source.includes('scrollTo'), false);
+  assert.equal(/\.focus\s*\(/.test(source), false);
+  const heartbeatLine = source.split('\n').find((line) => line.includes('state.heartbeatTimer'));
+  assert.equal(heartbeatLine.includes('showRoom'), false);
+  assert.equal(/presence[\s\S]{0,80}(cards|actualAnimal|npcHand|discard|inviteCode)/.test(source), false);
 });

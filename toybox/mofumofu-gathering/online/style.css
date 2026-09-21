@@ -11,3 +11,6 @@ button, select, input { min-height: 44px; margin: .25rem; font: inherit; }
 .final-player { margin: .75rem 0; padding: .75rem; border-radius: .75rem; background: #fff; }
 .final-player p { margin: .3rem 0; }
 .final-player.eliminated { border: 2px solid #e8a2a2; }
+.presence-list { list-style: none; padding: .6rem; border-radius: .75rem; background: #fff; }
+.presence-online { color: #167044; }
+.presence-wait { color: #765b19; }

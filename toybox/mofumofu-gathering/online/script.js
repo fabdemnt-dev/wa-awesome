@@ -2,6 +2,7 @@ import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.10.0/fireba
 import { getAuth, connectAuthEmulator, signInAnonymously } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js';
 import { getFirestore, connectFirestoreEmulator, doc, onSnapshot } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js';
 import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-functions.js';
+import { getDatabase, connectDatabaseEmulator, ref, onValue, onDisconnect, set, update, serverTimestamp } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js';
 import { firebaseConfig, emulatorConfig } from './firebase-config.js';
 
 const animals = ['cat', 'rabbit', 'bear', 'chick', 'fox', 'penguin', 'panda', 'polar'];
@@ -9,15 +10,60 @@ const labels = { cat: 'ねこ', rabbit: 'うさぎ', bear: 'くま', chick: 'ひ
 const emoji = { cat: '🐱', rabbit: '🐰', bear: '🐻', chick: '🐥', fox: '🦊', penguin: '🐧', panda: '🐼', polar: '🐻‍❄️' };
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app); const firestore = getFirestore(app); const functions = getFunctions(app, emulatorConfig.region);
+const database = getDatabase(app);
 connectAuthEmulator(auth, `http://${emulatorConfig.authHost}:${emulatorConfig.authPort}`, { disableWarnings: true });
 connectFirestoreEmulator(firestore, emulatorConfig.firestoreHost, emulatorConfig.firestorePort);
 connectFunctionsEmulator(functions, emulatorConfig.functionsHost, emulatorConfig.functionsPort);
+connectDatabaseEmulator(database, emulatorConfig.databaseHost, emulatorConfig.databasePort);
 const call = (name, data) => httpsCallable(functions, name)(data).then((response) => response.data);
 const $ = (id) => document.getElementById(id);
-const state = { roomId: localStorage.getItem('mofumofuRoomId'), seatId: localStorage.getItem('mofumofuSeatId'), room: null, cards: [], makeRequest: null, judgeRequest: null, npcRequest: null, makeBusy: false, judgeBusy: false, npcBusy: false, unsubscribe: null };
+const HEARTBEAT_MS = 15_000;
+const STALE_MS = 120_000;
+const ACCESS_REFRESH_MS = 4 * 60_000;
+const state = { roomId: localStorage.getItem('mofumofuRoomId'), seatId: localStorage.getItem('mofumofuSeatId'), room: null, cards: [], presence: {}, connectionId: crypto.randomUUID(), presenceRef: null, presenceUnsubscribe: null, heartbeatTimer: null, accessTimer: null, makeRequest: null, judgeRequest: null, npcRequest: null, makeBusy: false, judgeBusy: false, npcBusy: false, unsubscribe: null };
 function newId() { return crypto.randomUUID(); }
 function remember(roomId, seatId) { state.roomId = roomId; state.seatId = seatId; localStorage.setItem('mofumofuRoomId', roomId); localStorage.setItem('mofumofuSeatId', seatId); }
 function message(text) { $('status').textContent = text; }
+function connectionOnline(connection, now = Date.now()) { return connection?.state === 'online' && Number(connection.lastHeartbeatAt) >= now - STALE_MS; }
+function playerOnline(playerId) {
+  if (playerId === 'koharu') return true;
+  const uid = state.room?.playerUids?.[playerId];
+  return !!uid && Object.values(state.presence?.[uid]?.connections || {}).some((connection) => connectionOnline(connection));
+}
+function renderPresence() {
+  if (!state.room) return;
+  const rows = ['A', 'B', 'koharu'].map((playerId) => {
+    const li = document.createElement('li');
+    const online = playerOnline(playerId);
+    li.className = online ? 'presence-online' : 'presence-wait';
+    li.textContent = playerId === 'koharu' ? 'こはる　● NPC' : `プレイヤー${playerId}　${online ? '● 接続中' : '○ 再接続待ち'}`;
+    return li;
+  });
+  $('presence-list').replaceChildren(...rows);
+  const room = state.room;
+  const waitingPlayer = room.status === 'playing' && (
+    (room.turnState === 'awaitingJudgment' && room.publicOffer?.toPlayerId !== 'koharu' && !playerOnline(room.publicOffer?.toPlayerId))
+    || (room.currentTurnPlayerId !== 'koharu' && !playerOnline(room.currentTurnPlayerId))
+  ) ? (room.turnState === 'awaitingJudgment' ? room.publicOffer.toPlayerId : room.currentTurnPlayerId) : null;
+  $('reconnect-wait').hidden = !waitingPlayer;
+  $('reconnect-wait').textContent = waitingPlayer ? `プレイヤー${waitingPlayer}の再接続を待っています` : '';
+}
+async function authorizePresence() {
+  return call('authorizeMofumofuPresence', { roomId: state.roomId, connectionId: state.connectionId });
+}
+async function beginPresence(seatId) {
+  clearInterval(state.heartbeatTimer); clearInterval(state.accessTimer); state.presenceUnsubscribe?.();
+  const uid = auth.currentUser.uid;
+  const path = `mofumofuOnlinePresence/${state.roomId}/${uid}/connections/${state.connectionId}`;
+  state.presenceRef = ref(database, path);
+  const base = { uid, roomId: state.roomId, seatId, connectionId: state.connectionId };
+  const connectedAt = Date.now();
+  await onDisconnect(state.presenceRef).set({ ...base, state: 'disconnected', lastHeartbeatAt: serverTimestamp(), connectedAt });
+  await set(state.presenceRef, { ...base, state: 'online', lastHeartbeatAt: serverTimestamp(), connectedAt });
+  state.heartbeatTimer = setInterval(() => update(state.presenceRef, { state: 'online', lastHeartbeatAt: serverTimestamp() }).catch(() => message('接続状態を確認しています…')), HEARTBEAT_MS);
+  state.accessTimer = setInterval(() => authorizePresence().catch(() => message('接続状態を確認しています…')), ACCESS_REFRESH_MS);
+  state.presenceUnsubscribe = onValue(ref(database, `mofumofuOnlinePresence/${state.roomId}`), (snapshot) => { state.presence = snapshot.val() || {}; renderPresence(); }, () => message('接続状態を確認しています…'));
+}
 function showRoom(room) {
   if (room.status === 'finished' || room.playerStatus?.[state.seatId] === 'eliminated') {
     state.cards = [];
@@ -29,9 +75,16 @@ function showRoom(room) {
   $('room-id').textContent = state.roomId; $('players').innerHTML = `<li>A: ${room.players.A.joined ? '参加' : '待機'}</li><li>B: ${room.players.B.joined ? '参加' : '待機'}</li><li>こはる: 参加</li>`;
   $('start-game').hidden = room.hostUid !== auth.currentUser?.uid;
   if (room.status === 'playing' || room.status === 'finished') renderGame();
+  renderPresence();
 }
 function listenRoom() { state.unsubscribe?.(); state.unsubscribe = onSnapshot(doc(firestore, 'mofumofuOnlineRooms', state.roomId), (snap) => snap.exists() && showRoom(snap.data())); }
-async function resume() { if (!state.roomId) return; const value = await call('resumeMofumofuRoom', { roomId: state.roomId }); remember(state.roomId, value.seatId); state.cards = value.cards || []; showRoom(value.room); listenRoom(); }
+async function resume() {
+  if (!state.roomId) return;
+  const admission = await authorizePresence();
+  await beginPresence(admission.seatId);
+  const value = await call('resumeMofumofuRoom', { roomId: state.roomId });
+  remember(state.roomId, value.seatId); state.cards = value.cards || []; showRoom(value.room); listenRoom();
+}
 function renderGame() {
   const room = state.room; const offer = room.publicOffer; const ownStatus = room.playerStatus?.[state.seatId]; const finished = room.status === 'finished';
   $('turn').textContent = finished ? 'ゲーム終了' : `手番: ${room.currentTurnPlayerId}`;
@@ -52,6 +105,7 @@ function renderGame() {
   $('final-result').hidden = !finished;
   if (finished) renderFinalResult(room.finalResult);
   if (!finished && ownStatus === 'active' && room.turnState === 'awaitingNpcPhase') void runNpc();
+  renderPresence();
 }
 function renderFinalResult(finalResult) {
   if (!finalResult) return;
