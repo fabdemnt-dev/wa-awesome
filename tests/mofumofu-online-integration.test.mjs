@@ -37,7 +37,7 @@ function client(name, authenticate = true) {
   value.call = async (name, data) => {
     await value.ready;
     if (!direct) return httpsCallable(fn, name)(data).then((response) => response.data);
-    const handlerName = ({ createMofumofuRoom: 'createHandler', joinMofumofuRoom: 'joinHandler', startMofumofuGame: 'startHandler', resumeMofumofuRoom: 'resumeHandler', authorizeMofumofuPresence: 'authorizePresenceHandler', makeMofumofuOffer: 'makeHandler', judgeMofumofuOffer: 'judgeHandler', runMofumofuNpcTurn: 'npcHandler' })[name];
+    const handlerName = ({ createMofumofuRoom: 'createHandler', joinMofumofuRoom: 'joinHandler', startMofumofuGame: 'startHandler', resumeMofumofuRoom: 'resumeHandler', authorizeMofumofuPresence: 'authorizePresenceHandler', makeMofumofuOffer: 'makeHandler', judgeMofumofuOffer: 'judgeHandler', runMofumofuNpcTurn: 'npcHandler', startMofumofuNpcProxy: 'startProxyHandler', runMofumofuNpcProxyAction: 'proxyActionHandler' })[name];
     return module._handlers[handlerName]({ data, auth: auth.currentUser ? { uid: auth.currentUser.uid } : null });
   };
   clients.push(value);
@@ -558,4 +558,76 @@ test('Phase 5 71-84 status boundaries and UI avoid secret or automatic scrolling
   const heartbeatLine = source.split('\n').find((line) => line.includes('state.heartbeatTimer'));
   assert.equal(heartbeatLine.includes('showRoom'), false);
   assert.equal(/presence[\s\S]{0,80}(cards|actualAnimal|npcHand|discard|inviteCode)/.test(source), false);
+});
+
+async function staleSeat(who, roomId, age = 121_000, extraOnline = false) {
+  const uid = who.auth.currentUser.uid; const base = `mofumofuOnlinePresence/${roomId}/${uid}/connections`;
+  await adminRtdb.ref(base).set({ old: { uid, roomId, connectionId: 'old', state: 'disconnected', lastHeartbeatAt: Date.now() - age, connectedAt: Date.now() - age } });
+  if (extraOnline) await adminRtdb.ref(`${base}/${randomUUID()}`).set({ uid, roomId, connectionId: randomUUID(), state: 'online', lastHeartbeatAt: Date.now(), connectedAt: Date.now() });
+}
+
+test('Phase 6 1-14 long-disconnect admission, multiple connections, authorization, and idempotency', { timeout: 180_000 }, async () => {
+  const room = await startedRoom('p6-start');
+  await rejects(room.b.call('startMofumofuNpcProxy', { roomId: room.roomId, actionId: randomUUID() }), 'failed-precondition');
+  await staleSeat(room.a, room.roomId, 60_000);
+  await rejects(room.b.call('startMofumofuNpcProxy', { roomId: room.roomId, actionId: randomUUID() }), 'failed-precondition');
+  await staleSeat(room.a, room.roomId, 121_000, true);
+  await rejects(room.b.call('startMofumofuNpcProxy', { roomId: room.roomId, actionId: randomUUID() }), 'failed-precondition');
+  await staleSeat(room.a, room.roomId);
+  const id = randomUUID(); const started = await room.b.call('startMofumofuNpcProxy', { roomId: room.roomId, actionId: id });
+  assert.equal(started.seatId, 'A'); assert.equal(started.mode, 'npc-controlled'); assert.equal(started.generation, 1);
+  assert.deepEqual(await room.b.call('startMofumofuNpcProxy', { roomId: room.roomId, actionId: id }), started);
+  const race = await Promise.allSettled([room.b.call('startMofumofuNpcProxy', { roomId: room.roomId, actionId: randomUUID() }), room.b.call('startMofumofuNpcProxy', { roomId: room.roomId, actionId: randomUUID() })]);
+  assert.equal(race.filter((x) => x.status === 'fulfilled').length, 0);
+  const unauth = client('p6-unauth', false); await rejects(unauth.call('startMofumofuNpcProxy', { roomId: room.roomId, actionId: randomUUID() }), 'unauthenticated');
+  const outsider = client('p6-outsider'); await outsider.ready; await rejects(outsider.call('startMofumofuNpcProxy', { roomId: room.roomId, actionId: randomUUID() }), 'permission-denied');
+  const value = await roomDocs(room.roomId); assert.equal(value.room.playerStatus.A, 'active'); assert.equal(value.handA.cards.length, 10); assert.equal(value.room.status, 'playing');
+});
+
+test('Phase 6 15-32 proxy make and judge are server-authoritative and preserve Phase 4 resolution', { timeout: 180_000 }, async () => {
+  const room = await startedRoom('p6-action'); await staleSeat(room.a, room.roomId);
+  await room.b.call('startMofumofuNpcProxy', { roomId: room.roomId, actionId: randomUUID() });
+  const before = await roomDocs(room.roomId); const actionId = randomUUID();
+  await rejects(room.b.call('runMofumofuNpcProxyAction', { roomId: room.roomId, actionId, cardId: 'x' }), 'invalid-argument');
+  const made = await room.b.call('runMofumofuNpcProxyAction', { roomId: room.roomId, actionId });
+  assert.equal(made.mode, 'proxyOffer'); assert.equal(made.seatId, 'A'); assert.equal('actualAnimal' in made.offer, false);
+  const after = await roomDocs(room.roomId); assert.equal(after.handA.cards.length, before.handA.cards.length - 1); assert.equal(after.handB.cards.length, before.handB.cards.length);
+  assert.ok(before.handA.cards.some((card) => card.cardId === after.server.pendingOffer.card.cardId));
+  assert.equal(JSON.stringify(made).includes('privateHands'), false); assert.equal(JSON.stringify(made).includes('npcHand'), false);
+  assert.deepEqual(await room.b.call('runMofumofuNpcProxyAction', { roomId: room.roomId, actionId }), made);
+  const replay = await roomDocs(room.roomId); assert.equal(replay.handA.cards.length, after.handA.cards.length);
+  if (made.offer.toPlayerId === 'B') {
+    await staleSeat(room.b, room.roomId); await adminDb.doc(`mofumofuOnlineRooms/${room.roomId}`).update({ 'controlModes.B': { mode: 'npc-controlled', generation: 1 } });
+    const judged = await room.a.call('runMofumofuNpcProxyAction', { roomId: room.roomId, actionId: randomUUID() });
+    assert.equal(judged.mode, 'proxyJudgment'); assert.ok(['truth', 'lie'].includes(judged.offer.judgment)); assert.ok(judged.offer.actualAnimal);
+    const resolved = await roomDocs(room.roomId); assert.equal(resolved.server.pendingOffer, null);
+  }
+});
+
+test('Phase 6 33-56 same-UID return-pending, safe handoff, and race/idempotency boundaries', { timeout: 180_000 }, async () => {
+  const room = await startedRoom('p6-return'); await staleSeat(room.a, room.roomId);
+  await room.b.call('startMofumofuNpcProxy', { roomId: room.roomId, actionId: randomUUID() });
+  const before = await roomDocs(room.roomId); await connectPresence(room.a, room.roomId);
+  const pending = await room.a.call('resumeMofumofuRoom', { roomId: room.roomId });
+  assert.equal(pending.seatId, 'A'); assert.equal(pending.room.controlModes.A.mode, 'return-pending'); assert.equal(pending.cards.length, before.handA.cards.length);
+  await rejects(room.a.call('makeMofumofuOffer', { roomId: room.roomId, cardId: pending.cards[0].cardId, claimAnimal: 'cat', targetPlayerId: 'B', actionId: randomUUID() }), 'failed-precondition');
+  const returned = await room.a.call('resumeMofumofuRoom', { roomId: room.roomId });
+  assert.equal(returned.room.controlModes.A.mode, 'human'); assert.equal(returned.seatId, 'A'); assert.deepEqual(returned.cards, pending.cards);
+  const after = await roomDocs(room.roomId); assert.equal(after.room.currentTurnPlayerId, before.room.currentTurnPlayerId); assert.equal(after.room.turnState, before.room.turnState); assert.deepEqual(after.room.faceUpCards, before.room.faceUpCards);
+  const outsider = client('p6-return-outsider'); await outsider.ready; await rejects(outsider.call('resumeMofumofuRoom', { roomId: room.roomId }), 'permission-denied');
+  assert.equal(after.room.turnNumber, before.room.turnNumber); assert.equal(after.server.pendingOffer, before.server.pendingOffer);
+});
+
+test('Phase 6 57-69 secret isolation, UI states, operation gating, and no automatic scroll', { timeout: 180_000 }, async () => {
+  const source = await readFile(new URL('../toybox/mofumofu-gathering/online/script.js', import.meta.url), 'utf8');
+  const html = await readFile(new URL('../toybox/mofumofu-gathering/online/index.html', import.meta.url), 'utf8');
+  const backend = await readFile(new URL('../functions/mofumofu-online/index.js', import.meta.url), 'utf8');
+  for (const text of ['NPC代理中', '本人復帰済み／代理終了待ち', '本人へ操作権返却済み', '再接続待ち', '接続中']) assert.ok(source.includes(text));
+  assert.match(html, /id="control-status"/); assert.equal(source.includes('scrollIntoView'), false); assert.equal(source.includes('scrollTo'), false); assert.equal(/\.focus\s*\(/.test(source), false);
+  assert.match(source, /ownControl === 'human'/); assert.match(backend, /exactFields\(request\.data, \['roomId', 'actionId'\]\)/);
+  assert.equal(/proxyActionHandler[\s\S]*exactFields\([^\n]*cardId/.test(backend), false);
+  assert.equal(/proxyActionHandler[\s\S]*exactFields\([^\n]*actualAnimal/.test(backend), false);
+  const room = await startedRoom('p6-secrets'); const outsider = client('p6-secret-outsider'); await outsider.ready;
+  for (const path of [`mofumofuOnlineRooms/${room.roomId}/privateHands/${room.b.auth.currentUser.uid}`, `mofumofuOnlineRooms/${room.roomId}/serverState/current`]) await rejects(getDoc(doc(room.a.fs, path)), 'permission-denied');
+  await rejects(getDoc(doc(outsider.fs, `mofumofuOnlineRooms/${room.roomId}/privateHands/${room.a.auth.currentUser.uid}`)), 'permission-denied');
 });

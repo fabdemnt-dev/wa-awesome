@@ -126,6 +126,7 @@ function publicRoom(roomId, hostUid, now, expiresAt) {
     draw: false,
     finishReason: null,
     finalResult: null,
+    controlModes: { A: { mode: 'human', generation: 0 }, B: { mode: 'human', generation: 0 } },
   };
 }
 function publicResult(room, seatId, handStatus, cards) {
@@ -150,6 +151,20 @@ function presenceConnectionOnline(connection, now = Date.now()) {
 function uidPresenceOnline(value, now = Date.now()) {
   return plain(value?.connections)
     && Object.values(value.connections).some((connection) => presenceConnectionOnline(connection, now));
+}
+function uidPresenceState(value, now = Date.now()) {
+  const connections = Object.values(value?.connections || {}).filter(plain);
+  const lastHeartbeatAt = connections.reduce((latest, connection) => Math.max(latest, Number(connection.lastHeartbeatAt) || 0), 0);
+  return { online: connections.some((connection) => presenceConnectionOnline(connection, now)), lastHeartbeatAt };
+}
+async function seatPresenceState(room, seatId, now = Date.now()) {
+  const uid = room.playerUids?.[seatId];
+  if (!uid) return { online: false, lastHeartbeatAt: 0 };
+  const snapshot = await presenceDb().ref(`mofumofuOnlinePresence/${room.roomId}/${uid}`).get();
+  return uidPresenceState(snapshot.val(), now);
+}
+function controlFor(room, seatId) {
+  return room.controlModes?.[seatId] || { mode: 'human', generation: 0 };
 }
 async function onlineHumanSeats(room, now = Date.now()) {
   const snapshot = await presenceDb().ref(`mofumofuOnlinePresence/${room.roomId}`).get();
@@ -383,7 +398,7 @@ async function startHandler(request) {
     const leftovers = shuffled.slice(30);
     tx.set(r.hand(room.playerUids.A), { cards: handA });
     tx.set(r.hand(room.playerUids.B), { cards: handB });
-    tx.set(r.server, { npcHand, leftovers, discard: [], pendingOffer: null, claimHistory: { A: { truth: 0, total: 0 }, B: { truth: 0, total: 0 } } });
+    tx.set(r.server, { npcHand, leftovers, discard: [], pendingOffer: null, proxyLease: null, claimHistory: { A: { truth: 0, total: 0 }, B: { truth: 0, total: 0 } } });
     tx.update(r.room, { status: 'playing', startedAt: now, dealt: true, currentTurnPlayerId: 'A', turnState: 'awaitingOffer', turnNumber: 0 });
     tx.update(inviteRef, { status: 'started', revokedAt: now });
     return { roomId, status: 'playing', currentTurnPlayerId: 'A' };
@@ -395,11 +410,22 @@ async function resumeHandler(request) {
   const uid = authUid(request);
   const roomId = roomIdFrom(request.data);
   const r = refs(roomId);
+  const initialSnap = await r.room.get();
+  if (!initialSnap.exists) fail('not-found', '部屋が見つかりません。');
+  const initialRoom = initialSnap.data();
+  const initialSeat = requireMember(initialRoom, uid);
+  const presence = await seatPresenceState(initialRoom, initialSeat);
   return db().runTransaction(async (tx) => {
     const roomSnap = await tx.get(r.room);
     if (!roomSnap.exists) fail('not-found', '部屋が見つかりません。');
     const room = roomSnap.data();
     const seatId = requireMember(room, uid);
+    let control = controlFor(room, seatId);
+    if (presence.online && control.mode === 'npc-controlled' && room.status === 'playing' && room.playerStatus?.[seatId] === 'active') {
+      control = { ...control, mode: 'return-pending', returnRequestedAt: Date.now() };
+    } else if (presence.online && control.mode === 'return-pending' && room.status === 'playing' && room.playerStatus?.[seatId] === 'active') {
+      control = { mode: 'human', generation: control.generation, returnedAt: Date.now() };
+    }
     let cards = null;
     let handStatus = 'pending';
     if ((room.status === 'playing' || room.status === 'finished') && room.dealt) {
@@ -413,7 +439,41 @@ async function resumeHandler(request) {
         handStatus = 'ready';
       }
     }
-    return publicResult({ ...room, publicOffer: safeOffer(room.publicOffer) }, seatId, handStatus, cards);
+    if (control.mode !== controlFor(room, seatId).mode) tx.update(r.room, { [`controlModes.${seatId}`]: control });
+    const resultRoom = { ...room, controlModes: { ...(room.controlModes || {}), [seatId]: control }, publicOffer: safeOffer(room.publicOffer) };
+    return publicResult(resultRoom, seatId, handStatus, cards);
+  });
+}
+
+async function startProxyHandler(request) {
+  exactFields(request.data, ['roomId', 'actionId']);
+  const callerUid = authUid(request);
+  const roomId = roomIdFrom(request.data);
+  const actionId = actionIdFrom(request.data);
+  const r = refs(roomId);
+  const initialSnap = await r.room.get();
+  if (!initialSnap.exists) fail('not-found', '部屋が見つかりません。');
+  const initialRoom = initialSnap.data();
+  requireMember(initialRoom, callerUid);
+  const seatId = initialRoom.turnState === 'awaitingJudgment' ? initialRoom.publicOffer?.toPlayerId : initialRoom.currentTurnPlayerId;
+  if (!['A', 'B'].includes(seatId)) fail('failed-precondition', '代理が必要な席ではありません。');
+  const presence = await seatPresenceState(initialRoom, seatId);
+  const now = Date.now();
+  if (presence.online || !presence.lastHeartbeatAt || now - presence.lastHeartbeatAt < PRESENCE_STALE_MS) fail('failed-precondition', '長時間切断ではありません。');
+  const fingerprint = actionFingerprint('proxy-start', callerUid, roomId, { seatId });
+  return db().runTransaction(async (tx) => {
+    const [actionSnap, roomSnap] = await Promise.all([tx.get(r.action(actionId)), tx.get(r.room)]);
+    if (actionSnap.exists) return replayAction(actionSnap.data(), fingerprint);
+    if (!roomSnap.exists) fail('not-found', '部屋が見つかりません。');
+    const room = roomSnap.data(); requireMember(room, callerUid);
+    if (room.status !== 'playing' || room.playerStatus?.[seatId] !== 'active') fail('failed-precondition', '代理を開始できません。');
+    const old = controlFor(room, seatId);
+    if (old.mode !== 'human') fail('already-exists', '代理は開始済みです。');
+    const control = { mode: 'npc-controlled', generation: old.generation + 1, startedAt: now, lastHeartbeatAt: presence.lastHeartbeatAt };
+    const result = { roomId, seatId, mode: control.mode, generation: control.generation };
+    tx.update(r.room, { [`controlModes.${seatId}`]: control });
+    tx.create(r.action(actionId), { fingerprint, stateToken: `${room.turnNumber}:${seatId}:proxy-start`, result, completedAt: now });
+    return result;
   });
 }
 
@@ -451,6 +511,7 @@ async function makeHandler(request) {
     const stateToken = `${room.turnNumber}:${room.currentTurnPlayerId}:${room.turnState}`;
     if (actionSnap.exists) return replayAction(actionSnap.data(), fingerprint);
     if (room.status !== 'playing' || room.turnState !== 'awaitingOffer' || room.currentTurnPlayerId !== seatId) fail('failed-precondition', '現在はカードを渡せません。');
+    if (controlFor(room, seatId).mode !== 'human') fail('failed-precondition', 'NPC代理中は本人が操作できません。');
     if (room.playerStatus?.[seatId] !== 'active') fail('failed-precondition', '脱落後はカードを渡せません。');
     if (targetPlayerId === seatId || (targetPlayerId !== 'koharu' && !room.players?.[targetPlayerId]?.joined)) fail('invalid-argument', '相手が正しくありません。');
     if (room.playerStatus?.[targetPlayerId] !== 'active') fail('failed-precondition', '脱落した相手にはカードを渡せません。');
@@ -510,6 +571,7 @@ async function judgeHandler(request) {
     const stateToken = `${room.turnNumber}:${actionId}:judge`;
     if (judgeActionSnap.exists) return replayAction(judgeActionSnap.data(), fingerprint);
     if (room.status !== 'playing' || room.turnState !== 'awaitingJudgment') fail('failed-precondition', '現在は判定できません。');
+    if (controlFor(room, seatId).mode !== 'human') fail('failed-precondition', 'NPC代理中は本人が操作できません。');
     if (room.playerStatus?.[seatId] !== 'active') fail('failed-precondition', '脱落後は判定できません。');
     const pending = serverSnap.data().pendingOffer;
     if (!pending || pending.actionId !== actionId || pending.toPlayerId !== seatId || room.publicOffer?.status !== 'pending') fail('permission-denied', 'この判定は行えません。');
@@ -623,6 +685,59 @@ async function npcHandler(request) {
   });
 }
 
+async function proxyActionHandler(request) {
+  exactFields(request.data, ['roomId', 'actionId']);
+  const callerUid = authUid(request); const roomId = roomIdFrom(request.data); const actionId = actionIdFrom(request.data);
+  const r = refs(roomId); const fingerprint = actionFingerprint('proxy-action', callerUid, roomId, {});
+  return db().runTransaction(async (tx) => {
+    const roomSnap = await tx.get(r.room);
+    if (!roomSnap.exists) fail('not-found', '部屋が見つかりません。');
+    const room = roomSnap.data(); requireMember(room, callerUid);
+    const [actionSnap, serverSnap, handASnap, handBSnap, secretSnap] = await Promise.all([
+      tx.get(r.action(actionId)), tx.get(r.server), tx.get(r.hand(room.playerUids.A)), tx.get(r.hand(room.playerUids.B)), tx.get(r.secret),
+    ]);
+    if (actionSnap.exists) return replayAction(actionSnap.data(), fingerprint);
+    if (room.status !== 'playing' || !serverSnap.exists || !handASnap.exists || !handBSnap.exists) fail('failed-precondition', '代理行動を実行できません。');
+    const server = serverSnap.data(); const hands = { A: handASnap.data().cards || [], B: handBSnap.data().cards || [] }; const now = Date.now();
+    const seatId = room.turnState === 'awaitingJudgment' ? server.pendingOffer?.toPlayerId : room.currentTurnPlayerId;
+    if (!['A', 'B'].includes(seatId) || controlFor(room, seatId).mode !== 'npc-controlled' || room.playerStatus?.[seatId] !== 'active') fail('failed-precondition', 'NPC代理中の席ではありません。');
+    let result;
+    if (room.turnState === 'awaitingOffer' && room.currentTurnPlayerId === seatId && !server.pendingOffer) {
+      const cards = [...hands[seatId]];
+      if (!cards.length) fail('failed-precondition', '代理対象の手札がありません。');
+      const [card] = cards.splice(crypto.randomInt(cards.length), 1);
+      const claimAnimal = chooseNpcClaim(card.animalType);
+      const targets = PLAYERS.filter((candidate) => candidate !== seatId && room.playerStatus?.[candidate] === 'active');
+      if (!targets.length) fail('failed-precondition', '渡せる相手がいません。');
+      const targetPlayerId = targets[(room.turnNumber || 0) % targets.length];
+      const pending = { actionId, fromPlayerId: seatId, toPlayerId: targetPlayerId, claimAnimal, card, proxyGeneration: controlFor(room, seatId).generation };
+      const offer = { actionId, fromPlayerId: seatId, toPlayerId: targetPlayerId, claimAnimal, status: 'pending' };
+      const turnState = targetPlayerId === 'koharu' ? 'awaitingNpcPhase' : 'awaitingJudgment';
+      hands[seatId] = cards; server.pendingOffer = pending; room.publicOffer = offer; room.turnState = turnState;
+      result = { roomId, actionId, mode: 'proxyOffer', seatId, offer, turnState };
+    } else if (room.turnState === 'awaitingJudgment' && server.pendingOffer?.toPlayerId === seatId) {
+      const pending = server.pendingOffer;
+      const judgment = chooseNpcJudgment(server.claimHistory?.[pending.fromPlayerId]);
+      const resolved = resolveFaceUp(room, server, hands, pending, judgment, now);
+      const history = { ...(resolved.server.claimHistory || {}) };
+      if (pending.fromPlayerId !== 'koharu') {
+        const entry = { ...(history[pending.fromPlayerId] || { truth: 0, total: 0 }) };
+        entry.total += 1; if (pending.claimAnimal === pending.card.animalType) entry.truth += 1; history[pending.fromPlayerId] = entry;
+      }
+      resolved.server.claimHistory = history; resolved.room.publicOffer = resolved.offer;
+      Object.assign(room, resolved.room); Object.assign(server, resolved.server); Object.assign(hands, resolved.hands);
+      result = { roomId, actionId, mode: 'proxyJudgment', seatId, offer: resolved.offer, eliminatedPlayerId: resolved.eliminatedPlayerId, finish: resolved.finish, ...resolved.advance };
+    } else fail('failed-precondition', '代理行動の手番ではありません。');
+    if (room.status === 'finished' || room.playerStatus?.[seatId] === 'eliminated') room.controlModes[seatId] = { ...controlFor(room, seatId), mode: 'ended', endedAt: now };
+    tx.set(r.server, server); tx.update(r.hand(room.playerUids.A), { cards: hands.A }); tx.update(r.hand(room.playerUids.B), { cards: hands.B }); tx.set(r.room, room);
+    if (room.status === 'finished' && secretSnap.exists) {
+      const inviteRef = db().collection('mofumofuOnlineRoomInvites').doc(secretSnap.data().inviteDigest); tx.update(inviteRef, { status: 'ended', revokedAt: now });
+    }
+    tx.create(r.action(actionId), { fingerprint, stateToken: `${room.turnNumber}:${seatId}:proxy`, result, completedAt: now });
+    return result;
+  });
+}
+
 const createMofumofuRoom = onCall(callableOptions, createHandler);
 const joinMofumofuRoom = onCall(callableOptions, joinHandler);
 const startMofumofuGame = onCall(callableOptions, startHandler);
@@ -631,6 +746,8 @@ const authorizeMofumofuPresence = onCall(callableOptions, authorizePresenceHandl
 const makeMofumofuOffer = onCall(callableOptions, makeHandler);
 const judgeMofumofuOffer = onCall(callableOptions, judgeHandler);
 const runMofumofuNpcTurn = onCall(callableOptions, npcHandler);
+const startMofumofuNpcProxy = onCall(callableOptions, startProxyHandler);
+const runMofumofuNpcProxyAction = onCall(callableOptions, proxyActionHandler);
 
 module.exports = {
   createMofumofuRoom,
@@ -641,6 +758,8 @@ module.exports = {
   makeMofumofuOffer,
   judgeMofumofuOffer,
   runMofumofuNpcTurn,
-  _handlers: { createHandler, joinHandler, startHandler, resumeHandler, authorizePresenceHandler, makeHandler, judgeHandler, npcHandler },
-  _test: { ANIMALS, PROJECT_ID, PRESENCE_ACCESS_TTL_MS, PRESENCE_STALE_MS, presenceConnectionOnline, uidPresenceOnline, chooseNpcClaim, chooseNpcJudgment, nextPlayerId, judgeSuccess, digest, sameFingerprint, countByAnimal, finishIfNeeded, resolveFaceUp },
+  startMofumofuNpcProxy,
+  runMofumofuNpcProxyAction,
+  _handlers: { createHandler, joinHandler, startHandler, resumeHandler, authorizePresenceHandler, makeHandler, judgeHandler, npcHandler, startProxyHandler, proxyActionHandler },
+  _test: { ANIMALS, PROJECT_ID, PRESENCE_ACCESS_TTL_MS, PRESENCE_STALE_MS, presenceConnectionOnline, uidPresenceOnline, uidPresenceState, chooseNpcClaim, chooseNpcJudgment, nextPlayerId, judgeSuccess, digest, sameFingerprint, countByAnimal, finishIfNeeded, resolveFaceUp },
 };

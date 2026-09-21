@@ -19,6 +19,8 @@ try {
   exports.makeMofumofuOffer = mofumofuOnline.makeMofumofuOffer;
   exports.judgeMofumofuOffer = mofumofuOnline.judgeMofumofuOffer;
   exports.runMofumofuNpcTurn = mofumofuOnline.runMofumofuNpcTurn;
+  exports.startMofumofuNpcProxy = mofumofuOnline.startMofumofuNpcProxy;
+  exports.runMofumofuNpcProxyAction = mofumofuOnline.runMofumofuNpcProxyAction;
 } catch (error) {
   if (error?.message !== './mofumofu-online') throw error;
 }

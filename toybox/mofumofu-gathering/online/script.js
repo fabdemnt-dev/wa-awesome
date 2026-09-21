@@ -20,7 +20,7 @@ const $ = (id) => document.getElementById(id);
 const HEARTBEAT_MS = 15_000;
 const STALE_MS = 120_000;
 const ACCESS_REFRESH_MS = 4 * 60_000;
-const state = { roomId: localStorage.getItem('mofumofuRoomId'), seatId: localStorage.getItem('mofumofuSeatId'), room: null, cards: [], presence: {}, connectionId: crypto.randomUUID(), presenceRef: null, presenceUnsubscribe: null, heartbeatTimer: null, accessTimer: null, makeRequest: null, judgeRequest: null, npcRequest: null, makeBusy: false, judgeBusy: false, npcBusy: false, unsubscribe: null };
+const state = { roomId: localStorage.getItem('mofumofuRoomId'), seatId: localStorage.getItem('mofumofuSeatId'), room: null, cards: [], presence: {}, connectionId: crypto.randomUUID(), presenceRef: null, presenceUnsubscribe: null, heartbeatTimer: null, accessTimer: null, makeRequest: null, judgeRequest: null, npcRequest: null, proxyStartRequest: null, proxyActionRequest: null, makeBusy: false, judgeBusy: false, npcBusy: false, proxyBusy: false, unsubscribe: null };
 function newId() { return crypto.randomUUID(); }
 function remember(roomId, seatId) { state.roomId = roomId; state.seatId = seatId; localStorage.setItem('mofumofuRoomId', roomId); localStorage.setItem('mofumofuSeatId', seatId); }
 function message(text) { $('status').textContent = text; }
@@ -36,7 +36,9 @@ function renderPresence() {
     const li = document.createElement('li');
     const online = playerOnline(playerId);
     li.className = online ? 'presence-online' : 'presence-wait';
-    li.textContent = playerId === 'koharu' ? 'こはる　● NPC' : `プレイヤー${playerId}　${online ? '● 接続中' : '○ 再接続待ち'}`;
+    const mode = state.room.controlModes?.[playerId]?.mode || 'human';
+    const status = mode === 'npc-controlled' ? 'NPC代理中' : mode === 'return-pending' ? '本人復帰済み／代理終了待ち' : mode === 'ended' ? '代理終了' : online ? '● 接続中' : '○ 再接続待ち';
+    li.textContent = playerId === 'koharu' ? 'こはる　● NPC' : `プレイヤー${playerId}　${status}`;
     return li;
   });
   $('presence-list').replaceChildren(...rows);
@@ -92,20 +94,42 @@ function renderGame() {
   const latestElimination = Object.values(room.eliminationSnapshots || {}).sort((a, b) => (b.eliminatedAt || 0) - (a.eliminatedAt || 0))[0];
   $('elimination-notice').hidden = !latestElimination;
   if (latestElimination) $('elimination-notice').textContent = `${latestElimination.playerId === 'koharu' ? 'こはる' : `プレイヤー${latestElimination.playerId}`}は${emoji[latestElimination.eliminationAnimal]}${labels[latestElimination.eliminationAnimal]}が4枚そろって「もふもふ大集合！」／脱落`;
-  const canMake = !finished && ownStatus === 'active' && room.turnState === 'awaitingOffer' && room.currentTurnPlayerId === state.seatId;
+  const ownControl = room.controlModes?.[state.seatId]?.mode || 'human';
+  $('control-status').textContent = ownControl === 'human' ? '本人へ操作権返却済み' : ownControl === 'npc-controlled' ? 'NPC代理中' : ownControl === 'return-pending' ? '本人復帰済み／代理終了待ち' : '代理終了';
+  const canMake = !finished && ownStatus === 'active' && ownControl === 'human' && room.turnState === 'awaitingOffer' && room.currentTurnPlayerId === state.seatId;
   $('offer-form').hidden = !canMake; $('offer-card').innerHTML = state.cards.map((card) => `<option value="${card.cardId}">${labels[card.animalType]}</option>`).join('');
   $('claim-animal').innerHTML = animals.map((animal) => `<option value="${animal}">${labels[animal]}</option>`).join('');
   const targets = ['A', 'B', 'koharu'].filter((playerId) => playerId !== state.seatId && room.playerStatus?.[playerId] === 'active');
   $('target-player').innerHTML = targets.map((playerId) => `<option value="${playerId}">${playerId === 'koharu' ? 'こはる' : playerId}</option>`).join('');
   $('npc-status').hidden = finished || room.turnState !== 'awaitingNpcPhase';
-  $('offer').hidden = finished || !offer; $('judge-buttons').hidden = finished || ownStatus !== 'active' || !(offer?.status === 'pending' && offer.toPlayerId === state.seatId);
+  $('offer').hidden = finished || !offer; $('judge-buttons').hidden = finished || ownStatus !== 'active' || ownControl !== 'human' || !(offer?.status === 'pending' && offer.toPlayerId === state.seatId);
   $('offer-message').textContent = offer ? `${offer.fromPlayerId === 'koharu' ? 'こはる' : offer.fromPlayerId}「${labels[offer.claimAnimal]}だよ」` : '';
   $('result').hidden = offer?.status !== 'completed';
   if (offer?.status === 'completed') $('result').textContent = `本当は${labels[offer.actualAnimal]}。判定${offer.success ? '成功' : '失敗'}。${offer.faceUpRecipientPlayerId}が表向きカードを受け取りました。${finished ? 'ゲーム終了です。' : `次は${room.currentTurnPlayerId}です。`}`;
   $('final-result').hidden = !finished;
   if (finished) renderFinalResult(room.finalResult);
   if (!finished && ownStatus === 'active' && room.turnState === 'awaitingNpcPhase') void runNpc();
+  if (!finished) void runProxyIfNeeded();
   renderPresence();
+}
+async function runProxyIfNeeded() {
+  if (state.proxyBusy || !state.room) return;
+  const room = state.room;
+  const seatId = room.turnState === 'awaitingJudgment' ? room.publicOffer?.toPlayerId : room.currentTurnPlayerId;
+  if (!['A', 'B'].includes(seatId)) return;
+  const mode = room.controlModes?.[seatId]?.mode || 'human';
+  if (mode === 'return-pending') { if (seatId === state.seatId) await refresh().catch(() => {}); return; }
+  if (mode === 'human' && playerOnline(seatId)) return;
+  state.proxyBusy = true;
+  try {
+    if (mode === 'human') {
+      state.proxyStartRequest ||= { roomId: state.roomId, actionId: newId() };
+      await call('startMofumofuNpcProxy', state.proxyStartRequest); state.proxyStartRequest = null;
+    }
+    state.proxyActionRequest ||= { roomId: state.roomId, actionId: newId() };
+    await call('runMofumofuNpcProxyAction', state.proxyActionRequest); state.proxyActionRequest = null; await refresh();
+  } catch (error) { if (!String(error.code || '').includes('failed-precondition')) message(error.message); }
+  finally { state.proxyBusy = false; }
 }
 function renderFinalResult(finalResult) {
   if (!finalResult) return;
