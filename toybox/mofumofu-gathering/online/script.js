@@ -19,6 +19,12 @@ function newId() { return crypto.randomUUID(); }
 function remember(roomId, seatId) { state.roomId = roomId; state.seatId = seatId; localStorage.setItem('mofumofuRoomId', roomId); localStorage.setItem('mofumofuSeatId', seatId); }
 function message(text) { $('status').textContent = text; }
 function showRoom(room) {
+  if (room.status === 'finished' || room.playerStatus?.[state.seatId] === 'eliminated') {
+    state.cards = [];
+    state.makeRequest = null;
+    state.judgeRequest = null;
+    state.npcRequest = null;
+  }
   state.room = room; $('entry').hidden = true; $('lobby').hidden = room.status !== 'waiting'; $('game').hidden = !['playing', 'finished'].includes(room.status);
   $('room-id').textContent = state.roomId; $('players').innerHTML = `<li>A: ${room.players.A.joined ? '参加' : '待機'}</li><li>B: ${room.players.B.joined ? '参加' : '待機'}</li><li>こはる: 参加</li>`;
   $('start-game').hidden = room.hostUid !== auth.currentUser?.uid;

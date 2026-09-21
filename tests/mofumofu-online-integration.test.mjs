@@ -367,6 +367,7 @@ test('67-75 Phase 4 rules and static client secrecy/controls remain closed', asy
   const source = await readFile(new URL('../toybox/mofumofu-gathering/online/script.js', import.meta.url), 'utf8');
   assert.equal(source.includes('console.'), false); assert.equal(/localStorage\.setItem\([^)]*(cards|actualAnimal|finalResult)/.test(source), false);
   assert.match(source, /ownStatus === 'active'/); assert.match(source, /renderFinalResult/); assert.match(source, /room\.status === 'finished'/);
+  assert.match(source, /room\.status === 'finished' \|\| room\.playerStatus\?\.\[state\.seatId\] === 'eliminated'[\s\S]*?state\.cards = \[\]/);
 });
 
 test('Phase 4 boundary: three matching or four mixed face-up cards do not eliminate', () => {
