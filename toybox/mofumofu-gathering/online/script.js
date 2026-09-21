@@ -1,20 +1,29 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js';
 import { getAuth, connectAuthEmulator, signInAnonymously } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js';
+import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-app-check.js';
 import { getFirestore, connectFirestoreEmulator, doc, onSnapshot } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js';
 import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-functions.js';
 import { getDatabase, connectDatabaseEmulator, ref, onValue, onDisconnect, set, update, serverTimestamp } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js';
-import { firebaseConfig, emulatorConfig } from './firebase-config.js';
+import { resolveEnvironment, REGION } from './firebase-config.js';
 
 const animals = ['cat', 'rabbit', 'bear', 'chick', 'fox', 'penguin', 'panda', 'polar'];
 const labels = { cat: 'ねこ', rabbit: 'うさぎ', bear: 'くま', chick: 'ひよこ', fox: 'きつね', penguin: 'ぺんぎん', panda: 'ぱんだ', polar: 'しろくま' };
 const emoji = { cat: '🐱', rabbit: '🐰', bear: '🐻', chick: '🐥', fox: '🦊', penguin: '🐧', panda: '🐼', polar: '🐻‍❄️' };
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app); const firestore = getFirestore(app); const functions = getFunctions(app, emulatorConfig.region);
+const environment = resolveEnvironment();
+const app = initializeApp(environment.firebase);
+if (environment.appCheck.debug) globalThis.FIREBASE_APPCHECK_DEBUG_TOKEN = true;
+initializeAppCheck(app, {
+  provider: new ReCaptchaEnterpriseProvider(environment.appCheck.debug ? 'debug-provider' : environment.appCheck.siteKey),
+  isTokenAutoRefreshEnabled: true,
+});
+const auth = getAuth(app); const firestore = getFirestore(app); const functions = getFunctions(app, REGION);
 const database = getDatabase(app);
-connectAuthEmulator(auth, `http://${emulatorConfig.authHost}:${emulatorConfig.authPort}`, { disableWarnings: true });
-connectFirestoreEmulator(firestore, emulatorConfig.firestoreHost, emulatorConfig.firestorePort);
-connectFunctionsEmulator(functions, emulatorConfig.functionsHost, emulatorConfig.functionsPort);
-connectDatabaseEmulator(database, emulatorConfig.databaseHost, emulatorConfig.databasePort);
+if (environment.name === 'emulator') {
+  connectAuthEmulator(auth, `http://localhost:${environment.emulator.authPort}`, { disableWarnings: true });
+  connectFirestoreEmulator(firestore, 'localhost', environment.emulator.firestorePort);
+  connectFunctionsEmulator(functions, 'localhost', environment.emulator.functionsPort);
+  connectDatabaseEmulator(database, 'localhost', environment.emulator.databasePort);
+}
 const call = (name, data) => httpsCallable(functions, name)(data).then((response) => response.data);
 const $ = (id) => document.getElementById(id);
 const HEARTBEAT_MS = 15_000;
@@ -162,4 +171,6 @@ $('judge-buttons').addEventListener('click', async (event) => {
   const judgment = event.target.dataset.judgment; if (!judgment || state.judgeBusy) return; state.judgeRequest ||= { roomId: state.roomId, actionId: state.room.publicOffer.actionId, judgment }; state.judgeBusy = true;
   try { await call('judgeMofumofuOffer', state.judgeRequest); state.judgeRequest = null; await refresh(); } catch (error) { message(error.message); } finally { state.judgeBusy = false; }
 });
-await signInAnonymously(auth); message('接続しました。'); await resume().catch((error) => message(error.message));
+await auth.authStateReady();
+if (!auth.currentUser) await signInAnonymously(auth);
+message('接続しました。'); await resume().catch((error) => message(error.message));

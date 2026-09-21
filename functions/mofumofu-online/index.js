@@ -1,11 +1,12 @@
 'use strict';
 
 const crypto = require('node:crypto');
-const { getFirestore } = require('firebase-admin/firestore');
+const { getFirestore, Timestamp } = require('firebase-admin/firestore');
 const { getDatabase } = require('firebase-admin/database');
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
+const { onSchedule } = require('firebase-functions/v2/scheduler');
+const { defineSecret } = require('firebase-functions/params');
 
-const PROJECT_ID = 'demo-mofumofu-online';
 const REGION = 'asia-northeast1';
 const ANIMALS = ['cat', 'rabbit', 'bear', 'chick', 'fox', 'penguin', 'panda', 'polar'];
 const PLAYERS = ['A', 'B', 'koharu'];
@@ -17,10 +18,49 @@ const RATE_WINDOW_MS = 10 * 60 * 1000;
 const RATE_FAILURE_LIMIT = 8;
 const PRESENCE_ACCESS_TTL_MS = 5 * 60 * 1000;
 const PRESENCE_STALE_MS = 2 * 60 * 1000;
-const callableOptions = { region: REGION, cors: true };
+const PLAYING_TTL_MS = 24 * 60 * 60 * 1000;
+const FINISHED_TTL_MS = 6 * 60 * 60 * 1000;
+const ACTION_TTL_MS = 24 * 60 * 60 * 1000;
+const RATE_TTL_MS = 2 * RATE_WINDOW_MS;
+// Shared networks must not lock out normal rooms; this is a coarse abuse backstop,
+// while the stricter per-UID join limit remains authoritative.
+const IP_RATE_LIMIT = 100;
+const ipHmacKey = defineSecret('MOFUMOFU_ONLINE_IP_HMAC_KEY');
+const enforceAppCheck = process.env.MOFUMOFU_ENFORCE_APP_CHECK === 'true';
+const callableOptions = {
+  region: REGION,
+  cors: ['https://fabdemnt-dev.github.io'],
+  enforceAppCheck,
+  secrets: [ipHmacKey],
+};
 
 function db() { return getFirestore(); }
-function presenceDb() { return getDatabase(undefined, `https://${PROJECT_ID}.firebaseio.com`); }
+function presenceDb() {
+  const projectId = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT;
+  if (process.env.FIREBASE_DATABASE_EMULATOR_HOST && projectId) {
+    return getDatabase(undefined, `https://${projectId}-default-rtdb.firebaseio.com`);
+  }
+  const databaseURL = process.env.MOFUMOFU_RTDB_URL;
+  if (!databaseURL) fail('failed-precondition', 'サーバー設定を確認してください。');
+  return getDatabase(undefined, databaseURL);
+}
+function expiry(milliseconds) { return Timestamp.fromMillis(Date.now() + milliseconds); }
+function secretValue(secret, fallback) {
+  try { return secret.value() || fallback; } catch { return fallback; }
+}
+function ipSecret() {
+  const fallbackAllowed = !!process.env.FUNCTIONS_EMULATOR || process.env.NODE_ENV === 'test' || process.env.MOFUMOFU_DIRECT_HANDLERS === '1';
+  const value = secretValue(ipHmacKey, '');
+  if (value) return value;
+  if (fallbackAllowed) return 'mofumofu-emulator-ip-key';
+  fail('failed-precondition', 'サーバー設定を確認してください。');
+}
+function requestIp(request) {
+  return request.rawRequest?.ip || request.rawRequest?.socket?.remoteAddress || 'unknown';
+}
+function ipHash(request, day = new Date().toISOString().slice(0, 10)) {
+  return crypto.createHmac('sha256', ipSecret()).update(`${day}\n${requestIp(request)}`).digest('base64url');
+}
 function fail(code, message) { throw new HttpsError(code, message); }
 function authUid(request) {
   const uid = request.auth?.uid;
@@ -126,6 +166,7 @@ function publicRoom(roomId, hostUid, now, expiresAt) {
     draw: false,
     finishReason: null,
     finalResult: null,
+    deleteAt: expiry(WAITING_TTL_MS),
     controlModes: { A: { mode: 'human', generation: 0 }, B: { mode: 'human', generation: 0 } },
   };
 }
@@ -272,6 +313,7 @@ function resolveFaceUp(roomValue, serverValue, handsValue, pending, judgment, no
   if (finish) {
     advance = { currentTurnPlayerId: null, turnState: 'finished', turnNumber: (room.turnNumber || 0) + 1 };
     Object.assign(room, advance, { status: 'finished', ...finish, finalResult: buildFinalResult(room, finish.finishReason, finish.winnerPlayerId, finish.draw, now) });
+    room.deleteAt = Timestamp.fromMillis(now + FINISHED_TTL_MS);
   } else {
     const next = nextPlayerId(pending.fromPlayerId, room.playerStatus);
     advance = { currentTurnPlayerId: next, turnState: next === 'koharu' ? 'awaitingNpcPhase' : 'awaitingOffer', turnNumber: (room.turnNumber || 0) + 1 };
@@ -280,10 +322,55 @@ function resolveFaceUp(roomValue, serverValue, handsValue, pending, judgment, no
   return { room, server, hands, offer, eliminatedPlayerId, finish, advance };
 }
 
+async function deleteExpiredTopLevel(collectionName, now, limit = 100) {
+  const snapshot = await db().collection(collectionName).where('deleteAt', '<=', now).limit(limit).get();
+  if (snapshot.empty) return 0;
+  const batch = db().batch();
+  snapshot.docs.forEach((document) => batch.delete(document.ref));
+  await batch.commit();
+  return snapshot.size;
+}
+
+async function cleanupMofumofuDataNow(nowMillis = Date.now()) {
+  const now = Timestamp.fromMillis(nowMillis);
+  const expiredRooms = await db().collection('mofumofuOnlineRooms').where('deleteAt', '<=', now).limit(50).get();
+  for (const room of expiredRooms.docs) await db().recursiveDelete(room.ref);
+  const deleted = { rooms: expiredRooms.size };
+  for (const collectionName of ['mofumofuOnlineRoomInvites', 'mofumofuOnlineRateLimits', 'mofumofuOnlineActionRequests', 'mofumofuOnlineRoomSecrets']) {
+    deleted[collectionName] = await deleteExpiredTopLevel(collectionName, now);
+  }
+
+  const root = presenceDb();
+  const [accessSnapshot, presenceSnapshot] = await Promise.all([
+    root.ref('mofumofuOnlinePresenceAccess').get(),
+    root.ref('mofumofuOnlinePresence').get(),
+  ]);
+  const updates = {};
+  for (const [roomId, users] of Object.entries(accessSnapshot.val() || {})) {
+    for (const [uid, access] of Object.entries(users || {})) {
+      if (!Number.isFinite(access?.expiresAt) || access.expiresAt <= nowMillis) updates[`mofumofuOnlinePresenceAccess/${roomId}/${uid}`] = null;
+    }
+  }
+  for (const [roomId, users] of Object.entries(presenceSnapshot.val() || {})) {
+    for (const [uid, value] of Object.entries(users || {})) {
+      for (const [connectionId, connection] of Object.entries(value?.connections || {})) {
+        if (!Number.isFinite(connection?.lastHeartbeatAt) || connection.lastHeartbeatAt < nowMillis - PRESENCE_STALE_MS) {
+          updates[`mofumofuOnlinePresence/${roomId}/${uid}/connections/${connectionId}`] = null;
+        }
+      }
+    }
+  }
+  if (Object.keys(updates).length) await root.ref().update(updates);
+  deleted.realtimePaths = Object.keys(updates).length;
+  return deleted;
+}
+
 async function createHandler(request) {
   exactFields(request.data || {}, []);
   const uid = authUid(request);
   const store = db();
+  await consumeRateLimit(`create_uid_${digest(uid)}`, 6);
+  await consumeRateLimit(`create_ip_${ipHash(request)}`, IP_RATE_LIMIT);
   for (let attempt = 0; attempt < INVITE_RETRIES; attempt += 1) {
     const code = newInviteCode();
     const inviteDigest = digest(code);
@@ -297,9 +384,10 @@ async function createHandler(request) {
         const inviteSnap = await tx.get(inviteRef);
         if (inviteSnap.exists) fail('already-exists', '招待コードが衝突しました。');
         tx.create(r.room, publicRoom(roomId, uid, now, expiresAt));
-        tx.create(r.member(uid), { uid, playerId: 'A', joinedAt: now });
-        tx.create(r.secret, { inviteDigest, createdAt: now });
-        tx.create(inviteRef, { roomId, status: 'active', createdAt: now, expiresAt, revokedAt: null });
+        const deleteAt = expiry(WAITING_TTL_MS);
+        tx.create(r.member(uid), { uid, playerId: 'A', joinedAt: now, deleteAt });
+        tx.create(r.secret, { inviteDigest, createdAt: now, deleteAt });
+        tx.create(inviteRef, { roomId, status: 'active', createdAt: now, expiresAt, revokedAt: null, deleteAt });
       });
       return { roomId, inviteCode: code, status: 'waiting', seatId: 'A' };
     } catch (error) {
@@ -310,11 +398,30 @@ async function createHandler(request) {
   fail('resource-exhausted', '部屋を作成できませんでした。');
 }
 
+async function consumeRateLimit(key, limit = RATE_FAILURE_LIMIT, now = Date.now()) {
+  const rateRef = db().collection('mofumofuOnlineRateLimits').doc(key);
+  await db().runTransaction(async (tx) => {
+    const snap = await tx.get(rateRef);
+    const value = snap.exists ? snap.data() : null;
+    const started = value?.windowStartedAt?.toMillis?.() || Number(value?.windowStartedAt) || 0;
+    const withinWindow = now - started < RATE_WINDOW_MS;
+    const count = withinWindow ? Number(value?.count || 0) : 0;
+    if (count >= limit) fail('resource-exhausted', 'しばらく待ってから再試行してください。');
+    tx.set(rateRef, {
+      count: count + 1,
+      windowStartedAt: count ? value.windowStartedAt : Timestamp.fromMillis(now),
+      updatedAt: Timestamp.fromMillis(now),
+      deleteAt: Timestamp.fromMillis(now + RATE_TTL_MS),
+    });
+  });
+}
+
 async function checkRateLimit(tx, rateRef, now) {
   const snap = await tx.get(rateRef);
   if (!snap.exists) return { count: 0, windowStartedAt: now };
   const value = snap.data();
-  if (now - value.windowStartedAt >= RATE_WINDOW_MS) return { count: 0, windowStartedAt: now };
+  const started = value.windowStartedAt?.toMillis?.() || Number(value.windowStartedAt) || 0;
+  if (now - started >= RATE_WINDOW_MS) return { count: 0, windowStartedAt: Timestamp.fromMillis(now) };
   if (value.count >= RATE_FAILURE_LIMIT) fail('resource-exhausted', 'しばらく待ってから再試行してください。');
   return value;
 }
@@ -324,7 +431,7 @@ async function recordJoinFailure(uid, expectedDigest = null) {
   const now = Date.now();
   await store.runTransaction(async (tx) => {
     const state = await checkRateLimit(tx, rateRef, now);
-    tx.set(rateRef, { count: state.count + 1, windowStartedAt: state.windowStartedAt, updatedAt: now, expectedDigest });
+    tx.set(rateRef, { count: state.count + 1, windowStartedAt: state.windowStartedAt, updatedAt: now, expectedDigest, deleteAt: Timestamp.fromMillis(now + RATE_TTL_MS) });
   });
 }
 async function joinHandler(request) {
@@ -336,6 +443,7 @@ async function joinHandler(request) {
   const rateRef = store.collection('mofumofuOnlineRateLimits').doc(uid);
   const inviteRef = store.collection('mofumofuOnlineRoomInvites').doc(inviteDigest);
   const now = Date.now();
+  await consumeRateLimit(`join_ip_${ipHash(request)}`, IP_RATE_LIMIT, now);
   try {
     return await store.runTransaction(async (tx) => {
       await checkRateLimit(tx, rateRef, now);
@@ -359,7 +467,7 @@ async function joinHandler(request) {
         'playerUids.B': uid,
         'playerStatus.B': 'active',
       });
-      tx.create(r.member(uid), { uid, playerId: 'B', joinedAt: now });
+      tx.create(r.member(uid), { uid, playerId: 'B', joinedAt: now, deleteAt: expiry(PLAYING_TTL_MS) });
       tx.update(inviteRef, { status: 'full', revokedAt: now });
       tx.delete(rateRef);
       return { roomId: invite.roomId, seatId: 'B', status: 'waiting' };
@@ -396,11 +504,15 @@ async function startHandler(request) {
     const handB = shuffled.slice(10, 20);
     const npcHand = shuffled.slice(20, 30);
     const leftovers = shuffled.slice(30);
-    tx.set(r.hand(room.playerUids.A), { cards: handA });
-    tx.set(r.hand(room.playerUids.B), { cards: handB });
-    tx.set(r.server, { npcHand, leftovers, discard: [], pendingOffer: null, proxyLease: null, claimHistory: { A: { truth: 0, total: 0 }, B: { truth: 0, total: 0 } } });
-    tx.update(r.room, { status: 'playing', startedAt: now, dealt: true, currentTurnPlayerId: 'A', turnState: 'awaitingOffer', turnNumber: 0 });
-    tx.update(inviteRef, { status: 'started', revokedAt: now });
+    const deleteAt = expiry(PLAYING_TTL_MS);
+    tx.set(r.hand(room.playerUids.A), { cards: handA, deleteAt });
+    tx.set(r.hand(room.playerUids.B), { cards: handB, deleteAt });
+    tx.set(r.server, { npcHand, leftovers, discard: [], pendingOffer: null, proxyLease: null, claimHistory: { A: { truth: 0, total: 0 }, B: { truth: 0, total: 0 } }, deleteAt });
+    tx.update(r.member(room.playerUids.A), { deleteAt });
+    tx.update(r.member(room.playerUids.B), { deleteAt });
+    tx.update(r.secret, { deleteAt });
+    tx.update(r.room, { status: 'playing', startedAt: now, dealt: true, currentTurnPlayerId: 'A', turnState: 'awaitingOffer', turnNumber: 0, deleteAt });
+    tx.update(inviteRef, { status: 'started', revokedAt: now, deleteAt });
     return { roomId, status: 'playing', currentTurnPlayerId: 'A' };
   });
 }
@@ -472,7 +584,7 @@ async function startProxyHandler(request) {
     const control = { mode: 'npc-controlled', generation: old.generation + 1, startedAt: now, lastHeartbeatAt: presence.lastHeartbeatAt };
     const result = { roomId, seatId, mode: control.mode, generation: control.generation };
     tx.update(r.room, { [`controlModes.${seatId}`]: control });
-    tx.create(r.action(actionId), { fingerprint, stateToken: `${room.turnNumber}:${seatId}:proxy-start`, result, completedAt: now });
+    tx.create(r.action(actionId), { fingerprint, stateToken: `${room.turnNumber}:${seatId}:proxy-start`, result, completedAt: now, deleteAt: expiry(ACTION_TTL_MS) });
     return result;
   });
 }
@@ -528,7 +640,7 @@ async function makeHandler(request) {
     tx.update(r.hand(uid), { cards });
     tx.update(r.server, { pendingOffer: pending });
     tx.update(r.room, { publicOffer: offer, turnState });
-    tx.create(r.action(actionId), { fingerprint, stateToken, result, completedAt: Date.now() });
+    tx.create(r.action(actionId), { fingerprint, stateToken, result, completedAt: Date.now(), deleteAt: expiry(ACTION_TTL_MS) });
     return result;
   });
 }
@@ -593,7 +705,7 @@ async function judgeHandler(request) {
     tx.update(r.hand(room.playerUids.B), { cards: resolved.hands.B });
     tx.set(r.room, resolved.room);
     if (resolved.finish && inviteSnap.exists) tx.update(inviteRef, { status: 'ended', revokedAt: now });
-    tx.create(r.action(`judge-${actionId}`), { fingerprint, stateToken, result, completedAt: now });
+    tx.create(r.action(`judge-${actionId}`), { fingerprint, stateToken, result, completedAt: now, deleteAt: expiry(ACTION_TTL_MS) });
     return result;
   });
 }
@@ -680,7 +792,7 @@ async function npcHandler(request) {
     } else {
       fail('failed-precondition', 'こはるの処理は必要ありません。');
     }
-    tx.create(r.action(actionId), { fingerprint, stateToken, result, completedAt: now });
+    tx.create(r.action(actionId), { fingerprint, stateToken, result, completedAt: now, deleteAt: expiry(ACTION_TTL_MS) });
     return result;
   });
 }
@@ -733,7 +845,7 @@ async function proxyActionHandler(request) {
     if (room.status === 'finished' && secretSnap.exists) {
       const inviteRef = db().collection('mofumofuOnlineRoomInvites').doc(secretSnap.data().inviteDigest); tx.update(inviteRef, { status: 'ended', revokedAt: now });
     }
-    tx.create(r.action(actionId), { fingerprint, stateToken: `${room.turnNumber}:${seatId}:proxy`, result, completedAt: now });
+    tx.create(r.action(actionId), { fingerprint, stateToken: `${room.turnNumber}:${seatId}:proxy`, result, completedAt: now, deleteAt: expiry(ACTION_TTL_MS) });
     return result;
   });
 }
@@ -748,6 +860,7 @@ const judgeMofumofuOffer = onCall(callableOptions, judgeHandler);
 const runMofumofuNpcTurn = onCall(callableOptions, npcHandler);
 const startMofumofuNpcProxy = onCall(callableOptions, startProxyHandler);
 const runMofumofuNpcProxyAction = onCall(callableOptions, proxyActionHandler);
+const cleanupMofumofuOnline = onSchedule({ region: REGION, schedule: 'every 60 minutes', timeZone: 'Asia/Tokyo' }, () => cleanupMofumofuDataNow());
 
 module.exports = {
   createMofumofuRoom,
@@ -760,6 +873,7 @@ module.exports = {
   runMofumofuNpcTurn,
   startMofumofuNpcProxy,
   runMofumofuNpcProxyAction,
+  cleanupMofumofuOnline,
   _handlers: { createHandler, joinHandler, startHandler, resumeHandler, authorizePresenceHandler, makeHandler, judgeHandler, npcHandler, startProxyHandler, proxyActionHandler },
-  _test: { ANIMALS, PROJECT_ID, PRESENCE_ACCESS_TTL_MS, PRESENCE_STALE_MS, presenceConnectionOnline, uidPresenceOnline, uidPresenceState, chooseNpcClaim, chooseNpcJudgment, nextPlayerId, judgeSuccess, digest, sameFingerprint, countByAnimal, finishIfNeeded, resolveFaceUp },
+  _test: { ANIMALS, PRESENCE_ACCESS_TTL_MS, PRESENCE_STALE_MS, WAITING_TTL_MS, PLAYING_TTL_MS, FINISHED_TTL_MS, ACTION_TTL_MS, RATE_TTL_MS, callableOptions, ipHash, cleanupMofumofuDataNow, presenceConnectionOnline, uidPresenceOnline, uidPresenceState, chooseNpcClaim, chooseNpcJudgment, nextPlayerId, judgeSuccess, digest, sameFingerprint, countByAnimal, finishIfNeeded, resolveFaceUp },
 };

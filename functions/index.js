@@ -21,6 +21,7 @@ try {
   exports.runMofumofuNpcTurn = mofumofuOnline.runMofumofuNpcTurn;
   exports.startMofumofuNpcProxy = mofumofuOnline.startMofumofuNpcProxy;
   exports.runMofumofuNpcProxyAction = mofumofuOnline.runMofumofuNpcProxyAction;
+  exports.cleanupMofumofuOnline = mofumofuOnline.cleanupMofumofuOnline;
 } catch (error) {
   if (error?.message !== './mofumofu-online') throw error;
 }

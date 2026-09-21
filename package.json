@@ -18,6 +18,7 @@
     "test:mofumofu-online:presence-rules": "firebase --config firebase.mofumofu-online-emulator.json emulators:exec --only database --project demo-mofumofu-presence-three \"node --test --test-force-exit tests/mofumofu-online-presence-rules.test.mjs\"",
     "test:mofumofu-online:integration": "firebase --config firebase.mofumofu-online-emulator.json emulators:exec --only auth,firestore,database,functions --project demo-mofumofu-online \"node --test --test-force-exit tests/mofumofu-online-integration.test.mjs\"",
     "test:mofumofu-online:fallback": "MOFUMOFU_DIRECT_HANDLERS=1 firebase --config firebase.mofumofu-online-emulator.json emulators:exec --only auth,firestore,database --project demo-mofumofu-online \"node --test --test-force-exit tests/mofumofu-online-integration.test.mjs\""
+    ,"test:mofumofu-online:phase7": "node --test tests/mofumofu-online-phase7.test.mjs"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^3.0.4",
