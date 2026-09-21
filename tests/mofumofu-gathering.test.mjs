@@ -125,7 +125,9 @@ test('もう一回あそぶ時は前ゲームのカード表面と判定表示�
   assert.match(script, /offerCard"\)\.classList\.remove\("revealed"\)/);
   assert.match(script, /offerCardMain"\)\.textContent="？"/);
   assert.match(script, /flash"\)\.textContent=""/);
-  assert.match(script, /function startGame\(\) \{\s*clearTimers\(\);\s*resetOfferVisual\(\);/);
+  assert.ok(script.includes('function startGame(mode=selectedMode) {'));
+  assert.ok(script.includes('clearTimers();'));
+  assert.ok(script.includes('resetOfferVisual();'));
 });
 
 
@@ -137,8 +139,8 @@ test('3人生存時も3人目を含めて最少枚数を選ぶ実装である', 
 
 
 test('公開更新時にCSSとJSの古いキャッシュを使わず、ゲーム中に自動スクロールしない', () => {
-  assert.match(html, /style\.css\?v=20260921-1/);
-  assert.match(html, /script\.js\?v=20260921-1/);
+  assert.ok(html.includes('style.css?v=20260921-2'));
+  assert.ok(html.includes('script.js?v=20260921-2'));
   assert.doesNotMatch(script, /window\.scrollTo/);
   assert.doesNotMatch(script, /scrollIntoView/);
 });
@@ -148,4 +150,50 @@ test('山札は裏向きカードを残し、カード中央の？だけ表示�
   assert.match(html, /<div class="deck-card" aria-hidden="true"><\/div>/);
   assert.match(html, /山札 <b id="deckCount">2<\/b>枚/);
   assert.doesNotMatch(html, /class="deck-card"[^>]*>？<\/div>/);
+});
+
+
+test('タイトル画面でひとり用とローカルふたり用を選べる', () => {
+  assert.match(html, /id="soloBtn">ひとりであそぶ/);
+  assert.match(html, /id="duoBtn">ふたりであそぶ/);
+  assert.match(script, /const DUO_PLAYERS/);
+  assert.match(script, /name:"プレイヤーA"/);
+  assert.match(script, /name:"プレイヤーB"/);
+  assert.match(script, /name:"こはる"/);
+});
+
+test('ふたり用は人間の手番・判定前に全画面交代画面で手札を隠す', () => {
+  assert.match(html, /id="passOverlay"/);
+  assert.match(html, /id="passReadyBtn">準備できたらタップ/);
+  assert.match(script, /function showPassOverlay/);
+  assert.match(script, /game\.visibleHumanId=null/);
+  assert.match(script, /function acceptPass/);
+  assert.match(script, /game\.visibleHumanId=game\.pendingHumanId/);
+  assert.match(script, /purpose==="judge"/);
+});
+
+test('ふたり用も32枚を3人へ10枚ずつ配り、既存の判定と4枚脱落を共用する', () => {
+  assert.match(script, /mode==="duo"\?DUO_PLAYERS:SOLO_PLAYERS/);
+  assert.match(script, /for\(let i=0;i<10;i\+\+\) players\.forEach/);
+  assert.match(script, /const success=\(saysTrue && actualTruth\)\|\|\(!saysTrue && !actualTruth\)/);
+  assert.match(script, /receiver\.faceUp\[offer\.card\.id\]>=4/);
+});
+
+test('ふたり用の人間プレイヤーは相手とNPCの両方を渡す対象にできる', () => {
+  assert.match(script, /const actor=currentPlayer\(\)/);
+  assert.match(script, /activePlayers\(\)\.filter\(p=>p\.id!==actor\.id\)/);
+});
+
+
+test('ふたり用の交代前は手札を隠し、タップ後だけ対象プレイヤーの手札を表示する', () => {
+  assert.match(script, /function showPassOverlay[\s\S]*game\.visibleHumanId=null[\s\S]*render\(\)/);
+  assert.match(script, /function acceptPass[\s\S]*game\.visibleHumanId=game\.pendingHumanId/);
+  assert.match(script, /function renderHand[\s\S]*const you=visibleHuman\(\)/);
+  assert.match(script, /function renderJudgeHand[\s\S]*const you=visibleHuman\(\)/);
+});
+
+test('人間へのカードは判定前にも交代し、こはるへのカードはCPUが自動判定する', () => {
+  assert.match(script, /if\(isHuman\(target\)\)[\s\S]*showPassOverlay\(target,"judge"\)/);
+  assert.match(script, /else later\(\(\)=>cpuJudge\(to\),800\)/);
+  assert.match(script, /later\(cpuTurn,650\)/);
 });
