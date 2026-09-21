@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>もふもふ大集合！オンライン</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main>
+    <h1>もふもふ大集合！オンライン</h1>
+    <p id="status" role="status">Emulatorへ接続しています…</p>
+    <section id="entry">
+      <button id="create-room">部屋をつくる</button>
+      <form id="join-form"><label>招待コード <input id="invite-code" maxlength="8" autocomplete="off"></label><button>参加</button></form>
+    </section>
+    <section id="lobby" hidden>
+      <p>部屋: <strong id="room-id"></strong></p>
+      <p>招待コード: <strong id="shown-invite"></strong></p>
+      <ul id="players"></ul>
+      <button id="start-game">ゲーム開始</button>
+    </section>
+    <section id="game" hidden>
+      <h2>接続・秘密手札分離テスト</h2>
+      <p id="turn"></p><p id="npc-status" hidden>こはるが考えています…</p>
+      <div id="hand"></div>
+      <form id="offer-form" hidden>
+        <label>カード <select id="offer-card"></select></label>
+        <label>宣言 <select id="claim-animal"></select></label>
+        <label>相手 <select id="target-player"></select></label>
+        <button>渡す</button>
+      </form>
+      <section id="offer" hidden><p id="offer-message"></p><div id="judge-buttons" hidden><button data-judgment="truth">ほんと？</button><button data-judgment="lie">うそ！</button></div></section>
+      <section id="result" hidden></section>
+    </section>
+  </main>
+  <script type="module" src="./script.js"></script>
+</body>
+</html>

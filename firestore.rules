@@ -54,6 +54,32 @@ service cloud.firestore {
     match /deepMiningAgreementRoomLocators/{docId} { allow read, write: if false; }
     match /deepMiningAgreementActionRequests/{docId} { allow read, write: if false; }
 
+    // もふもふ大集合！オンライン版。公開roomとmembersは参加者だけが読み、
+    // ゲーム確定書込みはすべてCallable Functions (Admin SDK) に限定する。
+    function mofumofuSignedIn() { return request.auth != null; }
+    function isMofumofuMember(roomId) {
+      return mofumofuSignedIn()
+        && exists(/databases/$(database)/documents/mofumofuOnlineRooms/$(roomId)/members/$(request.auth.uid));
+    }
+    match /mofumofuOnlineRooms/{roomId} {
+      allow read: if isMofumofuMember(roomId);
+      allow write: if false;
+    }
+    match /mofumofuOnlineRooms/{roomId}/members/{uid} {
+      allow read: if isMofumofuMember(roomId);
+      allow write: if false;
+    }
+    match /mofumofuOnlineRooms/{roomId}/privateHands/{uid} {
+      allow read: if mofumofuSignedIn() && request.auth.uid == uid && isMofumofuMember(roomId);
+      allow write: if false;
+    }
+    match /mofumofuOnlineRooms/{roomId}/serverState/{document=**} { allow read, write: if false; }
+    match /mofumofuOnlineRooms/{roomId}/{document=**} { allow read, write: if false; }
+    match /mofumofuOnlineRoomInvites/{docId} { allow read, write: if false; }
+    match /mofumofuOnlineRoomSecrets/{docId} { allow read, write: if false; }
+    match /mofumofuOnlineRateLimits/{docId} { allow read, write: if false; }
+    match /mofumofuOnlineActionRequests/{docId} { allow read, write: if false; }
+
     // ============================================================
     // 1) 訪問カウンタ counter/visits
     // ============================================================

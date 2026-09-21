@@ -1,0 +1,8 @@
+:root { color-scheme: light; font-family: system-ui, sans-serif; background: #fffaf4; color: #352b28; }
+body { margin: 0; padding: 1rem; }
+main { max-width: 44rem; margin: auto; }
+section, form { margin: 1rem 0; padding: 1rem; border-radius: 1rem; background: #fff; }
+button, select, input { min-height: 44px; margin: .25rem; font: inherit; }
+#hand { display: flex; flex-wrap: wrap; gap: .5rem; }
+.card { border: 2px solid #e7c9ae; border-radius: .75rem; padding: .6rem; background: #fff; }
+#result { border: 2px solid #d7b26d; }
