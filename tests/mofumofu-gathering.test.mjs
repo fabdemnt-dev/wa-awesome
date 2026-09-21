@@ -144,7 +144,8 @@ test('公開更新時にCSSとJSの古いキャッシュを使わず、ゲーム
 });
 
 
-test('山札は枚数だけ表示し、操作を連想させる？カードは表示しない', () => {
+test('山札は裏向きカードを残し、カード中央の？だけ表示しない', () => {
+  assert.match(html, /<div class="deck-card" aria-hidden="true"><\/div>/);
   assert.match(html, /山札 <b id="deckCount">2<\/b>枚/);
-  assert.doesNotMatch(html, /class="deck-card"/);
+  assert.doesNotMatch(html, /class="deck-card"[^>]*>？<\/div>/);
 });
