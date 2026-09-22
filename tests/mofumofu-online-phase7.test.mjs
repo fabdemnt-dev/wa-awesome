@@ -84,3 +84,47 @@ const checks = [
 
 assert.equal(checks.length, 65);
 for (const [name, check] of checks) test(name, () => assert.ok(check(), name));
+
+const section = (start, end) => client.slice(client.indexOf(start), client.indexOf(end, client.indexOf(start)));
+const fullResume = section('async function fullResume', 'function renderGame');
+const lightweightSync = section('async function lightweightSync', 'function startSafetySync');
+const beginPresence = section('async function beginPresence', 'function showRoom');
+const roomListener = section('function listenRoom', 'async function lightweightSync');
+const stopRealtime = section('function stopRealtime', 'async function retirePresence');
+const reconnectChecks = [
+  ['R1 waiting→playingを公開room更新から検出', () => client.includes("wasWaiting && room.status === 'playing'")],
+  ['R2 waiting→playingはfull resumeでprivate hand取得', () => client.includes('waiting-playing') && fullResume.includes('state.cards = value.cards || []')],
+  ['R3 Firestore listener error handler', () => roomListener.includes('}, (error) => {')],
+  ['R4 listener error後に制限付きfull resume', () => roomListener.includes('MAX_LISTENER_RETRIES') && roomListener.includes("requestFullResume(`firestore-listener-error")],
+  ['R5 Firestore listenerは登録前に旧購読解除', () => roomListener.indexOf('state.unsubscribe?.()') < roomListener.indexOf('onSnapshot(')],
+  ['R6 visibilitychange復帰', () => client.includes("requestFullResume('visibilitychange')")],
+  ['R7 pageshow復帰', () => client.includes("requestFullResume('pageshow')")],
+  ['R8 online復帰', () => client.includes("requestFullResume('online')")],
+  ['R9 focusは不要として未追加', () => !client.includes("addEventListener('focus'")],
+  ['R10 full resume single-flight', () => fullResume.includes('if (state.resumeFlight) return state.resumeFlight')],
+  ['R11 古いgenerationの成功結果を破棄', () => fullResume.match(/generation !== state\.resumeGeneration/g)?.length >= 4],
+  ['R12 古いgenerationの失敗で最新UIを変更しない', () => fullResume.includes('generation === state.resumeGeneration') && client.includes('if (generation !== state.resumeGeneration) return;')],
+  ['R13 古いfinallyが最新flightを解除しない', () => fullResume.includes('if (state.resumeFlight === flight) state.resumeFlight = null')],
+  ['R14 heartbeat timer最大1本', () => stopRealtime.includes('clearInterval(state.heartbeatTimer)') && beginPresence.includes('state.heartbeatTimer = setInterval')],
+  ['R15 access refresh timer最大1本', () => stopRealtime.includes('clearInterval(state.accessTimer)') && beginPresence.includes('state.accessTimer = setInterval')],
+  ['R16 RTDB listener最大1本', () => stopRealtime.includes('state.presenceUnsubscribe?.()') && beginPresence.includes('state.presenceUnsubscribe = onValue')],
+  ['R17 safety polling timer最大1本', () => stopRealtime.includes('clearInterval(state.safetySyncTimer)') && client.includes('clearInterval(state.safetySyncTimer)')],
+  ['R18 復帰ごとに新connection ID', () => fullResume.includes('const connectionId = newId()')],
+  ['R19 presence認可後にRTDB登録', () => fullResume.indexOf('authorizePresence(connectionId)') < fullResume.indexOf('beginPresence(admission.seatId')],
+  ['R20 heartbeat失敗は復旧経路', () => beginPresence.includes("requestFullResume('heartbeat-error')")],
+  ['R21 5秒同期はserver fetchのみ', () => lightweightSync.includes('getDocFromServer') && !lightweightSync.includes("call('resumeMofumofuRoom")],
+  ['R22 NPC代理復帰を伴うCallableはfull resume', () => fullResume.includes("call('resumeMofumofuRoom'")],
+  ['R23 2分stale閾値維持', () => client.includes('STALE_MS = 120_000') && functions.includes('PRESENCE_STALE_MS = 2 * 60 * 1000')],
+  ['R24 2分未満をonline扱い', () => phase6.includes('119_999')],
+  ['R25 NPC代理後の本人復帰処理維持', () => functions.includes("mode === 'npc-controlled'") && functions.includes("mode: 'return-pending'")],
+  ['R26 App Check token準備後にpresence認可', () => fullResume.indexOf('getToken(appCheck, false)') < fullResume.indexOf('authorizePresence(connectionId)')],
+  ['R27 Firestore発生元とcodeを表示', () => roomListener.includes('Firestore listener:${code}')],
+  ['R28 permission-deniedは無限retryしない', () => roomListener.includes("code === 'permission-denied' ? 1") && lightweightSync.includes("code === 'permission-denied'") && lightweightSync.includes('clearInterval(state.safetySyncTimer)')],
+  ['R29 waitingでresume可能', () => functions.includes("let handStatus = 'pending'")],
+  ['R30 playingでprivate handをresume', () => functions.includes("room.status === 'playing' || room.status === 'finished'")],
+  ['R31 finishedで空手札をresume', () => functions.includes("handStatus = room.playerStatus?.[seatId] === 'eliminated' ? 'eliminated' : 'finished'")],
+  ['R32 接続状態表示が実状態に追従', () => client.includes("'接続中'") && client.includes('再接続中／同期中') && client.includes('同期エラー')],
+];
+
+assert.equal(reconnectChecks.length, 32);
+for (const [name, check] of reconnectChecks) test(name, () => assert.ok(check(), name));

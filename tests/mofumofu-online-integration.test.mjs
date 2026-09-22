@@ -550,7 +550,7 @@ test('Phase 5 71-84 status boundaries and UI avoid secret or automatic scrolling
   const source = await readFile(new URL('../toybox/mofumofu-gathering/online/script.js', import.meta.url), 'utf8');
   const html = await readFile(new URL('../toybox/mofumofu-gathering/online/index.html', import.meta.url), 'utf8');
   assert.match(source, /HEARTBEAT_MS = 15_000/); assert.match(source, /STALE_MS = 120_000/);
-  assert.match(source, /connections\/\$\{state\.connectionId\}/); assert.match(source, /onDisconnect\(state\.presenceRef\)/);
+  assert.match(source, /connections\/\$\{connectionId\}/); assert.match(source, /onDisconnect\(ownPresenceRef\)/);
   assert.match(source, /authorizeMofumofuPresence/); assert.match(source, /resumeMofumofuRoom/);
   assert.match(html, /id="presence-list"/); assert.match(html, /id="reconnect-wait"/);
   assert.equal(source.includes('scrollIntoView'), false); assert.equal(source.includes('scrollTo'), false);
