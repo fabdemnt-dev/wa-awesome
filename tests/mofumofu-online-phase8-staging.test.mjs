@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { readFile } from 'node:fs/promises';
 
 const require = createRequire(import.meta.url);
@@ -9,6 +10,41 @@ const backend = require('../functions/mofumofu-online');
 const configUrl = pathToFileURL(new URL('../toybox/mofumofu-gathering/online/firebase-config.js', import.meta.url).pathname);
 const html = await readFile(new URL('../toybox/mofumofu-gathering/online/index.html', import.meta.url), 'utf8');
 const firebaseJson = JSON.parse(await readFile(new URL('../firebase.json', import.meta.url), 'utf8'));
+
+test('未初期化プロセスでAdmin Appを一度だけ初期化してFunctionsをexportする', () => {
+  const functionsDirectory = fileURLToPath(new URL('../functions/mofumofu-online/', import.meta.url));
+  const modulePath = fileURLToPath(new URL('../functions/mofumofu-online/index.js', import.meta.url));
+  const expectedExports = [
+    'createMofumofuRoom',
+    'joinMofumofuRoom',
+    'startMofumofuGame',
+    'resumeMofumofuRoom',
+    'authorizeMofumofuPresence',
+    'makeMofumofuOffer',
+    'judgeMofumofuOffer',
+    'runMofumofuNpcTurn',
+    'startMofumofuNpcProxy',
+    'runMofumofuNpcProxyAction',
+    'cleanupMofumofuOnline',
+  ];
+  const script = `
+    const { getApps } = require('firebase-admin/app');
+    if (getApps().length !== 0) throw new Error('Admin App was initialized before module load');
+    const first = require(${JSON.stringify(modulePath)});
+    if (getApps().length !== 1) throw new Error('default Admin App was not initialized exactly once');
+    const app = getApps()[0];
+    const second = require(${JSON.stringify(modulePath)});
+    if (getApps().length !== 1 || getApps()[0] !== app) throw new Error('Admin App was initialized twice');
+    for (const name of ${JSON.stringify(expectedExports)}) {
+      if (typeof first[name] !== 'function' || second[name] !== first[name]) throw new Error('missing export: ' + name);
+    }
+  `;
+  const result = spawnSync(process.execPath, ['-e', script], {
+    cwd: functionsDirectory,
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+});
 
 const productionOrigin = 'https://fabdemnt-dev.github.io';
 const stagingOrigin = 'https://wa-awesome-mofumofu-stg.web.app';
