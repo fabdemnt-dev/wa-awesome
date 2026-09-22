@@ -43,6 +43,24 @@
       </section>
     </section>
   </main>
+  <script>
+    if (globalThis.location.hostname === 'wa-awesome-mofumofu-stg.web.app') {
+      globalThis.MOFUMOFU_ONLINE_CONFIG = Object.freeze({
+        environment: 'staging',
+        hostname: 'wa-awesome-mofumofu-stg.web.app',
+        firebase: Object.freeze({
+          apiKey: 'AIzaSyB1oIhZWMryuWZV9r2-nO9X4W6LuqXVvlo',
+          authDomain: 'wa-awesome-mofumofu-stg.firebaseapp.com',
+          projectId: 'wa-awesome-mofumofu-stg',
+          storageBucket: 'wa-awesome-mofumofu-stg.firebasestorage.app',
+          messagingSenderId: '481875415725',
+          appId: '1:481875415725:web:e16ec434ac7cddd117ec24',
+          databaseURL: 'https://wa-awesome-mofumofu-stg-default-rtdb.asia-southeast1.firebasedatabase.app',
+        }),
+        appCheckSiteKey: '6LfWOsgtAAAAAIuboWvU-f8EEAh2olIFiGDk_f1X',
+      });
+    }
+  </script>
   <script type="module" src="./script.js"></script>
 </body>
 </html>

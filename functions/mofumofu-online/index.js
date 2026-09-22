@@ -25,11 +25,26 @@ const RATE_TTL_MS = 2 * RATE_WINDOW_MS;
 // Shared networks must not lock out normal rooms; this is a coarse abuse backstop,
 // while the stricter per-UID join limit remains authoritative.
 const IP_RATE_LIMIT = 100;
+const PRODUCTION_PROJECT_ID = 'wa-awesome';
+const STAGING_PROJECT_ID = 'wa-awesome-mofumofu-stg';
+const PRODUCTION_ORIGIN = 'https://fabdemnt-dev.github.io';
+const STAGING_ORIGIN = 'https://wa-awesome-mofumofu-stg.web.app';
 const ipHmacKey = defineSecret('MOFUMOFU_ONLINE_IP_HMAC_KEY');
 const enforceAppCheck = process.env.MOFUMOFU_ENFORCE_APP_CHECK === 'true';
+
+function runtimeProjectId() {
+  if (process.env.GCLOUD_PROJECT) return process.env.GCLOUD_PROJECT;
+  if (process.env.GOOGLE_CLOUD_PROJECT) return process.env.GOOGLE_CLOUD_PROJECT;
+  try { return JSON.parse(process.env.FIREBASE_CONFIG || '{}').projectId || ''; } catch { return ''; }
+}
+function corsOriginsForProject(projectId) {
+  if (projectId === PRODUCTION_PROJECT_ID) return [PRODUCTION_ORIGIN];
+  if (projectId === STAGING_PROJECT_ID) return [STAGING_ORIGIN];
+  return [];
+}
 const callableOptions = {
   region: REGION,
-  cors: ['https://fabdemnt-dev.github.io'],
+  cors: corsOriginsForProject(runtimeProjectId()),
   enforceAppCheck,
   secrets: [ipHmacKey],
 };
@@ -875,5 +890,5 @@ module.exports = {
   runMofumofuNpcProxyAction,
   cleanupMofumofuOnline,
   _handlers: { createHandler, joinHandler, startHandler, resumeHandler, authorizePresenceHandler, makeHandler, judgeHandler, npcHandler, startProxyHandler, proxyActionHandler },
-  _test: { ANIMALS, PRESENCE_ACCESS_TTL_MS, PRESENCE_STALE_MS, WAITING_TTL_MS, PLAYING_TTL_MS, FINISHED_TTL_MS, ACTION_TTL_MS, RATE_TTL_MS, callableOptions, ipHash, cleanupMofumofuDataNow, presenceConnectionOnline, uidPresenceOnline, uidPresenceState, chooseNpcClaim, chooseNpcJudgment, nextPlayerId, judgeSuccess, digest, sameFingerprint, countByAnimal, finishIfNeeded, resolveFaceUp },
+  _test: { ANIMALS, PRESENCE_ACCESS_TTL_MS, PRESENCE_STALE_MS, WAITING_TTL_MS, PLAYING_TTL_MS, FINISHED_TTL_MS, ACTION_TTL_MS, RATE_TTL_MS, callableOptions, runtimeProjectId, corsOriginsForProject, ipHash, cleanupMofumofuDataNow, presenceConnectionOnline, uidPresenceOnline, uidPresenceState, chooseNpcClaim, chooseNpcJudgment, nextPlayerId, judgeSuccess, digest, sameFingerprint, countByAnimal, finishIfNeeded, resolveFaceUp },
 };
