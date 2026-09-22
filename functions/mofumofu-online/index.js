@@ -305,9 +305,20 @@ function finishIfNeeded(room, server, hands) {
   }
   return null;
 }
+function cloneGameDocument(documentValue) {
+  const { deleteAt, ...gameState } = documentValue;
+  const cloned = structuredClone(gameState);
+  if (Object.hasOwn(documentValue, 'deleteAt')) cloned.deleteAt = deleteAt;
+  return cloned;
+}
+function finishedNpcRoom(roomValue, advance, finish, now) {
+  const room = cloneGameDocument(roomValue);
+  Object.assign(room, advance, { status: 'finished', ...finish, finalResult: buildFinalResult(room, finish.finishReason, finish.winnerPlayerId, finish.draw, now) });
+  return room;
+}
 function resolveFaceUp(roomValue, serverValue, handsValue, pending, judgment, now) {
-  const room = structuredClone(roomValue);
-  const server = structuredClone(serverValue);
+  const room = cloneGameDocument(roomValue);
+  const server = cloneGameDocument(serverValue);
   const hands = { A: [...handsValue.A], B: [...handsValue.B] };
   const offer = completedOffer(pending, judgment);
   const recipient = offer.faceUpRecipientPlayerId;
@@ -786,9 +797,8 @@ async function npcHandler(request) {
       if (!npcHand.length) {
         const finish = finishIfNeeded(room, server, hands);
         if (!finish) fail('failed-precondition', 'こはるの手札がありません。');
-        const finishedRoom = structuredClone(room);
         const advance = { currentTurnPlayerId: null, turnState: 'finished', turnNumber: (room.turnNumber || 0) + 1 };
-        Object.assign(finishedRoom, advance, { status: 'finished', ...finish, finalResult: buildFinalResult(finishedRoom, finish.finishReason, finish.winnerPlayerId, finish.draw, now) });
+        const finishedRoom = finishedNpcRoom(room, advance, finish, now);
         result = { roomId, actionId, mode: 'npcFinish', finish, ...advance };
         tx.set(r.room, finishedRoom);
         if (inviteSnap.exists) tx.update(inviteRef, { status: 'ended', revokedAt: now });
@@ -893,5 +903,5 @@ module.exports = {
   runMofumofuNpcProxyAction,
   cleanupMofumofuOnline,
   _handlers: { createHandler, joinHandler, startHandler, resumeHandler, authorizePresenceHandler, makeHandler, judgeHandler, npcHandler, startProxyHandler, proxyActionHandler },
-  _test: { ANIMALS, PRESENCE_ACCESS_TTL_MS, PRESENCE_STALE_MS, WAITING_TTL_MS, PLAYING_TTL_MS, FINISHED_TTL_MS, ACTION_TTL_MS, RATE_TTL_MS, callableOptions, runtimeProjectId, corsOriginsForProject, ipHash, cleanupMofumofuDataNow, presenceConnectionOnline, uidPresenceOnline, uidPresenceState, chooseNpcClaim, chooseNpcJudgment, nextPlayerId, judgeSuccess, digest, sameFingerprint, countByAnimal, finishIfNeeded, resolveFaceUp },
+  _test: { ANIMALS, PRESENCE_ACCESS_TTL_MS, PRESENCE_STALE_MS, WAITING_TTL_MS, PLAYING_TTL_MS, FINISHED_TTL_MS, ACTION_TTL_MS, RATE_TTL_MS, callableOptions, runtimeProjectId, corsOriginsForProject, ipHash, cleanupMofumofuDataNow, presenceConnectionOnline, uidPresenceOnline, uidPresenceState, chooseNpcClaim, chooseNpcJudgment, nextPlayerId, judgeSuccess, digest, sameFingerprint, countByAnimal, finishIfNeeded, cloneGameDocument, finishedNpcRoom, resolveFaceUp },
 };

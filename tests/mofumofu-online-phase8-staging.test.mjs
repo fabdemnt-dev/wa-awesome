@@ -7,6 +7,8 @@ import { readFile } from 'node:fs/promises';
 
 const require = createRequire(import.meta.url);
 const backend = require('../functions/mofumofu-online');
+const functionRequire = createRequire(new URL('../functions/mofumofu-online/package.json', import.meta.url));
+const { Timestamp } = functionRequire('firebase-admin/firestore');
 const configUrl = pathToFileURL(new URL('../toybox/mofumofu-gathering/online/firebase-config.js', import.meta.url).pathname);
 const html = await readFile(new URL('../toybox/mofumofu-gathering/online/index.html', import.meta.url), 'utf8');
 const firebaseJson = JSON.parse(await readFile(new URL('../firebase.json', import.meta.url), 'utf8'));
@@ -44,6 +46,45 @@ test('未初期化プロセスでAdmin Appを一度だけ初期化してFunction
     encoding: 'utf8',
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
+});
+
+test('resolveFaceUp後もroomとserverStateのdeleteAtは同じFirestore Timestamp', () => {
+  const roomDeleteAt = Timestamp.fromMillis(2_000_000_000_000);
+  const serverDeleteAt = Timestamp.fromMillis(2_000_000_000_123);
+  const card = { cardId: 'cat-pending', animalType: 'cat' };
+  const pending = { actionId: 'timestamp-action', fromPlayerId: 'A', toPlayerId: 'B', claimAnimal: 'cat', card };
+  const room = {
+    status: 'playing', playerStatus: { A: 'active', B: 'active', koharu: 'active' },
+    faceUpCards: { A: [], B: [], koharu: [] }, eliminationSnapshots: {}, turnNumber: 1,
+    deleteAt: roomDeleteAt,
+  };
+  const server = { npcHand: [{ cardId: 'fox-npc', animalType: 'fox' }], discard: [], pendingOffer: pending, deleteAt: serverDeleteAt };
+  const hands = { A: [{ cardId: 'bear-a', animalType: 'bear' }], B: [{ cardId: 'rabbit-b', animalType: 'rabbit' }] };
+  const resolved = backend._test.resolveFaceUp(room, server, hands, pending, 'truth', 1_900_000_000_000);
+
+  assert.ok(resolved.room.deleteAt instanceof Timestamp);
+  assert.ok(resolved.server.deleteAt instanceof Timestamp);
+  assert.ok(resolved.room.deleteAt.isEqual(roomDeleteAt));
+  assert.ok(resolved.server.deleteAt.isEqual(serverDeleteAt));
+  assert.equal(resolved.finish, null);
+});
+
+test('NPC終了roomのdeleteAtは正規Firestore Timestampのまま期限値も維持する', () => {
+  const deleteAt = Timestamp.fromMillis(2_000_000_000_000);
+  const now = 1_900_000_000_000;
+  const room = {
+    status: 'playing', playerStatus: { A: 'active', B: 'active', koharu: 'active' },
+    faceUpCards: { A: [], B: [], koharu: [] }, eliminationSnapshots: {}, turnNumber: 4,
+    deleteAt,
+  };
+  const advance = { currentTurnPlayerId: null, turnState: 'finished', turnNumber: 5 };
+  const finish = { finishReason: 'hand-empty', winnerPlayerId: 'A', draw: false };
+  const finished = backend._test.finishedNpcRoom(room, advance, finish, now);
+
+  assert.ok(finished.deleteAt instanceof Timestamp);
+  assert.ok(finished.deleteAt.isEqual(deleteAt));
+  assert.equal(finished.status, 'finished');
+  assert.equal(finished.finalResult.finishReason, 'hand-empty');
 });
 
 const productionOrigin = 'https://fabdemnt-dev.github.io';
