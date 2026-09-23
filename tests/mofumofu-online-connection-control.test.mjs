@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createResumeCoordinator, runStartGame } from '../toybox/mofumofu-gathering/online/connection-control.js';
+import { connectionIsOnline, createResumeCoordinator, proxyEvaluationReady, runStartGame, shouldStartNpcProxy } from '../toybox/mofumofu-gathering/online/connection-control.js';
 
 function deferred() {
   let resolve;
@@ -233,4 +233,50 @@ test('old flight finally cannot clear a newer flight reference', async () => {
   gate.resolve();
   await oldFlight;
   assert.equal(value.state.resumeFlight, replacement);
+});
+
+function proxyState(overrides = {}) {
+  return {
+    resumeFlight: null,
+    connectionState: 'connected',
+    resumeGeneration: 4,
+    presenceReadyGeneration: 4,
+    ...overrides,
+  };
+}
+
+test('full resume中の旧presence切断から新presence確認までproxyを要求しない', () => {
+  let requests = 0;
+  const requestProxy = (state) => {
+    if (shouldStartNpcProxy({ state, mode: 'human', online: false })) requests += 1;
+  };
+  requestProxy(proxyState({ resumeFlight: Promise.resolve(), connectionState: 'syncing', presenceReadyGeneration: 0 }));
+  requestProxy(proxyState({ resumeFlight: Promise.resolve(), connectionState: 'syncing', presenceReadyGeneration: 4 }));
+  requestProxy(proxyState({ resumeFlight: null, connectionState: 'connected', presenceReadyGeneration: 3 }));
+  assert.equal(requests, 0);
+});
+
+test('現generationの新presence snapshot確認後はhuman onlineを維持する', () => {
+  const state = proxyState();
+  assert.equal(proxyEvaluationReady(state), true);
+  assert.equal(shouldStartNpcProxy({ state, mode: 'human', online: true }), false);
+});
+
+test('2分未満のconnectionはonlineとしてproxyを開始しない', () => {
+  const now = 1_000_000;
+  const online = connectionIsOnline({ state: 'online', lastHeartbeatAt: now - 119_999 }, now);
+  assert.equal(online, true);
+  assert.equal(shouldStartNpcProxy({ state: proxyState(), mode: 'human', online }), false);
+});
+
+test('2分超staleかつ安定接続後なら従来どおりproxy開始可能', () => {
+  const now = 1_000_000;
+  const online = connectionIsOnline({ state: 'online', lastHeartbeatAt: now - 120_001 }, now);
+  assert.equal(online, false);
+  assert.equal(shouldStartNpcProxy({ state: proxyState(), mode: 'human', online }), true);
+});
+
+test('NPC代理開始済みのactionは安定接続後に引き続き許可される', () => {
+  assert.equal(proxyEvaluationReady(proxyState()), true);
+  assert.equal(shouldStartNpcProxy({ state: proxyState(), mode: 'npc-controlled', online: false }), false);
 });

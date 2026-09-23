@@ -6,7 +6,7 @@ import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'https://w
 import { getDatabase, connectDatabaseEmulator, ref, onValue, onDisconnect, set, update, serverTimestamp } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js';
 import { resolveEnvironment, REGION } from './firebase-config.js';
 import { completeInitialConnection } from './initial-connection.js';
-import { createResumeCoordinator, runStartGame } from './connection-control.js';
+import { connectionIsOnline, createResumeCoordinator, proxyEvaluationReady, runStartGame, shouldStartNpcProxy } from './connection-control.js';
 
 const animals = ['cat', 'rabbit', 'bear', 'chick', 'fox', 'penguin', 'panda', 'polar'];
 const labels = { cat: 'ねこ', rabbit: 'うさぎ', bear: 'くま', chick: 'ひよこ', fox: 'きつね', penguin: 'ぺんぎん', panda: 'ぱんだ', polar: 'しろくま' };
@@ -34,7 +34,7 @@ const ACCESS_REFRESH_MS = 4 * 60_000;
 const SAFETY_SYNC_MS = 5_000;
 const LISTENER_RETRY_MS = 2_000;
 const MAX_LISTENER_RETRIES = 3;
-const state = { roomId: localStorage.getItem('mofumofuRoomId'), seatId: localStorage.getItem('mofumofuSeatId'), room: null, cards: [], presence: {}, connectionId: null, presenceRef: null, presenceUnsubscribe: null, heartbeatTimer: null, accessTimer: null, safetySyncTimer: null, listenerRetryTimer: null, listenerRetryCount: 0, resumeFlight: null, resumeGeneration: 0, lastSuccessfulResumeAt: 0, lastSuccessfulResumeRoomId: null, lifecycleDisconnected: navigator.onLine === false, playingResumeKey: null, connectionState: 'syncing', startBusy: false, makeRequest: null, judgeRequest: null, npcRequest: null, proxyStartRequest: null, proxyActionRequest: null, makeBusy: false, judgeBusy: false, npcBusy: false, proxyBusy: false, unsubscribe: null };
+const state = { roomId: localStorage.getItem('mofumofuRoomId'), seatId: localStorage.getItem('mofumofuSeatId'), room: null, cards: [], presence: {}, connectionId: null, presenceRef: null, presenceUnsubscribe: null, heartbeatTimer: null, accessTimer: null, safetySyncTimer: null, listenerRetryTimer: null, listenerRetryCount: 0, resumeFlight: null, resumeGeneration: 0, presenceReadyGeneration: 0, lastSuccessfulResumeAt: 0, lastSuccessfulResumeRoomId: null, lifecycleDisconnected: navigator.onLine === false, playingResumeKey: null, connectionState: 'syncing', startBusy: false, makeRequest: null, judgeRequest: null, npcRequest: null, proxyStartRequest: null, proxyActionRequest: null, makeBusy: false, judgeBusy: false, npcBusy: false, proxyBusy: false, unsubscribe: null };
 function newId() { return crypto.randomUUID(); }
 function remember(roomId, seatId) { state.roomId = roomId; state.seatId = seatId; localStorage.setItem('mofumofuRoomId', roomId); localStorage.setItem('mofumofuSeatId', seatId); }
 function message(text) { $('status').textContent = text; }
@@ -43,7 +43,7 @@ function setConnectionState(next, detail = '') {
   message(next === 'connected' ? '接続中' : next === 'syncing' ? '再接続中／同期中…' : `同期エラー${detail ? `（${detail}）` : ''}`);
 }
 function errorCode(error) { return String(error?.code || 'unknown').replace(/^firestore\//, ''); }
-function connectionOnline(connection, now = Date.now()) { return connection?.state === 'online' && Number(connection.lastHeartbeatAt) >= now - STALE_MS; }
+function connectionOnline(connection, now = Date.now()) { return connectionIsOnline(connection, now, STALE_MS); }
 function playerOnline(playerId) {
   if (playerId === 'koharu') return true;
   const uid = state.room?.playerUids?.[playerId];
@@ -117,7 +117,10 @@ async function beginPresence(seatId, generation, connectionId) {
   }, ACCESS_REFRESH_MS);
   state.presenceUnsubscribe = onValue(ref(database, `mofumofuOnlinePresence/${state.roomId}`), (snapshot) => {
     if (generation !== state.resumeGeneration) return;
-    state.presence = snapshot.val() || {}; renderPresence();
+    state.presence = snapshot.val() || {};
+    if (connectionOnline(state.presence?.[uid]?.connections?.[connectionId])) state.presenceReadyGeneration = generation;
+    renderPresence();
+    if (proxyEvaluationReady(state)) void runProxyIfNeeded();
   }, () => requestFullResume('rtdb-listener-error'));
 }
 function showRoom(room) {
@@ -185,6 +188,7 @@ async function fullResume(reason = 'manual') {
   if (!state.roomId) return;
   const generation = state.resumeGeneration + 1;
   state.resumeGeneration = generation;
+  state.presenceReadyGeneration = 0;
   setConnectionState('syncing');
   stopRealtime(generation);
   try {
@@ -236,13 +240,14 @@ function renderGame() {
   renderPresence();
 }
 async function runProxyIfNeeded() {
-  if (state.proxyBusy || !state.room) return;
+  if (state.proxyBusy || !state.room || !proxyEvaluationReady(state)) return;
   const room = state.room;
   const seatId = room.turnState === 'awaitingJudgment' ? room.publicOffer?.toPlayerId : room.currentTurnPlayerId;
   if (!['A', 'B'].includes(seatId)) return;
   const mode = room.controlModes?.[seatId]?.mode || 'human';
   if (mode === 'return-pending') { if (seatId === state.seatId) await refresh().catch(() => {}); return; }
-  if (mode === 'human' && playerOnline(seatId)) return;
+  const online = playerOnline(seatId);
+  if (mode === 'human' && !shouldStartNpcProxy({ state, mode, online })) return;
   state.proxyBusy = true;
   try {
     if (mode === 'human') {

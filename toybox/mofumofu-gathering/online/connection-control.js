@@ -1,5 +1,19 @@
 export const LIFECYCLE_RESUME_REASONS = new Set(['visibilitychange', 'pageshow', 'online']);
 
+export function connectionIsOnline(connection, now = Date.now(), staleMs = 120_000) {
+  return connection?.state === 'online' && Number(connection.lastHeartbeatAt) >= now - staleMs;
+}
+
+export function proxyEvaluationReady(state) {
+  return !state.resumeFlight
+    && state.connectionState === 'connected'
+    && state.presenceReadyGeneration === state.resumeGeneration;
+}
+
+export function shouldStartNpcProxy({ state, mode, online }) {
+  return proxyEvaluationReady(state) && mode === 'human' && !online;
+}
+
 export async function runStartGame({ state, button, roomId, startGame, refresh }) {
   if (state.startBusy) return false;
   state.startBusy = true;
