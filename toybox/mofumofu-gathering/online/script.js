@@ -6,7 +6,7 @@ import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'https://w
 import { getDatabase, connectDatabaseEmulator, ref, onValue, onDisconnect, set, update, serverTimestamp } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js';
 import { resolveEnvironment, REGION } from './firebase-config.js';
 import { completeInitialConnection } from './initial-connection.js';
-import { connectionIsOnline, createResumeCoordinator, proxyEvaluationReady, runStartGame, shouldStartNpcProxy } from './connection-control.js';
+import { connectionIsOnline, createResumeCoordinator, playerPresenceState, proxyEvaluationReady, runStartGame, shouldStartNpcProxy } from './connection-control.js';
 
 const animals = ['cat', 'rabbit', 'bear', 'chick', 'fox', 'penguin', 'panda', 'polar'];
 const labels = { cat: 'ねこ', rabbit: 'うさぎ', bear: 'くま', chick: 'ひよこ', fox: 'きつね', penguin: 'ぺんぎん', panda: 'ぱんだ', polar: 'しろくま' };
@@ -44,10 +44,13 @@ function setConnectionState(next, detail = '') {
 }
 function errorCode(error) { return String(error?.code || 'unknown').replace(/^firestore\//, ''); }
 function connectionOnline(connection, now = Date.now()) { return connectionIsOnline(connection, now, STALE_MS); }
+function playerPresence(playerId) {
+  const uid = state.room?.playerUids?.[playerId];
+  return uid ? state.presence?.[uid] : null;
+}
 function playerOnline(playerId) {
   if (playerId === 'koharu') return true;
-  const uid = state.room?.playerUids?.[playerId];
-  return !!uid && Object.values(state.presence?.[uid]?.connections || {}).some((connection) => connectionOnline(connection));
+  return playerPresenceState(playerPresence(playerId), Date.now(), STALE_MS).online;
 }
 function renderPresence() {
   if (!state.room) return;
@@ -246,8 +249,7 @@ async function runProxyIfNeeded() {
   if (!['A', 'B'].includes(seatId)) return;
   const mode = room.controlModes?.[seatId]?.mode || 'human';
   if (mode === 'return-pending') { if (seatId === state.seatId) await refresh().catch(() => {}); return; }
-  const online = playerOnline(seatId);
-  if (mode === 'human' && !shouldStartNpcProxy({ state, mode, online })) return;
+  if (mode === 'human' && !shouldStartNpcProxy({ state, mode, presence: playerPresence(seatId), staleMs: STALE_MS })) return;
   state.proxyBusy = true;
   try {
     if (mode === 'human') {

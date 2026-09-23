@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { readFile } from 'node:fs/promises';
+import { presenceAllowsNpcProxy } from '../toybox/mofumofu-gathering/online/connection-control.js';
 
 const require = createRequire(import.meta.url);
 const backend = require('../functions/mofumofu-online');
@@ -12,6 +13,31 @@ const { Timestamp } = functionRequire('firebase-admin/firestore');
 const configUrl = pathToFileURL(new URL('../toybox/mofumofu-gathering/online/firebase-config.js', import.meta.url).pathname);
 const html = await readFile(new URL('../toybox/mofumofu-gathering/online/index.html', import.meta.url), 'utf8');
 const firebaseJson = JSON.parse(await readFile(new URL('../firebase.json', import.meta.url), 'utf8'));
+
+test('client proxy stale判定はserverの全connection・最新heartbeat判定と一致する', () => {
+  const now = 1_000_000;
+  const staleMs = backend._test.PRESENCE_STALE_MS;
+  assert.equal(staleMs, 120_000);
+  const values = [
+    null,
+    {},
+    { connections: { live: { state: 'online', lastHeartbeatAt: now - 15_000 } } },
+    { connections: { gone: { state: 'disconnected', lastHeartbeatAt: now - 15_000 } } },
+    { connections: { gone: { state: 'disconnected', lastHeartbeatAt: now - 119_999 } } },
+    { connections: { gone: { state: 'disconnected', lastHeartbeatAt: now - 120_000 } } },
+    { connections: { gone: { state: 'disconnected', lastHeartbeatAt: now - 120_001 } } },
+    { connections: { old: { state: 'disconnected', lastHeartbeatAt: now - 500_000 }, live: { state: 'online', lastHeartbeatAt: now - 1_000 } } },
+    { connections: { old: { state: 'disconnected', lastHeartbeatAt: now - 500_000 }, recent: { state: 'disconnected', lastHeartbeatAt: now - 30_000 } } },
+    { connections: { only: { state: 'disconnected', connectedAt: now - 500_000 } } },
+    { connections: { bad: { state: 'disconnected', lastHeartbeatAt: 'invalid' } } },
+    { connections: { malformed: { state: 'online', lastHeartbeatAt: Infinity } } },
+  ];
+  for (const value of values) {
+    const server = backend._test.uidPresenceState(value, now);
+    const serverAllows = !server.online && !!server.lastHeartbeatAt && now - server.lastHeartbeatAt >= staleMs;
+    assert.equal(presenceAllowsNpcProxy(value, now, staleMs), serverAllows);
+  }
+});
 
 test('未初期化プロセスでAdmin Appを一度だけ初期化してFunctionsをexportする', () => {
   const functionsDirectory = fileURLToPath(new URL('../functions/mofumofu-online/', import.meta.url));

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { connectionIsOnline, createResumeCoordinator, proxyEvaluationReady, runStartGame, shouldStartNpcProxy } from '../toybox/mofumofu-gathering/online/connection-control.js';
+import { connectionIsOnline, createResumeCoordinator, playerPresenceState, presenceAllowsNpcProxy, proxyEvaluationReady, runStartGame, shouldStartNpcProxy } from '../toybox/mofumofu-gathering/online/connection-control.js';
 
 function deferred() {
   let resolve;
@@ -248,7 +248,7 @@ function proxyState(overrides = {}) {
 test('full resume中の旧presence切断から新presence確認までproxyを要求しない', () => {
   let requests = 0;
   const requestProxy = (state) => {
-    if (shouldStartNpcProxy({ state, mode: 'human', online: false })) requests += 1;
+    if (shouldStartNpcProxy({ state, mode: 'human', presence: { connections: { old: { state: 'disconnected', lastHeartbeatAt: 1 } } }, now: 1_000_000 })) requests += 1;
   };
   requestProxy(proxyState({ resumeFlight: Promise.resolve(), connectionState: 'syncing', presenceReadyGeneration: 0 }));
   requestProxy(proxyState({ resumeFlight: Promise.resolve(), connectionState: 'syncing', presenceReadyGeneration: 4 }));
@@ -259,24 +259,99 @@ test('full resume中の旧presence切断から新presence確認までproxyを要
 test('現generationの新presence snapshot確認後はhuman onlineを維持する', () => {
   const state = proxyState();
   assert.equal(proxyEvaluationReady(state), true);
-  assert.equal(shouldStartNpcProxy({ state, mode: 'human', online: true }), false);
+  assert.equal(shouldStartNpcProxy({ state, mode: 'human', presence: { connections: { live: { state: 'online', lastHeartbeatAt: 999_999 } } }, now: 1_000_000 }), false);
 });
 
-test('2分未満のconnectionはonlineとしてproxyを開始しない', () => {
+test('online connectionがあればproxyを開始しない', () => {
   const now = 1_000_000;
-  const online = connectionIsOnline({ state: 'online', lastHeartbeatAt: now - 119_999 }, now);
-  assert.equal(online, true);
-  assert.equal(shouldStartNpcProxy({ state: proxyState(), mode: 'human', online }), false);
+  const presence = { connections: { live: { state: 'online', lastHeartbeatAt: now - 15_000 } } };
+  assert.equal(playerPresenceState(presence, now).online, true);
+  assert.equal(shouldStartNpcProxy({ state: proxyState(), mode: 'human', presence, now }), false);
 });
 
-test('2分超staleかつ安定接続後なら従来どおりproxy開始可能', () => {
+test('disconnectedでも最新heartbeatが15秒前または119秒前ならproxyを開始しない', () => {
   const now = 1_000_000;
-  const online = connectionIsOnline({ state: 'online', lastHeartbeatAt: now - 120_001 }, now);
-  assert.equal(online, false);
-  assert.equal(shouldStartNpcProxy({ state: proxyState(), mode: 'human', online }), true);
+  for (const age of [15_000, 119_000, 119_999]) {
+    const presence = { connections: { gone: { state: 'disconnected', lastHeartbeatAt: now - age } } };
+    assert.equal(presenceAllowsNpcProxy(presence, now), false);
+    assert.equal(shouldStartNpcProxy({ state: proxyState(), mode: 'human', presence, now }), false);
+  }
+});
+
+test('disconnectedの2分境界と2分超ではserver仕様どおりproxy開始可能', () => {
+  const now = 1_000_000;
+  for (const age of [120_000, 120_001]) {
+    const presence = { connections: { gone: { state: 'disconnected', lastHeartbeatAt: now - age } } };
+    assert.equal(presenceAllowsNpcProxy(presence, now), true);
+    assert.equal(shouldStartNpcProxy({ state: proxyState(), mode: 'human', presence, now }), true);
+  }
+});
+
+test('複数connectionのうち1つでもonlineならproxyを開始しない', () => {
+  const now = 1_000_000;
+  const presence = { connections: {
+    old: { state: 'disconnected', lastHeartbeatAt: now - 500_000 },
+    live: { state: 'online', lastHeartbeatAt: now - 1_000 },
+  } };
+  assert.deepEqual(playerPresenceState(presence, now), { online: true, lastHeartbeatAt: now - 1_000 });
+  assert.equal(shouldStartNpcProxy({ state: proxyState(), mode: 'human', presence, now }), false);
+});
+
+test('複数disconnectedでは最新heartbeatから2分を判定する', () => {
+  const now = 1_000_000;
+  const recent = { connections: {
+    old: { state: 'disconnected', lastHeartbeatAt: now - 500_000 },
+    recent: { state: 'disconnected', lastHeartbeatAt: now - 30_000 },
+  } };
+  assert.equal(presenceAllowsNpcProxy(recent, now), false);
+  const stale = { connections: {
+    old: { state: 'disconnected', lastHeartbeatAt: now - 500_000 },
+    latest: { state: 'disconnected', lastHeartbeatAt: now - 120_001 },
+  } };
+  assert.equal(presenceAllowsNpcProxy(stale, now), true);
+});
+
+test('connectedAtだけ・欠損presence・malformed timestampは安全側でproxyを開始しない', () => {
+  const now = 1_000_000;
+  const values = [
+    null,
+    {},
+    { connections: { only: { state: 'disconnected', connectedAt: now - 500_000 } } },
+    { connections: { bad: { state: 'disconnected', lastHeartbeatAt: 'invalid' } } },
+    { connections: { bad: null } },
+  ];
+  for (const presence of values) {
+    assert.deepEqual(playerPresenceState(presence, now), { online: false, lastHeartbeatAt: 0 });
+    assert.equal(shouldStartNpcProxy({ state: proxyState(), mode: 'human', presence, now }), false);
+  }
+});
+
+test('非有限timestampは安全側でproxyを開始しない', () => {
+  const now = 1_000_000;
+  const presence = { connections: { bad: { state: 'online', lastHeartbeatAt: Infinity } } };
+  assert.equal(playerPresenceState(presence, now).online, false);
+  assert.equal(presenceAllowsNpcProxy(presence, now), false);
+});
+
+test('文字列timestampはmalformedとして安全側でproxyを開始しない', () => {
+  const now = 1_000_000;
+  const presence = { connections: { malformed: { state: 'online', lastHeartbeatAt: String(now - 120_000) } } };
+  assert.deepEqual(playerPresenceState(presence, now), { online: false, lastHeartbeatAt: 0 });
+  assert.equal(presenceAllowsNpcProxy(presence, now), false);
+});
+
+test('5秒polling再評価は2分未満0回、2分到達後に開始可能', () => {
+  const heartbeat = 1_000_000;
+  const presence = { connections: { gone: { state: 'disconnected', lastHeartbeatAt: heartbeat } } };
+  let requests = 0;
+  for (let elapsed = 5_000; elapsed < 120_000; elapsed += 5_000) {
+    if (shouldStartNpcProxy({ state: proxyState(), mode: 'human', presence, now: heartbeat + elapsed })) requests += 1;
+  }
+  assert.equal(requests, 0);
+  assert.equal(shouldStartNpcProxy({ state: proxyState(), mode: 'human', presence, now: heartbeat + 120_000 }), true);
 });
 
 test('NPC代理開始済みのactionは安定接続後に引き続き許可される', () => {
   assert.equal(proxyEvaluationReady(proxyState()), true);
-  assert.equal(shouldStartNpcProxy({ state: proxyState(), mode: 'npc-controlled', online: false }), false);
+  assert.equal(shouldStartNpcProxy({ state: proxyState(), mode: 'npc-controlled', presence: null }), false);
 });

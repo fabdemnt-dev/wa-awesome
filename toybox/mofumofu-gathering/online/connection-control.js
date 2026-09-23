@@ -1,7 +1,27 @@
 export const LIFECYCLE_RESUME_REASONS = new Set(['visibilitychange', 'pageshow', 'online']);
 
 export function connectionIsOnline(connection, now = Date.now(), staleMs = 120_000) {
-  return connection?.state === 'online' && Number(connection.lastHeartbeatAt) >= now - staleMs;
+  return connection?.state === 'online'
+    && Number.isFinite(connection.lastHeartbeatAt)
+    && connection.lastHeartbeatAt >= now - staleMs;
+}
+
+export function playerPresenceState(value, now = Date.now(), staleMs = 120_000) {
+  const connections = Object.values(value?.connections || {}).filter((connection) => connection && typeof connection === 'object' && !Array.isArray(connection));
+  const lastHeartbeatAt = connections.reduce((latest, connection) => (
+    Number.isFinite(connection.lastHeartbeatAt) ? Math.max(latest, connection.lastHeartbeatAt) : latest
+  ), 0);
+  return {
+    online: connections.some((connection) => connectionIsOnline(connection, now, staleMs)),
+    lastHeartbeatAt,
+  };
+}
+
+export function presenceAllowsNpcProxy(value, now = Date.now(), staleMs = 120_000) {
+  const presence = playerPresenceState(value, now, staleMs);
+  return !presence.online
+    && !!presence.lastHeartbeatAt
+    && now - presence.lastHeartbeatAt >= staleMs;
 }
 
 export function proxyEvaluationReady(state) {
@@ -10,8 +30,10 @@ export function proxyEvaluationReady(state) {
     && state.presenceReadyGeneration === state.resumeGeneration;
 }
 
-export function shouldStartNpcProxy({ state, mode, online }) {
-  return proxyEvaluationReady(state) && mode === 'human' && !online;
+export function shouldStartNpcProxy({ state, mode, presence, now = Date.now(), staleMs = 120_000 }) {
+  return proxyEvaluationReady(state)
+    && mode === 'human'
+    && presenceAllowsNpcProxy(presence, now, staleMs);
 }
 
 export async function runStartGame({ state, button, roomId, startGame, refresh }) {
