@@ -5,6 +5,7 @@ import { getFirestore, connectFirestoreEmulator, doc, onSnapshot, getDocFromServ
 import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-functions.js';
 import { getDatabase, connectDatabaseEmulator, ref, onValue, onDisconnect, set, update, serverTimestamp } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js';
 import { resolveEnvironment, REGION } from './firebase-config.js';
+import { completeInitialConnection } from './initial-connection.js';
 
 const animals = ['cat', 'rabbit', 'bear', 'chick', 'fox', 'penguin', 'panda', 'polar'];
 const labels = { cat: 'ねこ', rabbit: 'うさぎ', bear: 'くま', chick: 'ひよこ', fox: 'きつね', penguin: 'ぺんぎん', panda: 'ぱんだ', polar: 'しろくま' };
@@ -296,6 +297,10 @@ $('judge-buttons').addEventListener('click', async (event) => {
 document.addEventListener('visibilitychange', () => { if (!document.hidden) void requestFullResume('visibilitychange'); });
 globalThis.addEventListener('pageshow', () => void requestFullResume('pageshow'));
 globalThis.addEventListener('online', () => void requestFullResume('online'));
-await auth.authStateReady();
-if (!auth.currentUser) await signInAnonymously(auth);
-await requestFullResume('initial');
+await completeInitialConnection({
+  auth,
+  signInAnonymously,
+  roomId: state.roomId,
+  markConnected: () => message('接続しました。'),
+  resumeRoom: () => requestFullResume('initial'),
+});
