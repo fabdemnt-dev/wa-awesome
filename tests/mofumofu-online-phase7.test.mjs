@@ -6,6 +6,7 @@ const read = (path) => fs.readFileSync(new URL(`../${path}`, import.meta.url), '
 const config = read('toybox/mofumofu-gathering/online/firebase-config.js');
 const client = read('toybox/mofumofu-gathering/online/script.js');
 const connectionControl = read('toybox/mofumofu-gathering/online/connection-control.js');
+const fullResumePipeline = read('toybox/mofumofu-gathering/online/full-resume.js');
 const functions = read('functions/mofumofu-online/index.js');
 const exportsFile = read('functions/index.js');
 const firestore = read('firestore.rules');
@@ -26,8 +27,8 @@ const checks = [
   ['8 production設定にEmulator portなし', () => !config.slice(config.indexOf('const productionBase'), config.indexOf('function required')).match(/(9199|8180|9103|5101)/)],
   ['9 production設定にstaging値なし', () => !config.slice(config.indexOf('const productionBase'), config.indexOf('function required')).includes('staging')],
   ['10 Secret/private keyなし', () => !`${config}${client}`.match(/private_key|BEGIN PRIVATE KEY|MOFUMOFU_ONLINE_IP_HMAC_KEY/)],
-  ['11 既存Auth UID再利用', () => client.includes('if (!auth.currentUser) await signInAnonymously(auth)')],
-  ['12 Auth初期化前に新UIDを作らない', () => client.indexOf('await auth.authStateReady()') < client.lastIndexOf('signInAnonymously(auth)')],
+  ['11 既存Auth UID再利用', () => fullResumePipeline.includes('if (!auth.currentUser) await signInAnonymously(auth)')],
+  ['12 Auth初期化前に新UIDを作らない', () => fullResumePipeline.indexOf('await auth.authStateReady()') < fullResumePipeline.indexOf('signInAnonymously(auth)')],
   ['13 UID喪失時localStorageだけでresume不可', () => phase6.includes('別UID') || functions.includes('requireMember(room, uid)')],
   ['14 productionでApp Check設定必須', () => config.includes("required(injected.appCheckSiteKey")],
   ['15 debug providerはlocalhost/CIだけ', () => config.includes("name: 'emulator'") && client.includes('environment.appCheck.debug')],
@@ -103,22 +104,22 @@ const reconnectChecks = [
   ['R8 online復帰', () => client.includes("requestFullResume('online')")],
   ['R9 focusは不要として未追加', () => !client.includes("addEventListener('focus'")],
   ['R10 full resume single-flight', () => connectionControl.includes('if (state.resumeFlight) return state.resumeFlight')],
-  ['R11 古いgenerationの成功結果を破棄', () => fullResume.match(/generation !== state\.resumeGeneration/g)?.length >= 4],
+  ['R11 古いgenerationの成功結果を破棄', () => fullResumePipeline.match(/if \(!isCurrent\(\)\) return false/g)?.length >= 4],
   ['R12 古いgenerationの失敗で最新UIを変更しない', () => fullResume.includes('generation === state.resumeGeneration') && client.includes('if (generation !== state.resumeGeneration) return;')],
   ['R13 古いfinallyが最新flightを解除しない', () => connectionControl.includes('if (state.resumeFlight === flight) state.resumeFlight = null')],
   ['R14 heartbeat timer最大1本', () => stopRealtime.includes('clearInterval(state.heartbeatTimer)') && beginPresence.includes('state.heartbeatTimer = setInterval')],
   ['R15 access refresh timer最大1本', () => stopRealtime.includes('clearInterval(state.accessTimer)') && beginPresence.includes('state.accessTimer = setInterval')],
   ['R16 RTDB listener最大1本', () => stopRealtime.includes('state.presenceUnsubscribe?.()') && beginPresence.includes('state.presenceUnsubscribe = onValue')],
   ['R17 safety polling timer最大1本', () => stopRealtime.includes('clearInterval(state.safetySyncTimer)') && client.includes('clearInterval(state.safetySyncTimer)')],
-  ['R18 復帰ごとに新connection ID', () => fullResume.includes('const connectionId = newId()')],
-  ['R19 presence認可後にRTDB登録', () => fullResume.indexOf('authorizePresence(connectionId)') < fullResume.indexOf('beginPresence(admission.seatId')],
+  ['R18 復帰ごとに新connection ID', () => fullResumePipeline.includes('const connectionId = createConnectionId()') && fullResume.includes('createConnectionId: newId')],
+  ['R19 presence認可後にRTDB登録', () => fullResumePipeline.indexOf('authorizePresence(connectionId)') < fullResumePipeline.indexOf('beginPresence(admission.seatId')],
   ['R20 heartbeat失敗は復旧経路', () => beginPresence.includes("requestFullResume('heartbeat-error')")],
   ['R21 5秒同期はserver fetchのみ', () => lightweightSync.includes('getDocFromServer') && !lightweightSync.includes("call('resumeMofumofuRoom")],
   ['R22 NPC代理復帰を伴うCallableはfull resume', () => fullResume.includes("call('resumeMofumofuRoom'")],
   ['R23 2分stale閾値維持', () => client.includes('STALE_MS = 120_000') && functions.includes('PRESENCE_STALE_MS = 2 * 60 * 1000')],
   ['R24 2分未満をonline扱い', () => phase6.includes('119_999')],
   ['R25 NPC代理後の本人復帰処理維持', () => functions.includes("mode === 'npc-controlled'") && functions.includes("mode: 'return-pending'")],
-  ['R26 App Check token準備後にpresence認可', () => fullResume.indexOf('getToken(appCheck, false)') < fullResume.indexOf('authorizePresence(connectionId)')],
+  ['R26 App Checkは初期化・自動更新し明示token preflightで復帰を阻害しない', () => client.includes('initializeAppCheck(app') && client.includes('isTokenAutoRefreshEnabled: true') && !client.includes('getToken(appCheck, false)')],
   ['R27 Firestore発生元とcodeを表示', () => roomListener.includes('Firestore listener:${code}')],
   ['R28 permission-deniedは無限retryしない', () => roomListener.includes("code === 'permission-denied' ? 1") && lightweightSync.includes("code === 'permission-denied'") && lightweightSync.includes('clearInterval(state.safetySyncTimer)')],
   ['R29 waitingでresume可能', () => functions.includes("let handStatus = 'pending'")],

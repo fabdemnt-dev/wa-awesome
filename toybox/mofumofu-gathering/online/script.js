@@ -1,12 +1,13 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js';
 import { getAuth, connectAuthEmulator, signInAnonymously } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js';
-import { initializeAppCheck, ReCaptchaEnterpriseProvider, getToken } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-app-check.js';
+import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-app-check.js';
 import { getFirestore, connectFirestoreEmulator, doc, onSnapshot, getDocFromServer } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js';
 import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-functions.js';
 import { getDatabase, connectDatabaseEmulator, ref, onValue, onDisconnect, set, update, serverTimestamp } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js';
 import { resolveEnvironment, REGION } from './firebase-config.js';
 import { completeInitialConnection } from './initial-connection.js';
 import { connectionIsOnline, createResumeCoordinator, playerPresenceState, proxyEvaluationReady, runStartGame, shouldStartNpcProxy } from './connection-control.js';
+import { runMofumofuFullResume } from './full-resume.js';
 
 const animals = ['cat', 'rabbit', 'bear', 'chick', 'fox', 'penguin', 'panda', 'polar'];
 const labels = { cat: 'ねこ', rabbit: 'うさぎ', bear: 'くま', chick: 'ひよこ', fox: 'きつね', penguin: 'ぺんぎん', panda: 'ぱんだ', polar: 'しろくま' };
@@ -14,7 +15,7 @@ const emoji = { cat: '🐱', rabbit: '🐰', bear: '🐻', chick: '🐥', fox: '
 const environment = resolveEnvironment();
 const app = initializeApp(environment.firebase);
 if (environment.appCheck.debug) globalThis.FIREBASE_APPCHECK_DEBUG_TOKEN = true;
-const appCheck = initializeAppCheck(app, {
+initializeAppCheck(app, {
   provider: new ReCaptchaEnterpriseProvider(environment.appCheck.debug ? 'debug-provider' : environment.appCheck.siteKey),
   isTokenAutoRefreshEnabled: true,
 });
@@ -195,22 +196,23 @@ async function fullResume(reason = 'manual') {
   setConnectionState('syncing');
   stopRealtime(generation);
   try {
-    await auth.authStateReady();
-    if (!auth.currentUser) await signInAnonymously(auth);
-    await getToken(appCheck, false);
-    if (generation !== state.resumeGeneration) return;
-    await retirePresence();
-    if (generation !== state.resumeGeneration) return;
-    const connectionId = newId();
-    const admission = await authorizePresence(connectionId);
-    if (generation !== state.resumeGeneration) return;
-    state.connectionId = connectionId;
-    await beginPresence(admission.seatId, generation, connectionId);
-    if (generation !== state.resumeGeneration) return;
-    const value = await call('resumeMofumofuRoom', { roomId: state.roomId });
-    if (generation !== state.resumeGeneration) return;
-    remember(state.roomId, value.seatId); state.cards = value.cards || []; showRoom(value.room);
-    listenRoom(generation); startSafetySync(generation); setConnectionState('connected');
+    await runMofumofuFullResume({
+      auth,
+      signInAnonymously,
+      isCurrent: () => generation === state.resumeGeneration,
+      retirePresence,
+      createConnectionId: newId,
+      authorizePresence,
+      beginPresence: async (seatId, connectionId) => {
+        state.connectionId = connectionId;
+        await beginPresence(seatId, generation, connectionId);
+      },
+      resumeRoom: () => call('resumeMofumofuRoom', { roomId: state.roomId }),
+      applyResume: (value) => {
+        remember(state.roomId, value.seatId); state.cards = value.cards || []; showRoom(value.room);
+        listenRoom(generation); startSafetySync(generation); setConnectionState('connected');
+      },
+    });
   }
   catch (error) {
     if (generation === state.resumeGeneration) { stopRealtime(generation); await retirePresence(); }
