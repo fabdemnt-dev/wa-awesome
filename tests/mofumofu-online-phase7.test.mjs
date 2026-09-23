@@ -5,6 +5,7 @@ import fs from 'node:fs';
 const read = (path) => fs.readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 const config = read('toybox/mofumofu-gathering/online/firebase-config.js');
 const client = read('toybox/mofumofu-gathering/online/script.js');
+const connectionControl = read('toybox/mofumofu-gathering/online/connection-control.js');
 const functions = read('functions/mofumofu-online/index.js');
 const exportsFile = read('functions/index.js');
 const firestore = read('firestore.rules');
@@ -101,10 +102,10 @@ const reconnectChecks = [
   ['R7 pageshow復帰', () => client.includes("requestFullResume('pageshow')")],
   ['R8 online復帰', () => client.includes("requestFullResume('online')")],
   ['R9 focusは不要として未追加', () => !client.includes("addEventListener('focus'")],
-  ['R10 full resume single-flight', () => fullResume.includes('if (state.resumeFlight) return state.resumeFlight')],
+  ['R10 full resume single-flight', () => connectionControl.includes('if (state.resumeFlight) return state.resumeFlight')],
   ['R11 古いgenerationの成功結果を破棄', () => fullResume.match(/generation !== state\.resumeGeneration/g)?.length >= 4],
   ['R12 古いgenerationの失敗で最新UIを変更しない', () => fullResume.includes('generation === state.resumeGeneration') && client.includes('if (generation !== state.resumeGeneration) return;')],
-  ['R13 古いfinallyが最新flightを解除しない', () => fullResume.includes('if (state.resumeFlight === flight) state.resumeFlight = null')],
+  ['R13 古いfinallyが最新flightを解除しない', () => connectionControl.includes('if (state.resumeFlight === flight) state.resumeFlight = null')],
   ['R14 heartbeat timer最大1本', () => stopRealtime.includes('clearInterval(state.heartbeatTimer)') && beginPresence.includes('state.heartbeatTimer = setInterval')],
   ['R15 access refresh timer最大1本', () => stopRealtime.includes('clearInterval(state.accessTimer)') && beginPresence.includes('state.accessTimer = setInterval')],
   ['R16 RTDB listener最大1本', () => stopRealtime.includes('state.presenceUnsubscribe?.()') && beginPresence.includes('state.presenceUnsubscribe = onValue')],

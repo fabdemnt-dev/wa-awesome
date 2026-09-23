@@ -94,6 +94,7 @@ for (const eventName of ['visibilitychange', 'pageshow', 'online']) {
 
 test('クライアントの復帰イベントはroomなしなら既存のrequestFullResume早期終了を使う', () => {
   const source = fs.readFileSync(new URL('../toybox/mofumofu-gathering/online/script.js', import.meta.url), 'utf8');
-  assert.match(source, /function requestFullResume\(reason\) \{\s*if \(!state\.roomId\) return Promise\.resolve\(\);/);
+  const control = fs.readFileSync(new URL('../toybox/mofumofu-gathering/online/connection-control.js', import.meta.url), 'utf8');
+  assert.match(control, /const roomId = getRoomId\(\);\s*if \(!roomId\) return Promise\.resolve\(\);/);
   for (const reason of ['visibilitychange', 'pageshow', 'online']) assert.ok(source.includes(`requestFullResume('${reason}')`));
 });

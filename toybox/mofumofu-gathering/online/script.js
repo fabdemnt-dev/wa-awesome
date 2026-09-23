@@ -6,6 +6,7 @@ import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'https://w
 import { getDatabase, connectDatabaseEmulator, ref, onValue, onDisconnect, set, update, serverTimestamp } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js';
 import { resolveEnvironment, REGION } from './firebase-config.js';
 import { completeInitialConnection } from './initial-connection.js';
+import { createResumeCoordinator, runStartGame } from './connection-control.js';
 
 const animals = ['cat', 'rabbit', 'bear', 'chick', 'fox', 'penguin', 'panda', 'polar'];
 const labels = { cat: 'ねこ', rabbit: 'うさぎ', bear: 'くま', chick: 'ひよこ', fox: 'きつね', penguin: 'ぺんぎん', panda: 'ぱんだ', polar: 'しろくま' };
@@ -33,7 +34,7 @@ const ACCESS_REFRESH_MS = 4 * 60_000;
 const SAFETY_SYNC_MS = 5_000;
 const LISTENER_RETRY_MS = 2_000;
 const MAX_LISTENER_RETRIES = 3;
-const state = { roomId: localStorage.getItem('mofumofuRoomId'), seatId: localStorage.getItem('mofumofuSeatId'), room: null, cards: [], presence: {}, connectionId: null, presenceRef: null, presenceUnsubscribe: null, heartbeatTimer: null, accessTimer: null, safetySyncTimer: null, listenerRetryTimer: null, listenerRetryCount: 0, resumeFlight: null, resumeGeneration: 0, playingResumeKey: null, connectionState: 'syncing', makeRequest: null, judgeRequest: null, npcRequest: null, proxyStartRequest: null, proxyActionRequest: null, makeBusy: false, judgeBusy: false, npcBusy: false, proxyBusy: false, unsubscribe: null };
+const state = { roomId: localStorage.getItem('mofumofuRoomId'), seatId: localStorage.getItem('mofumofuSeatId'), room: null, cards: [], presence: {}, connectionId: null, presenceRef: null, presenceUnsubscribe: null, heartbeatTimer: null, accessTimer: null, safetySyncTimer: null, listenerRetryTimer: null, listenerRetryCount: 0, resumeFlight: null, resumeGeneration: 0, lastSuccessfulResumeAt: 0, lastSuccessfulResumeRoomId: null, lifecycleDisconnected: navigator.onLine === false, playingResumeKey: null, connectionState: 'syncing', startBusy: false, makeRequest: null, judgeRequest: null, npcRequest: null, proxyStartRequest: null, proxyActionRequest: null, makeBusy: false, judgeBusy: false, npcBusy: false, proxyBusy: false, unsubscribe: null };
 function newId() { return crypto.randomUUID(); }
 function remember(roomId, seatId) { state.roomId = roomId; state.seatId = seatId; localStorage.setItem('mofumofuRoomId', roomId); localStorage.setItem('mofumofuSeatId', seatId); }
 function message(text) { $('status').textContent = text; }
@@ -87,16 +88,15 @@ async function retirePresence() {
   await onDisconnect(oldRef).cancel().catch(() => {});
   await update(oldRef, { state: 'disconnected', lastHeartbeatAt: serverTimestamp() }).catch(() => {});
 }
-function requestFullResume(reason) {
-  if (!state.roomId) return Promise.resolve();
-  const promise = fullResume(reason);
-  const generation = state.resumeGeneration;
-  return promise.catch((error) => {
-    if (state.resumeGeneration !== generation) return;
+const requestFullResume = createResumeCoordinator({
+  state,
+  getRoomId: () => state.roomId,
+  runResume: fullResume,
+  onError: (error, reason) => {
     if (reason.includes('waiting-playing')) state.playingResumeKey = null;
     setConnectionState('error', `復帰:${errorCode(error)}`);
-  });
-}
+  },
+});
 async function beginPresence(seatId, generation, connectionId) {
   const uid = auth.currentUser.uid;
   const path = `mofumofuOnlinePresence/${state.roomId}/${uid}/connections/${connectionId}`;
@@ -183,12 +183,11 @@ function startSafetySync(generation) {
 }
 async function fullResume(reason = 'manual') {
   if (!state.roomId) return;
-  if (state.resumeFlight) return state.resumeFlight;
   const generation = state.resumeGeneration + 1;
   state.resumeGeneration = generation;
   setConnectionState('syncing');
   stopRealtime(generation);
-  const flight = (async () => {
+  try {
     await auth.authStateReady();
     if (!auth.currentUser) await signInAnonymously(auth);
     await getToken(appCheck, false);
@@ -205,14 +204,11 @@ async function fullResume(reason = 'manual') {
     if (generation !== state.resumeGeneration) return;
     remember(state.roomId, value.seatId); state.cards = value.cards || []; showRoom(value.room);
     listenRoom(generation); startSafetySync(generation); setConnectionState('connected');
-  })();
-  state.resumeFlight = flight;
-  try { await flight; }
+  }
   catch (error) {
     if (generation === state.resumeGeneration) { stopRealtime(generation); await retirePresence(); }
     throw error;
   }
-  finally { if (state.resumeFlight === flight) state.resumeFlight = null; }
 }
 function renderGame() {
   const room = state.room; const offer = room.publicOffer; const ownStatus = room.playerStatus?.[state.seatId]; const finished = room.status === 'finished';
@@ -285,7 +281,11 @@ async function runNpc() {
 }
 $('create-room').addEventListener('click', async () => { const value = await call('createMofumofuRoom', {}); remember(value.roomId, value.seatId); $('shown-invite').textContent = value.inviteCode; await requestFullResume('create-room'); });
 $('join-form').addEventListener('submit', async (event) => { event.preventDefault(); const value = await call('joinMofumofuRoom', { inviteCode: $('invite-code').value }); remember(value.roomId, value.seatId); await requestFullResume('join-room'); });
-$('start-game').addEventListener('click', async () => { await call('startMofumofuGame', { roomId: state.roomId }); await refresh(); });
+$('start-game').addEventListener('click', async () => {
+  try {
+    await runStartGame({ state, button: $('start-game'), roomId: state.roomId, startGame: (data) => call('startMofumofuGame', data), refresh });
+  } catch (error) { message(error.message); }
+});
 $('offer-form').addEventListener('submit', async (event) => {
   event.preventDefault(); if (state.makeBusy) return; state.makeRequest ||= { roomId: state.roomId, cardId: $('offer-card').value, claimAnimal: $('claim-animal').value, targetPlayerId: $('target-player').value, actionId: newId() }; state.makeBusy = true;
   try { await call('makeMofumofuOffer', state.makeRequest); state.makeRequest = null; await refresh(); } catch (error) { message(error.message); } finally { state.makeBusy = false; }
@@ -297,6 +297,7 @@ $('judge-buttons').addEventListener('click', async (event) => {
 document.addEventListener('visibilitychange', () => { if (!document.hidden) void requestFullResume('visibilitychange'); });
 globalThis.addEventListener('pageshow', () => void requestFullResume('pageshow'));
 globalThis.addEventListener('online', () => void requestFullResume('online'));
+globalThis.addEventListener('offline', () => { state.lifecycleDisconnected = true; });
 await completeInitialConnection({
   auth,
   signInAnonymously,
