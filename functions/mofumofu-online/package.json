@@ -2,7 +2,7 @@
   "name": "wa-awesome-mofumofu-online-functions",
   "private": true,
   "engines": {
-    "node": "20"
+    "node": "22"
   },
   "main": "index.js",
   "dependencies": {
