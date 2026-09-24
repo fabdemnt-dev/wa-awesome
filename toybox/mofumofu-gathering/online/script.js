@@ -31,7 +31,7 @@ if (environment.name === 'emulator') {
 const call = (name, data) => httpsCallable(functions, name)(data).then((response) => response.data);
 const $ = (id) => document.getElementById(id);
 const helpDialog = $('help-dialog');
-$('open-help').addEventListener('click', () => helpDialog.showModal());
+for (const helpId of ['open-help', 'open-help-lobby', 'game-help']) $(helpId).addEventListener('click', () => helpDialog.showModal());
 $('close-help').addEventListener('click', () => helpDialog.close());
 const HEARTBEAT_MS = 15_000;
 const STALE_MS = 120_000;
@@ -40,9 +40,59 @@ const SAFETY_SYNC_MS = 5_000;
 const LISTENER_RETRY_MS = 2_000;
 const MAX_LISTENER_RETRIES = 3;
 const state = { roomId: localStorage.getItem('mofumofuRoomId'), seatId: localStorage.getItem('mofumofuSeatId'), room: null, cards: [], presence: {}, connectionId: null, presenceRef: null, presenceUnsubscribe: null, heartbeatTimer: null, accessTimer: null, safetySyncTimer: null, listenerRetryTimer: null, listenerRetryCount: 0, resumeFlight: null, resumeGeneration: 0, presenceReadyGeneration: 0, lastSuccessfulResumeAt: 0, lastSuccessfulResumeRoomId: null, lifecycleDisconnected: navigator.onLine === false, playingResumeKey: null, connectionState: 'syncing', startBusy: false, makeRequest: null, judgeRequest: null, npcRequest: null, proxyStartRequest: null, proxyActionRequest: null, makeBusy: false, judgeBusy: false, npcBusy: false, proxyBusy: false, unsubscribe: null };
+const ui = { selectedUid: null, claim: null, flashTimer: null, lastOfferActionId: null, seenEliminations: new Set() };
 function newId() { return crypto.randomUUID(); }
 function remember(roomId, seatId) { state.roomId = roomId; state.seatId = seatId; localStorage.setItem('mofumofuRoomId', roomId); localStorage.setItem('mofumofuSeatId', seatId); }
 function message(text) { $('status').textContent = text; }
+const seatEmoji = { A: '🐰', B: '🐻', koharu: '🐱' };
+function seatName(playerId) { return playerId === 'koharu' ? 'こはる' : `プレイヤー${playerId}`; }
+function seatNode(room, playerId, isSelf) {
+  const seat = document.createElement('section');
+  seat.className = 'player-box';
+  const name = document.createElement('strong');
+  name.textContent = `${seatEmoji[playerId] || '🙂'} ${seatName(playerId)}${isSelf ? '（あなた）' : ''}`;
+  const chip = document.createElement('span');
+  chip.className = 'chip';
+  const online = playerOnline(playerId);
+  const mode = room.controlModes?.[playerId]?.mode || 'human';
+  chip.textContent = mode === 'npc-controlled' ? 'NPC代理中' : mode === 'return-pending' ? '本人復帰済み／代理終了待ち' : mode === 'ended' ? '代理終了' : online ? '● 接続中' : '○ 再接続待ち';
+  seat.append(name, chip);
+  if (!isSelf && room.status !== 'finished' && room.currentTurnPlayerId === playerId) { const mark = document.createElement('span'); mark.className = 'turn-mark'; mark.textContent = '🐾'; seat.append(mark); }
+  return seat;
+}
+function renderLobbySeats(room) {
+  const seats = ['A', 'B', 'koharu'].map((playerId) => {
+    const seat = document.createElement('section');
+    seat.className = 'player-box lobby-seat';
+    const name = document.createElement('strong');
+    name.textContent = `${seatEmoji[playerId] || '🙂'} ${seatName(playerId)}${playerId === state.seatId ? '（あなた）' : ''}`;
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    chip.textContent = playerId === 'koharu' ? 'NPC' : room.players?.[playerId]?.joined ? '参加ずみ' : '参加まち';
+    seat.append(name, chip);
+    return seat;
+  });
+  $('players').replaceChildren(...seats);
+}
+function pushLog(text) {
+  const line = document.createElement('p');
+  line.textContent = text;
+  $('log').append(line);
+}
+function flash(text) {
+  const node = $('flash');
+  node.textContent = text;
+  clearTimeout(ui.flashTimer);
+  ui.flashTimer = setTimeout(() => { node.textContent = ''; }, 2600);
+}
+function observeRoomEvents(room, previous) {
+  if (!previous) return;
+  for (const snapshot of Object.values(room.eliminationSnapshots || {})) {
+    if (ui.seenEliminations.has(snapshot.eliminatedAt)) continue;
+    ui.seenEliminations.add(snapshot.eliminatedAt);
+    pushLog(`${snapshot.playerId === 'koharu' ? 'こはる' : `プレイヤー${snapshot.playerId}`}が${emoji[snapshot.eliminationAnimal]}${labels[snapshot.eliminationAnimal]}を4枚そろって「もふもふ大集合！」`);
+  }
+}
 
 const recoverFromRoomGone = createRoomGoneRecovery({
   state,
@@ -50,9 +100,9 @@ const recoverFromRoomGone = createRoomGoneRecovery({
   message,
   resetEntryView: () => {
     $('entry').hidden = false;
-    for (const id of ['lobby', 'game', 'offer', 'result', 'final-result', 'offer-form', 'npc-status', 'reconnect-wait', 'elimination-notice']) $(id).hidden = true;
-    for (const id of ['players', 'presence-list', 'hand']) $(id).replaceChildren();
-    for (const id of ['turn', 'shown-invite', 'control-status']) $(id).textContent = '';
+    for (const id of ['lobby', 'game', 'result', 'final-result', 'offer-form', 'claimStep', 'targetStep', 'judgeStep', 'npc-status', 'reconnect-wait']) $(id).hidden = true;
+    for (const id of ['players', 'presence-list', 'hand', 'judgeHand', 'log', 'self-seat']) $(id).replaceChildren();
+    for (const id of ['turn', 'shown-invite', 'control-status', 'offer-message', 'flash']) $(id).textContent = '';
   },
 });
 function setConnectionState(next, detail = '') {
@@ -71,23 +121,17 @@ function playerOnline(playerId) {
 }
 function renderPresence() {
   if (!state.room) return;
-  const rows = ['A', 'B', 'koharu'].map((playerId) => {
-    const li = document.createElement('li');
-    const online = playerOnline(playerId);
-    li.className = online ? 'presence-online' : 'presence-wait';
-    const mode = state.room.controlModes?.[playerId]?.mode || 'human';
-    const status = mode === 'npc-controlled' ? 'NPC代理中' : mode === 'return-pending' ? '本人復帰済み／代理終了待ち' : mode === 'ended' ? '代理終了' : online ? '● 接続中' : '○ 再接続待ち';
-    li.textContent = playerId === 'koharu' ? 'こはる　● NPC' : `プレイヤー${playerId}　${status}`;
-    return li;
-  });
-  $('presence-list').replaceChildren(...rows);
   const room = state.room;
+  const top = ['A', 'B', 'koharu'].filter((playerId) => playerId !== state.seatId).map((playerId) => seatNode(room, playerId, false));
+  $('presence-list').replaceChildren(...top);
+  $('self-seat').replaceChildren(seatNode(room, state.seatId, true));
   const waitingPlayer = room.status === 'playing' && (
     (room.turnState === 'awaitingJudgment' && room.publicOffer?.toPlayerId !== 'koharu' && !playerOnline(room.publicOffer?.toPlayerId))
     || (room.currentTurnPlayerId !== 'koharu' && !playerOnline(room.currentTurnPlayerId))
   ) ? (room.turnState === 'awaitingJudgment' ? room.publicOffer.toPlayerId : room.currentTurnPlayerId) : null;
-  $('reconnect-wait').hidden = !waitingPlayer;
-  $('reconnect-wait').textContent = waitingPlayer ? `プレイヤー${waitingPlayer}の再接続を待っています` : '';
+  const wait = $('reconnect-wait');
+  wait.hidden = !waitingPlayer;
+  wait.textContent = waitingPlayer ? `プレイヤー${waitingPlayer}の再接続を待っています` : '';
 }
 async function authorizePresence(connectionId = state.connectionId) {
   return call('authorizeMofumofuPresence', { roomId: state.roomId, connectionId });
@@ -151,7 +195,8 @@ function showRoom(room) {
     state.npcRequest = null;
   }
   state.room = room; $('entry').hidden = true; $('lobby').hidden = room.status !== 'waiting'; $('game').hidden = !['playing', 'finished'].includes(room.status);
-  $('room-id').textContent = state.roomId; $('players').innerHTML = `<li>A: ${room.players.A.joined ? '参加' : '待機'}</li><li>B: ${room.players.B.joined ? '参加' : '待機'}</li><li>こはる: 参加</li>`;
+  $('room-id').textContent = state.roomId;
+  renderLobbySeats(room);
   $('start-game').hidden = room.hostUid !== auth.currentUser?.uid;
   if (room.status === 'playing' || room.status === 'finished') renderGame();
   renderPresence();
@@ -159,7 +204,9 @@ function showRoom(room) {
 function applyPublicRoom(room, generation, source) {
   if (generation !== state.resumeGeneration) return;
   const wasWaiting = state.room?.status === 'waiting';
+  const previousRoom = state.room;
   showRoom(room);
+  observeRoomEvents(room, previousRoom);
   if (wasWaiting && room.status === 'playing') {
     const key = `${state.roomId}:playing`;
     if (state.playingResumeKey !== key) { state.playingResumeKey = key; void requestFullResume(`${source}:waiting-playing`); }
@@ -246,28 +293,91 @@ async function fullResume(reason = 'manual') {
 }
 function renderGame() {
   const room = state.room; const offer = room.publicOffer; const ownStatus = room.playerStatus?.[state.seatId]; const finished = room.status === 'finished';
-  $('turn').textContent = finished ? 'ゲーム終了' : `手番: ${room.currentTurnPlayerId}`;
-  $('hand').replaceChildren(...state.cards.map((card) => { const node = document.createElement('span'); node.className = 'card'; node.textContent = labels[card.animalType]; return node; }));
-  const latestElimination = Object.values(room.eliminationSnapshots || {}).sort((a, b) => (b.eliminatedAt || 0) - (a.eliminatedAt || 0))[0];
-  $('elimination-notice').hidden = !latestElimination;
-  if (latestElimination) $('elimination-notice').textContent = `${latestElimination.playerId === 'koharu' ? 'こはる' : `プレイヤー${latestElimination.playerId}`}は${emoji[latestElimination.eliminationAnimal]}${labels[latestElimination.eliminationAnimal]}が4枚そろって「もふもふ大集合！」／脱落`;
   const ownControl = room.controlModes?.[state.seatId]?.mode || 'human';
-  $('control-status').textContent = ownControl === 'human' ? '本人へ操作権返却済み' : ownControl === 'npc-controlled' ? 'NPC代理中' : ownControl === 'return-pending' ? '本人復帰済み／代理終了待ち' : '代理終了';
   const canMake = !finished && ownStatus === 'active' && ownControl === 'human' && room.turnState === 'awaitingOffer' && room.currentTurnPlayerId === state.seatId;
-  $('offer-form').hidden = !canMake; $('offer-card').innerHTML = state.cards.map((card) => `<option value="${card.cardId}">${labels[card.animalType]}</option>`).join('');
-  $('claim-animal').innerHTML = animals.map((animal) => `<option value="${animal}">${labels[animal]}</option>`).join('');
-  const targets = ['A', 'B', 'koharu'].filter((playerId) => playerId !== state.seatId && room.playerStatus?.[playerId] === 'active');
-  $('target-player').innerHTML = targets.map((playerId) => `<option value="${playerId}">${playerId === 'koharu' ? 'こはる' : playerId}</option>`).join('');
+  const canJudge = !finished && ownStatus === 'active' && ownControl === 'human' && offer?.status === 'pending' && offer.toPlayerId === state.seatId;
+  for (const stepId of ['claimStep', 'targetStep', 'judgeStep']) $(stepId).classList.remove('hidden');
+  $('turn').textContent = finished ? 'ゲーム終了' : `${seatName(room.currentTurnPlayerId)}の番`;
+  $('turn').classList.toggle('mine', !finished && room.currentTurnPlayerId === state.seatId);
   $('npc-status').hidden = finished || room.turnState !== 'awaitingNpcPhase';
-  $('offer').hidden = finished || !offer; $('judge-buttons').hidden = finished || ownStatus !== 'active' || ownControl !== 'human' || !(offer?.status === 'pending' && offer.toPlayerId === state.seatId);
-  $('offer-message').textContent = offer ? `${offer.fromPlayerId === 'koharu' ? 'こはる' : offer.fromPlayerId}「${labels[offer.claimAnimal]}だよ」` : '';
+  $('control-status').textContent = ownControl === 'human' ? '本人へ操作権返却済み' : ownControl === 'npc-controlled' ? 'NPC代理中' : ownControl === 'return-pending' ? '本人復帰済み／代理終了待ち' : '代理終了';
+  $('offer-form').hidden = !canMake;
+  $('hand').replaceChildren(...state.cards.map((card) => {
+    const node = document.createElement('button');
+    node.type = 'button';
+    node.className = `hand-card${ui.selectedUid === card.cardId ? ' selected' : ''}`;
+    node.textContent = emoji[card.animalType];
+    node.setAttribute('aria-label', labels[card.animalType]);
+    node.disabled = !canMake;
+    node.addEventListener('click', () => { if (!canMake) return; ui.selectedUid = card.cardId; ui.claim = null; renderGame(); });
+    return node;
+  }));
+  const claimButtons = $('claimButtons');
+  if (canMake && ui.selectedUid) {
+    claimButtons.replaceChildren(...animals.map((animal) => {
+      const node = document.createElement('button');
+      node.type = 'button';
+      node.className = `animal-button${ui.claim === animal ? ' selected' : ''}`;
+      node.textContent = `${emoji[animal]} ${labels[animal]}`;
+      node.addEventListener('click', () => { if (!canMake) return; ui.claim = animal; renderGame(); });
+      return node;
+    }));
+  } else claimButtons.replaceChildren();
+  $('claimStep').hidden = !(canMake && ui.selectedUid);
+  const targetButtons = $('targetButtons');
+  const targets = ['A', 'B', 'koharu'].filter((playerId) => playerId !== state.seatId && room.playerStatus?.[playerId] === 'active');
+  if (canMake && ui.claim) {
+    targetButtons.replaceChildren(...targets.map((playerId) => {
+      const node = document.createElement('button');
+      node.type = 'button';
+      node.dataset.target = playerId;
+      node.textContent = `${seatName(playerId)}へ`;
+      node.addEventListener('click', async () => {
+        if (state.makeBusy || !canMake || !ui.selectedUid || !ui.claim) return;
+        const button = node; if (button.disabled) return; button.disabled = true;
+        state.makeRequest ||= { roomId: state.roomId, cardId: ui.selectedUid, claimAnimal: ui.claim, targetPlayerId: button.dataset.target, actionId: newId() };
+        state.makeBusy = true; [...$('targetButtons').children].forEach((b) => { b.disabled = true; });
+        try {
+          await call('makeMofumofuOffer', state.makeRequest); state.makeRequest = null;
+          ui.selectedUid = null; ui.claim = null;
+          await refresh();
+        } catch (error) { message(error.message); [...$('targetButtons').children].forEach((b) => { b.disabled = false; }); }
+        finally { state.makeBusy = false; }
+      });
+      return node;
+    }));
+  } else targetButtons.replaceChildren();
+  $('targetStep').hidden = !(canMake && ui.claim);
+  $('judgeStep').hidden = !canJudge;
+  $('judge-buttons').hidden = !canJudge;
+  if (canJudge) {
+    $('judgeHand').replaceChildren(...state.cards.map((card) => {
+      const node = document.createElement('span');
+      node.className = 'hand-card static';
+      node.textContent = emoji[card.animalType];
+      node.setAttribute('aria-label', labels[card.animalType]);
+      return node;
+    }));
+  } else $('judgeHand').replaceChildren();
+  if (offer && (offer.status === 'pending' || offer.status === 'completed')) {
+    $('tableCardMain').textContent = labels[offer.claimAnimal];
+    $('tableCardSub').textContent = `${offer.fromPlayerId === 'koharu' ? 'こはる' : `プレイヤー${offer.fromPlayerId}`}の宣言`;
+  } else {
+    $('tableCardMain').textContent = '？';
+    $('tableCardSub').textContent = '';
+  }
+  $('offer-message').textContent = offer?.status === 'pending' && offer.toPlayerId !== state.seatId ? '相手の判定を待っています…' : offer?.status === 'pending' ? 'うそ？ ほんと？ えらんでね。' : '';
+  if (offer?.status === 'completed' && offer.actionId && offer.actionId !== ui.lastOfferActionId) {
+    ui.lastOfferActionId = offer.actionId;
+    pushLog(`${offer.fromPlayerId === 'koharu' ? 'こはる' : `プレイヤー${offer.fromPlayerId}`}「${labels[offer.claimAnimal]}だよ」→ ほんとは${labels[offer.actualAnimal]}（判定${offer.success ? '成功' : '失敗'}）`);
+    flash(offer.success ? '○ あたり！' : '× うそだった！');
+  }
   $('result').hidden = offer?.status !== 'completed';
   if (offer?.status === 'completed') $('result').textContent = `本当は${labels[offer.actualAnimal]}。判定${offer.success ? '成功' : '失敗'}。${offer.faceUpRecipientPlayerId}が表向きカードを受け取りました。${finished ? 'ゲーム終了です。' : `次は${room.currentTurnPlayerId}です。`}`;
   $('final-result').hidden = !finished;
   if (finished) renderFinalResult(room.finalResult);
   if (!finished && ownStatus === 'active' && room.turnState === 'awaitingNpcPhase') void runNpc();
   if (!finished) void runProxyIfNeeded();
-  renderPresence();
 }
 async function runProxyIfNeeded() {
   if (state.proxyBusy || !state.room || !proxyEvaluationReady(state)) return;
@@ -327,10 +437,6 @@ $('start-game').addEventListener('click', async () => {
   try {
     await runStartGame({ state, button: $('start-game'), roomId: state.roomId, startGame: (data) => call('startMofumofuGame', data), refresh });
   } catch (error) { message(error.message); }
-});
-$('offer-form').addEventListener('submit', async (event) => {
-  event.preventDefault(); if (state.makeBusy) return; const button = event.currentTarget.querySelector('button'); state.makeRequest ||= { roomId: state.roomId, cardId: $('offer-card').value, claimAnimal: $('claim-animal').value, targetPlayerId: $('target-player').value, actionId: newId() }; state.makeBusy = true; button.disabled = true;
-  try { await call('makeMofumofuOffer', state.makeRequest); state.makeRequest = null; await refresh(); } catch (error) { message(error.message); } finally { state.makeBusy = false; button.disabled = false; }
 });
 $('judge-buttons').addEventListener('click', async (event) => {
   const judgment = event.target.dataset.judgment; if (!judgment || state.judgeBusy) return; const buttons = [...event.currentTarget.querySelectorAll('button')]; state.judgeRequest ||= { roomId: state.roomId, actionId: state.room.publicOffer.actionId, judgment }; state.judgeBusy = true; buttons.forEach((button) => { button.disabled = true; });
