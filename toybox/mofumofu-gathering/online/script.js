@@ -8,6 +8,7 @@ import { resolveEnvironment, REGION } from './firebase-config.js';
 import { completeInitialConnection } from './initial-connection.js';
 import { connectionIsOnline, createResumeCoordinator, playerPresenceState, proxyEvaluationReady, runStartGame, shouldStartNpcProxy } from './connection-control.js';
 import { runMofumofuFullResume } from './full-resume.js';
+import { isSavedRoomGoneError, createRoomGoneRecovery } from './room-recovery.js';
 
 const animals = ['cat', 'rabbit', 'bear', 'chick', 'fox', 'penguin', 'panda', 'polar'];
 const labels = { cat: 'ねこ', rabbit: 'うさぎ', bear: 'くま', chick: 'ひよこ', fox: 'きつね', penguin: 'ぺんぎん', panda: 'ぱんだ', polar: 'しろくま' };
@@ -42,6 +43,18 @@ const state = { roomId: localStorage.getItem('mofumofuRoomId'), seatId: localSto
 function newId() { return crypto.randomUUID(); }
 function remember(roomId, seatId) { state.roomId = roomId; state.seatId = seatId; localStorage.setItem('mofumofuRoomId', roomId); localStorage.setItem('mofumofuSeatId', seatId); }
 function message(text) { $('status').textContent = text; }
+
+const recoverFromRoomGone = createRoomGoneRecovery({
+  state,
+  storage: localStorage,
+  message,
+  resetEntryView: () => {
+    $('entry').hidden = false;
+    for (const id of ['lobby', 'game', 'offer', 'result', 'final-result', 'offer-form', 'npc-status', 'reconnect-wait', 'elimination-notice']) $(id).hidden = true;
+    for (const id of ['players', 'presence-list', 'hand']) $(id).replaceChildren();
+    for (const id of ['turn', 'shown-invite', 'control-status']) $(id).textContent = '';
+  },
+});
 function setConnectionState(next, detail = '') {
   state.connectionState = next;
   message(next === 'connected' ? '接続中' : next === 'syncing' ? '再接続中／同期中…' : `同期エラー${detail ? `（${detail}）` : ''}`);
@@ -218,7 +231,16 @@ async function fullResume(reason = 'manual') {
     });
   }
   catch (error) {
-    if (generation === state.resumeGeneration) { stopRealtime(generation); await retirePresence(); }
+    if (generation === state.resumeGeneration) {
+      stopRealtime(generation);
+      await retirePresence();
+      // 保存済みroomの存在確認で返るnot-foundだけを「room終了」として扱い、入室画面へ戻す。
+      if (isSavedRoomGoneError(error)) {
+        state.resumeGeneration += 1;
+        recoverFromRoomGone();
+        return;
+      }
+    }
     throw error;
   }
 }
