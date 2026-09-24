@@ -272,6 +272,13 @@ function countByAnimal(cards = []) {
   for (const card of cards) if (ANIMALS.includes(card?.animalType)) counts[card.animalType] += 1;
   return counts;
 }
+// 表向きカードだけから「もふもふ大集合！」の敗北条件を判定する純粋関数（手札は含めない）。
+function gatheringState(cards) {
+  const counts = countByAnimal(cards);
+  const fourOfAKind = ANIMALS.find((animal) => counts[animal] >= 4) || null;
+  const allEightTypes = ANIMALS.every((animal) => counts[animal] >= 1);
+  return { fourOfAKind, allEightTypes, gathering: Boolean(fourOfAKind || allEightTypes) };
+}
 function publicPlayerSnapshot(playerId, status, cards, elimination = null) {
   const faceUpCardsByAnimal = countByAnimal(cards);
   return {
@@ -284,10 +291,12 @@ function publicPlayerSnapshot(playerId, status, cards, elimination = null) {
     eliminatedAt: elimination?.eliminatedAt || null,
   };
 }
-function buildFinalResult(room, finishReason, winnerPlayerId, draw, finishedAt) {
+function buildFinalResult(room, finishReason, winnerPlayerId, draw, finishedAt, winnerPlayerIds = null) {
   const players = PLAYERS.map((playerId) => room.eliminationSnapshots?.[playerId]
     || publicPlayerSnapshot(playerId, room.playerStatus[playerId], room.faceUpCards[playerId]));
-  return { winnerPlayerId, draw, finishReason, players, finishedAt };
+  const result = { winnerPlayerId, draw, finishReason, players, finishedAt };
+  if (winnerPlayerIds) result.winnerPlayerIds = winnerPlayerIds;
+  return result;
 }
 function handFor(playerId, server, hands) {
   return playerId === 'koharu' ? server.npcHand || [] : hands[playerId] || [];
@@ -313,7 +322,7 @@ function cloneGameDocument(documentValue) {
 }
 function finishedNpcRoom(roomValue, advance, finish, now) {
   const room = cloneGameDocument(roomValue);
-  Object.assign(room, advance, { status: 'finished', ...finish, finalResult: buildFinalResult(room, finish.finishReason, finish.winnerPlayerId, finish.draw, now) });
+  Object.assign(room, advance, { status: 'finished', ...finish, finalResult: buildFinalResult(room, finish.finishReason, finish.winnerPlayerId, finish.draw, now, finish.winnerPlayerIds || null) });
   return room;
 }
 function resolveFaceUp(roomValue, serverValue, handsValue, pending, judgment, now) {
@@ -325,10 +334,11 @@ function resolveFaceUp(roomValue, serverValue, handsValue, pending, judgment, no
   room.faceUpCards[recipient] = [...(room.faceUpCards[recipient] || []), pending.card];
   server.pendingOffer = null;
   let eliminatedPlayerId = null;
-  if (room.faceUpCards[recipient].filter((card) => card.animalType === pending.card.animalType).length >= 4) {
+  const gathering = gatheringState(room.faceUpCards[recipient]);
+  if (gathering.gathering) {
     eliminatedPlayerId = recipient;
     const publicCards = room.faceUpCards[recipient];
-    const snapshot = publicPlayerSnapshot(recipient, 'eliminated', publicCards, { eliminationAnimal: pending.card.animalType, eliminatedAt: now });
+    const snapshot = publicPlayerSnapshot(recipient, 'eliminated', publicCards, { eliminationAnimal: gathering.fourOfAKind, eliminatedAt: now });
     room.eliminationSnapshots = { ...(room.eliminationSnapshots || {}), [recipient]: snapshot };
     room.playerStatus = { ...room.playerStatus, [recipient]: 'eliminated' };
     const secretCards = recipient === 'koharu' ? server.npcHand || [] : hands[recipient];
@@ -337,11 +347,22 @@ function resolveFaceUp(roomValue, serverValue, handsValue, pending, judgment, no
     else hands[recipient] = [];
     room.faceUpCards[recipient] = [];
   }
-  const finish = finishIfNeeded(room, server, hands);
+  let finish = null;
+  if (eliminatedPlayerId) {
+    // 「もふもふ大集合！」成立で即終了。敗者1人、残り2人が勝者。通常終了判定へ進んで結果を上書きしない。
+    finish = {
+      finishReason: gathering.fourOfAKind && gathering.allEightTypes ? 'four-and-eight' : gathering.fourOfAKind ? 'four-of-a-kind' : 'all-eight-types',
+      winnerPlayerIds: PLAYERS.filter((playerId) => room.playerStatus[playerId] === 'active'),
+      winnerPlayerId: null,
+      draw: false,
+    };
+  } else {
+    finish = finishIfNeeded(room, server, hands);
+  }
   let advance;
   if (finish) {
     advance = { currentTurnPlayerId: null, turnState: 'finished', turnNumber: (room.turnNumber || 0) + 1 };
-    Object.assign(room, advance, { status: 'finished', ...finish, finalResult: buildFinalResult(room, finish.finishReason, finish.winnerPlayerId, finish.draw, now) });
+    Object.assign(room, advance, { status: 'finished', ...finish, finalResult: buildFinalResult(room, finish.finishReason, finish.winnerPlayerId, finish.draw, now, finish.winnerPlayerIds || null) });
     room.deleteAt = Timestamp.fromMillis(now + FINISHED_TTL_MS);
   } else {
     const next = nextPlayerId(pending.fromPlayerId, room.playerStatus);
@@ -903,5 +924,5 @@ module.exports = {
   runMofumofuNpcProxyAction,
   cleanupMofumofuOnline,
   _handlers: { createHandler, joinHandler, startHandler, resumeHandler, authorizePresenceHandler, makeHandler, judgeHandler, npcHandler, startProxyHandler, proxyActionHandler },
-  _test: { ANIMALS, PRESENCE_ACCESS_TTL_MS, PRESENCE_STALE_MS, WAITING_TTL_MS, PLAYING_TTL_MS, FINISHED_TTL_MS, ACTION_TTL_MS, RATE_TTL_MS, callableOptions, runtimeProjectId, corsOriginsForProject, ipHash, cleanupMofumofuDataNow, presenceConnectionOnline, uidPresenceOnline, uidPresenceState, chooseNpcClaim, chooseNpcJudgment, nextPlayerId, judgeSuccess, digest, sameFingerprint, countByAnimal, finishIfNeeded, cloneGameDocument, finishedNpcRoom, resolveFaceUp },
+  _test: { ANIMALS, PRESENCE_ACCESS_TTL_MS, PRESENCE_STALE_MS, WAITING_TTL_MS, PLAYING_TTL_MS, FINISHED_TTL_MS, ACTION_TTL_MS, RATE_TTL_MS, callableOptions, runtimeProjectId, corsOriginsForProject, ipHash, cleanupMofumofuDataNow, presenceConnectionOnline, uidPresenceOnline, uidPresenceState, chooseNpcClaim, chooseNpcJudgment, nextPlayerId, judgeSuccess, digest, sameFingerprint, countByAnimal, gatheringState, finishIfNeeded, cloneGameDocument, finishedNpcRoom, resolveFaceUp },
 };

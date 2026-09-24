@@ -20,6 +20,21 @@ test('online script drives the new UI without legacy ids', () => {
   for (const token of ["$('offer-card')", "$('claim-animal')", "$('target-player')", "$('elimination-notice')", "$('offer')", '<option']) assert.ok(!script.includes(token), `script.js must not use ${token}`);
 });
 
+test('online cards use the official artwork and keep labels accessible', () => {
+  const script = read('toybox/mofumofu-gathering/online/script.js');
+  assert.equal(script.split("node.append(cardImage(card.animalType, ''))").length - 1, 2, 'hand and judge-hand cards must both use the official image');
+  assert.ok(script.includes("cardImage(offer.claimAnimal, labels[offer.claimAnimal])"), 'table card must use the official image');
+  assert.ok(script.includes("polar: 'polar-bear.png'"), 'all 8 animal ids must map to the official files');
+});
+
+test('online renders the gathering loss, two winners, and the one-time logo show', () => {
+  const script = read('toybox/mofumofu-gathering/online/script.js');
+  for (const token of ['Array.isArray(finalResult.winnerPlayerIds)', 'gatheringReasonText', 'showGatheringLogo', 'ui.gatheringShown = true', "winnerPlayerIds.includes(player.playerId)"]) assert.ok(script.includes(token), `script.js missing ${token}`);
+  assert.ok(!script.includes('もふもふ回避'), 'the gathering result must not reuse the solo save title');
+  const html = read('toybox/mofumofu-gathering/online/index.html');
+  for (const token of ['id="gathering-overlay"', 'assets/mofumofu-gathering/mofumofu-logo.png']) assert.ok(html.includes(token), `index.html missing ${token}`);
+});
+
 test('online labels use the viewer perspective', () => {
   const script = read('toybox/mofumofu-gathering/online/script.js');
   assert.ok(script.includes("playerId === state.seatId ? 'あなた' : '相手';"), 'seatName must speak from the viewer seat');

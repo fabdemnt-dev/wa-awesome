@@ -20,13 +20,42 @@ test('判定4パターンは宣言一致と選択の一致で成功を決める'
   assert.match(html, /× うそ！/);
 });
 
-test('同種4枚で脱落し、手札と表向きカードを捨て札へ移す', () => {
-  assert.match(script, /receiver\.faceUp\[offer\.card\.id\]>=4/);
-  assert.match(script, /player\.out=true/);
-  assert.match(script, /game\.discard\.push\(\.\.\.player\.hand\)/);
-  assert.match(script, /player\.hand=\[\]/);
-  assert.match(script, /player\.faceUp\[a\.id\]=0/);
+test('同種4枚・全8種類で「もふもふ大集合！」敗北となり、即終了して手札と表向きカードを捨て札へ移す', () => {
+  assert.match(script, /function gatheringState\(faceUp\)/);
+  assert.match(script, /faceUp\[a\.id\] >= 4/);
+  assert.match(script, /ANIMALS\.every\(a => faceUp\[a\.id\] >= 1\)/);
+  assert.match(script, /gatheringState\(receiver\.faceUp\)/);
+  assert.match(script, /finishByGathering\(receiver,gathering\)/);
+  assert.match(script, /function finishByGathering\(loser, gathering\)/);
+  assert.match(script, /loser\.out=true/);
+  assert.match(script, /game\.discard\.push\(\.\.\.loser\.hand\)/);
+  assert.match(script, /loser\.hand=\[\]/);
+  assert.match(script, /loser\.faceUp\[a\.id\]=0/);
   assert.match(script, /activePlayers\(\).*filter\(p=>p\.id!==/s);
+  assert.doesNotMatch(script, /function finishByGathering[\s\S]{0,900}nextTurn/);
+});
+
+test('集合終了は敗者1人・残り2人が勝ちを結果一覧で示し、ロゴ演出を1回だけ挟む', () => {
+  assert.match(script, /verdict:p\.id===loser\.id\?"lose":"win"/);
+  assert.match(script, /p\.verdict==="lose"\?"もふもふ大集合！／負け":p\.verdict==="win"\?"勝ち！"/);
+  assert.match(script, /function showGatheringLogo\(onDone\)/);
+  assert.match(script, /showGatheringLogo\(\(\)=>finishResult\(null,text,title\)\)/);
+  const gStart = script.indexOf('function finishByGathering');
+  const gEnd = script.indexOf('function finishByHandEmpty');
+  assert.ok(gStart !== -1 && gEnd > gStart, 'finishByGathering precedes finishByHandEmpty');
+  const gBody = script.slice(gStart, gEnd);
+  assert.ok(!gBody.includes('もふもふ回避'), 'gathering result must not reuse the solo save title');
+  assert.ok(gBody.includes('finishResult(null,text,title)'), 'gathering finish routes through the unified result');
+});
+
+test('正式カード画像を表示層だけで使い、動物名のアクセシビリティ情報を維持する', () => {
+  assert.match(script, /const CARD_IMAGES = \{ cat:"cat\.png", rabbit:"rabbit\.png", chick:"chick\.png", bear:"bear\.png", polar:"polar-bear\.png", fox:"fox\.png", penguin:"penguin\.png", panda:"panda\.png" \}/);
+  assert.match(script, /aria-label="\$\{a\.name\}のカード"/);
+  assert.match(script, /<img src="\$\{ASSET_BASE\}\$\{CARD_IMAGES\[c\.id\]\}" alt=""/);
+  assert.match(script, /offerCardMain"\)\.innerHTML=cardImage\(claim,a\.name\)/);
+  assert.match(script, /offerCardMain"\)\.innerHTML=cardImage\(offer\.card\.id,animal\(offer\.card\.id\)\.name\)/);
+  assert.match(html, /assets\/mofumofu-gathering\/mofumofu-logo\.png/);
+  assert.match(html, /id="gatheringOverlay"/);
 });
 
 test('手札0枚が出たら生存者全員の表向き総数を比較し、最少同数は引き分け', () => {
@@ -84,9 +113,9 @@ test('結果画面に文字列の改行コードを表示しない', () => {
 test('判定中は宣言アイコンと判定後の表向きカードを区別し、自分の手札も表示する', () => {
   assert.match(html, /id="judgeHand"/);
   assert.match(script, /offerCard"\)\.classList\.remove\("revealed"\)/);
-  assert.match(script, /offerCardMain"\)\.textContent=a\.emoji/);
+  assert.match(script, /offerCardMain"\)\.innerHTML=cardImage\(claim,a\.name\)/);
   assert.match(script, /offerCard"\)\.classList\.add\("revealed"\)/);
-  assert.match(script, /offerCardMain"\)\.textContent=animal\(offer\.card\.id\)\.emoji/);
+  assert.match(script, /offerCardMain"\)\.innerHTML=cardImage\(offer\.card\.id,animal\(offer\.card\.id\)\.name\)/);
   assert.doesNotMatch(script, /宣言：/);
   assert.doesNotMatch(script, /正体：/);
   assert.match(script, /function renderJudgeHand/);
@@ -172,11 +201,12 @@ test('ふたり用は人間の手番・判定前に全画面交代画面で手�
   assert.match(script, /purpose==="judge"/);
 });
 
-test('ふたり用も32枚を3人へ10枚ずつ配り、既存の判定と4枚脱落を共用する', () => {
+test('ふたり用も32枚を3人へ10枚ずつ配り、既存の判定と集合終了を共用する', () => {
   assert.match(script, /mode==="duo"\?DUO_PLAYERS:SOLO_PLAYERS/);
   assert.match(script, /for\(let i=0;i<10;i\+\+\) players\.forEach/);
   assert.match(script, /const success=\(saysTrue && actualTruth\)\|\|\(!saysTrue && !actualTruth\)/);
-  assert.match(script, /receiver\.faceUp\[offer\.card\.id\]>=4/);
+  assert.match(script, /gatheringState\(receiver\.faceUp\)/);
+  assert.match(script, /finishByGathering\(receiver,gathering\)/);
 });
 
 test('ふたり用の人間プレイヤーは相手とNPCの両方を渡す対象にできる', () => {
@@ -196,4 +226,8 @@ test('人間へのカードは判定前にも交代し、こはるへのカー�
   assert.match(script, /if\(isHuman\(target\)\)[\s\S]*showPassOverlay\(target,"judge"\)/);
   assert.match(script, /else later\(\(\)=>cpuJudge\(to\),800\)/);
   assert.match(script, /later\(cpuTurn,650\)/);
+});
+
+test('soloでは人間宛の判定依頼が判定UIへ届き、duoでは操作中のビューアに限定される', () => {
+  assert.match(script, /game\.mode==="duo" \? viewer\?\.id===game\.offer\.to : isHuman\(getPlayer\(game\.offer\.to\)\)/);
 });

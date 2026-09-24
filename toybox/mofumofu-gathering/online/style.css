@@ -100,3 +100,14 @@ dialog::backdrop{background:rgba(65,49,43,.45);backdrop-filter:blur(2px)}
 @media(max-width: 340px){.screen{padding:8px 10px 12px}.seat-row{gap:7px}.player-box{padding:7px 6px}.face{font-size:24px}.hand-card{flex-basis:58px;height:80px;font-size:27px}.table-center{gap:14px;min-height:130px}}
 @media(min-width:700px){body{padding:22px 0}.app{min-height:calc(100dvh - 44px);border-radius:28px}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important}}
+
+.hand-card img{width:46px;height:58px;object-fit:contain}
+.compact-hand .hand-card img{width:36px;height:44px;object-fit:contain}
+.offer-card img{width:50px;height:50px;object-fit:contain}
+.final-verdict{margin:.25rem 0 0;font-weight:900}
+.final-verdict.won{color:#167044}
+.final-verdict.lost{color:#b4526b}
+.gathering-overlay{position:fixed;inset:0;z-index:120;display:grid;place-items:center;background:rgba(255,248,237,.92)}
+.gathering-overlay img{width:min(86vw,560px);animation:gatheringPop 2.6s ease both}
+@keyframes gatheringPop{0%{opacity:0;transform:scale(.85)}18%,80%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(1.02)}}
+@media(prefers-reduced-motion:reduce){.gathering-overlay img{animation:none;opacity:1;transform:none}}

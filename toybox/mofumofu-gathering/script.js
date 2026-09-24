@@ -22,7 +22,10 @@ const DUO_PLAYERS = [
   { id:"koharu", name:"こはる", face:"🌸", personality:"honest", human:false }
 ];
 
+const CARD_IMAGES = { cat:"cat.png", rabbit:"rabbit.png", chick:"chick.png", bear:"bear.png", polar:"polar-bear.png", fox:"fox.png", penguin:"penguin.png", panda:"panda.png" };
+const ASSET_BASE = "../../assets/mofumofu-gathering/";
 const $ = (id) => document.getElementById(id);
+function cardImage(id, alt) { return `<img src="${ASSET_BASE}${CARD_IMAGES[id]}" alt="${alt}" draggable="false">`; }
 const screens = ["titleScreen","gameScreen","resultScreen"];
 let game = null;
 let timers = [];
@@ -72,6 +75,12 @@ function makeDeck() {
   ANIMALS.forEach(a => { for(let i=0;i<4;i++) cards.push({id:a.id, uid:a.id+"-"+i}); });
   return shuffle(cards);
 }
+// 表向きカードだけから「もふもふ大集合！」の敗北条件を判定する純粋関数（手札は含めない）。
+function gatheringState(faceUp) {
+  const fourOfAKind = ANIMALS.find(a => faceUp[a.id] >= 4)?.id || null;
+  const allEightTypes = ANIMALS.every(a => faceUp[a.id] >= 1);
+  return { fourOfAKind, allEightTypes, gathering: !!(fourOfAKind || allEightTypes) };
+}
 function freshPlayer(data) {
   return {...data, hand:[], faceUp:Object.fromEntries(ANIMALS.map(a=>[a.id,0])), out:false};
 }
@@ -104,6 +113,7 @@ function startGame(mode=selectedMode) {
   };
   showScreen("gameScreen");
   render();
+  game.visibleHumanId=(game.players.find(isHuman)||{id:null}).id;
   beginTurn();
 }
 
@@ -161,7 +171,7 @@ function render() {
   $("handStep").classList.toggle("hidden",!humanTurn);
   $("claimStep").classList.toggle("hidden",!humanTurn || !game.selectedUid);
   $("targetStep").classList.toggle("hidden",!humanTurn || !game.selectedUid || !game.claim);
-  $("judgeStep").classList.toggle("hidden",!(game.offer && viewer?.id===game.offer.to));
+  $("judgeStep").classList.toggle("hidden",!(game.offer && (game.mode==="duo" ? viewer?.id===game.offer.to : isHuman(getPlayer(game.offer.to)))));
   if (!game.offer) {
     $("offerText").textContent=humanTurn ? "カードを選んでね" : actor.name+"が考えています…";
   }
@@ -183,7 +193,7 @@ function renderHand() {
   $("hand").innerHTML=you.hand.length ? you.hand.map(c => {
     const a=animal(c.id);
     return `<button class="hand-card ${game.selectedUid===c.uid?"selected":""}" data-uid="${c.uid}" aria-label="${a.name}のカード">
-      <span>${a.emoji}</span><small>${a.name}</small>
+      <img src="${ASSET_BASE}${CARD_IMAGES[c.id]}" alt="" draggable="false"><small>${a.name}</small>
     </button>`;
   }).join("") : "<p>手札はありません。</p>";
   document.querySelectorAll(".hand-card").forEach(btn => btn.addEventListener("click",()=>{
@@ -199,7 +209,7 @@ function renderJudgeHand() {
   if(!you){ box.innerHTML=""; return; }
   box.innerHTML=you.hand.length ? you.hand.map(c=>{
     const a=animal(c.id);
-    return `<div class="hand-card read-only"><span>${a.emoji}</span><small>${a.name}</small></div>`;
+    return `<div class="hand-card read-only"><img src="${ASSET_BASE}${CARD_IMAGES[c.id]}" alt="${a.name}" draggable="false"><small>${a.name}</small></div>`;
   }).join("") : "<p>手札はありません。</p>";
 }
 
@@ -257,7 +267,7 @@ function createOffer(from,to,card,claim) {
   addLog(`${giver.name}「これは『${a.name}』だよ」→ ${receiver.name}`);
   $("offerText").textContent=`${giver.name}「${a.name}だよ」`;
   $("offerCard").classList.remove("revealed");
-  $("offerCardMain").textContent=a.emoji;
+  $("offerCardMain").innerHTML=cardImage(claim,a.name);
   $("offerCardSub").textContent="";
   animateCard(to);
   render();
@@ -319,11 +329,12 @@ function resolveJudge(saysTrue) {
   flash(success?"✨ 判定成功！":"💭 判定失敗！");
   game.offer=null;
   $("offerCard").classList.add("revealed");
-  $("offerCardMain").textContent=animal(offer.card.id).emoji;
+  $("offerCardMain").innerHTML=cardImage(offer.card.id,animal(offer.card.id).name);
   $("offerCardSub").textContent="";
   $("offerText").textContent=`${receiver.name}が受け取りました`;
   render();
-  if(receiver.faceUp[offer.card.id]>=4) return later(()=>eliminate(receiver,offer.card.id),700);
+  const gathering=gatheringState(receiver.faceUp);
+  if(gathering.gathering) return later(()=>finishByGathering(receiver,gathering),700);
   later(nextTurn,700);
 }
 
@@ -344,6 +355,36 @@ function eliminate(player, animalId) {
   later(nextTurn,850);
 }
 
+// 3人戦の「もふもふ大集合！」は即終了（敗者1人、残り2人が勝ち）。脱落戦や2人専用ルールへ移行しない。
+function finishByGathering(loser, gathering) {
+  if(game.ended) return;
+  game.ended=true; clearTimers();
+  game.finalSnapshot=game.players.map(p=>({id:p.id,name:p.name,face:p.face,count:faceCards(p),out:p.out,faceUp:{...p.faceUp},verdict:p.id===loser.id?"lose":"win"}));
+  loser.out=true;
+  game.discard.push(...loser.hand);
+  loser.hand=[];
+  ANIMALS.forEach(a=>{
+    for(let i=0;i<loser.faceUp[a.id];i++) game.discard.push({id:a.id,uid:"discard-"+Math.random()});
+    loser.faceUp[a.id]=0;
+  });
+  const reason=gathering.fourOfAKind && gathering.allEightTypes ? `${animal(gathering.fourOfAKind).name}が4枚・全8種類がそろった`
+    : gathering.fourOfAKind ? `${animal(gathering.fourOfAKind).name}が4枚そろった`
+    : "全8種類の動物が表向きにそろった";
+  addLog(`${loser.name}は「もふもふ大集合！」 ${reason}で敗北！`);
+  flash("🐾 もふもふ大集合！");
+  render();
+  const title=loser.id==="you" ? "🐾 もふもふ大集合！ あなたの負け" : `🐾 もふもふ大集合！ ${loser.name}の負け`;
+  const text=`${reason}ため、${loser.name}の負け。残りの2人は勝ち！`;
+  later(()=>showGatheringLogo(()=>finishResult(null,text,title)),700);
+}
+
+// ロゴ演出は表示層だけ。演出完了をゲーム進行の条件にしない。
+function showGatheringLogo(onDone) {
+  const overlay=$("gatheringOverlay");
+  if(!overlay) return onDone();
+  overlay.classList.remove("hidden");
+  later(()=>{ overlay.classList.add("hidden"); onDone(); },2600);
+}
 function finishByHandEmpty(alive) {
   const counts=alive.map(p=>({p,n:faceCards(p)}));
   game.finalSnapshot=game.players.map(p=>({id:p.id,name:p.name,face:p.face,count:faceCards(p),out:p.out,faceUp:{...p.faceUp}}));
@@ -371,7 +412,8 @@ function finishResult(winner,text,title) {
   const snapshot=game.finalSnapshot || game.players.map(p=>({id:p.id,name:p.name,face:p.face,count:faceCards(p),out:p.out,faceUp:{...p.faceUp}}));
   $("resultDetails").innerHTML=snapshot.map(p=>{
     const detail=ANIMALS.filter(a=>(p.faceUp?.[a.id]||0)>0).map(a=>`<span class="result-chip">${a.emoji}${a.name} ×${p.faceUp[a.id]}</span>`).join("") || '<span class="result-chip">なし</span>';
-    return `<div class="result-player"><div class="result-row"><strong>${p.face} ${p.name}</strong><span>表向き ${p.count}枚${p.out?" ／ 脱落":""}</span></div><div class="result-breakdown">${detail}</div></div>`;
+    const verdict=p.verdict==="lose"?"もふもふ大集合！／負け":p.verdict==="win"?"勝ち！":(p.out?" ／ 脱落":"");
+    return `<div class="result-player"><div class="result-row"><strong>${p.face} ${p.name}</strong><span>表向き ${p.count}枚${verdict?` ／ ${verdict}`:""}</span></div><div class="result-breakdown">${detail}</div></div>`;
   }).join("");
   $("resultAnimals").innerHTML="<span>🐾</span><span>✨</span><span>🐾</span>";
   $("resultAnimals").classList.remove("bounce");
