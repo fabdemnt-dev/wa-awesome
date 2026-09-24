@@ -149,7 +149,12 @@ test('CORSはprojectごとの単一origin allowlistでfail-closed', () => {
 });
 
 test('production hostnameはproduction configだけを選ぶ', async () => {
-  const environment = await resolve('fabdemnt-dev.github.io', { databaseURL: 'https://production.example', appCheckSiteKey: 'production-key' });
+  const environment = await resolve('fabdemnt-dev.github.io', {
+    environment: 'production',
+    hostname: 'fabdemnt-dev.github.io',
+    databaseURL: 'https://wa-awesome-default-rtdb.asia-southeast1.firebasedatabase.app',
+    appCheckSiteKey: '6LeU8sstAAAAAOEyP56nWLD633TiAWaLmvcskE6e',
+  });
   assert.equal(environment.name, 'production');
   assert.equal(environment.firebase.projectId, 'wa-awesome');
   assert.notEqual(environment.firebase.projectId, stagingConfig.firebase.projectId);

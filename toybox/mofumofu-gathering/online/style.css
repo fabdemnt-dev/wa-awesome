@@ -1,8 +1,19 @@
 :root { color-scheme: light; font-family: system-ui, sans-serif; background: #fffaf4; color: #352b28; }
-body { margin: 0; padding: 1rem; }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 1rem; overflow-wrap: anywhere; }
 main { max-width: 44rem; margin: auto; }
 section, form { margin: 1rem 0; padding: 1rem; border-radius: 1rem; background: #fff; }
-button, select, input { min-height: 44px; margin: .25rem; font: inherit; }
+button, select, input, a { min-height: 44px; font: inherit; }
+button, select, input { max-width: 100%; margin: .25rem; }
+button, a { touch-action: manipulation; }
+.top-nav { display: flex; flex-wrap: wrap; gap: .5rem 1rem; }
+.top-nav a { display: inline-flex; align-items: center; }
+#join-form label { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+#invite-code { width: min(100%, 14rem); text-transform: uppercase; }
+dialog { width: min(calc(100% - 2rem), 36rem); max-height: calc(100dvh - 2rem); border: 0; border-radius: 1rem; padding: 0; }
+dialog::backdrop { background: rgb(53 43 40 / 55%); }
+.dialog-body { padding: 1rem; }
+.dialog-body li { margin-block: .6rem; line-height: 1.5; }
 #hand { display: flex; flex-wrap: wrap; gap: .5rem; }
 .card { border: 2px solid #e7c9ae; border-radius: .75rem; padding: .6rem; background: #fff; }
 #result { border: 2px solid #d7b26d; }
@@ -14,3 +25,7 @@ button, select, input { min-height: 44px; margin: .25rem; font: inherit; }
 .presence-list { list-style: none; padding: .6rem; border-radius: .75rem; background: #fff; }
 .presence-online { color: #167044; }
 .presence-wait { color: #765b19; }
+@media (max-width: 340px) {
+  body { padding: .65rem; }
+  section, form { padding: .75rem; }
+}

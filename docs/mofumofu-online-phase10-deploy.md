@@ -1,31 +1,45 @@
-# もふもふ大集合！オンライン版 Phase 10 deploy手順
+# もふもふ大集合！オンライン版 Phase 10 production作業表
 
-Phase 7では実行しない。本番値・Console設定を確認できたPhase 10でのみ使う。
+Phase 9では実行しない。すべての変更前に対象projectと現在値を保存し、1工程ずつ検証する。
 
-## 必須実値とConsole確認
+## 固定production値
 
-- 正規Firebase Web AppのRTDB URL（推測せずConsoleから転記）
-- Functions runtime環境変数 `MOFUMOFU_RTDB_URL` に同じ正規RTDB URL
-- reCAPTCHA Enterprise site keyとApp Check Web App登録
-- Anonymous Authenticationが有効
-- `fabdemnt-dev.github.io` がAuthorized domainsに登録済み
-- Secret Managerの `MOFUMOFU_ONLINE_IP_HMAC_KEY`（32 bytes以上のランダム値）
-- `MOFUMOFU_ENFORCE_APP_CHECK=true` は実機token確認後に設定
-- Firestore TTL policyは次表を個別確認してから設定
+- project ID: `wa-awesome`
+- project number: `1074804319870`
+- Web App ID: `1:1074804319870:web:923f0ec866812f98ae5a2f`
+- RTDB URL: `https://wa-awesome-default-rtdb.asia-southeast1.firebasedatabase.app`
+- GitHub Pages origin: `https://fabdemnt-dev.github.io`
+- reCAPTCHA Enterprise App Check site key: `6LeU8sstAAAAAOEyP56nWLD633TiAWaLmvcskE6e`
+- 初期公開フラグ: `ONLINE_PUBLIC_ENABLED=false`
 
-| collection group | field | 保持期間 |
-|---|---|---|
-| mofumofuOnlineRooms | deleteAt | 待機30分、進行24時間、終了6時間 |
-| members / privateHands / serverState | deleteAt | 親roomと同じ |
-| mofumofuOnlineRoomInvites / mofumofuOnlineRoomSecrets | deleteAt | 親roomと同じ |
-| mofumofuOnlineActionRequests | deleteAt | 24時間 |
-| mofumofuOnlineRateLimits | deleteAt | 20分 |
+## 順序付き作業
 
-TTLは削除の猶予を許す仕組みであり、Callableの期限判定は別途維持する。
+1. `firebase use`、Console、Web App設定でproject ID／number／Web App ID／RTDB URLを再確認する。stagingと異なることを記録する。
+2. Anonymous AuthenticationとAuthorized domain `fabdemnt-dev.github.io` の現在値を画面保存する。変更が必要な場合は変更前値も保存する。
+3. Functionsの現在の環境変数・Secret version・11 Functions（10 Callable＋cleanup scheduler）・runtime／regionを保存する。Secret本文はログやファイルへ出さない。
+4. `MOFUMOFU_RTDB_URL` を固定production RTDB URLへ設定する。
+5. `MOFUMOFU_ONLINE_IP_HMAC_KEY` が32 bytes以上のproduction専用ランダムSecretであることを確認し、未作成時だけ作成する。
+6. App Check provider、Web App紐付け、TTL 3600秒、許可domainを再確認する。ここではenforcementをONにしない。
+7. Firestore TTLの現在policyを保存し、次表のcollection group／`deleteAt`を個別設定する。
 
-## preflight、限定deploy、rollback
+| collection group | 保持期限 |
+|---|---|
+| mofumofuOnlineRooms | 待機30分、進行24時間、終了6時間 |
+| members / privateHands / serverState | 親roomと同じ |
+| mofumofuOnlineRoomInvites / mofumofuOnlineRoomSecrets | 親roomと同じ |
+| mofumofuOnlineActionRequests | 24時間 |
+| mofumofuOnlineRateLimits | 20分 |
 
-repository rootで `scripts/mofumofu-online-phase10-preflight.sh` を実行する。これはSHA-256と完全版Rulesを時刻付きdirectoryへ保存し、差分と対象Function名を表示する。内容をレビュー後、次の限定コマンドだけを個別に実行する。
+8. `scripts/mofumofu-online-phase10-preflight.sh` で現在Rules、対象ファイルSHA-256、対象Function一覧を時刻付きdirectoryへ保存する。
+9. 10 Callableと`cleanupMofumofuOnline`だけを限定deployする。Firestore Rules、RTDB Rulesも各サービス限定で個別deployする。
+10. cleanup schedulerが60分間隔・`Asia/Tokyo`・`asia-northeast1`で有効か確認する。
+11. production clientを反映するが、`ONLINE_PUBLIC_ENABLED=false`を維持する。
+12. production直接URLでAuth、App Check初期化、正規App Check token、create／join／start／resume、Firestore／RTDB同期を確認する。debug provider/tokenは禁止する。
+13. Functionsの呼出数、4xx/5xx、latency、App Check invalid/missing、Firestore／RTDB拒否、cleanup結果を確認する。
+14. 実測が正常な場合だけ`MOFUMOFU_ENFORCE_APP_CHECK=true`を設定して10 Callableを再deployする。cleanup schedulerにはclient App Checkを要求しない。
+15. enforcement ON後に正規client成功、tokenなし／不正token拒否、resume／presence／NPC代理を再確認する。異常時は即rollbackする。
+
+限定deploy対象:
 
 ```sh
 firebase deploy --only functions:createMofumofuRoom,functions:joinMofumofuRoom,functions:startMofumofuGame,functions:resumeMofumofuRoom,functions:authorizeMofumofuPresence,functions:makeMofumofuOffer,functions:judgeMofumofuOffer,functions:runMofumofuNpcTurn,functions:startMofumofuNpcProxy,functions:runMofumofuNpcProxyAction,functions:cleanupMofumofuOnline
@@ -33,6 +47,13 @@ firebase deploy --only firestore:rules
 firebase deploy --only database
 ```
 
-問題時はpreflightが保存した `firestore.rules` と `database.rules.json` をrepository rootへ復元し、SHAを照合して、Rulesだけを各 `--only` で戻す。Functionsは直前のGit commitをworktreeへ展開し、同じ限定Function一覧で戻す。main、他ゲームnamespace、全サービス一括deployは対象外。
+## rollback
 
-オンライン導線は実機検証が終わるまで `online-entry.js` の `ONLINE_PUBLIC_ENABLED=false` を維持する。
+- client: 直前の正常commitをGitHub Pagesへ再反映する。一般導線は`ONLINE_PUBLIC_ENABLED=false`へ戻す。
+- Functions: 保存した直前commitから同じ11 Functionsだけを限定deployする。`MOFUMOFU_ENFORCE_APP_CHECK`の変更前値も復元する。
+- Firestore／RTDB Rules: preflight保存版をrootへ戻し、保存SHAと一致後に各Rulesだけを限定deployする。
+- App Check enforcement: ConsoleでFunctions／Firestore／RTDB／Authenticationの変更対象だけを変更前状態へ戻す。
+- runtime config: clientの直前正常commitと、保存したFunctions環境変数の変更前値を復元する。Secret本文はrollback資料へ保存しない。
+- main反映後: revert commitを作成して通常pushし、force/resetで履歴を書き換えない。
+
+TTLは削除時刻を保証しないため、Callable内の期限判定とcleanupを維持する。rollback後は直接URL、metrics、Rules拒否、`ONLINE_PUBLIC_ENABLED=false`を再確認する。

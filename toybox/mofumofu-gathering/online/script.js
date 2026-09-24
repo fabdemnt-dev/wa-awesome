@@ -29,6 +29,9 @@ if (environment.name === 'emulator') {
 }
 const call = (name, data) => httpsCallable(functions, name)(data).then((response) => response.data);
 const $ = (id) => document.getElementById(id);
+const helpDialog = $('help-dialog');
+$('open-help').addEventListener('click', () => helpDialog.showModal());
+$('close-help').addEventListener('click', () => helpDialog.close());
 const HEARTBEAT_MS = 15_000;
 const STALE_MS = 120_000;
 const ACCESS_REFRESH_MS = 4 * 60_000;
@@ -288,20 +291,28 @@ async function runNpc() {
   catch (error) { message(error.message); setTimeout(runNpc, 1000); }
   finally { state.npcBusy = false; }
 }
-$('create-room').addEventListener('click', async () => { const value = await call('createMofumofuRoom', {}); remember(value.roomId, value.seatId); $('shown-invite').textContent = value.inviteCode; await requestFullResume('create-room'); });
-$('join-form').addEventListener('submit', async (event) => { event.preventDefault(); const value = await call('joinMofumofuRoom', { inviteCode: $('invite-code').value }); remember(value.roomId, value.seatId); await requestFullResume('join-room'); });
+$('create-room').addEventListener('click', async () => {
+  const button = $('create-room'); if (button.disabled) return; button.disabled = true;
+  try { const value = await call('createMofumofuRoom', {}); remember(value.roomId, value.seatId); $('shown-invite').textContent = value.inviteCode; await requestFullResume('create-room'); }
+  catch (error) { message(error.message); button.disabled = false; }
+});
+$('join-form').addEventListener('submit', async (event) => {
+  event.preventDefault(); const button = $('join-room'); if (button.disabled) return; button.disabled = true;
+  try { const value = await call('joinMofumofuRoom', { inviteCode: $('invite-code').value }); remember(value.roomId, value.seatId); await requestFullResume('join-room'); }
+  catch (error) { message(error.message); button.disabled = false; }
+});
 $('start-game').addEventListener('click', async () => {
   try {
     await runStartGame({ state, button: $('start-game'), roomId: state.roomId, startGame: (data) => call('startMofumofuGame', data), refresh });
   } catch (error) { message(error.message); }
 });
 $('offer-form').addEventListener('submit', async (event) => {
-  event.preventDefault(); if (state.makeBusy) return; state.makeRequest ||= { roomId: state.roomId, cardId: $('offer-card').value, claimAnimal: $('claim-animal').value, targetPlayerId: $('target-player').value, actionId: newId() }; state.makeBusy = true;
-  try { await call('makeMofumofuOffer', state.makeRequest); state.makeRequest = null; await refresh(); } catch (error) { message(error.message); } finally { state.makeBusy = false; }
+  event.preventDefault(); if (state.makeBusy) return; const button = event.currentTarget.querySelector('button'); state.makeRequest ||= { roomId: state.roomId, cardId: $('offer-card').value, claimAnimal: $('claim-animal').value, targetPlayerId: $('target-player').value, actionId: newId() }; state.makeBusy = true; button.disabled = true;
+  try { await call('makeMofumofuOffer', state.makeRequest); state.makeRequest = null; await refresh(); } catch (error) { message(error.message); } finally { state.makeBusy = false; button.disabled = false; }
 });
 $('judge-buttons').addEventListener('click', async (event) => {
-  const judgment = event.target.dataset.judgment; if (!judgment || state.judgeBusy) return; state.judgeRequest ||= { roomId: state.roomId, actionId: state.room.publicOffer.actionId, judgment }; state.judgeBusy = true;
-  try { await call('judgeMofumofuOffer', state.judgeRequest); state.judgeRequest = null; await refresh(); } catch (error) { message(error.message); } finally { state.judgeBusy = false; }
+  const judgment = event.target.dataset.judgment; if (!judgment || state.judgeBusy) return; const buttons = [...event.currentTarget.querySelectorAll('button')]; state.judgeRequest ||= { roomId: state.roomId, actionId: state.room.publicOffer.actionId, judgment }; state.judgeBusy = true; buttons.forEach((button) => { button.disabled = true; });
+  try { await call('judgeMofumofuOffer', state.judgeRequest); state.judgeRequest = null; await refresh(); } catch (error) { message(error.message); } finally { state.judgeBusy = false; buttons.forEach((button) => { button.disabled = false; }); }
 });
 document.addEventListener('visibilitychange', () => { if (!document.hidden) void requestFullResume('visibilitychange'); });
 globalThis.addEventListener('pageshow', () => void requestFullResume('pageshow'));

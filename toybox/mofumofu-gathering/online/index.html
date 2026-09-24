@@ -8,11 +8,17 @@
 </head>
 <body>
   <main>
+    <nav class="top-nav" aria-label="ページ移動">
+      <a href="../">← もふもふ大集合！へ戻る</a>
+      <a href="../../../toybox/">おもちゃ箱へ戻る</a>
+    </nav>
     <h1>もふもふ大集合！オンライン</h1>
-    <p id="status" role="status">接続準備中です…</p>
+    <p id="status" role="status" aria-live="polite">接続準備中です…</p>
+    <button id="open-help" type="button" aria-haspopup="dialog">オンライン版の遊び方</button>
     <section id="entry">
       <button id="create-room">部屋をつくる</button>
-      <form id="join-form"><label>招待コード <input id="invite-code" maxlength="8" autocomplete="off"></label><button>参加</button></form>
+      <p id="invite-help">部屋をつくった人から8文字の招待コードを教えてもらい、入力してください。</p>
+      <form id="join-form"><label>招待コード <input id="invite-code" maxlength="8" autocomplete="off" aria-describedby="invite-help" autocapitalize="characters" spellcheck="false"></label><button id="join-room">参加</button></form>
     </section>
     <section id="lobby" hidden>
       <p>部屋: <strong id="room-id"></strong></p>
@@ -24,9 +30,9 @@
       <h2>オンライン対戦</h2>
       <section id="elimination-notice" class="notice" hidden></section>
       <ul id="presence-list" class="presence-list" aria-label="接続状態"></ul>
-      <p id="control-status" class="notice"></p>
-      <p id="reconnect-wait" class="notice" hidden></p>
-      <p id="turn"></p><p id="npc-status" hidden>こはるが考えています…</p>
+      <p id="control-status" class="notice" aria-live="polite"></p>
+      <p id="reconnect-wait" class="notice" role="status" aria-live="polite" hidden></p>
+      <p id="turn" aria-live="polite"></p><p id="npc-status" role="status" aria-live="polite" hidden>こはるが考えています…</p>
       <div id="hand"></div>
       <form id="offer-form" hidden>
         <label>カード <select id="offer-card"></select></label>
@@ -35,7 +41,7 @@
         <button>渡す</button>
       </form>
       <section id="offer" hidden><p id="offer-message"></p><div id="judge-buttons" hidden><button data-judgment="truth">ほんと？</button><button data-judgment="lie">うそ！</button></div></section>
-      <section id="result" hidden></section>
+      <section id="result" role="status" aria-live="polite" hidden></section>
       <section id="final-result" class="final-result" hidden>
         <h2 id="final-title"></h2>
         <p id="final-reason"></p>
@@ -43,7 +49,28 @@
       </section>
     </section>
   </main>
+  <dialog id="help-dialog" aria-labelledby="help-title">
+    <div class="dialog-body">
+      <h2 id="help-title">オンライン版の遊び方</h2>
+      <ol>
+        <li>1人が部屋をつくり、表示された8文字の招待コードをもう1人へ伝えます。</li>
+        <li>もう1人がコードを入力して参加したら、部屋をつくった人がゲームを開始します。</li>
+        <li>手番では手札を1枚選び、動物を宣言して相手へ渡します。受け取った人は「ほんと？」か「うそ！」で判定します。</li>
+        <li>同じ動物が表向きで4枚そろうと脱落です。最後まで残るか、手札を0枚にすると勝ちです。</li>
+      </ol>
+      <p>「再接続中」と表示された場合は、そのまま同期が終わるまで待ってください。</p>
+      <button id="close-help" type="button">閉じる</button>
+    </div>
+  </dialog>
   <script>
+    if (globalThis.location.hostname === 'fabdemnt-dev.github.io') {
+      globalThis.MOFUMOFU_ONLINE_CONFIG = Object.freeze({
+        environment: 'production',
+        hostname: 'fabdemnt-dev.github.io',
+        databaseURL: 'https://wa-awesome-default-rtdb.asia-southeast1.firebasedatabase.app',
+        appCheckSiteKey: '6LeU8sstAAAAAOEyP56nWLD633TiAWaLmvcskE6e',
+      });
+    }
     if (globalThis.location.hostname === 'wa-awesome-mofumofu-stg.web.app') {
       globalThis.MOFUMOFU_ONLINE_CONFIG = Object.freeze({
         environment: 'staging',

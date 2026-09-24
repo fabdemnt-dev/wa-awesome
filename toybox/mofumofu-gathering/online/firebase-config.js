@@ -23,6 +23,20 @@ function exact(value, expected, label) {
   return expected;
 }
 
+function productionEnvironment() {
+  if (injected.environment !== 'production' || injected.hostname !== productionHost) {
+    throw new Error('production runtime configが正しくありません。');
+  }
+  return {
+    name: 'production',
+    firebase: {
+      ...productionBase,
+      databaseURL: exact(injected.databaseURL, 'https://wa-awesome-default-rtdb.asia-southeast1.firebasedatabase.app', 'production RTDB URL'),
+    },
+    appCheck: { siteKey: exact(injected.appCheckSiteKey, '6LeU8sstAAAAAOEyP56nWLD633TiAWaLmvcskE6e', 'production App Check site key') },
+  };
+}
+
 function stagingEnvironment() {
   if (injected.environment !== 'staging' || injected.hostname !== stagingHost) {
     throw new Error('staging runtime configが正しくありません。');
@@ -50,11 +64,7 @@ export function resolveEnvironment() {
     emulator: { authPort: 9199, firestorePort: 8180, databasePort: 9103, functionsPort: 5101 },
     appCheck: { debug: true },
   };
-  if (host === productionHost) return {
-    name: 'production',
-    firebase: { ...productionBase, databaseURL: required(injected.databaseURL, '本番RTDB URL') },
-    appCheck: { siteKey: required(injected.appCheckSiteKey, 'App Check site key') },
-  };
+  if (host === productionHost) return productionEnvironment();
   if (host === stagingHost) return stagingEnvironment();
   throw new Error('このホストではオンライン版を起動できません。');
 }

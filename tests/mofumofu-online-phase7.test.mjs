@@ -30,7 +30,7 @@ const checks = [
   ['11 既存Auth UID再利用', () => fullResumePipeline.includes('if (!auth.currentUser) await signInAnonymously(auth)')],
   ['12 Auth初期化前に新UIDを作らない', () => fullResumePipeline.indexOf('await auth.authStateReady()') < fullResumePipeline.indexOf('signInAnonymously(auth)')],
   ['13 UID喪失時localStorageだけでresume不可', () => phase6.includes('別UID') || functions.includes('requireMember(room, uid)')],
-  ['14 productionでApp Check設定必須', () => config.includes("required(injected.appCheckSiteKey")],
+  ['14 productionでApp Check設定必須', () => config.includes("exact(injected.appCheckSiteKey")],
   ['15 debug providerはlocalhost/CIだけ', () => config.includes("name: 'emulator'") && client.includes('environment.appCheck.debug')],
   ['16 debug token commit禁止', () => !`${config}${client}`.match(/FIREBASE_APPCHECK_DEBUG_TOKEN\s*=\s*['\"][^'\"]+['\"]/) ],
   ['17 productionでdebug provider禁止', () => config.includes("name: 'production'") && config.includes('appCheck: { siteKey:')],
