@@ -12,8 +12,16 @@ export function clearSavedRoom(storage) {
   storage.removeItem('mofumofuSeatId');
 }
 
+// roomが消えた理由を、保存していたroomの招待期限がまだ先かどうかで見分ける。
+// hostが閉じた場合は期限前に消えるため「部屋が閉じられました。」、TTL cleanup後は従来の文言を使う。
+export function roomGoneNotice(lastRoom, now = Date.now()) {
+  const expiresAt = lastRoom?.joinExpiresAt;
+  const millis = typeof expiresAt?.toMillis === 'function' ? expiresAt.toMillis() : Number(expiresAt) || 0;
+  return millis > now ? '部屋が閉じられました。' : '保存していた部屋は終了しました。接続しました。';
+}
+
 export function createRoomGoneRecovery({ state, storage, message, resetEntryView }) {
-  return function recoverFromRoomGone() {
+  return function recoverFromRoomGone(notice = null) {
     clearSavedRoom(storage);
     state.roomId = null;
     state.seatId = null;
@@ -29,8 +37,10 @@ export function createRoomGoneRecovery({ state, storage, message, resetEntryView
     state.npcRequest = null;
     state.proxyStartRequest = null;
     state.proxyActionRequest = null;
+    state.closeRequest = null;
+    state.closeBusy = false;
     resetEntryView();
     state.connectionState = 'connected';
-    message('保存していた部屋は終了しました。接続しました。');
+    message(notice || '保存していた部屋は終了しました。接続しました。');
   };
 }

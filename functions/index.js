@@ -15,6 +15,7 @@ try {
   exports.joinMofumofuRoom = mofumofuOnline.joinMofumofuRoom;
   exports.startMofumofuGame = mofumofuOnline.startMofumofuGame;
   exports.resumeMofumofuRoom = mofumofuOnline.resumeMofumofuRoom;
+  exports.closeMofumofuRoom = mofumofuOnline.closeMofumofuRoom;
   exports.authorizeMofumofuPresence = mofumofuOnline.authorizeMofumofuPresence;
   exports.makeMofumofuOffer = mofumofuOnline.makeMofumofuOffer;
   exports.judgeMofumofuOffer = mofumofuOnline.judgeMofumofuOffer;

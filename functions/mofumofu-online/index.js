@@ -28,6 +28,8 @@ const RATE_TTL_MS = 2 * RATE_WINDOW_MS;
 // Shared networks must not lock out normal rooms; this is a coarse abuse backstop,
 // while the stricter per-UID join limit remains authoritative.
 const IP_RATE_LIMIT = 100;
+// createHandlerのUID単位の主制限。closeも同じ方式・同じ値で揃える（独自値は作らない）。
+const CREATE_UID_RATE_LIMIT = 6;
 const PRODUCTION_PROJECT_ID = 'wa-awesome';
 const STAGING_PROJECT_ID = 'wa-awesome-mofumofu-stg';
 const PRODUCTION_ORIGIN = 'https://fabdemnt-dev.github.io';
@@ -419,7 +421,7 @@ async function createHandler(request) {
   exactFields(request.data || {}, []);
   const uid = authUid(request);
   const store = db();
-  await consumeRateLimit(`create_uid_${digest(uid)}`, 6);
+  await consumeRateLimit(`create_uid_${digest(uid)}`, CREATE_UID_RATE_LIMIT);
   await consumeRateLimit(`create_ip_${ipHash(request)}`, IP_RATE_LIMIT);
   for (let attempt = 0; attempt < INVITE_RETRIES; attempt += 1) {
     const code = newInviteCode();
@@ -899,10 +901,51 @@ async function proxyActionHandler(request) {
   });
 }
 
+// 部屋を閉じる（host限定・waiting限定）。既存のactionId+fingerprint方式と、create/joinと同じrate-limit方式を再利用する。
+async function closeHandler(request) {
+  exactFields(request.data, ['roomId', 'actionId']);
+  const uid = authUid(request);
+  const roomId = roomIdFrom(request.data);
+  const actionId = actionIdFrom(request.data);
+  const r = refs(roomId);
+  const fingerprint = actionFingerprint('close', uid, roomId, {});
+  // 正常closeの再送は、roomがすでに消えていても初回と同じ成功結果を返す（rate limitも消費しない）。
+  const initialActionSnap = await r.action(actionId).get();
+  if (initialActionSnap.exists) return replayAction(initialActionSnap.data(), fingerprint);
+  const now = Date.now();
+  // createと同じ2段（UID主制限＋IP補助制限）。IPは既存のHMACのみで、平文も新Secretも増やさない。
+  await consumeRateLimit(`close_uid_${digest(uid)}`, CREATE_UID_RATE_LIMIT, now);
+  await consumeRateLimit(`close_ip_${ipHash(request)}`, IP_RATE_LIMIT, now);
+  const result = await db().runTransaction(async (tx) => {
+    const actionSnap = await tx.get(r.action(actionId));
+    if (actionSnap.exists) return replayAction(actionSnap.data(), fingerprint);
+    const [roomSnap, secretSnap] = await Promise.all([tx.get(r.room), tx.get(r.secret)]);
+    // cleanup等でroomが既に無い場合は、正常closeの再送と区別してnot-foundで返す。
+    if (!roomSnap.exists) fail('not-found', '部屋が見つかりません。');
+    const room = roomSnap.data();
+    if (room.hostUid !== uid) fail('permission-denied', 'ホストだけが部屋を閉じられます。');
+    if (room.status !== 'waiting') fail('failed-precondition', 'この部屋は閉じられません。');
+    if (secretSnap.exists && typeof secretSnap.data().inviteDigest === 'string') {
+      const inviteRef = db().collection('mofumofuOnlineRoomInvites').doc(secretSnap.data().inviteDigest);
+      const inviteSnap = await tx.get(inviteRef);
+      if (inviteSnap.exists) tx.update(inviteRef, { status: 'closed', revokedAt: now });
+    }
+    const closeResult = { roomId, actionId, status: 'closed' };
+    tx.update(r.room, { status: 'closed', closedAt: now, closeReason: 'host-closed', deleteAt: Timestamp.fromMillis(now) });
+    tx.create(r.action(actionId), { fingerprint, stateToken: `close:${room.status}`, result: closeResult, completedAt: now, deleteAt: expiry(ACTION_TTL_MS) });
+    return closeResult;
+  });
+  // 確定後は、既存cleanupと同じ方式でroom配下（members/privateHands/serverState）とsecretを片付ける。
+  await db().recursiveDelete(r.room);
+  await db().collection('mofumofuOnlineRoomSecrets').doc(roomId).delete().catch(() => {});
+  return result;
+}
+
 const createMofumofuRoom = onCall(callableOptions, createHandler);
 const joinMofumofuRoom = onCall(callableOptions, joinHandler);
 const startMofumofuGame = onCall(callableOptions, startHandler);
 const resumeMofumofuRoom = onCall(callableOptions, resumeHandler);
+const closeMofumofuRoom = onCall(callableOptions, closeHandler);
 const authorizeMofumofuPresence = onCall(callableOptions, authorizePresenceHandler);
 const makeMofumofuOffer = onCall(callableOptions, makeHandler);
 const judgeMofumofuOffer = onCall(callableOptions, judgeHandler);
@@ -916,6 +959,7 @@ module.exports = {
   joinMofumofuRoom,
   startMofumofuGame,
   resumeMofumofuRoom,
+  closeMofumofuRoom,
   authorizeMofumofuPresence,
   makeMofumofuOffer,
   judgeMofumofuOffer,
@@ -923,6 +967,6 @@ module.exports = {
   startMofumofuNpcProxy,
   runMofumofuNpcProxyAction,
   cleanupMofumofuOnline,
-  _handlers: { createHandler, joinHandler, startHandler, resumeHandler, authorizePresenceHandler, makeHandler, judgeHandler, npcHandler, startProxyHandler, proxyActionHandler },
+  _handlers: { createHandler, joinHandler, startHandler, resumeHandler, authorizePresenceHandler, makeHandler, judgeHandler, npcHandler, startProxyHandler, proxyActionHandler, closeHandler },
   _test: { ANIMALS, PRESENCE_ACCESS_TTL_MS, PRESENCE_STALE_MS, WAITING_TTL_MS, PLAYING_TTL_MS, FINISHED_TTL_MS, ACTION_TTL_MS, RATE_TTL_MS, callableOptions, runtimeProjectId, corsOriginsForProject, ipHash, cleanupMofumofuDataNow, presenceConnectionOnline, uidPresenceOnline, uidPresenceState, chooseNpcClaim, chooseNpcJudgment, nextPlayerId, judgeSuccess, digest, sameFingerprint, countByAnimal, gatheringState, finishIfNeeded, cloneGameDocument, finishedNpcRoom, resolveFaceUp },
 };
