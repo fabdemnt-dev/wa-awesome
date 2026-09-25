@@ -6,10 +6,10 @@ import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'https://w
 import { getDatabase, connectDatabaseEmulator, ref, onValue, onDisconnect, set, update, serverTimestamp } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js';
 import { resolveEnvironment, REGION } from './firebase-config.js';
 import { completeInitialConnection } from './initial-connection.js';
-import { beginEntrySubmit, connectionIsOnline, createResumeCoordinator, endEntrySubmit, playerPresenceState, proxyEvaluationReady, runStartGame, shouldStartNpcProxy } from './connection-control.js';
+import { beginEntrySubmit, connectionIsOnline, createResumeCoordinator, endEntrySubmit, playerPresenceState, proxyEvaluationReady, runStartGame, shouldStartNpcProxy } from './connection-control.js?v=20260925-3';
 import { runMofumofuFullResume } from './full-resume.js';
-import { isSavedRoomGoneError, createRoomGoneRecovery } from './room-recovery.js';
-import { roomGoneNotice } from './room-recovery.js';
+import { isSavedRoomGoneError, createRoomGoneRecovery } from './room-recovery.js?v=20260925-3';
+import { roomGoneNotice } from './room-recovery.js?v=20260925-3';
 
 const animals = ['cat', 'rabbit', 'bear', 'chick', 'fox', 'penguin', 'panda', 'polar'];
 const labels = { cat: 'ねこ', rabbit: 'うさぎ', bear: 'くま', chick: 'ひよこ', fox: 'きつね', penguin: 'ぺんぎん', panda: 'ぱんだ', polar: 'しろくま' };
