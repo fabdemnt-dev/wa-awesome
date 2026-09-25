@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
@@ -230,4 +231,15 @@ test('人間へのカードは判定前にも交代し、こはるへのカー�
 
 test('soloでは人間宛の判定依頼が判定UIへ届き、duoでは操作中のビューアに限定される', () => {
   assert.match(script, /game\.mode==="duo" \? viewer\?\.id===game\.offer\.to : isHuman\(getPlayer\(game\.offer\.to\)\)/);
+});
+
+test('おもちゃ箱にはもふもふ大集合！への導線カードが1枚だけある', () => {
+  const box = readFileSync('toybox/index.html', 'utf8');
+  assert.equal((box.match(/mofumofu-gathering/g) || []).length, 1, 'exactly one entry link');
+  assert.match(box, /href="\.\/mofumofu-gathering\/"/);
+  assert.match(box, /もふもふ大集合！/);
+  assert.match(box, /player-count--1-2">1〜2人用</);
+  for (const link of ['../shadow-card.html', '../moon-scale-duel-select.html', '../twin-shadow-caskets/', '../birdcage-observer/', '../deep-mining-agreement/']) {
+    assert.ok(box.includes(link), 'existing link kept: ' + link);
+  }
 });
