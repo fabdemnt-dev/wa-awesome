@@ -62,3 +62,23 @@ test('invite code is held in state and sessionStorage and restored only for the 
   const entry = read('toybox/mofumofu-gathering/online-entry.js');
   assert.ok(entry.includes('const ONLINE_PUBLIC_ENABLED = true;'), 'public flag stays enabled');
 });
+
+test('lobby keeps the room id small and auxiliary and gives the waiting host an invite-only copy button', () => {
+  const script = read('toybox/mofumofu-gathering/online/script.js');
+  const html = read('toybox/mofumofu-gathering/online/index.html');
+  const css = read('toybox/mofumofu-gathering/online/style.css');
+  for (const token of ['async function copyText(value, button, resetLabel)', 'await navigator.clipboard.writeText(value)', "document.execCommand('copy')", 'コピーしました！', 'コピーできませんでした', "$('copy-invite').addEventListener", "$('copy-room-id').addEventListener", "copyText(code, $('copy-invite'), 'コピー')", "copyText(state.roomId, $('copy-room-id'), '部屋IDをコピー')", 'ui.copyTimer']) assert.ok(script.includes(token), `script.js missing ${token}`);
+  assert.ok(!script.includes('console.log'), 'no console logging');
+  assert.ok(!script.includes('clipboard.writeText(`'), 'clipboard must never get a composed payload');
+  assert.ok(script.includes("$('room-id').textContent = state.roomId ? `${state.roomId.slice(0, 8)}…` : '';"), 'room id must be abbreviated on screen');
+  assert.ok(!script.includes("$('room-id').textContent = state.roomId;"), 'the full uuid must not be displayed as-is');
+  assert.ok(script.includes("$('room-id').setAttribute('aria-label', $('room-id').title);"), 'full room id stays reachable for assistive tech');
+  const renderBlock = script.slice(script.indexOf('function renderInvite(room)'), script.indexOf('function renderLobbySeats'));
+  for (const token of ["$('copy-invite').hidden = true;", "$('copy-invite').hidden = !code;"]) assert.ok(renderBlock.includes(token), `renderInvite missing ${token}`);
+  for (const token of ['id="copy-invite"', 'id="copy-room-id"', '部屋IDをコピー', '部屋ID：', 'class="invite-box"']) assert.ok(html.includes(token), `index.html missing ${token}`);
+  assert.ok(html.includes('id="copy-invite" type="button" hidden'), 'copy button starts hidden');
+  assert.ok(!html.includes('部屋 <span id="room-id"'), 'the huge uuid headline must be gone');
+  for (const token of ['.room-id-line{', '.invite-box{', '.invite-copy{', 'min-height:44px']) assert.ok(css.includes(token), `style.css missing ${token}`);
+  const entry = read('toybox/mofumofu-gathering/online-entry.js');
+  assert.ok(entry.includes('const ONLINE_PUBLIC_ENABLED = true;'), 'public flag stays enabled');
+});
