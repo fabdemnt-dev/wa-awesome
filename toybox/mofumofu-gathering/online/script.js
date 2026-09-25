@@ -43,7 +43,7 @@ const SAFETY_SYNC_MS = 5_000;
 const LISTENER_RETRY_MS = 2_000;
 const MAX_LISTENER_RETRIES = 3;
 const state = { roomId: localStorage.getItem('mofumofuRoomId'), seatId: localStorage.getItem('mofumofuSeatId'), room: null, cards: [], presence: {}, connectionId: null, presenceRef: null, presenceUnsubscribe: null, heartbeatTimer: null, accessTimer: null, safetySyncTimer: null, listenerRetryTimer: null, listenerRetryCount: 0, resumeFlight: null, resumeGeneration: 0, presenceReadyGeneration: 0, lastSuccessfulResumeAt: 0, lastSuccessfulResumeRoomId: null, lifecycleDisconnected: navigator.onLine === false, playingResumeKey: null, connectionState: 'syncing', startBusy: false, makeRequest: null, judgeRequest: null, npcRequest: null, proxyStartRequest: null, proxyActionRequest: null, makeBusy: false, judgeBusy: false, npcBusy: false, proxyBusy: false, unsubscribe: null, invite: null };
-const ui = { selectedUid: null, claim: null, flashTimer: null, lastOfferActionId: null, seenEliminations: new Set(), controlTimer: null, gatheringShown: false, logoTimer: null };
+const ui = { selectedUid: null, claim: null, flashTimer: null, lastOfferActionId: null, seenEliminations: new Set(), controlTimer: null, gatheringShown: false, logoTimer: null, copyTimer: null };
 function newId() { return crypto.randomUUID(); }
 function remember(roomId, seatId) { state.roomId = roomId; state.seatId = seatId; localStorage.setItem('mofumofuRoomId', roomId); localStorage.setItem('mofumofuSeatId', seatId); }
 // 招待コードはcreate正常responseの平文だけを正本にする。stateと、現在タブ・現在room用のsessionStorageだけに保持する。
@@ -54,9 +54,11 @@ function restoreInvite(roomId) { if (!roomId) return ''; if (state.invite?.roomI
 function forgetInvite(roomId) { if (!roomId) { if (state.invite) { try { sessionStorage.removeItem(inviteKey(state.invite.roomId)); } catch {} } state.invite = null; return; } try { sessionStorage.removeItem(inviteKey(roomId)); } catch {} if (state.invite?.roomId === roomId) state.invite = null; }
 function renderInvite(room) {
   const hostWaiting = room.status === 'waiting' && room.hostUid === auth.currentUser?.uid && state.seatId === 'A' && state.roomId;
-  if (!hostWaiting) { $('shown-invite').textContent = ''; $('invite-note').textContent = ''; return; }
+  if (!hostWaiting) { $('shown-invite').textContent = ''; $('invite-note').textContent = ''; $('copy-invite').hidden = true; $('copy-invite').textContent = 'コピー'; return; }
   const code = restoreInvite(state.roomId);
   $('shown-invite').textContent = code;
+  $('copy-invite').hidden = !code;
+  $('copy-invite').textContent = 'コピー';
   $('invite-note').textContent = code ? 'この8文字の招待コードを相手に教えてね。' : '招待コードを表示できませんでした。部屋をつくり直してください。';
 }
 function message(text) { $('status').textContent = text; }
@@ -231,7 +233,9 @@ function showRoom(room) {
   }
   state.room = room; $('entry').hidden = true; $('lobby').hidden = room.status !== 'waiting'; $('game').hidden = !['playing', 'finished'].includes(room.status);
   if (room.status === 'playing' || room.status === 'finished') forgetInvite(state.roomId);
-  $('room-id').textContent = state.roomId;
+  $('room-id').textContent = state.roomId ? `${state.roomId.slice(0, 8)}…` : '';
+  $('room-id').title = state.roomId ? `部屋ID：${state.roomId}` : '';
+  $('room-id').setAttribute('aria-label', $('room-id').title);
   renderInvite(room);
   renderLobbySeats(room);
   $('start-game').hidden = room.hostUid !== auth.currentUser?.uid;
@@ -473,6 +477,13 @@ async function runNpc() {
   catch (error) { message(error.message); setTimeout(runNpc, 1000); }
   finally { state.npcBusy = false; }
 }
+async function copyText(value, button, resetLabel) {
+  const done = (text) => { button.textContent = text; clearTimeout(ui.copyTimer); ui.copyTimer = setTimeout(() => { button.textContent = resetLabel; }, 2400); };
+  try { await navigator.clipboard.writeText(value); done('コピーしました！'); return; } catch {}
+  try { const area = document.createElement('textarea'); area.value = value; area.setAttribute('readonly', ''); area.style.position = 'fixed'; area.style.opacity = '0'; document.body.append(area); area.select(); const ok = document.execCommand('copy'); area.remove(); done(ok ? 'コピーしました！' : 'コピーできませんでした'); } catch { done('コピーできませんでした'); }
+}
+$('copy-invite').addEventListener('click', async () => { const code = restoreInvite(state.roomId); if (code) await copyText(code, $('copy-invite'), 'コピー'); });
+$('copy-room-id').addEventListener('click', () => { if (state.roomId) return copyText(state.roomId, $('copy-room-id'), '部屋IDをコピー'); });
 $('create-room').addEventListener('click', async () => {
   const button = $('create-room'); if (button.disabled) return; button.disabled = true;
   try { const value = await call('createMofumofuRoom', {}); forgetInvite(); remember(value.roomId, value.seatId); rememberInvite(value.roomId, value.inviteCode); await requestFullResume('create-room'); }

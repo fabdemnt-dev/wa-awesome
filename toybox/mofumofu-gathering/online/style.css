@@ -111,3 +111,10 @@ dialog::backdrop{background:rgba(65,49,43,.45);backdrop-filter:blur(2px)}
 .gathering-overlay img{width:min(86vw,560px);animation:gatheringPop 2.6s ease both}
 @keyframes gatheringPop{0%{opacity:0;transform:scale(.85)}18%,80%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(1.02)}}
 @media(prefers-reduced-motion:reduce){.gathering-overlay img{animation:none;opacity:1;transform:none}}
+.room-id-line{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:4px 8px;margin:6px 0 2px;font-size:12px;font-weight:800;color:#8a7a70}
+.room-id-text{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.room-id-copy{min-height:44px;padding:4px 12px;border-radius:12px;background:#fff;border:2px solid #e6d7cb;font-size:12px;font-weight:800;color:#8a7a70}
+.invite-box{display:flex;flex-direction:column;align-items:center;gap:8px;margin:12px 0 6px;padding:14px 10px 12px;border-radius:20px;background:#fff0f5;border:2px solid var(--pink)}
+.invite-box .catch{margin:0}
+.invite-main{margin:0}
+.invite-copy{min-width:132px;min-height:44px;padding:8px 18px;border:0;border-radius:999px;background:#ef8eaa;color:#fff;font-weight:900;box-shadow:0 4px 0 rgba(85,61,49,.15)}
