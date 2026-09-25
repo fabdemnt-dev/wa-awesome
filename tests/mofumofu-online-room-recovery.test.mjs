@@ -41,7 +41,7 @@ test('recoveryでstate破棄・UI復帰・接続完了になる', () => {
 });
 
 test('実行経路: fullResumeのcatchでrecoveryを呼ぶ', () => {
-  assert.ok(script.includes("import { isSavedRoomGoneError, createRoomGoneRecovery } from './room-recovery.js';"));
+  assert.ok(script.includes("import { isSavedRoomGoneError, createRoomGoneRecovery } from './room-recovery.js?v=20260925-3';"));
   assert.ok(script.includes('if (isSavedRoomGoneError(error)) {'));
   assert.ok(script.includes('state.resumeGeneration += 1;'));
   assert.ok(script.indexOf('stopRealtime(generation);') < script.indexOf('isSavedRoomGoneError(error)'));
