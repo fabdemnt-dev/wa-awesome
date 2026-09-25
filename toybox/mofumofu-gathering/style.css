@@ -95,3 +95,11 @@ dialog::backdrop{background:rgba(65,49,43,.45);backdrop-filter:blur(2px)}
 .pass-overlay.hidden{display:none}
 .pass-card{width:min(100%,440px);padding:30px 22px;text-align:center;background:#fff;border:3px solid #f3bfd0;border-radius:28px;box-shadow:0 18px 50px rgba(73,60,57,.22)}
 .pass-icon{font-size:54px}.pass-card h2{margin:12px 0 8px;font-size:26px}.pass-card p{line-height:1.7;font-weight:700}
+
+.hand-card img{width:46px;height:52px;object-fit:contain}
+.compact-hand .hand-card img{width:34px;height:40px;object-fit:contain}
+#offerCardMain img{width:38px;height:38px;object-fit:contain}
+.gathering-overlay{position:fixed;inset:0;z-index:110;display:grid;place-items:center;background:rgba(255,248,237,.92)}
+.gathering-overlay img{width:min(86vw,560px);animation:gatheringPop 2.6s ease both}
+@keyframes gatheringPop{0%{opacity:0;transform:scale(.85)}18%,80%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(1.02)}}
+@media(prefers-reduced-motion:reduce){.gathering-overlay img{animation:none;opacity:1;transform:none}}

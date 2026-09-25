@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#fff5e8">
+  <title>もふもふ大集合！オンライン</title>
+  <link rel="stylesheet" href="./style.css?v=20260924-1">
+</head>
+<body>
+  <main class="app" id="app">
+    <p id="status" role="status" aria-live="polite" class="status-line">接続準備中です…</p>
+    <nav class="top-nav" aria-label="ページ移動">
+      <a href="../">← もふもふ大集合！へ戻る</a>
+      <a href="../../../toybox/">おもちゃ箱へ戻る</a>
+    </nav>
+
+    <section id="entry" class="screen active">
+      <div class="title-card">
+        <div class="animal-ring" aria-hidden="true">🐱 🐰 🐻 🐤<br>🦊 🐧 🐼 🐻‍❄️</div>
+        <h1>もふもふ<br>大集合！<span class="online-badge">オンライン</span></h1>
+        <p class="catch">ほんと？ うそ？ もふもふのひみつ！</p>
+        <button class="primary big" id="create-room">部屋をつくる</button>
+        <p id="invite-help">部屋をつくった人から8文字の招待コードを教えてもらい、入力してください。</p>
+        <form id="join-form"><label>招待コード <input id="invite-code" maxlength="8" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-describedby="invite-help"></label><button class="secondary big" id="join-room">参加</button></form>
+        <button class="secondary big" id="open-help" type="button" aria-haspopup="dialog">オンライン版のあそびかた</button>
+      </div>
+    </section>
+
+    <section id="lobby" class="screen" hidden>
+      <div class="title-card">
+        <p class="lobby-eyebrow">部屋ができました</p>
+        <h1 class="lobby-room-title">部屋 <span id="room-id"></span></h1>
+        <p class="catch">招待コード <strong id="shown-invite" class="invite-code"></strong></p>
+        <p class="lobby-note">この8文字の招待コードを相手に教えてね。</p>
+        <section id="players" class="seat-row" aria-label="参加者"></section>
+        <button class="primary big" id="start-game">ゲーム開始</button>
+        <button class="secondary big" id="open-help-lobby" type="button" aria-haspopup="dialog">あそびかた</button>
+      </div>
+    </section>
+
+    <section id="game" class="screen" hidden>
+      <header class="game-header">
+        <div id="turn" class="turn-badge">あなたの番</div>
+        <button class="mini" id="game-help" type="button" aria-haspopup="dialog" aria-label="あそびかたを開く">？</button>
+      </header>
+
+      <section id="presence-list" class="seat-row" aria-label="参加者の接続状態"></section>
+
+      <div id="reconnect-wait" class="notice" role="status" aria-live="polite" hidden></div>
+
+      <section class="table-center">
+        <div class="deck-area" aria-hidden="true">
+          <div class="deck-card"></div>
+          <div class="deck-card deck-card-back"></div>
+        </div>
+        <div id="offerArea" class="offer-area">
+          <div id="tableCard" class="offer-card"><span id="tableCardMain">？</span></div>
+          <p id="tableCardSub" class="table-label"></p>
+          <p id="offer-message"></p>
+        </div>
+      </section>
+
+      <p id="npc-status" class="npc-status" role="status" aria-live="polite" hidden>こはるが考えています…</p>
+      <div id="flash" class="flash" role="status" aria-live="polite"></div>
+      <p id="control-status" class="control-chip" role="status" aria-live="polite"></p>
+
+      <section class="log-panel">
+        <h2>おはなし</h2>
+        <div id="log" class="log" aria-live="polite"></div>
+      </section>
+
+      <section class="action-panel">
+        <div id="self-seat" class="self-seat" aria-label="あなたの状態"></div>
+        <div id="offer-form" class="step">
+          <div class="step-heading"><h2>① 渡すカードを選ぶ</h2></div>
+          <div id="hand" class="hand"></div>
+        </div>
+        <div id="claimStep" class="step hidden">
+          <h2>② 何の動物だと言う？</h2>
+          <div id="claimButtons" class="animal-buttons"></div>
+        </div>
+        <div id="targetStep" class="step hidden">
+          <h2>③ 誰に渡す？</h2>
+          <div id="targetButtons" class="target-buttons"></div>
+        </div>
+        <div id="judgeStep" class="step hidden">
+          <div class="judge-hand">
+            <h2>あなたの手札</h2>
+            <div id="judgeHand" class="hand compact-hand"></div>
+          </div>
+          <h2>この宣言は……？</h2>
+          <div id="judge-buttons" class="judge-buttons">
+            <button class="truth" data-judgment="truth">○ ほんと？</button>
+            <button class="lie" data-judgment="lie">× うそ！</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="result" role="status" aria-live="polite" hidden></section>
+
+      <section id="final-result" class="result-card" hidden>
+        <div class="result-animals" aria-hidden="true">🐱 🐰 🐻<br>🦊 🐧 🐼</div>
+        <h2 id="final-title"></h2>
+        <p id="final-reason"></p>
+        <div id="final-players"></div>
+      </section>
+    </section>
+
+    <div id="gathering-overlay" class="gathering-overlay hidden" role="img" aria-label="もふもふ大集合！">
+      <img src="../../../assets/mofumofu-gathering/mofumofu-logo.png" alt="" draggable="false">
+    </div>
+    <dialog id="help-dialog" aria-labelledby="help-title">
+      <div class="dialog-body">
+        <h2 id="help-title">オンライン版のあそびかた</h2>
+        <ol>
+          <li>1人が部屋をつくり、表示された8文字の招待コードをもう1人へ伝えます。</li>
+          <li>もう1人がコードを入力して参加したら、部屋をつくった人がゲームを開始します。</li>
+          <li>手番では手札を1枚選び、動物を宣言して相手へ渡します。受け取った人は「ほんと？」か「うそ！」で判定します。</li>
+          <li>同じ動物が表向きで4枚そろうと脱落です。最後まで残るか、手札を0枚にすると勝ちです。</li>
+        </ol>
+        <p>「再接続中」と表示された場合は、そのまま同期が終わるまで待ってください。</p>
+        <button class="primary big" id="close-help" type="button">わかった！</button>
+      </div>
+    </dialog>
+  </main>
+
+  <script>
+    if (globalThis.location.hostname === 'fabdemnt-dev.github.io') {
+      globalThis.MOFUMOFU_ONLINE_CONFIG = Object.freeze({
+        environment: 'production',
+        hostname: 'fabdemnt-dev.github.io',
+        databaseURL: 'https://wa-awesome-default-rtdb.asia-southeast1.firebasedatabase.app',
+        appCheckSiteKey: '6LeU8sstAAAAAOEyP56nWLD633TiAWaLmvcskE6e',
+      });
+    }
+    if (globalThis.location.hostname === 'wa-awesome-mofumofu-stg.web.app') {
+      globalThis.MOFUMOFU_ONLINE_CONFIG = Object.freeze({
+        environment: 'staging',
+        hostname: 'wa-awesome-mofumofu-stg.web.app',
+        firebase: Object.freeze({
+          apiKey: 'AIzaSyB1oIhZWMryuWZV9r2-nO9X4W6LuqXVvlo',
+          authDomain: 'wa-awesome-mofumofu-stg.firebaseapp.com',
+          projectId: 'wa-awesome-mofumofu-stg',
+          storageBucket: 'wa-awesome-mofumofu-stg.firebasestorage.app',
+          messagingSenderId: '481875415725',
+          appId: '1:481875415725:web:e16ec434ac7cddd117ec24',
+          databaseURL: 'https://wa-awesome-mofumofu-stg-default-rtdb.asia-southeast1.firebasedatabase.app',
+        }),
+        appCheckSiteKey: '6LfWOsgtAAAAAIuboWvU-f8EEAh2olIFiGDk_f1X',
+      });
+    }
+  </script>
+  <script type="module" src="./script.js?v=20260924-1"></script>
+</body>
+</html>

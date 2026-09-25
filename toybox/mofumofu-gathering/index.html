@@ -16,6 +16,7 @@
         <p class="catch">ほんと？ うそ？ もふもふのひみつ！</p>
         <button class="primary big" id="soloBtn">ひとりであそぶ</button>
         <button class="secondary big" id="duoBtn">ふたりであそぶ</button>
+        <a id="onlineEntry" href="./online/" hidden><button class="secondary big" type="button">オンラインであそぶ</button></a>
         <button class="secondary big" id="howBtn">あそびかた</button>
       </div>
     </section>
@@ -88,6 +89,9 @@
     </section>
   </main>
 
+  <div id="gatheringOverlay" class="gathering-overlay hidden" role="img" aria-label="もふもふ大集合！">
+    <img src="../../assets/mofumofu-gathering/mofumofu-logo.png" alt="" draggable="false">
+  </div>
   <div id="passOverlay" class="pass-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="passTitle">
     <div class="pass-card">
       <div class="pass-icon" aria-hidden="true">🙈</div>
@@ -115,5 +119,6 @@
   </dialog>
 
   <script src="script.js?v=20260921-2"></script>
+  <script type="module" src="online-entry.js?v=20260922-1"></script>
 </body>
 </html>

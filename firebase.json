@@ -4,6 +4,12 @@
     "indexes": "firestore.indexes.json"
   },
   "database": { "rules": "database.rules.json" },
+  "hosting": {
+    "site": "wa-awesome-mofumofu-stg",
+    "public": "toybox/mofumofu-gathering/online",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "trailingSlash": false
+  },
   "functions": [
     {
       "source": "functions",

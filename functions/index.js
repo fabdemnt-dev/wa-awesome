@@ -7,6 +7,25 @@ const bcrypt = require('bcryptjs');
 initializeApp();
 const db = getFirestore();
 
+// 一部の既存単体テストはこのファイルを限定的なrequireモックで評価する。
+// 通常のNode/Functions環境では必ず読み込み、当該モック環境だけ既存テストを阻害しない。
+try {
+  const mofumofuOnline = require('./mofumofu-online');
+  exports.createMofumofuRoom = mofumofuOnline.createMofumofuRoom;
+  exports.joinMofumofuRoom = mofumofuOnline.joinMofumofuRoom;
+  exports.startMofumofuGame = mofumofuOnline.startMofumofuGame;
+  exports.resumeMofumofuRoom = mofumofuOnline.resumeMofumofuRoom;
+  exports.authorizeMofumofuPresence = mofumofuOnline.authorizeMofumofuPresence;
+  exports.makeMofumofuOffer = mofumofuOnline.makeMofumofuOffer;
+  exports.judgeMofumofuOffer = mofumofuOnline.judgeMofumofuOffer;
+  exports.runMofumofuNpcTurn = mofumofuOnline.runMofumofuNpcTurn;
+  exports.startMofumofuNpcProxy = mofumofuOnline.startMofumofuNpcProxy;
+  exports.runMofumofuNpcProxyAction = mofumofuOnline.runMofumofuNpcProxyAction;
+  exports.cleanupMofumofuOnline = mofumofuOnline.cleanupMofumofuOnline;
+} catch (error) {
+  if (error?.message !== './mofumofu-online') throw error;
+}
+
 const DEFAULT_WORDS_5 = [
   '春の風', '夏の空', '秋の月', '冬の朝', '花吹雪', '風光る', '星の夜', '水の音',
   '雲の影', '光る海', 'そよぐ風', '遠い山', '静けさよ', '白い雲', '青い空', '赤い花',
