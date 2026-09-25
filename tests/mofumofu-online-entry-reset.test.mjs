@@ -106,8 +106,8 @@ test('11. キャンセル時は状態変更なし', () => {
   assert.equal(/handleRoomGone|recoverFromRoomGone|entryBusy/.test(cancel), false, 'cancel must only close the dialog');
 });
 
-test('12. CLOSE_ROOM_ENABLED=false維持', () => {
-  assert.ok(script.includes('const CLOSE_ROOM_ENABLED = false;'));
+test('12. CLOSE_ROOM_ENABLED=true維持', () => {
+  assert.ok(script.includes('const CLOSE_ROOM_ENABLED = true;'));
   assert.ok(script.includes("$('close-room').hidden = !(CLOSE_ROOM_ENABLED && hostWaitingRoom(room));"));
 });
 

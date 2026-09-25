@@ -55,7 +55,7 @@ test('close tells a cleanup-removed room apart from a legitimate replay', () => 
 });
 
 test('client keeps 部屋を閉じる gated until the callable is deployed', () => {
-  assert.ok(client.includes('const CLOSE_ROOM_ENABLED = false;'));
+  assert.ok(client.includes('const CLOSE_ROOM_ENABLED = true;'));
   assert.ok(client.includes("$('close-room').hidden = !(CLOSE_ROOM_ENABLED && hostWaitingRoom(room));"));
   assert.ok(client.includes("$('close-room').addEventListener('click', () => { if (!CLOSE_ROOM_ENABLED || !hostWaitingRoom(state.room)) return;"));
   assert.ok(client.includes('if (!CLOSE_ROOM_ENABLED || state.closeBusy || !hostWaitingRoom(state.room)) return;'));
