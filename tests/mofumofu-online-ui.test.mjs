@@ -46,3 +46,19 @@ test('online labels use the viewer perspective', () => {
   const html = read('toybox/mofumofu-gathering/online/index.html');
   assert.ok(html.includes('id="control-status" class="control-chip"'), 'control notice renders as a small chip, not a banner');
 });
+
+test('invite code is held in state and sessionStorage and restored only for the waiting host', () => {
+  const script = read('toybox/mofumofu-gathering/online/script.js');
+  for (const token of ['const INVITE_CODE_RE = /^[A-Za-z0-9]{8}$/;', 'function rememberInvite(roomId, code)', 'function restoreInvite(roomId)', 'function forgetInvite(roomId)', 'function renderInvite(room)', 'rememberInvite(value.roomId, value.inviteCode)', 'renderInvite(room);', "sessionStorage.setItem(inviteKey(roomId), code)", "sessionStorage.getItem(inviteKey(roomId))", "sessionStorage.removeItem(inviteKey(roomId))", 'forgetInvite(); remember(value.roomId, value.seatId)', 'forgetInvite(state.roomId);']) assert.ok(script.includes(token), `script.js missing ${token}`);
+  assert.ok(!script.includes("$('shown-invite').textContent = value.inviteCode"), 'create must not write the code straight into the DOM only');
+  assert.ok(!script.includes("localStorage.setItem('mofumofuInvite"), 'plain invite code must not go to localStorage');
+  assert.ok(!script.includes('console.log'), 'no console logging');
+  const renderBlock = script.slice(script.indexOf('function renderInvite(room)'), script.indexOf('function renderLobbySeats'));
+  for (const token of ["room.status === 'waiting'", 'room.hostUid === auth.currentUser?.uid', "state.seatId === 'A'", '部屋をつくり直してください。']) assert.ok(renderBlock.includes(token), `renderInvite missing ${token}`);
+  const resetBlock = script.slice(script.indexOf('resetEntryView: () => {'), script.indexOf('function setConnectionState'));
+  assert.ok(resetBlock.includes('forgetInvite();'), 'room recovery must clear the stored invite');
+  const html = read('toybox/mofumofu-gathering/online/index.html');
+  assert.ok(html.includes('id="invite-note"'), 'note must be script-driven');
+  const entry = read('toybox/mofumofu-gathering/online-entry.js');
+  assert.ok(entry.includes('const ONLINE_PUBLIC_ENABLED = true;'), 'public flag stays enabled');
+});
