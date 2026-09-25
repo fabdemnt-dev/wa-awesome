@@ -42,10 +42,23 @@ const ACCESS_REFRESH_MS = 4 * 60_000;
 const SAFETY_SYNC_MS = 5_000;
 const LISTENER_RETRY_MS = 2_000;
 const MAX_LISTENER_RETRIES = 3;
-const state = { roomId: localStorage.getItem('mofumofuRoomId'), seatId: localStorage.getItem('mofumofuSeatId'), room: null, cards: [], presence: {}, connectionId: null, presenceRef: null, presenceUnsubscribe: null, heartbeatTimer: null, accessTimer: null, safetySyncTimer: null, listenerRetryTimer: null, listenerRetryCount: 0, resumeFlight: null, resumeGeneration: 0, presenceReadyGeneration: 0, lastSuccessfulResumeAt: 0, lastSuccessfulResumeRoomId: null, lifecycleDisconnected: navigator.onLine === false, playingResumeKey: null, connectionState: 'syncing', startBusy: false, makeRequest: null, judgeRequest: null, npcRequest: null, proxyStartRequest: null, proxyActionRequest: null, makeBusy: false, judgeBusy: false, npcBusy: false, proxyBusy: false, unsubscribe: null };
+const state = { roomId: localStorage.getItem('mofumofuRoomId'), seatId: localStorage.getItem('mofumofuSeatId'), room: null, cards: [], presence: {}, connectionId: null, presenceRef: null, presenceUnsubscribe: null, heartbeatTimer: null, accessTimer: null, safetySyncTimer: null, listenerRetryTimer: null, listenerRetryCount: 0, resumeFlight: null, resumeGeneration: 0, presenceReadyGeneration: 0, lastSuccessfulResumeAt: 0, lastSuccessfulResumeRoomId: null, lifecycleDisconnected: navigator.onLine === false, playingResumeKey: null, connectionState: 'syncing', startBusy: false, makeRequest: null, judgeRequest: null, npcRequest: null, proxyStartRequest: null, proxyActionRequest: null, makeBusy: false, judgeBusy: false, npcBusy: false, proxyBusy: false, unsubscribe: null, invite: null };
 const ui = { selectedUid: null, claim: null, flashTimer: null, lastOfferActionId: null, seenEliminations: new Set(), controlTimer: null, gatheringShown: false, logoTimer: null };
 function newId() { return crypto.randomUUID(); }
 function remember(roomId, seatId) { state.roomId = roomId; state.seatId = seatId; localStorage.setItem('mofumofuRoomId', roomId); localStorage.setItem('mofumofuSeatId', seatId); }
+// 招待コードはcreate正常responseの平文だけを正本にする。stateと、現在タブ・現在room用のsessionStorageだけに保持する。
+const INVITE_CODE_RE = /^[A-Za-z0-9]{8}$/;
+const inviteKey = (roomId) => `mofumofuInvite:${roomId}`;
+function rememberInvite(roomId, code) { if (!roomId || !INVITE_CODE_RE.test(code || '')) return; state.invite = { roomId, code }; try { sessionStorage.setItem(inviteKey(roomId), code); } catch {} }
+function restoreInvite(roomId) { if (!roomId) return ''; if (state.invite?.roomId === roomId && INVITE_CODE_RE.test(state.invite.code || '')) return state.invite.code; try { const code = sessionStorage.getItem(inviteKey(roomId)); if (code && INVITE_CODE_RE.test(code)) { state.invite = { roomId, code }; return code; } } catch {} return ''; }
+function forgetInvite(roomId) { if (!roomId) { if (state.invite) { try { sessionStorage.removeItem(inviteKey(state.invite.roomId)); } catch {} } state.invite = null; return; } try { sessionStorage.removeItem(inviteKey(roomId)); } catch {} if (state.invite?.roomId === roomId) state.invite = null; }
+function renderInvite(room) {
+  const hostWaiting = room.status === 'waiting' && room.hostUid === auth.currentUser?.uid && state.seatId === 'A' && state.roomId;
+  if (!hostWaiting) { $('shown-invite').textContent = ''; $('invite-note').textContent = ''; return; }
+  const code = restoreInvite(state.roomId);
+  $('shown-invite').textContent = code;
+  $('invite-note').textContent = code ? 'この8文字の招待コードを相手に教えてね。' : '招待コードを表示できませんでした。部屋をつくり直してください。';
+}
 function message(text) { $('status').textContent = text; }
 const seatEmoji = { A: '🐰', B: '🐻', koharu: '🌸' };
 function seatName(playerId) { return playerId === 'koharu' ? 'こはる' : playerId === state.seatId ? 'あなた' : '相手'; }
@@ -122,6 +135,8 @@ const recoverFromRoomGone = createRoomGoneRecovery({
     for (const id of ['lobby', 'game', 'result', 'final-result', 'offer-form', 'claimStep', 'targetStep', 'judgeStep', 'npc-status', 'reconnect-wait']) $(id).hidden = true;
     for (const id of ['players', 'presence-list', 'hand', 'judgeHand', 'log', 'self-seat']) $(id).replaceChildren();
     for (const id of ['turn', 'shown-invite', 'control-status', 'offer-message', 'flash']) $(id).textContent = '';
+    $('invite-note').textContent = '';
+    forgetInvite();
     ui.gatheringShown = false;
   },
 });
@@ -215,7 +230,9 @@ function showRoom(room) {
     state.npcRequest = null;
   }
   state.room = room; $('entry').hidden = true; $('lobby').hidden = room.status !== 'waiting'; $('game').hidden = !['playing', 'finished'].includes(room.status);
+  if (room.status === 'playing' || room.status === 'finished') forgetInvite(state.roomId);
   $('room-id').textContent = state.roomId;
+  renderInvite(room);
   renderLobbySeats(room);
   $('start-game').hidden = room.hostUid !== auth.currentUser?.uid;
   if (room.status === 'playing' || room.status === 'finished') renderGame();
@@ -458,12 +475,12 @@ async function runNpc() {
 }
 $('create-room').addEventListener('click', async () => {
   const button = $('create-room'); if (button.disabled) return; button.disabled = true;
-  try { const value = await call('createMofumofuRoom', {}); remember(value.roomId, value.seatId); $('shown-invite').textContent = value.inviteCode; await requestFullResume('create-room'); }
+  try { const value = await call('createMofumofuRoom', {}); forgetInvite(); remember(value.roomId, value.seatId); rememberInvite(value.roomId, value.inviteCode); await requestFullResume('create-room'); }
   catch (error) { message(error.message); button.disabled = false; }
 });
 $('join-form').addEventListener('submit', async (event) => {
   event.preventDefault(); const button = $('join-room'); if (button.disabled) return; button.disabled = true;
-  try { const value = await call('joinMofumofuRoom', { inviteCode: $('invite-code').value }); remember(value.roomId, value.seatId); await requestFullResume('join-room'); }
+  try { const value = await call('joinMofumofuRoom', { inviteCode: $('invite-code').value }); forgetInvite(); remember(value.roomId, value.seatId); await requestFullResume('join-room'); }
   catch (error) { message(error.message); button.disabled = false; }
 });
 $('start-game').addEventListener('click', async () => {
