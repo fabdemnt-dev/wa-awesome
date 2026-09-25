@@ -6,7 +6,7 @@ import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'https://w
 import { getDatabase, connectDatabaseEmulator, ref, onValue, onDisconnect, set, update, serverTimestamp } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js';
 import { resolveEnvironment, REGION } from './firebase-config.js';
 import { completeInitialConnection } from './initial-connection.js';
-import { connectionIsOnline, createResumeCoordinator, playerPresenceState, proxyEvaluationReady, runStartGame, shouldStartNpcProxy } from './connection-control.js';
+import { beginEntrySubmit, connectionIsOnline, createResumeCoordinator, endEntrySubmit, playerPresenceState, proxyEvaluationReady, runStartGame, shouldStartNpcProxy } from './connection-control.js';
 import { runMofumofuFullResume } from './full-resume.js';
 import { isSavedRoomGoneError, createRoomGoneRecovery } from './room-recovery.js';
 import { roomGoneNotice } from './room-recovery.js';
@@ -46,7 +46,7 @@ const ACCESS_REFRESH_MS = 4 * 60_000;
 const SAFETY_SYNC_MS = 5_000;
 const LISTENER_RETRY_MS = 2_000;
 const MAX_LISTENER_RETRIES = 3;
-const state = { roomId: localStorage.getItem('mofumofuRoomId'), seatId: localStorage.getItem('mofumofuSeatId'), room: null, cards: [], presence: {}, connectionId: null, presenceRef: null, presenceUnsubscribe: null, heartbeatTimer: null, accessTimer: null, safetySyncTimer: null, listenerRetryTimer: null, listenerRetryCount: 0, resumeFlight: null, resumeGeneration: 0, presenceReadyGeneration: 0, lastSuccessfulResumeAt: 0, lastSuccessfulResumeRoomId: null, lifecycleDisconnected: navigator.onLine === false, playingResumeKey: null, connectionState: 'syncing', startBusy: false, makeRequest: null, judgeRequest: null, npcRequest: null, proxyStartRequest: null, proxyActionRequest: null, makeBusy: false, judgeBusy: false, npcBusy: false, proxyBusy: false, unsubscribe: null, invite: null, closeBusy: false, closeRequest: null };
+const state = { roomId: localStorage.getItem('mofumofuRoomId'), seatId: localStorage.getItem('mofumofuSeatId'), room: null, cards: [], presence: {}, connectionId: null, presenceRef: null, presenceUnsubscribe: null, heartbeatTimer: null, accessTimer: null, safetySyncTimer: null, listenerRetryTimer: null, listenerRetryCount: 0, resumeFlight: null, resumeGeneration: 0, presenceReadyGeneration: 0, lastSuccessfulResumeAt: 0, lastSuccessfulResumeRoomId: null, lifecycleDisconnected: navigator.onLine === false, playingResumeKey: null, connectionState: 'syncing', startBusy: false, makeRequest: null, judgeRequest: null, npcRequest: null, proxyStartRequest: null, proxyActionRequest: null, makeBusy: false, judgeBusy: false, npcBusy: false, proxyBusy: false, unsubscribe: null, invite: null, entryBusy: false, closeBusy: false, closeRequest: null };
 const ui = { selectedUid: null, claim: null, flashTimer: null, lastOfferActionId: null, seenEliminations: new Set(), controlTimer: null, gatheringShown: false, logoTimer: null, copyTimer: null };
 function newId() { return crypto.randomUUID(); }
 function remember(roomId, seatId) { state.roomId = roomId; state.seatId = seatId; localStorage.setItem('mofumofuRoomId', roomId); localStorage.setItem('mofumofuSeatId', seatId); }
@@ -145,6 +145,7 @@ const recoverFromRoomGone = createRoomGoneRecovery({
     $('invite-note').textContent = '';
     forgetInvite();
     ui.gatheringShown = false;
+    renderEntry();
   },
 });
 // roomが消えた（hostが閉じた／TTL cleanup）ときは、保存room・seatを解除して入口へ戻す。
@@ -239,6 +240,8 @@ async function beginPresence(seatId, generation, connectionId) {
 }
 function hostWaitingRoom(room) { return Boolean(room) && room.status === 'waiting' && room.hostUid === auth.currentUser?.uid && state.seatId === 'A'; }
 function renderCloseRoom(room) { $('close-room').hidden = !(CLOSE_ROOM_ENABLED && hostWaitingRoom(room)); }
+// 入口操作のenabledは state.entryBusy だけから導出する。DOMを直接いじらず、次回renderでも同じ結果になる。
+function renderEntry() { const busy = Boolean(state.entryBusy); $('create-room').disabled = busy; $('join-room').disabled = busy; }
 function showRoom(room) {
   if (room.status === 'finished' || room.playerStatus?.[state.seatId] === 'eliminated') {
     state.cards = [];
@@ -503,14 +506,16 @@ async function copyText(value, button, resetLabel) {
 $('copy-invite').addEventListener('click', async () => { const code = restoreInvite(state.roomId); if (code) await copyText(code, $('copy-invite'), 'コピー'); });
 $('copy-room-id').addEventListener('click', () => { if (state.roomId) return copyText(state.roomId, $('copy-room-id'), '部屋IDをコピー'); });
 $('create-room').addEventListener('click', async () => {
-  const button = $('create-room'); if (button.disabled) return; button.disabled = true;
+  if (!beginEntrySubmit(state)) return; renderEntry();
   try { const value = await call('createMofumofuRoom', {}); forgetInvite(); remember(value.roomId, value.seatId); rememberInvite(value.roomId, value.inviteCode); await requestFullResume('create-room'); }
-  catch (error) { message(error.message); button.disabled = false; }
+  catch (error) { message(error.message); }
+  finally { endEntrySubmit(state); renderEntry(); }
 });
 $('join-form').addEventListener('submit', async (event) => {
-  event.preventDefault(); const button = $('join-room'); if (button.disabled) return; button.disabled = true;
+  event.preventDefault(); if (!beginEntrySubmit(state)) return; renderEntry();
   try { const value = await call('joinMofumofuRoom', { inviteCode: $('invite-code').value }); forgetInvite(); remember(value.roomId, value.seatId); await requestFullResume('join-room'); }
-  catch (error) { message(error.message); button.disabled = false; }
+  catch (error) { message(error.message); }
+  finally { endEntrySubmit(state); renderEntry(); }
 });
 $('start-game').addEventListener('click', async () => {
   try {
