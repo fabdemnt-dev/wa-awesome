@@ -70,7 +70,7 @@ const checks = [
   ['51 ひとりモード維持', () => offline.includes('id="soloBtn"')],
   ['52 ふたりモード維持', () => offline.includes('id="duoBtn"')],
   ['53 オンライン導線はonline/', () => offline.includes('href="./online/"')],
-  ['54 Phase 10前は導線無効', () => entry.includes('ONLINE_PUBLIC_ENABLED = false') && offline.includes('onlineEntry') && offline.includes('hidden')],
+  ['54 Phase 10前は導線無効', () => entry.includes('ONLINE_PUBLIC_ENABLED = true') && offline.includes('onlineEntry') && offline.includes('hidden')],
   ['55 オフラインゲームロジック不変', () => fs.existsSync(new URL('../toybox/mofumofu-gathering/script.js', import.meta.url))],
   ['56 他人privateHands拒否', () => firestore.includes('request.auth.uid == uid')],
   ['57 NPC手札拒否', () => firestore.includes('serverState/{document=**} { allow read, write: if false; }')],

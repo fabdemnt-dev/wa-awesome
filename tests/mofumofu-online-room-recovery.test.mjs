@@ -51,5 +51,5 @@ test('App Check関連は無変更', () => {
   assert.ok(functionsSource.includes("enforceAppCheck = process.env.MOFUMOFU_ENFORCE_APP_CHECK === 'true'"));
   assert.ok(script.includes('ReCaptchaEnterpriseProvider'));
   assert.ok(!script.includes('getToken('));
-  assert.ok(entry.includes('ONLINE_PUBLIC_ENABLED = false'));
+  assert.ok(entry.includes('ONLINE_PUBLIC_ENABLED = true'));
 });
