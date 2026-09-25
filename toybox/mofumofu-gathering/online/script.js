@@ -34,7 +34,7 @@ if (environment.name === 'emulator') {
 const call = (name, data) => httpsCallable(functions, name)(data).then((response) => response.data);
 // 新Callable（closeMofumofuRoom）がstaging/productionへdeployされるまではfalseに保つ公開ゲート。
 // falseの間は一般ユーザーに「部屋を閉じる」を表示せず、呼び出しも一切行わない。
-const CLOSE_ROOM_ENABLED = false;
+const CLOSE_ROOM_ENABLED = true;
 const $ = (id) => document.getElementById(id);
 function cardImage(animalType, alt) { const node = document.createElement('img'); node.src = `${assetBase}${cardImages[animalType]}`; node.alt = alt; node.draggable = false; return node; }
 const helpDialog = $('help-dialog');

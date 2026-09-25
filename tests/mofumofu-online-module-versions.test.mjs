@@ -9,12 +9,13 @@ const css = read('toybox/mofumofu-gathering/online/style.css');
 const entry = read('toybox/mofumofu-gathering/online-entry.js');
 
 // 正本で固定する世代version（人間が管理する固定値。ランダム・時刻生成は禁止）。
-const GEN = '20260925-3';
+const GEN = '20260925-3'; // 依存module（connection-control.js / room-recovery.js）の固定世代
+const SCRIPT_GEN = '20260925-4'; // script.js本体の世代（production gate ONで更新）
 
 const graph = ['firebase-config.js', 'initial-connection.js', 'connection-control.js', 'full-resume.js', 'room-recovery.js'];
 
 test('1. index.htmlのmodule importが解決できる（script.js本体の参照が世代version付き）', async () => {
-  assert.ok(html.includes(`<script type="module" src="./script.js?v=${GEN}"></script>`), 'script.jsは世代version付きで読み込む');
+  assert.ok(html.includes(`<script type="module" src="./script.js?v=${SCRIPT_GEN}"></script>`), 'script.jsは世代version付きで読み込む');
   for (const mod of graph) {
     await import(`../toybox/mofumofu-gathering/online/${mod}`);
   }
@@ -51,7 +52,7 @@ test('6. module URLが意図した同世代へ揃う（script.js / connection-co
   const htmlV = html.match(/script\.js\?v=([\w-]+)"/)?.[1];
   const ccV = script.match(/connection-control\.js\?v=([\w-]+)/)?.[1];
   const rrV = script.match(/room-recovery\.js\?v=([\w-]+)/)?.[1];
-  assert.equal(htmlV, GEN);
+  assert.equal(htmlV, SCRIPT_GEN);
   assert.equal(ccV, GEN);
   assert.equal(rrV, GEN);
 });
@@ -62,8 +63,8 @@ test('7. 320/390px UIに変更なし（style.cssの構造は据え置き）', ()
   assert.ok(css.includes('.dialog-actions{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:12px;}'));
 });
 
-test('8. CLOSE_ROOM_ENABLED=false維持', () => {
-  assert.ok(script.includes('const CLOSE_ROOM_ENABLED = false;'));
+test('8. CLOSE_ROOM_ENABLED=true維持', () => {
+  assert.ok(script.includes('const CLOSE_ROOM_ENABLED = true;'));
 });
 
 test('9. ONLINE_PUBLIC_ENABLED=true維持', () => {
