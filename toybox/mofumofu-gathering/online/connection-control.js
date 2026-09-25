@@ -36,6 +36,18 @@ export function shouldStartNpcProxy({ state, mode, presence, now = Date.now(), s
     && presenceAllowsNpcProxy(presence, now, staleMs);
 }
 
+// 入口（部屋をつくる／参加）の二重送信防止。disabled状態はDOMではなくstate.entryBusyだけを正本にし、
+// room消失で入口へ戻る経路でも同じstateを解放できるようにする。
+export function beginEntrySubmit(state) {
+  if (state.entryBusy) return false;
+  state.entryBusy = true;
+  return true;
+}
+
+export function endEntrySubmit(state) {
+  state.entryBusy = false;
+}
+
 export async function runStartGame({ state, button, roomId, startGame, refresh }) {
   if (state.startBusy) return false;
   state.startBusy = true;

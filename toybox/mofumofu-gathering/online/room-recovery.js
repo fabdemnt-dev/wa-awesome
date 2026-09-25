@@ -39,6 +39,9 @@ export function createRoomGoneRecovery({ state, storage, message, resetEntryView
     state.proxyActionRequest = null;
     state.closeRequest = null;
     state.closeBusy = false;
+    // 入口の二重送信防止stateも解放する。host close成功・B側room消失の双方で、
+    // 入口のcreate/joinがstateから正常にenabledへ戻る（disabled残留の回帰防止）。
+    state.entryBusy = false;
     resetEntryView();
     state.connectionState = 'connected';
     message(notice || '保存していた部屋は終了しました。接続しました。');
