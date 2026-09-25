@@ -36,6 +36,15 @@ export function shouldStartNpcProxy({ state, mode, presence, now = Date.now(), s
     && presenceAllowsNpcProxy(presence, now, staleMs);
 }
 
+// ダイアログのスクロール位置を、初期表示で全文が読める位置へ合わせる純粋計算。
+// 収まるとき／高さ未確定（viewH=0）は0（先頭）。収まらないときは先頭→末尾の順で返し、末尾が実際の初期位置になる。
+export function dialogScrollTargets({ contentH, viewH, wasAtBottom, pad = 24 }) {
+  if (!(viewH > 0) || !(contentH > 0)) return [0];
+  if (contentH <= viewH + pad) return [0];
+  const bottom = contentH - viewH;
+  return wasAtBottom ? [bottom] : [0, bottom];
+}
+
 // 入口（部屋をつくる／参加）の二重送信防止。disabled状態はDOMではなくstate.entryBusyだけを正本にし、
 // room消失で入口へ戻る経路でも同じstateを解放できるようにする。
 export function beginEntrySubmit(state) {

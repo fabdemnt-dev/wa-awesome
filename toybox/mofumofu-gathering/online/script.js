@@ -6,7 +6,7 @@ import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'https://w
 import { getDatabase, connectDatabaseEmulator, ref, onValue, onDisconnect, set, update, serverTimestamp } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js';
 import { resolveEnvironment, REGION } from './firebase-config.js';
 import { completeInitialConnection } from './initial-connection.js';
-import { beginEntrySubmit, connectionIsOnline, createResumeCoordinator, endEntrySubmit, playerPresenceState, proxyEvaluationReady, runStartGame, shouldStartNpcProxy } from './connection-control.js?v=20260925-3';
+import { beginEntrySubmit, connectionIsOnline, createResumeCoordinator, dialogScrollTargets, endEntrySubmit, playerPresenceState, proxyEvaluationReady, runStartGame, shouldStartNpcProxy } from './connection-control.js?v=20260925-5';
 import { runMofumofuFullResume } from './full-resume.js';
 import { isSavedRoomGoneError, createRoomGoneRecovery } from './room-recovery.js?v=20260925-3';
 import { roomGoneNotice } from './room-recovery.js?v=20260925-3';
@@ -40,6 +40,18 @@ function cardImage(animalType, alt) { const node = document.createElement('img')
 const helpDialog = $('help-dialog');
 for (const helpId of ['open-help', 'open-help-lobby', 'game-help']) $(helpId).addEventListener('click', () => helpDialog.showModal());
 $('close-help').addEventListener('click', () => helpDialog.close());
+// ダイアログが画面に収まらないとき、初期表示を末尾（閉じるボタンの見える位置）へ寄せる。収まる場合は位置を変えない。
+function enhanceDialogScroll(dialog) {
+  if (!dialog) return;
+  let wasAtBottom = false;
+  dialog.addEventListener('scroll', () => { wasAtBottom = dialog.scrollTop + dialog.clientHeight >= dialog.scrollHeight - 24; }, { passive: true });
+  dialog.addEventListener('toggle', () => {
+    if (!dialog.open) return;
+    const targets = dialogScrollTargets({ contentH: dialog.scrollHeight, viewH: dialog.clientHeight, wasAtBottom });
+    dialog.scrollTop = targets[targets.length - 1];
+  });
+}
+for (const dialogId of ['help-dialog', 'close-room-dialog']) enhanceDialogScroll($(dialogId));
 const HEARTBEAT_MS = 15_000;
 const STALE_MS = 120_000;
 const ACCESS_REFRESH_MS = 4 * 60_000;
@@ -474,15 +486,14 @@ function renderFinalResult(finalResult) {
   const gathering = Array.isArray(finalResult.winnerPlayerIds);
   const loser = gathering ? finalResult.players.find((player) => player.eliminated) : null;
   $('final-title').textContent = gathering ? `🐾 もふもふ大集合！ ${loser ? `${seatName(loser.playerId)}の負け` : ''}` : finalResult.draw ? '🤝 引き分け！' : `${seatName(finalResult.winnerPlayerId)}の勝ち！`;
-  $('final-reason').textContent = gathering ? gatheringReasonText(finalResult.finishReason, loser?.eliminationAnimal) : finalResult.finishReason === 'last-player-standing' ? '最後の1人が残ったため終了' : '手札が0枚になったため終了';
+  $('final-reason').textContent = gatheringReasonText(finalResult.finishReason, loser?.eliminationAnimal);
   $('final-players').replaceChildren(...finalResult.players.map((player) => {
     const box = document.createElement('section'); box.className = `final-player${player.eliminated ? ' eliminated' : ''}`;
     const title = document.createElement('strong'); title.textContent = seatName(player.playerId); box.append(title);
     if (gathering) { const verdict = document.createElement('p'); verdict.className = `final-verdict ${player.eliminated ? 'lost' : 'won'}`; verdict.textContent = player.eliminated ? 'もふもふ大集合！／負け' : finalResult.winnerPlayerIds.includes(player.playerId) ? '勝ち！' : ''; box.append(verdict); }
     for (const animal of animals) if (player.faceUpCardsByAnimal?.[animal]) { const line = document.createElement('p'); line.textContent = `${emoji[animal]}${labels[animal]} ×${player.faceUpCardsByAnimal[animal]}`; box.append(line); }
     if (!player.faceUpCardsTotal) { const line = document.createElement('p'); line.textContent = '表向きカード なし'; box.append(line); }
-    if (player.eliminated && gathering && player.eliminationAnimal) { const line = document.createElement('p'); line.textContent = `${emoji[player.eliminationAnimal]}${labels[player.eliminationAnimal]}が4枚そろいました`; box.append(line); }
-    if (player.eliminated && !gathering) { const line = document.createElement('p'); line.textContent = `もふもふ大集合！／脱落（${emoji[player.eliminationAnimal]}${labels[player.eliminationAnimal]}）`; box.append(line); }
+    if (player.eliminated && player.eliminationAnimal) { const line = document.createElement('p'); line.textContent = `${emoji[player.eliminationAnimal]}${labels[player.eliminationAnimal]}が4枚そろいました`; box.append(line); }
     return box;
   }));
 }
