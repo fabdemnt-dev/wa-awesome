@@ -37,7 +37,7 @@ function client(name, authenticate = true) {
   value.call = async (name, data) => {
     await value.ready;
     if (!direct) return httpsCallable(fn, name)(data).then((response) => response.data);
-    const handlerName = ({ createMofumofuRoom: 'createHandler', joinMofumofuRoom: 'joinHandler', startMofumofuGame: 'startHandler', resumeMofumofuRoom: 'resumeHandler', authorizeMofumofuPresence: 'authorizePresenceHandler', makeMofumofuOffer: 'makeHandler', judgeMofumofuOffer: 'judgeHandler', runMofumofuNpcTurn: 'npcHandler', startMofumofuNpcProxy: 'startProxyHandler', runMofumofuNpcProxyAction: 'proxyActionHandler' })[name];
+    const handlerName = ({ createMofumofuRoom: 'createHandler', joinMofumofuRoom: 'joinHandler', startMofumofuGame: 'startHandler', resumeMofumofuRoom: 'resumeHandler', authorizeMofumofuPresence: 'authorizePresenceHandler', makeMofumofuOffer: 'makeHandler', judgeMofumofuOffer: 'judgeHandler', runMofumofuNpcTurn: 'npcHandler', startMofumofuNpcProxy: 'startProxyHandler', runMofumofuNpcProxyAction: 'proxyActionHandler', closeMofumofuRoom: 'closeHandler' })[name];
     return module._handlers[handlerName]({ data, auth: auth.currentUser ? { uid: auth.currentUser.uid } : null });
   };
   clients.push(value);

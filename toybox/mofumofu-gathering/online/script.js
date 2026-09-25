@@ -9,6 +9,7 @@ import { completeInitialConnection } from './initial-connection.js';
 import { connectionIsOnline, createResumeCoordinator, playerPresenceState, proxyEvaluationReady, runStartGame, shouldStartNpcProxy } from './connection-control.js';
 import { runMofumofuFullResume } from './full-resume.js';
 import { isSavedRoomGoneError, createRoomGoneRecovery } from './room-recovery.js';
+import { roomGoneNotice } from './room-recovery.js';
 
 const animals = ['cat', 'rabbit', 'bear', 'chick', 'fox', 'penguin', 'panda', 'polar'];
 const labels = { cat: 'ねこ', rabbit: 'うさぎ', bear: 'くま', chick: 'ひよこ', fox: 'きつね', penguin: 'ぺんぎん', panda: 'ぱんだ', polar: 'しろくま' };
@@ -31,6 +32,9 @@ if (environment.name === 'emulator') {
   connectDatabaseEmulator(database, 'localhost', environment.emulator.databasePort);
 }
 const call = (name, data) => httpsCallable(functions, name)(data).then((response) => response.data);
+// 新Callable（closeMofumofuRoom）がstaging/productionへdeployされるまではfalseに保つ公開ゲート。
+// falseの間は一般ユーザーに「部屋を閉じる」を表示せず、呼び出しも一切行わない。
+const CLOSE_ROOM_ENABLED = false;
 const $ = (id) => document.getElementById(id);
 function cardImage(animalType, alt) { const node = document.createElement('img'); node.src = `${assetBase}${cardImages[animalType]}`; node.alt = alt; node.draggable = false; return node; }
 const helpDialog = $('help-dialog');
@@ -42,7 +46,7 @@ const ACCESS_REFRESH_MS = 4 * 60_000;
 const SAFETY_SYNC_MS = 5_000;
 const LISTENER_RETRY_MS = 2_000;
 const MAX_LISTENER_RETRIES = 3;
-const state = { roomId: localStorage.getItem('mofumofuRoomId'), seatId: localStorage.getItem('mofumofuSeatId'), room: null, cards: [], presence: {}, connectionId: null, presenceRef: null, presenceUnsubscribe: null, heartbeatTimer: null, accessTimer: null, safetySyncTimer: null, listenerRetryTimer: null, listenerRetryCount: 0, resumeFlight: null, resumeGeneration: 0, presenceReadyGeneration: 0, lastSuccessfulResumeAt: 0, lastSuccessfulResumeRoomId: null, lifecycleDisconnected: navigator.onLine === false, playingResumeKey: null, connectionState: 'syncing', startBusy: false, makeRequest: null, judgeRequest: null, npcRequest: null, proxyStartRequest: null, proxyActionRequest: null, makeBusy: false, judgeBusy: false, npcBusy: false, proxyBusy: false, unsubscribe: null, invite: null };
+const state = { roomId: localStorage.getItem('mofumofuRoomId'), seatId: localStorage.getItem('mofumofuSeatId'), room: null, cards: [], presence: {}, connectionId: null, presenceRef: null, presenceUnsubscribe: null, heartbeatTimer: null, accessTimer: null, safetySyncTimer: null, listenerRetryTimer: null, listenerRetryCount: 0, resumeFlight: null, resumeGeneration: 0, presenceReadyGeneration: 0, lastSuccessfulResumeAt: 0, lastSuccessfulResumeRoomId: null, lifecycleDisconnected: navigator.onLine === false, playingResumeKey: null, connectionState: 'syncing', startBusy: false, makeRequest: null, judgeRequest: null, npcRequest: null, proxyStartRequest: null, proxyActionRequest: null, makeBusy: false, judgeBusy: false, npcBusy: false, proxyBusy: false, unsubscribe: null, invite: null, closeBusy: false, closeRequest: null };
 const ui = { selectedUid: null, claim: null, flashTimer: null, lastOfferActionId: null, seenEliminations: new Set(), controlTimer: null, gatheringShown: false, logoTimer: null, copyTimer: null };
 function newId() { return crypto.randomUUID(); }
 function remember(roomId, seatId) { state.roomId = roomId; state.seatId = seatId; localStorage.setItem('mofumofuRoomId', roomId); localStorage.setItem('mofumofuSeatId', seatId); }
@@ -134,7 +138,8 @@ const recoverFromRoomGone = createRoomGoneRecovery({
   message,
   resetEntryView: () => {
     $('entry').hidden = false;
-    for (const id of ['lobby', 'game', 'result', 'final-result', 'offer-form', 'claimStep', 'targetStep', 'judgeStep', 'npc-status', 'reconnect-wait']) $(id).hidden = true;
+    for (const id of ['lobby', 'game', 'result', 'final-result', 'offer-form', 'claimStep', 'targetStep', 'judgeStep', 'npc-status', 'reconnect-wait', 'close-room']) $(id).hidden = true;
+    if ($('close-room-dialog').open) $('close-room-dialog').close();
     for (const id of ['players', 'presence-list', 'hand', 'judgeHand', 'log', 'self-seat']) $(id).replaceChildren();
     for (const id of ['turn', 'shown-invite', 'control-status', 'offer-message', 'flash']) $(id).textContent = '';
     $('invite-note').textContent = '';
@@ -142,6 +147,14 @@ const recoverFromRoomGone = createRoomGoneRecovery({
     ui.gatheringShown = false;
   },
 });
+// roomが消えた（hostが閉じた／TTL cleanup）ときは、保存room・seatを解除して入口へ戻す。
+function handleRoomGone(notice = null) {
+  if (!state.roomId) return;
+  const generation = state.resumeGeneration + 1;
+  state.resumeGeneration = generation;
+  stopRealtime(generation);
+  recoverFromRoomGone(notice);
+}
 function setConnectionState(next, detail = '') {
   state.connectionState = next;
   message(next === 'connected' ? '接続中' : next === 'syncing' ? '再接続中／同期中…' : `同期エラー${detail ? `（${detail}）` : ''}`);
@@ -224,6 +237,8 @@ async function beginPresence(seatId, generation, connectionId) {
     if (proxyEvaluationReady(state)) void runProxyIfNeeded();
   }, () => requestFullResume('rtdb-listener-error'));
 }
+function hostWaitingRoom(room) { return Boolean(room) && room.status === 'waiting' && room.hostUid === auth.currentUser?.uid && state.seatId === 'A'; }
+function renderCloseRoom(room) { $('close-room').hidden = !(CLOSE_ROOM_ENABLED && hostWaitingRoom(room)); }
 function showRoom(room) {
   if (room.status === 'finished' || room.playerStatus?.[state.seatId] === 'eliminated') {
     state.cards = [];
@@ -239,6 +254,7 @@ function showRoom(room) {
   renderInvite(room);
   renderLobbySeats(room);
   $('start-game').hidden = room.hostUid !== auth.currentUser?.uid;
+  renderCloseRoom(room);
   if (room.status === 'playing' || room.status === 'finished') renderGame();
   renderPresence();
 }
@@ -258,7 +274,8 @@ function listenRoom(generation) {
   state.unsubscribe?.(); state.unsubscribe = null;
   const roomRef = doc(firestore, 'mofumofuOnlineRooms', state.roomId);
   state.unsubscribe = onSnapshot(roomRef, (snap) => {
-    if (generation !== state.resumeGeneration || !snap.exists()) return;
+    if (generation !== state.resumeGeneration) return;
+    if (!snap.exists()) { handleRoomGone(roomGoneNotice(state.room)); return; }
     state.listenerRetryCount = 0;
     applyPublicRoom(snap.data(), generation, 'firestore-listener');
   }, (error) => {
@@ -279,7 +296,8 @@ async function lightweightSync(generation = state.resumeGeneration) {
   if (!state.roomId || document.hidden || generation !== state.resumeGeneration) return;
   try {
     const snap = await getDocFromServer(doc(firestore, 'mofumofuOnlineRooms', state.roomId));
-    if (generation !== state.resumeGeneration || !snap.exists()) return;
+    if (generation !== state.resumeGeneration) return;
+    if (!snap.exists()) { handleRoomGone(roomGoneNotice(state.room)); return; }
     applyPublicRoom(snap.data(), generation, 'safety-sync');
   } catch (error) {
     if (generation !== state.resumeGeneration) return;
@@ -502,6 +520,20 @@ $('start-game').addEventListener('click', async () => {
 $('judge-buttons').addEventListener('click', async (event) => {
   const judgment = event.target.dataset.judgment; if (!judgment || state.judgeBusy) return; const buttons = [...event.currentTarget.querySelectorAll('button')]; state.judgeRequest ||= { roomId: state.roomId, actionId: state.room.publicOffer.actionId, judgment }; state.judgeBusy = true; buttons.forEach((button) => { button.disabled = true; });
   try { await call('judgeMofumofuOffer', state.judgeRequest); state.judgeRequest = null; await refresh(); } catch (error) { message(error.message); } finally { state.judgeBusy = false; buttons.forEach((button) => { button.disabled = false; }); }
+});
+$('close-room').addEventListener('click', () => { if (!CLOSE_ROOM_ENABLED || !hostWaitingRoom(state.room)) return; $('close-room-dialog').showModal(); });
+$('close-room-cancel').addEventListener('click', () => $('close-room-dialog').close());
+$('close-room-confirm').addEventListener('click', async () => {
+  if (!CLOSE_ROOM_ENABLED || state.closeBusy || !hostWaitingRoom(state.room)) return;
+  const button = $('close-room-confirm'); if (button.disabled) return; button.disabled = true; state.closeBusy = true;
+  try {
+    state.closeRequest ||= { roomId: state.roomId, actionId: newId() };
+    await call('closeMofumofuRoom', state.closeRequest);
+    state.closeRequest = null;
+    $('close-room-dialog').close();
+    handleRoomGone('部屋を閉じました。');
+  } catch (error) { message(error.message); button.disabled = false; }
+  finally { state.closeBusy = false; }
 });
 document.addEventListener('visibilitychange', () => { if (!document.hidden) void requestFullResume('visibilitychange'); });
 globalThis.addEventListener('pageshow', () => void requestFullResume('pageshow'));
