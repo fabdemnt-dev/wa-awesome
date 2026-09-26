@@ -301,7 +301,7 @@ if (!emulatorHost) {
         assert.equal(core.isGatheringResult(room), true);
         assert.equal(result.showGatheringOverlay, true);
         assert.equal(result.players.length, count, `${count}人の結果表示の人数`);
-        assert.equal(result.loserPlayerIds.length >= 1, true);
+        assert.equal(result.players.filter((player) => player.isLoser).length >= 1, true, '敗者が結果表示にいない');
         assert.equal(result.title.includes('もふもふ大集合！'), true);
         assert.equal(result.players.filter((player) => player.isLoser).every((player) => player.verdict === core.TEXT.loserVerdict), true);
         assert.equal(result.players.filter((player) => player.isWinner).every((player) => player.verdict === core.TEXT.winVerdict), true);
