@@ -32,6 +32,36 @@
         }
       }
     },
+    "mofumofuMultiPresenceAccess": {
+      "$roomId": {
+        "$uid": {
+          ".read": false,
+          ".write": false
+        }
+      }
+    },
+    "mofumofuMultiPresence": {
+      "$roomId": {
+        ".read": "auth != null && root.child('mofumofuMultiPresenceAccess').child($roomId).child(auth.uid).child('uid').val() === auth.uid && root.child('mofumofuMultiPresenceAccess').child($roomId).child(auth.uid).child('roomId').val() === $roomId && root.child('mofumofuMultiPresenceAccess').child($roomId).child(auth.uid).child('expiresAt').val() > now",
+        "$uid": {
+          "connections": {
+            "$connectionId": {
+              ".write": "auth != null && $uid === auth.uid && root.child('mofumofuMultiPresenceAccess').child($roomId).child(auth.uid).child('uid').val() === auth.uid && root.child('mofumofuMultiPresenceAccess').child($roomId).child(auth.uid).child('roomId').val() === $roomId && (root.child('mofumofuMultiPresenceAccess').child($roomId).child(auth.uid).child('expiresAt').val() > now || (data.exists() && data.child('uid').val() === auth.uid && newData.child('state').val() === 'disconnected')) && $connectionId.matches(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)",
+              ".validate": "newData.hasChildren(['uid', 'roomId', 'seatId', 'connectionId', 'state', 'lastHeartbeatAt', 'connectedAt']) && newData.child('uid').val() === auth.uid && newData.child('roomId').val() === $roomId && newData.child('seatId').val() === root.child('mofumofuMultiPresenceAccess').child($roomId).child(auth.uid).child('seatId').val() && newData.child('connectionId').val() === $connectionId && (newData.child('state').val() === 'online' || newData.child('state').val() === 'disconnected') && newData.child('lastHeartbeatAt').isNumber() && newData.child('connectedAt').isNumber()",
+              "uid": { ".validate": true },
+              "roomId": { ".validate": true },
+              "seatId": { ".validate": "newData.val() === 'S1' || newData.val() === 'S2' || newData.val() === 'S3' || newData.val() === 'S4' || newData.val() === 'S5' || newData.val() === 'S6'" },
+              "connectionId": { ".validate": true },
+              "state": { ".validate": true },
+              "lastHeartbeatAt": { ".validate": true },
+              "connectedAt": { ".validate": "!data.exists() || newData.val() === data.val()" },
+              "$other": { ".validate": false }
+            }
+          },
+          "$other": { ".validate": false }
+        }
+      }
+    },
     "shadowCardRoomAccess": {
       "$roomId": {
         "$uid": {

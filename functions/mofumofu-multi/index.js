@@ -15,11 +15,13 @@
 const crypto = require('node:crypto');
 const { initializeApp, getApps } = require('firebase-admin/app');
 const { getFirestore, Timestamp } = require('firebase-admin/firestore');
+const { getDatabase } = require('firebase-admin/database');
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { defineSecret } = require('firebase-functions/params');
 
 const contract = require('./contract');
 const rules = require('./rules');
+const presence = require('./presence');
 
 if (!getApps().length) initializeApp();
 
@@ -51,6 +53,18 @@ const callableOptions = {
 };
 
 function db() { return getFirestore(); }
+// Phase D: 3〜6人版専用のRTDBルートだけを使う（既存2人＋こはる版のpresenceルートとは別系統）。
+// RTDB URLは専用appのoptionsで渡す（Emulatorでは ?ns= 形式でdatabase emulatorへ向ける）。
+function presenceDb() {
+  const projectId = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT;
+  const emulatorHost = process.env.FIREBASE_DATABASE_EMULATOR_HOST;
+  const databaseURL = process.env.MOFUMOFU_RTDB_URL
+    || (emulatorHost && projectId ? `http://${emulatorHost}?ns=${projectId}` : null);
+  if (!databaseURL) fail('failed-precondition', 'サーバー設定を確認してください。');
+  const appName = 'mofumofu-multi-presence';
+  const existing = getApps().find((candidate) => candidate.name === appName);
+  return getDatabase(existing || initializeApp({ databaseURL }, appName));
+}
 function expiry(milliseconds) { return Timestamp.fromMillis(Date.now() + milliseconds); }
 function fail(code, message) { throw new HttpsError(code, message); }
 function authUid(request) {
@@ -500,6 +514,67 @@ async function judgeOfferHandler(request) {
   }).catch((error) => { throw convertContractError(error); });
 }
 
+/* ============================================ Phase D: presence / resume */
+
+// 失敗理由（room-not-found / not-member / room-expired / room-status）をdetailsで区別して返す。
+function sessionFailure(decision) {
+  return new HttpsError(decision.code, decision.message, { reason: decision.reason });
+}
+
+// clientがseatIdを名乗ることはできない。serverがFirestore正本からseatを解決し、
+// その結果だけをRTDBのpresenceAccessへ短時間（既存版と同じ5分）書く。
+async function authorizePresenceHandler(request) {
+  exactFields(request.data, ['roomId']);
+  const uid = authUid(request);
+  const roomId = roomIdFrom(request.data);
+  const now = Date.now();
+  const store = db();
+  await consumeRateLimit({ kind: 'presence_uid', value: contract.digest(uid) }, presence.AUTHORIZE_UID_RATE_LIMIT, now);
+  await consumeRateLimit({ kind: 'presence_ip', value: ipHash(request) }, presence.AUTHORIZE_IP_RATE_LIMIT, now);
+  const roomSnap = await store.collection(contract.COLLECTIONS.rooms).doc(roomId).get();
+  const decision = presence.authorizePrecondition(roomSnap.exists ? roomSnap.data() : null, { uid, now });
+  if (!decision.ok) throw sessionFailure(decision);
+  const expiresAt = now + presence.PRESENCE_ACCESS_TTL_MS;
+  await presenceDb().ref(presence.accessPath(roomId, uid)).set(presence.accessFields({
+    uid, roomId, seatId: decision.seatId, expiresAt,
+  }));
+  return {
+    roomId,
+    seatId: decision.seatId,
+    expiresAt,
+    heartbeatIntervalMs: presence.HEARTBEAT_INTERVAL_MS,
+    staleMs: presence.PRESENCE_STALE_MS,
+  };
+}
+
+// 同じseat・同じprivate hand・同じgame stateへ戻す。roomへの書込みは一切行わない
+// （手番・playerStatus・カード・finalResultをpresence側から動かさない）。
+async function resumeRoomHandler(request) {
+  exactFields(request.data, ['roomId']);
+  const uid = authUid(request);
+  const roomId = roomIdFrom(request.data);
+  const now = Date.now();
+  await consumeRateLimit({ kind: 'resume_uid', value: contract.digest(uid) }, presence.RESUME_UID_RATE_LIMIT, now);
+  await consumeRateLimit({ kind: 'resume_ip', value: ipHash(request) }, presence.RESUME_IP_RATE_LIMIT, now);
+  const r = refs(roomId);
+  const roomSnap = await r.room.get();
+  const decision = presence.resumePrecondition(roomSnap.exists ? roomSnap.data() : null, { uid, now });
+  if (!decision.ok) throw sessionFailure(decision);
+  const room = roomSnap.data();
+  const seatId = decision.seatId;
+  // 他人のprivate handは絶対に読まない（自分 documentのみ）。
+  let handStatus = 'pending';
+  let handCards = null;
+  if (room.status === 'playing' || room.status === 'finished') {
+    const handSnap = await r.hand(uid).get();
+    if (room.status === 'finished') handStatus = 'finished';
+    else if (room.playerStatus?.[seatId] === 'left') handStatus = 'left';
+    else if (!handSnap.exists) handStatus = 'retry';
+    else { handStatus = 'ready'; handCards = Array.isArray(handSnap.data().cards) ? handSnap.data().cards : []; }
+  }
+  return presence.resumeResult({ roomId, room, seatId, handCards, handStatus });
+}
+
 /* -------------------------------------------------------------- cleanup */
 
 // Phase Bではschedulerを登録しない（deploy禁止のため）。Phase Dでcleanupへ結線する。
@@ -527,6 +602,8 @@ const joinMofumofuMultiRoom = onCall(callableOptions, (request) => joinHandler(r
 const startMofumofuMultiGame = onCall(callableOptions, (request) => startHandler(request));
 const makeMofumofuMultiOffer = onCall(callableOptions, (request) => makeOfferHandler(request));
 const judgeMofumofuMultiOffer = onCall(callableOptions, (request) => judgeOfferHandler(request));
+const authorizeMofumofuMultiPresence = onCall(callableOptions, (request) => authorizePresenceHandler(request));
+const resumeMofumofuMultiRoom = onCall(callableOptions, (request) => resumeRoomHandler(request));
 
 module.exports = {
   createMofumofuMultiRoom,
@@ -534,12 +611,16 @@ module.exports = {
   startMofumofuMultiGame,
   makeMofumofuMultiOffer,
   judgeMofumofuMultiOffer,
+  authorizeMofumofuMultiPresence,
+  resumeMofumofuMultiRoom,
   _handlers: {
     createHandler,
     joinHandler,
     startHandler,
     makeOfferHandler,
     judgeOfferHandler,
+    authorizePresenceHandler,
+    resumeRoomHandler,
     cleanupMofumofuMultiDataNow,
   },
   _test: {
@@ -553,5 +634,7 @@ module.exports = {
     cleanupMofumofuMultiDataNow,
     contract,
     rules,
+    presence,
+    presenceDb,
   },
 };

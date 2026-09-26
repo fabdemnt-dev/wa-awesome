@@ -80,6 +80,30 @@ service cloud.firestore {
     match /mofumofuOnlineRateLimits/{docId} { allow read, write: if false; }
     match /mofumofuOnlineActionRequests/{docId} { allow read, write: if false; }
 
+    // もふもふ大集合！人間3〜6人オンライン版（Phase B/C/D）。公開roomとmembersは参加者だけが読み、
+    // privateHandsは本人だけ、ゲーム確定書込みはすべてCallable Functions (Admin SDK) に限定する。
+    function isMofumofuMultiMember(roomId) {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/mofumofuMultiRooms/$(roomId)/members/$(request.auth.uid));
+    }
+    match /mofumofuMultiRooms/{roomId} {
+      allow read: if isMofumofuMultiMember(roomId);
+      allow write: if false;
+    }
+    match /mofumofuMultiRooms/{roomId}/members/{uid} {
+      allow read: if isMofumofuMultiMember(roomId);
+      allow write: if false;
+    }
+    match /mofumofuMultiRooms/{roomId}/privateHands/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid && isMofumofuMultiMember(roomId);
+      allow write: if false;
+    }
+    match /mofumofuMultiRooms/{roomId}/{document=**} { allow read, write: if false; }
+    match /mofumofuMultiRoomInvites/{docId} { allow read, write: if false; }
+    match /mofumofuMultiRoomSecrets/{docId} { allow read, write: if false; }
+    match /mofumofuMultiRateLimits/{docId} { allow read, write: if false; }
+    match /mofumofuMultiActionRequests/{docId} { allow read, write: if false; }
+
     // ============================================================
     // 1) 訪問カウンタ counter/visits
     // ============================================================

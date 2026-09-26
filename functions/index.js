@@ -35,6 +35,8 @@ try {
   exports.startMofumofuMultiGame = mofumofuMulti.startMofumofuMultiGame;
   exports.makeMofumofuMultiOffer = mofumofuMulti.makeMofumofuMultiOffer;
   exports.judgeMofumofuMultiOffer = mofumofuMulti.judgeMofumofuMultiOffer;
+  exports.authorizeMofumofuMultiPresence = mofumofuMulti.authorizeMofumofuMultiPresence;
+  exports.resumeMofumofuMultiRoom = mofumofuMulti.resumeMofumofuMultiRoom;
 } catch (error) {
   if (error?.message !== './mofumofu-multi') throw error;
 }
