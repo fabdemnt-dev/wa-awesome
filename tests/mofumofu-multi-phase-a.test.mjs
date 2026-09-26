@@ -571,16 +571,19 @@ test('結果契約: 終了理由と勝敗を曖昧なく表現する', () => {
   assert.equal(handEmpty.finalResult.finishReason, 'hand-empty');
   assert.equal(handEmpty.finalResult.gatheringReason, null);
   assert.deepEqual(handEmpty.finalResult.winnerPlayerIds, ['S2']);
-  const tooFew = leaveGame(leaveGame(newState(5, 231), 'S5'), 'S4');
+  const afterLeaves = leaveGame(leaveGame(newState(5, 231), 'S5'), 'S4');
+  assert.equal(afterLeaves.status, 'playing', 'active3人までは継続する');
+  assert.equal(afterLeaves.finalResult, null);
+  assert.deepEqual(afterLeaves.leftPlayerIds, ['S4', 'S5']);
+  const tooFew = leaveGame(afterLeaves, 'S3');
   assert.equal(tooFew.finalResult.finishReason, 'too-few-active');
-  assert.deepEqual(tooFew.finalResult.leftPlayerIds, ['S4', 'S5']);
+  assert.deepEqual(tooFew.finalResult.leftPlayerIds, ['S3', 'S4', 'S5']);
   assert.equal(tooFew.finalResult.players.length, 5);
+  assert.deepEqual(tooFew.winnerPlayerIds, ['S1', 'S2']);
   for (const player of tooFew.finalResult.players) {
     assert.equal(typeof player.handCount, 'number');
     assert.equal(typeof player.faceUpCardsTotal, 'number');
     assert.equal(Object.keys(player.faceUpCardsByAnimal).length, 8);
     assert.equal(SEAT_IDS.includes(player.seatId), true);
   }
-  const tooFewFinished = leaveGame(tooFew, 'S3');
-  assert.deepEqual(tooFewFinished.winnerPlayerIds, ['S1', 'S2']);
 });
