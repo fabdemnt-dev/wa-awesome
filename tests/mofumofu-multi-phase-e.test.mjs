@@ -110,10 +110,14 @@ test('E-3 モード選択: 修飾クリックは素通しし、無効モード�
   assert.ok(multiEntry.includes('event.preventDefault()'));
   assert.ok(multiEntry.includes('document.createElement(mode.enabled ? \'a\' : \'span\')'), '無効モードをリンクで描いている');
   // 3〜6人版ページ自体のキャッシュ版数は固定（ランダム生成・時刻生成をしない）。
-  assert.ok(multiPage.includes('../multi/script.js?v=20260926-2'));
+  assert.ok(multiPage.includes('../multi/script.js?v=20260927-1'));
   assert.ok(multiPage.includes('../multi/style.css?v=20260926-2'));
   assert.equal(/\?v=\$\{/.test(multiPage), false, '版数を変数で組み立てている');
   assert.equal(/Math\.random|Date\.now\(\)\s*\)\s*\?v=/.test(multiPage), false);
+});
+
+test('保存roomなしの初期認証後は接続完了を表示し、復帰処理を呼ばない', () => {
+  assert.match(multiClient, /await auth\.authStateReady\(\);\s*if \(!auth\.currentUser\) await signInAnonymously\(auth\);\s*if \(state\.roomId\) await requestResume\('initial'\);\s*else message\('接続しました。'\);/);
 });
 
 /* ------------------------------------------------------------ 公開契約の一致 */
