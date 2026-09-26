@@ -300,13 +300,15 @@ test('publicRoomViolations は公開roomへの秘密混入を検出する', () =
   for (const key of FORBIDDEN_PUBLIC_KEYS) assert.deepEqual(publicRoomViolations({ [key]: 1 }), [key]);
 });
 
-test('index.js は別系統で、既存版・RTDB・新Secretに依存しない', () => {
+test('index.js は別系統で、既存版・新Secretに依存しない（RTDBはPhase Dのpresence専用）', () => {
   assert.ok(INDEX_SOURCE.includes("./contract"), 'contract.js を参照していない');
   assert.ok(INDEX_SOURCE.includes("./rules"), 'rules.js を参照していない');
   // コメントではなく実際の require だけを見る。
   assert.equal(/require\(\s*['"][^'"]*mofumofu-online/.test(INDEX_SOURCE), false, '既存版モジュールを参照している');
-  assert.equal(/require\(\s*['"][^'"]*\/database/.test(INDEX_SOURCE), false, 'RTDBへ依存している');
-  assert.equal(INDEX_SOURCE.includes('getDatabase'), false, 'RTDBへ依存している');
+  // Phase D: 接続情報（presence）だけRTDBを使う。ゲーム状態はFirestoreのまま。
+  assert.ok(INDEX_SOURCE.includes("require('firebase-admin/database')"), 'presence用のRTDB参照が無い');
+  assert.ok(INDEX_SOURCE.includes('presence.accessPath(roomId, uid)'), 'RTDBへ書くのは3〜6人版専用presenceAccessだけであること');
+  assert.equal(/['"]mofumofuOnlinePresence/.test(INDEX_SOURCE), false, '既存2人版presenceルートを参照している');
   const secrets = [...INDEX_SOURCE.matchAll(/defineSecret\(\s*['"]([^'"]+)['"]\s*\)/g)].map((m) => m[1]);
   assert.deepEqual(secrets, ['MOFUMOFU_ONLINE_IP_HMAC_KEY'], '新Secretを追加している');
   for (const name of ['createMofumofuMultiRoom', 'joinMofumofuMultiRoom', 'startMofumofuMultiGame']) {
