@@ -165,7 +165,7 @@ async function createHandler(request) {
   const fingerprint = contract.actionFingerprint('multi-create', uid, '', {});
   // 再送はrate limitを消費せず初回結果を返す（別roomを作らない）。
   const initialActionSnap = await actionRef.get();
-  if (initialActionSnap.exists) return contract.replayAction(initialActionSnap.data(), fingerprint);
+  if (initialActionSnap.exists) return replayIfPresent(initialActionSnap, fingerprint);
 
   const now = Date.now();
   await consumeRateLimit({ kind: 'create_uid', value: contract.digest(uid) }, contract.CREATE_UID_RATE_LIMIT, now);
@@ -209,7 +209,7 @@ async function createHandler(request) {
 async function joinHandler(request) {
   exactFields(request.data, ['inviteCode', 'actionId']);
   const uid = authUid(request);
-  const code = contract.normalizeInviteCode(request.data.inviteCode);
+  const code = contractInput(() => contract.normalizeInviteCode(request.data.inviteCode));
   const inviteDigest = contract.inviteCodeDigest(code);
   const actionId = actionIdFrom(request.data);
   const store = db();
@@ -217,7 +217,7 @@ async function joinHandler(request) {
   const actionRef = store.collection(contract.COLLECTIONS.actionRequests).doc(actionId);
   const fingerprint = contract.actionFingerprint('multi-join', uid, '', { inviteDigest });
   const initialActionSnap = await actionRef.get();
-  if (initialActionSnap.exists) return contract.replayAction(initialActionSnap.data(), fingerprint);
+  if (initialActionSnap.exists) return replayIfPresent(initialActionSnap, fingerprint);
 
   const rateRef = store.collection(contract.COLLECTIONS.rateLimits).doc(contract.rateKey('join_uid', contract.digest(uid)));
   await consumeRateLimit({ kind: 'join_ip', value: ipHash(request) }, contract.IP_RATE_LIMIT, now);
@@ -280,7 +280,7 @@ async function startHandler(request) {
   const actionRef = store.collection(contract.COLLECTIONS.actionRequests).doc(actionId);
   const fingerprint = contract.actionFingerprint('multi-start', uid, roomId, {});
   const initialActionSnap = await actionRef.get();
-  if (initialActionSnap.exists) return contract.replayAction(initialActionSnap.data(), fingerprint);
+  if (initialActionSnap.exists) return replayIfPresent(initialActionSnap, fingerprint);
   await consumeRateLimit({ kind: 'start_uid', value: contract.digest(uid) }, contract.START_UID_RATE_LIMIT, now);
 
   return store.runTransaction(async (tx) => {
@@ -339,6 +339,167 @@ async function startHandler(request) {
   }).catch((error) => { throw convertContractError(error); });
 }
 
+/* --------------------------------------------------------- Phase C: offer */
+
+function seatIdOrNull(member) {
+  return member && typeof member.seatId === 'string' ? member.seatId : null;
+}
+// contract.js の入力検証（ContractError）を callable の HttpsError へ寄せる。
+function contractInput(run) {
+  try { return run(); } catch (error) { throw convertContractError(error); }
+}
+// 冪等再送も ContractError のまま投げると callable が internal になるため、必ず変換して返す。
+function replayIfPresent(snapshot, fingerprint) {
+  try {
+    return contract.replayAction(snapshot.data(), fingerprint);
+  } catch (error) {
+    throw convertContractError(error);
+  }
+}
+// 全席の手札を読む。rules.js は handCounts を hands から再計算するため、部分読みは禁止。
+async function readHands(tx, r, room) {
+  const seatOrder = room.seatOrder || [];
+  const snapshots = await Promise.all(seatOrder.map((seat) => {
+    const uid = room.playerUids?.[seat];
+    return uid ? tx.get(r.hand(uid)) : Promise.resolve(null);
+  }));
+  const handsByUid = {};
+  for (let index = 0; index < seatOrder.length; index += 1) {
+    const uid = room.playerUids?.[seatOrder[index]];
+    const snapshot = snapshots[index];
+    if (!uid || !snapshot || !snapshot.exists) fail('failed-precondition', contract.HAND_MISSING_ERROR);
+    handsByUid[uid] = Array.isArray(snapshot.data().cards) ? snapshot.data().cards : [];
+  }
+  return handsByUid;
+}
+function rulesStateFrom(room, secret, handsByUid) {
+  return contract.rulesStateFromRoom(room, {
+    handsByUid,
+    leftovers: secret?.leftovers || [],
+    discard: secret?.discard || [],
+    pendingOffer: secret?.pendingOffer || null,
+  });
+}
+// 手札の変化分だけを書き、公開roomへは handCounts 等の公開情報だけを書く。
+function writeHands(tx, r, room, changed, deleteAt) {
+  for (const [seat, cards] of Object.entries(changed)) {
+    tx.set(r.hand(room.playerUids[seat]), { cards, deleteAt });
+  }
+}
+
+async function makeOfferHandler(request) {
+  exactFields(request.data, contract.OFFER_FIELDS);
+  const uid = authUid(request);
+  const roomId = roomIdFrom(request.data);
+  const actionId = actionIdFrom(request.data);
+  const cardId = contractInput(() => contract.requireCardId(request.data.cardId));
+  const claimedAnimalType = contractInput(() => contract.requireAnimalType(request.data.claimedAnimalType));
+  const targetPlayerId = contractInput(() => contract.requireSeatValue(request.data.targetPlayerId));
+  const store = db();
+  const now = Date.now();
+  const actionRef = store.collection(contract.COLLECTIONS.actionRequests).doc(actionId);
+  const fingerprint = contract.actionFingerprint('multi-make-offer', uid, roomId, { cardId, claimedAnimalType, targetPlayerId });
+  // 再送はrate limitを消費せず初回結果を返す（カード二重消費・手番二重進行を防ぐ）。
+  const initialActionSnap = await actionRef.get();
+  if (initialActionSnap.exists) return replayIfPresent(initialActionSnap, fingerprint);
+
+  await consumeRateLimit({ kind: 'make_uid', value: contract.digest(uid) }, contract.MAKE_UID_RATE_LIMIT, now);
+  await consumeRateLimit({ kind: 'make_ip', value: ipHash(request) }, contract.MAKE_IP_RATE_LIMIT, now);
+
+  const r = refs(roomId);
+  return store.runTransaction(async (tx) => {
+    const actionSnap = await tx.get(actionRef);
+    if (actionSnap.exists) return contract.replayAction(actionSnap.data(), fingerprint);
+    const [roomSnap, secretSnap, memberSnap] = await Promise.all([tx.get(r.room), tx.get(r.server), tx.get(r.member(uid))]);
+    if (!roomSnap.exists) fail('not-found', '部屋が見つかりません。');
+    const room = roomSnap.data();
+    const secret = secretSnap.exists ? secretSnap.data() : null;
+    // 呼び出し元の席は member document から解決する（clientの自己申告は使わない）。
+    const seatId = seatIdOrNull(memberSnap.exists ? memberSnap.data() : null);
+    const precondition = contract.offerPrecondition(room, { seatId, targetPlayerId, claimedAnimalType, cardId });
+    if (!precondition.ok) fail(precondition.code, precondition.message);
+
+    const handsByUid = await readHands(tx, r, room);
+    const state = rulesStateFrom(room, secret, handsByUid);
+    const next = contract.runRules(() => rules.applyOffer(state, {
+      fromPlayerId: seatId,
+      toPlayerId: targetPlayerId,
+      cardId,
+      claimAnimal: claimedAnimalType,
+      actionId,
+    }));
+    const deleteAt = secret?.deleteAt || Timestamp.fromMillis(now + contract.PLAYING_TTL_MS);
+    writeHands(tx, r, room, contract.changedHands(state, next), deleteAt);
+    // 実カードは秘密領域（serverState）だけに置き、公開roomへは publicOffer のみを書く。
+    tx.set(r.server, contract.serverStateAfterOffer(next, deleteAt));
+    tx.update(r.room, contract.roomWritesAfterOffer(next));
+    const result = contract.offerResult(roomId, next, seatId);
+    tx.create(actionRef, {
+      fingerprint,
+      stateToken: `offer:${next.turnNumber}`,
+      result,
+      completedAt: now,
+      deleteAt: Timestamp.fromMillis(now + contract.ACTION_TTL_MS),
+    });
+    return result;
+  }).catch((error) => { throw convertContractError(error); });
+}
+
+/* --------------------------------------------------------- Phase C: judge */
+
+async function judgeOfferHandler(request) {
+  exactFields(request.data, contract.JUDGE_FIELDS);
+  const uid = authUid(request);
+  const roomId = roomIdFrom(request.data);
+  const actionId = actionIdFrom(request.data);
+  const judgment = contractInput(() => contract.requireJudgment(request.data.judgment));
+  const store = db();
+  const now = Date.now();
+  const actionRef = store.collection(contract.COLLECTIONS.actionRequests).doc(actionId);
+  const fingerprint = contract.actionFingerprint('multi-judge-offer', uid, roomId, { judgment });
+  const initialActionSnap = await actionRef.get();
+  if (initialActionSnap.exists) return replayIfPresent(initialActionSnap, fingerprint);
+
+  await consumeRateLimit({ kind: 'judge_uid', value: contract.digest(uid) }, contract.JUDGE_UID_RATE_LIMIT, now);
+  await consumeRateLimit({ kind: 'judge_ip', value: ipHash(request) }, contract.JUDGE_IP_RATE_LIMIT, now);
+
+  const r = refs(roomId);
+  return store.runTransaction(async (tx) => {
+    const actionSnap = await tx.get(actionRef);
+    if (actionSnap.exists) return contract.replayAction(actionSnap.data(), fingerprint);
+    const [roomSnap, secretSnap, memberSnap] = await Promise.all([tx.get(r.room), tx.get(r.server), tx.get(r.member(uid))]);
+    if (!roomSnap.exists) fail('not-found', '部屋が見つかりません。');
+    const room = roomSnap.data();
+    const secret = secretSnap.exists ? secretSnap.data() : null;
+    const seatId = seatIdOrNull(memberSnap.exists ? memberSnap.data() : null);
+    const precondition = contract.judgmentPrecondition(room, secret, { seatId, judgment });
+    if (!precondition.ok) fail(precondition.code, precondition.message);
+
+    const handsByUid = await readHands(tx, r, room);
+    const state = rulesStateFrom(room, secret, handsByUid);
+    // 判定・表向き解決・集合判定・hand-empty・次手番はすべて rules.js（Phase A）が正本。
+    const next = contract.runRules(() => rules.applyJudgment(state, { judgment, byPlayerId: seatId }));
+    const finished = next.status === rules.ROOM_STATUS.FINISHED;
+    const deleteAt = finished
+      ? Timestamp.fromMillis(now + contract.FINISHED_TTL_MS)
+      : (secret?.deleteAt || Timestamp.fromMillis(now + contract.PLAYING_TTL_MS));
+    const roomWrites = contract.roomWritesAfterJudgment(next);
+    if (finished) roomWrites.deleteAt = deleteAt;
+    tx.update(r.room, roomWrites);
+    tx.set(r.server, contract.serverStateAfterJudgment(next, deleteAt));
+    writeHands(tx, r, room, contract.changedHands(state, next), deleteAt);
+    const result = contract.judgmentResult(roomId, next, judgment);
+    tx.create(actionRef, {
+      fingerprint,
+      stateToken: `judge:${next.turnNumber}`,
+      result,
+      completedAt: now,
+      deleteAt: Timestamp.fromMillis(now + contract.ACTION_TTL_MS),
+    });
+    return result;
+  }).catch((error) => { throw convertContractError(error); });
+}
+
 /* -------------------------------------------------------------- cleanup */
 
 // Phase Bではschedulerを登録しない（deploy禁止のため）。Phase Dでcleanupへ結線する。
@@ -364,12 +525,23 @@ async function cleanupMofumofuMultiDataNow(nowMillis = Date.now(), limit = 100) 
 const createMofumofuMultiRoom = onCall(callableOptions, (request) => createHandler(request));
 const joinMofumofuMultiRoom = onCall(callableOptions, (request) => joinHandler(request));
 const startMofumofuMultiGame = onCall(callableOptions, (request) => startHandler(request));
+const makeMofumofuMultiOffer = onCall(callableOptions, (request) => makeOfferHandler(request));
+const judgeMofumofuMultiOffer = onCall(callableOptions, (request) => judgeOfferHandler(request));
 
 module.exports = {
   createMofumofuMultiRoom,
   joinMofumofuMultiRoom,
   startMofumofuMultiGame,
-  _handlers: { createHandler, joinHandler, startHandler, cleanupMofumofuMultiDataNow },
+  makeMofumofuMultiOffer,
+  judgeMofumofuMultiOffer,
+  _handlers: {
+    createHandler,
+    joinHandler,
+    startHandler,
+    makeOfferHandler,
+    judgeOfferHandler,
+    cleanupMofumofuMultiDataNow,
+  },
   _test: {
     COLLECTIONS: contract.COLLECTIONS,
     callableOptions,
