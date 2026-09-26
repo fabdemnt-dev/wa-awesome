@@ -10,6 +10,14 @@
 //   - 他人の手札内容・pendingOfferの実カード・leftoversの内容はこのファイルでも一切扱わない。
 //   - 山札の表示枚数は「人数から公開契約で決まる枚数」（HAND_SIZE/LEFTOVERS表）だけで、中身は見ない。
 
+/* ------------------------------------------------------- RTDB presenceルート */
+
+// functions/mofumofu-multi/presence.js の RTDB_ROOTS と同じ値（3〜6人版専用。既存2人版と共有しない）。
+export const RTDB_ROOTS = Object.freeze({
+  presence: 'mofumofuMultiPresence',
+  access: 'mofumofuMultiPresenceAccess',
+});
+
 /* ------------------------------------------------------------------ 公開gate */
 
 // 3〜6人版の一般導線gate。Phase Eではまだ一般公開しないため false 固定。

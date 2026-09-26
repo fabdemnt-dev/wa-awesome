@@ -1,0 +1,129 @@
+/* もふもふ大集合！ 人間3〜6人オンライン版 Phase E。
+   既存「もふもふ大集合！」完成UIと同じデザイン言語（同じ配色変数・角丸・影・ボタン）を使い、
+   3〜6人版だけの追加要素（他席2列グリッド・自分下固定・山札0枚・結果6人）を足す。 */
+:root{
+  --cream:#fff8ed;--paper:#fffdf8;--ink:#493c39;--pink:#f6b8c8;--pink2:#ffe1e9;
+  --mint:#bfe5d2;--blue:#c9def5;--yellow:#f7dfa0;--wood:#d7a86e;--wood2:#c89257;
+  --shadow:0 8px 20px rgba(93,66,50,.14);--radius:22px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;background:#f4e3c8;color:var(--ink);font-family:"Hiragino Sans","Yu Gothic",system-ui,sans-serif}
+body{overflow-x:hidden;background:repeating-linear-gradient(90deg,#d9ad78 0 52px,#d4a46c 52px 104px)}
+button{font:inherit;color:inherit;touch-action:manipulation}
+button:focus-visible{outline:4px solid #6b5fd3;outline-offset:2px}
+button,select,input,a{min-height:44px}
+button,select,input{max-width:100%}
+.app{width:min(100%,520px);min-height:100dvh;margin:auto;background:var(--cream);box-shadow:0 0 35px rgba(62,41,26,.2);overflow:hidden;padding-bottom:18px}
+[hidden]{display:none!important}
+.screen{min-height:70dvh;padding:12px 16px 16px}
+.status-line{position:sticky;top:0;z-index:9;margin:0;padding:7px 14px;border-radius:999px;background:var(--paper);border:2px solid var(--pink);font-weight:900;text-align:center;box-shadow:var(--shadow)}
+.top-nav{display:flex;flex-wrap:wrap;gap:.5rem 1rem;padding:8px 4px 0;font-weight:800;font-size:13px}
+.top-nav a{display:inline-flex;align-items:center;color:#8a6a5c;text-decoration:none}
+.title-card,.result-card{width:100%;margin-top:12px;padding:26px 18px;text-align:center;background:rgba(255,253,248,.94);border:3px solid #fff;border-radius:32px;box-shadow:var(--shadow)}
+.animal-ring{font-size:32px;line-height:1.5;filter:drop-shadow(0 4px 3px rgba(0,0,0,.08))}
+h1{margin:10px 0;font-size:clamp(32px,9vw,46px);line-height:1.08;color:#d96c8c;text-shadow:0 3px 0 #fff}
+.online-badge{display:block;font-size:14px;color:#8a6a5c;letter-spacing:.22em;text-shadow:none}
+.catch{font-weight:800;margin:14px 0 20px}
+.big{width:100%;min-height:54px;border:0;border-radius:18px;margin-top:10px;font-weight:900;box-shadow:0 5px 0 rgba(85,61,49,.15);transition:.12s transform}
+.big:active,button:active{transform:translateY(2px)}
+.primary{background:#ef8eaa;color:#fff}
+.secondary{background:#fff;border:2px solid #e8b2c1}
+.entry-note{font-size:13px;font-weight:800;color:#796963;margin:10px 0 0}
+.lobby-eyebrow{margin:0;font-weight:900;color:#b58a7a}
+.lobby-note{font-size:13px;font-weight:800;color:#796963}
+.room-id-line{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:4px 8px;margin:6px 0 2px;font-size:12px;font-weight:800;color:#8a7a70}
+.room-id-text{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.room-id-copy{min-height:44px;padding:4px 12px;border-radius:12px;background:#fff;border:2px solid #e6d7cb;font-size:12px;font-weight:800;color:#8a7a70}
+.invite-box{display:flex;flex-direction:column;align-items:center;gap:8px;margin:12px 0 6px;padding:14px 10px 12px;border-radius:20px;background:#fff0f5;border:2px solid var(--pink)}
+.invite-box .catch{margin:0}
+.invite-main{margin:0}
+.invite-code{display:inline-block;min-width:8ch;padding:2px 10px;border-radius:12px;background:#ffe9f0;border:2px solid var(--pink);font-size:20.5px;letter-spacing:.14em}
+.invite-copy{min-width:132px;min-height:44px;padding:8px 18px;border:0;border-radius:999px;background:#ef8eaa;color:#fff;font-weight:900;box-shadow:0 4px 0 rgba(85,61,49,.15)}
+#players{display:grid;grid-template-columns:1fr;gap:10px;margin:14px 0 4px}
+.player-box{padding:7px 8px;background:var(--paper);border-radius:18px;box-shadow:var(--shadow);border:2px solid transparent;text-align:center}
+.player-box.current{border-color:#e18aa5}
+.player-box.judge-target{border-color:#9fd8ba}
+.player-box strong{display:block}
+.player-box .chip{white-space:nowrap}
+.chip{padding:2px 8px;background:#fff;border-radius:999px;border:1px solid #eadbd2;font-size:11px;font-weight:900}
+.chip.online{background:#e7f6ee;border-color:#9fd8ba;color:#167044}
+.chip.wait{background:#fff6df;border-color:#e7cf8e;color:#765b19}
+.chip.host{background:#f3ecff;border-color:#c9b6f2;color:#5d4a94}
+.chip-line{display:flex;justify-content:center;flex-wrap:wrap;gap:4px;margin-top:4px}
+.count{font-size:12px;font-weight:800;color:#796963}
+.face-line{display:flex;justify-content:center;flex-wrap:wrap;gap:4px;margin-top:4px}
+.face-chip{display:inline-flex;align-items:center;gap:2px;padding:2px 8px;background:#fff;border-radius:999px;border:1px solid #eadbd2;font-size:11px;font-weight:900}
+.face-chip img{width:18px;height:18px;object-fit:contain}
+.game-header{position:sticky;top:44px;z-index:8;display:flex;align-items:center;justify-content:center;padding:4px 0 8px;background:linear-gradient(var(--cream) 75%,transparent)}
+.turn-badge{padding:8px 18px;border-radius:999px;background:#fff;border:2px solid var(--pink);font-weight:900;box-shadow:var(--shadow)}
+.turn-badge.mine{border-color:#e18aa5;background:#fff0f5}
+.mini{position:absolute;right:2px;width:42px;height:42px;border:0;border-radius:50%;background:#fff;box-shadow:var(--shadow);font-weight:900}
+/* 他のplayerは上側・最大5人・2列折返し。 */
+.others-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:14px 0}
+.others-grid .player-box:last-child:nth-child(odd){grid-column:1 / -1}
+.table-center{position:relative;min-height:150px;margin:10px -16px;padding:14px 16px;background:
+  linear-gradient(rgba(255,255,255,.08),rgba(0,0,0,.03)),
+  repeating-linear-gradient(0deg,var(--wood),var(--wood) 28px,var(--wood2) 29px,var(--wood2) 30px);
+  border-block:3px solid rgba(113,70,37,.12);display:flex;align-items:center;justify-content:center;gap:20px}
+.deck-area{display:flex;flex-direction:column;align-items:center;gap:6px}
+.deck-card{width:44px;height:60px;border-radius:12px;background:repeating-conic-gradient(#f4a9bb 0 25%,#fff0f4 0 50%) 0/16px 16px;border:3px solid #fff;box-shadow:var(--shadow)}
+.deck-card.empty{background:#f0e2da;border-style:dashed}
+.deck-count{display:inline-block;margin:0;padding:2px 8px;border-radius:10px;background:rgba(255,255,255,.9);font-size:11px;font-weight:900}
+.offer-card{width:66px;height:88px;border-radius:14px;display:grid;place-items:center;font-size:32px;font-weight:900;background:repeating-conic-gradient(#f4a9bb 0 25%,#fff0f4 0 50%) 0/18px 18px;border:4px solid #fff;box-shadow:var(--shadow)}
+.offer-card.revealed{background:#fff}
+.offer-card img{width:50px;height:50px;object-fit:contain}
+.offer-area{text-align:center;max-width:230px}
+.table-label{display:inline-block;max-width:100%;margin:6px 0 0;padding:3px 10px;border-radius:10px;background:rgba(255,255,255,.9);font-size:12px;font-weight:900}
+.offer-area p{margin:6px 0 0;padding:4px 8px;border-radius:10px;background:rgba(255,255,255,.86);font-size:12.5px;font-weight:900}
+.flash{min-height:0;margin:8px 0 0;text-align:center;font-weight:900;pointer-events:none}
+.flash:not(:empty){padding:9px 12px;border-radius:14px;background:#fff3f6;border:2px solid #efb2c3;box-shadow:var(--shadow)}
+.notice{border:3px solid #e78f8f;background:#fff4f4;font-weight:700;border-radius:14px;padding:8px 10px;margin:8px 2px}
+.log-panel,.action-panel{margin-top:12px;padding:12px;background:rgba(255,253,248,.92);border-radius:var(--radius);box-shadow:var(--shadow)}
+.log-panel h2,.step h2{font-size:15px;margin:0 0 8px;color:#a8623f}
+.log{height:72px;overflow:auto;font-size:13px;line-height:1.5}
+.log p{margin:0 0 5px;border-bottom:1px dashed #f0e2da;padding-bottom:4px}
+/* 手札は横スクロール（6人戦・10枚でも折り返さない）。 */
+.hand{display:flex;gap:8px;overflow-x:auto;padding:8px 2px 12px;scrollbar-width:thin}
+.hand-card{flex:0 0 64px;height:88px;border:3px solid #fff;border-radius:15px;background:#fff;box-shadow:0 4px 10px rgba(80,55,40,.12);font-size:31px;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:0;margin:0}
+.hand-card img{width:46px;height:58px;object-fit:contain}
+.hand-card.selected{outline:4px solid #e981a0;transform:translateY(-4px)}
+.compact-hand{padding-bottom:4px}
+.compact-hand .hand-card{flex-basis:52px;height:70px;font-size:24px}
+.compact-hand .hand-card img{width:36px;height:44px;object-fit:contain}
+.animal-buttons,.target-buttons,.judge-buttons{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.animal-buttons button,.target-buttons button{min-height:46px;border:0;border-radius:14px;background:#fff;border:2px solid #eadbd2;font-weight:800}
+.animal-buttons button.selected{background:#fff0f5;border-color:#e981a0;box-shadow:0 0 0 3px rgba(233,129,160,.18) inset}
+.judge-buttons{margin-top:6px}
+.judge-buttons button{min-height:62px;border:0;border-radius:18px;font-size:18px;font-weight:900}
+.truth{background:var(--mint)}.lie{background:var(--pink)}
+.judge-hand{margin-bottom:14px;padding-bottom:12px;border-bottom:1px dashed #e5cec7}
+#result{margin-top:12px;padding:10px 12px;border-radius:14px;background:#fff7f9;border:2px solid #efd6dd;font-weight:800}
+/* 自分の席は常に下（sticky）。他の5人の上に重ならない。 */
+.self-seat{position:sticky;bottom:8px;z-index:10;display:flex;flex-direction:column;gap:2px;padding:8px 12px;margin:12px 0 4px;background:var(--paper);border:2px solid var(--pink);border-radius:18px;box-shadow:var(--shadow);font-weight:900}
+.self-seat .count,.self-seat .chip-line,.self-seat .face-line{margin-top:4px}
+.result-card h2{color:#d96c8c;margin:6px 0}
+#final-players{display:grid;gap:8px;margin-top:10px;text-align:left}
+#final-players section{padding:9px 11px;border:1px solid #efd6dd;border-radius:14px;background:#fffafc}
+#final-players p{margin:.25rem 0;font-size:13px;font-weight:800}
+.final-verdict{margin:.25rem 0 0;font-weight:900}
+.final-verdict.won{color:#167044}
+.final-verdict.lost{color:#b4526b}
+.gathering-overlay{position:fixed;inset:0;z-index:120;display:grid;place-items:center;background:rgba(255,248,237,.92)}
+.gathering-overlay img{width:min(86vw,560px);animation:gatheringPop 2.6s ease both}
+@keyframes gatheringPop{0%{opacity:0;transform:scale(.85)}18%,80%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(1.02)}}
+.hidden{display:none!important}
+dialog{width:min(calc(100% - 28px),480px);max-height:85dvh;border:0;border-radius:26px;padding:0;color:var(--ink);box-shadow:0 20px 60px rgba(0,0,0,.25);overflow:auto}
+dialog::backdrop{background:rgba(65,49,43,.45);backdrop-filter:blur(2px)}
+.dialog-body{padding:22px}
+.dialog-body h2{margin-top:0;color:#d96c8c}
+.dialog-body h3{margin:16px 0 4px;font-size:14px;color:#a8623f}
+.dialog-body p,.dialog-body li{line-height:1.65}
+.dialog-body ul,.dialog-body ol{padding-left:22px}
+.dialog-actions{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:12px}
+@keyframes pop{0%{opacity:0;transform:scale(.96)}25%,70%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(1)}}
+.flash.show{animation:pop .8s ease}
+@keyframes fade{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+/* 320px幅でも横overflowを出さない。 */
+@media(max-width:360px){.screen{padding:8px 10px 12px}.others-grid{gap:7px}.player-box{padding:7px 6px}.face-line{gap:3px}.hand-card{flex-basis:58px;height:80px}.hand-card img{width:40px;height:52px}.table-center{gap:12px;min-height:130px}.animal-buttons,.target-buttons,.judge-buttons{gap:6px}.animal-buttons button,.target-buttons button{font-size:14px}}
+@media(min-width:700px){body{padding:22px 0}.app{min-height:calc(100dvh - 44px);border-radius:28px}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important}.gathering-overlay img{animation:none;opacity:1;transform:none}}
