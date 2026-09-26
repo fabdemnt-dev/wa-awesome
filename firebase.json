@@ -8,7 +8,15 @@
     "site": "wa-awesome-mofumofu-stg",
     "public": "toybox/mofumofu-gathering/online",
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
-    "trailingSlash": false
+    "trailingSlash": false,
+    "headers": [
+      {
+        "source": "/multi",
+        "headers": [
+          { "key": "Cache-Control", "value": "no-cache, max-age=0, must-revalidate" }
+        ]
+      }
+    ]
   },
   "functions": [
     {

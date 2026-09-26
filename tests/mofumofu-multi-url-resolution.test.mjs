@@ -9,6 +9,7 @@ const publicRoot = new URL('../toybox/mofumofu-gathering/online/', import.meta.u
 const repositoryRoot = new URL('../', import.meta.url);
 const multiRoot = new URL('multi/', publicRoot);
 const origins = ['https://wa-awesome-mofumofu-stg.web.app/multi', 'https://wa-awesome-mofumofu-stg.web.app/multi/'];
+const hostingConfig = JSON.parse(readFileSync(new URL('../firebase.json', import.meta.url), 'utf8')).hosting;
 
 function attribute(tag, name) {
   return tag.match(new RegExp(`${name}="([^"]+)"`))?.[1] ?? '';
@@ -31,6 +32,14 @@ test('multi page resolves its stylesheet and entry module identically with or wi
     assert.equal(new URL(module, origin).pathname, '/multi/script.js');
     assert.notEqual(new URL(module, origin).pathname, '/script.js');
   }
+});
+
+test('normalized /multi HTML is revalidated instead of retaining a stale entry module', () => {
+  assert.equal(hostingConfig.trailingSlash, false);
+  const rule = hostingConfig.headers.find(({ source }) => source === '/multi');
+  assert.deepEqual(rule?.headers, [
+    { key: 'Cache-Control', value: 'no-cache, max-age=0, must-revalidate' },
+  ]);
 });
 
 test('multi module graph resolves under /multi and every local module exists', () => {
