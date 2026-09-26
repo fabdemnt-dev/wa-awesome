@@ -672,4 +672,4 @@ renderEntry();
 await auth.authStateReady();
 if (!auth.currentUser) await signInAnonymously(auth);
 if (state.roomId) await requestResume('initial');
-else message(core.TEXT.connecting);
+else message('接続しました。');
