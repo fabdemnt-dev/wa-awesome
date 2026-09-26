@@ -88,7 +88,8 @@ export const LOGO_PATH = `${ASSET_BASE}mofumofu-logo.png`;
 export function cardImagePath(animalType) { return `${ASSET_BASE}${CARD_IMAGES[animalType] || ''}`; }
 
 export const INVITE_LENGTH = 8;
-export const INVITE_CODE_RE = /^[A-Za-z0-9]{8}$/;
+// serverの招待コードalphabetと同じ（紛らわしい I / O / 0 / 1 は使わない）。
+export const INVITE_CODE_RE = /^[A-HJ-NP-Z2-9]{8}$/;
 export const COPY_LABEL = 'コピー';
 export const COPY_DONE_LABEL = 'コピーしました！';
 export const COPY_FAILED_LABEL = 'コピーできませんでした';
