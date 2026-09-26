@@ -477,15 +477,12 @@ test('E-14 復帰の同時実行: 1本にまとめ、lifecycleの連続発火は
 
 /* ------------------------------------------------------------ あそびかた・禁止 */
 
-test('E-15 あそびかた: 実装済みの内容だけを書き、未実装機能は「できない」と明記する', () => {
+test('E-15 あそびかた: いま遊べるルールだけを書き、未実装の機能は載せない', () => {
   const flat = core.helpTextFlat().join('\n');
-  for (const required of ['3人から6人まで', '3人=10枚', '4人=8枚', '5人=6枚', '6人=5枚', '最大5人', '受け取った本人だけ', '同率']) {
+  for (const required of ['3人から6人まで', '3人=10枚', '4人=8枚', '5人=6枚', '6人=5枚', '最大5人', '受け取った本人だけ', '同率', '再接続待ち']) {
     assert.ok(flat.includes(required), `あそびかたに ${required} が無い`);
   }
-  assert.ok(flat.includes('まだゲームの途中で抜けることはできません'));
-  assert.ok(flat.includes('部屋を閉じる機能もまだありません'));
-  assert.ok(flat.includes('NPCやこはるは出てきません'));
-  assert.ok(!/観戦|40枚/.test(flat), '未実装の機能をあそびかたに書いている');
+  assert.equal(/NPC|こはる|観戦|40枚|途中で抜ける|部屋を閉じる|まだありません|まだできません/.test(flat), false, '未実装の機能をあそびかたに書いている');
   // ページ側のダイアログはmulti-coreの文面から描く（文面の二重管理をしない）。
   assert.ok(multiClient.includes('core.helpSections()'), 'あそびかたを自前で書いている');
   assert.ok(multiPage.includes('id="help-body"'));
