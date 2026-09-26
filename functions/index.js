@@ -27,6 +27,16 @@ try {
   if (error?.message !== './mofumofu-online') throw error;
 }
 
+// 人間3〜6人オンライン版（Phase A/B）。既存2人版と同じく、別系統のcollectionとCallableだけを公開する。
+try {
+  const mofumofuMulti = require('./mofumofu-multi');
+  exports.createMofumofuMultiRoom = mofumofuMulti.createMofumofuMultiRoom;
+  exports.joinMofumofuMultiRoom = mofumofuMulti.joinMofumofuMultiRoom;
+  exports.startMofumofuMultiGame = mofumofuMulti.startMofumofuMultiGame;
+} catch (error) {
+  if (error?.message !== './mofumofu-multi') throw error;
+}
+
 const DEFAULT_WORDS_5 = [
   '春の風', '夏の空', '秋の月', '冬の朝', '花吹雪', '風光る', '星の夜', '水の音',
   '雲の影', '光る海', 'そよぐ風', '遠い山', '静けさよ', '白い雲', '青い空', '赤い花',
