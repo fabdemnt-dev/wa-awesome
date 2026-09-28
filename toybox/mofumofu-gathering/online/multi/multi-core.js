@@ -275,8 +275,9 @@ export function seatPresenceOf(room, presence, seatId, now = Date.now(), staleMs
 // 内部seat ID（S1〜S6）を利用者向けの主表示にしない。自分は「あなた」、他は表示名か「あいてN」。
 export function seatDisplayName(room, seatId, mySeatId) {
   if (!seatId) return '';
-  if (seatId === mySeatId) return TEXT.selfLabel;
   const displayName = room?.players?.[seatId]?.displayName;
+  if (seatId === mySeatId) return typeof displayName === 'string' && displayName.trim()
+    ? `${TEXT.selfLabel}（${displayName.trim()}）` : TEXT.selfLabel;
   if (typeof displayName === 'string' && displayName.trim()) return displayName.trim();
   const index = otherSeatIndex(room, seatId, mySeatId);
   return index === null ? TEXT.otherLabelPrefix : `${TEXT.otherLabelPrefix}${index}`;

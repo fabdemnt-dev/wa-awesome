@@ -90,13 +90,20 @@ function normalizeInviteCode(value) {
   if (!isInviteCode(code)) fail('failed-precondition', INVITE_ERROR);
   return code;
 }
+function normalizeDisplayName(value) {
+  if (value === undefined) return null; // 旧clientとの互換性
+  if (typeof value !== 'string') fail('invalid-argument', '表示名が正しくありません。');
+  const name = value.trim();
+  if (Array.from(name).length > 12) fail('invalid-argument', '表示名は12文字以内にしてください。');
+  return name || null;
+}
 function inviteCodeDigest(code) { return crypto.createHash('sha256').update(code).digest('hex'); }
 function digest(value) { return crypto.createHash('sha256').update(String(value)).digest('hex'); }
 function rateKey(kind, value) { return `${kind}_${value}`; }
 
 /* ----------------------------------------------------------- 初期document */
 
-function initialRoomFields({ roomId, hostUid, now, deleteAt }) {
+function initialRoomFields({ roomId, hostUid, now, deleteAt, displayName = null }) {
   return {
     schemaVersion: SCHEMA_VERSION,
     kind: KIND,
@@ -110,7 +117,7 @@ function initialRoomFields({ roomId, hostUid, now, deleteAt }) {
     minPlayers: MIN_PLAYERS,
     maxPlayers: MAX_PLAYERS,
     seatOrder: ['S1'],
-    players: { S1: { seatId: 'S1', joined: true, joinedAt: now, displayName: null } },
+    players: { S1: { seatId: 'S1', joined: true, joinedAt: now, displayName } },
     playerUids: { S1: hostUid },
     playerStatus: { S1: PLAYER_STATUS.ACTIVE },
     handCounts: { S1: 0 },
@@ -175,10 +182,10 @@ function joinDecision(room, invite, { uid, now }) {
   if (!seatId) return { ok: false, code: 'resource-exhausted', message: FULL_ERROR };
   return { ok: true, action: 'join', seatId, playerCount: count + 1 };
 }
-function joinRoomUpdate(room, seatId, uid, now) {
+function joinRoomUpdate(room, seatId, uid, now, displayName = null) {
   return {
     seatOrder: [...(room.seatOrder || []), seatId],
-    [`players.${seatId}`]: { seatId, joined: true, joinedAt: now, displayName: null },
+    [`players.${seatId}`]: { seatId, joined: true, joinedAt: now, displayName },
     [`playerUids.${seatId}`]: uid,
     [`playerStatus.${seatId}`]: PLAYER_STATUS.ACTIVE,
     [`handCounts.${seatId}`]: 0,
@@ -538,6 +545,7 @@ module.exports = {
   inviteCodePattern,
   isInviteCode,
   normalizeInviteCode,
+  normalizeDisplayName,
   inviteCodeDigest,
   digest,
   rateKey,
