@@ -26,7 +26,7 @@ test('multi page resolves its stylesheet and entry module identically with or wi
   const module = attribute(moduleTag, 'src');
 
   assert.equal(stylesheet, '../multi/style.css?v=20260926-2');
-  assert.equal(module, '../multi/script.js?v=20260928-1');
+  assert.equal(module, '../multi/script.js?v=20260928-2');
   for (const origin of origins) {
     assert.equal(new URL(stylesheet, origin).pathname, '/multi/style.css');
     assert.equal(new URL(module, origin).pathname, '/multi/script.js');
@@ -47,7 +47,7 @@ test('multi module graph resolves under /multi and every local module exists', (
   const localImports = [...client.matchAll(/from\s+['"](\.\/[^'"]+)['"]/g)].map((match) => match[1]);
   assert.deepEqual(localImports.sort(), [
     './firebase-config.js?v=20260926-1',
-    './multi-core.js?v=20260928-1',
+    './multi-core.js?v=20260928-2',
     './multi-resume.js?v=20260926-1',
   ]);
   for (const specifier of localImports) {

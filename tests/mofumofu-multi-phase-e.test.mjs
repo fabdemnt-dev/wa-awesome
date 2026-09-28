@@ -110,7 +110,7 @@ test('E-3 モード選択: 修飾クリックは素通しし、無効モード�
   assert.ok(multiEntry.includes('event.preventDefault()'));
   assert.ok(multiEntry.includes('document.createElement(mode.enabled ? \'a\' : \'span\')'), '無効モードをリンクで描いている');
   // 3〜6人版ページ自体のキャッシュ版数は固定（ランダム生成・時刻生成をしない）。
-  assert.ok(multiPage.includes('../multi/script.js?v=20260928-1'));
+  assert.ok(multiPage.includes('../multi/script.js?v=20260928-2'));
   assert.ok(multiPage.includes('../multi/style.css?v=20260926-2'));
   assert.equal(/\?v=\$\{/.test(multiPage), false, '版数を変数で組み立てている');
   assert.equal(/Math\.random|Date\.now\(\)\s*\)\s*\?v=/.test(multiPage), false);
@@ -118,6 +118,31 @@ test('E-3 モード選択: 修飾クリックは素通しし、無効モード�
 
 test('保存roomなしの初期認証後は接続完了を表示し、復帰処理を呼ばない', () => {
   assert.match(multiClient, /await auth\.authStateReady\(\);\s*if \(!auth\.currentUser\) await signInAnonymously\(auth\);\s*if \(state\.roomId\) await requestResume\('initial'\);\s*else message\('接続しました。'\);/);
+});
+
+test('playing中の自分の手札は手番外も閲覧でき、選択は自分の出す手番だけ', () => {
+  for (const count of [3, 4, 5, 6]) {
+    const room = playingRoom(count, { currentTurnPlayerId: 'S1' });
+    assert.equal(room.handCounts.S2, core.handSizeFor(count));
+    assert.equal(core.handMode(core.gameView(room, 'S1')), 'select');
+    assert.equal(core.handMode(core.gameView(room, 'S2')), 'view');
+    const judging = playingRoom(count, {
+      currentTurnPlayerId: 'S1', turnState: rules.TURN_STATE.AWAITING_JUDGMENT,
+      publicOffer: { status: 'pending', fromPlayerId: 'S1', toPlayerId: 'S2', claimAnimal: 'cat' },
+    });
+    assert.equal(core.handMode(core.gameView(judging, 'S2')), 'judging');
+    assert.equal(core.handMode(core.gameView(judging, 'S3')), 'view');
+  }
+  assert.equal(core.handMode(core.gameView(baseRoom(3), 'S1')), 'hidden');
+  assert.match(multiClient, /\['select', 'view'\]\.includes\(handMode\) \? state\.cards : \[\]/);
+  assert.match(multiClient, /document\.createElement\(canMake \? 'button' : 'span'\)/);
+  assert.match(multiClient, /if \(canMake\) node\.addEventListener\('click'/);
+  assert.match(multiClient, /if \(!core\.canMakeOffer\(state\.room, state\.seatId\) \|\| state\.makeBusy\) return/);
+  assert.match(multiClient, /state\.cards = Array\.isArray\(value\.cards\) \? value\.cards : \[\];[\s\S]*?renderAll\(\)/);
+  assert.match(multiClient, /if \(view\.canJudge\) \{\s*\$\('judgeHand'\)\.replaceChildren\(\.\.\.state\.cards\.map/);
+  assert.ok(multiPage.includes('id="hand" class="hand"'));
+  assert.ok(multiStyle.includes('.hand{display:flex;gap:8px;overflow-x:auto'));
+  assert.equal(multiClient.includes('other.cards'), false);
 });
 
 test('waiting・playing・resume後のconnected表示は入口と一致し、接続途中と区別する', () => {

@@ -349,6 +349,12 @@ export function canJudge(room, mySeatId) {
     && room.publicOffer?.toPlayerId === mySeatId
     && room.playerStatus?.[mySeatId] === PLAYER_STATUS.ACTIVE;
 }
+// 手札の閲覧とカード選択を分ける。判定時は既存のjudgeHandを使う。
+export function handMode(view) {
+  if (!view || view.status !== ROOM_STATUS.PLAYING) return 'hidden';
+  if (view.canJudge) return 'judging';
+  return view.canMakeOffer ? 'select' : 'view';
+}
 // 渡せる相手: 自分以外のactive席（最大5人）。
 export function validTargets(room, mySeatId) {
   if (!canMakeOffer(room, mySeatId)) return [];

@@ -10,7 +10,7 @@ import { getFirestore, connectFirestoreEmulator, doc, onSnapshot, getDocFromServ
 import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-functions.js';
 import { getDatabase, connectDatabaseEmulator, ref, onValue, onDisconnect, set, update, serverTimestamp } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js';
 import { resolveEnvironment, REGION } from './firebase-config.js?v=20260926-1';
-import * as core from './multi-core.js?v=20260928-1';
+import * as core from './multi-core.js?v=20260928-2';
 import { runMofumofuMultiFullResume, createMultiResumeCoordinator, handleMultiSessionFailure } from './multi-resume.js?v=20260926-1';
 
 const environment = resolveEnvironment();
@@ -261,16 +261,18 @@ function renderGame(room) {
 }
 function renderSteps(view) {
   const canMake = view.canMakeOffer;
+  const handMode = core.handMode(view);
   if (!canMake) { ui.cardId = null; ui.claim = null; }
   if (ui.cardId && !state.cards.some((entry) => entry.cardId === ui.cardId)) { ui.cardId = null; ui.claim = null; }
-  $('offer-form').hidden = !canMake;
-  $('hand').replaceChildren(...(canMake ? state.cards : []).map((entry) => {
-    const node = document.createElement('button');
-    node.type = 'button';
+  $('offer-form').hidden = handMode === 'hidden' || handMode === 'judging';
+  $('hand-heading').textContent = canMake ? '① 渡すカードを選ぶ' : 'あなたの手札';
+  $('hand').replaceChildren(...(['select', 'view'].includes(handMode) ? state.cards : []).map((entry) => {
+    const node = document.createElement(canMake ? 'button' : 'span');
+    if (canMake) node.type = 'button';
     node.className = `hand-card${entry.cardId === ui.cardId ? ' selected' : ''}`;
     node.append(cardImage(entry.animalType, core.ANIMAL_LABELS[entry.animalType]));
     node.setAttribute('aria-label', core.ANIMAL_LABELS[entry.animalType]);
-    node.addEventListener('click', () => {
+    if (canMake) node.addEventListener('click', () => {
       if (!core.canMakeOffer(state.room, state.seatId) || state.makeBusy) return;
       ui.cardId = entry.cardId; ui.claim = null; renderGame(state.room);
     });
