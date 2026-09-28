@@ -160,6 +160,7 @@ export function forgetInvite(storage, roomId) {
 export const TEXT = {
   statusInitial: '接続準備中です…',
   connecting: '接続中',
+  connected: '接続しました。',
   syncing: '再接続中／同期中…',
   entryTitle: 'もふもふ大集合！',
   entryBadge: 'オンライン 3〜6人',
