@@ -421,3 +421,47 @@ exports.getAiRoomManusTask = onCall(manusCallableOptions, async (request) => {
     clearTimeout(timeout);
   }
 });
+
+// The original connection check is owned by the ai-room codebase.
+exports.testOpenAIConnection = onCall(openAiCallableOptions, async (request) => {
+  if (!request.auth?.uid) {
+    fail('unauthenticated', '編集するにはアプリへの接続が必要です。ページを再読み込みして、もう一度お試しください。');
+  }
+
+  const apiKey = openAiApiKey.value();
+  if (!apiKey) fail('failed-precondition', 'OpenAI接続用のSecretが設定されていません。');
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20_000);
+  try {
+    const response = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-5.6-luna',
+        input: 'Reply with exactly: OK',
+        max_output_tokens: 8,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      fail('internal', `OpenAI接続テストに失敗しました（HTTP ${response.status}）。`);
+    }
+    const result = await response.json();
+    return {
+      ok: true,
+      model: result.model || 'gpt-5.6-luna',
+      responseId: result.id || null,
+      output: result.output_text || null,
+    };
+  } catch (error) {
+    if (error instanceof HttpsError) throw error;
+    fail('internal', 'OpenAI接続テストに失敗しました。');
+  } finally {
+    clearTimeout(timeout);
+  }
+});
