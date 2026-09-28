@@ -10,7 +10,7 @@ import { getFirestore, connectFirestoreEmulator, doc, onSnapshot, getDocFromServ
 import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-functions.js';
 import { getDatabase, connectDatabaseEmulator, ref, onValue, onDisconnect, set, update, serverTimestamp } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js';
 import { resolveEnvironment, REGION } from './firebase-config.js?v=20260926-1';
-import * as core from './multi-core.js?v=20260926-1';
+import * as core from './multi-core.js?v=20260928-1';
 import { runMofumofuMultiFullResume, createMultiResumeCoordinator, handleMultiSessionFailure } from './multi-resume.js?v=20260926-1';
 
 const environment = resolveEnvironment();
@@ -165,7 +165,7 @@ async function copyText(value, button, resetLabel) {
 }
 function setConnectionState(next, detail = '') {
   state.connectionState = next;
-  message(next === 'connected' ? core.TEXT.connecting : next === 'syncing' ? core.TEXT.syncing : `同期エラー${detail ? `（${detail}）` : ''}`);
+  message(next === 'connected' ? core.TEXT.connected : next === 'syncing' ? core.TEXT.syncing : `同期エラー${detail ? `（${detail}）` : ''}`);
 }
 function errorCode(error) { return String(error?.code || 'unknown').replace(/^functions\//, ''); }
 
