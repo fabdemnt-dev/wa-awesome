@@ -10,7 +10,7 @@ import { getFirestore, connectFirestoreEmulator, doc, onSnapshot, getDocFromServ
 import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-functions.js';
 import { getDatabase, connectDatabaseEmulator, ref, onValue, onDisconnect, set, update, serverTimestamp } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js';
 import { resolveEnvironment, REGION } from './firebase-config.js?v=20260926-1';
-import * as core from './multi-core.js?v=20260928-2';
+import * as core from './multi-core.js?v=20260928-3';
 import { runMofumofuMultiFullResume, createMultiResumeCoordinator, handleMultiSessionFailure } from './multi-resume.js?v=20260926-1';
 
 const environment = resolveEnvironment();
@@ -618,11 +618,15 @@ $('copy-invite').addEventListener('click', async () => {
 $('copy-room-id').addEventListener('click', () => {
   if (state.roomId) return copyText(state.roomId, $('copy-room-id'), core.ROOM_ID_COPY_LABEL);
 });
+$('display-name').addEventListener('input', (event) => {
+  event.target.value = Array.from(event.target.value).slice(0, 12).join('');
+});
+
 $('create-room').addEventListener('click', async () => {
   if (state.entryBusy) return;
   state.entryBusy = true; renderEntry();
   try {
-    const value = await call('createMofumofuMultiRoom', { actionId: newId() });
+    const value = await call('createMofumofuMultiRoom', { actionId: newId(), displayName: $('display-name').value.trim() });
     forgetInvite(value.roomId);
     remember(value.roomId, value.seatId);
     // 平文inviteはcreate応答だけを正本にし、そのタブのsessionStorageへだけ置く。
@@ -639,6 +643,7 @@ $('join-form').addEventListener('submit', async (event) => {
     const value = await call('joinMofumofuMultiRoom', {
       inviteCode: core.normalizeInviteCode($('invite-code').value),
       actionId: newId(),
+      displayName: $('display-name').value.trim(),
     });
     forgetInvite(value.roomId);
     remember(value.roomId, value.seatId);

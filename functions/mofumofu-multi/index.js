@@ -171,12 +171,13 @@ async function recordJoinFailure(uid, now = Date.now()) {
 /* ---------------------------------------------------------------- create */
 
 async function createHandler(request) {
-  exactFields(request.data || {}, ['actionId']);
+  exactFields(request.data || {}, ['actionId', 'displayName']);
   const uid = authUid(request);
   const actionId = actionIdFrom(request.data);
+  const displayName = contractInput(() => contract.normalizeDisplayName(request.data.displayName));
   const store = db();
   const actionRef = store.collection(contract.COLLECTIONS.actionRequests).doc(actionId);
-  const fingerprint = contract.actionFingerprint('multi-create', uid, '', {});
+  const fingerprint = contract.actionFingerprint('multi-create', uid, '', displayName ? { displayName } : {});
   // 再送はrate limitを消費せず初回結果を返す（別roomを作らない）。
   const initialActionSnap = await actionRef.get();
   if (initialActionSnap.exists) return replayIfPresent(initialActionSnap, fingerprint);
@@ -195,7 +196,7 @@ async function createHandler(request) {
       await store.runTransaction(async (tx) => {
         const inviteSnap = await tx.get(r.invite(inviteDigest));
         if (inviteSnap.exists) fail('already-exists', '招待コードが衝突しました。');
-        tx.create(r.room, contract.initialRoomFields({ roomId, hostUid: uid, now, deleteAt }));
+        tx.create(r.room, contract.initialRoomFields({ roomId, hostUid: uid, now, deleteAt, displayName }));
         tx.create(r.member(uid), contract.initialMemberFields({ uid, seatId: 'S1', joinedAt: now, deleteAt }));
         tx.create(r.secret, contract.initialSecretFields({ inviteDigest, createdAt: now, deleteAt }));
         tx.create(r.invite(inviteDigest), contract.initialInviteFields({ roomId, now, deleteAt }));
@@ -221,15 +222,18 @@ async function createHandler(request) {
 /* ------------------------------------------------------------------ join */
 
 async function joinHandler(request) {
-  exactFields(request.data, ['inviteCode', 'actionId']);
+  exactFields(request.data, ['inviteCode', 'actionId', 'displayName']);
   const uid = authUid(request);
+  const displayName = contractInput(() => contract.normalizeDisplayName(request.data.displayName));
   const code = contractInput(() => contract.normalizeInviteCode(request.data.inviteCode));
   const inviteDigest = contract.inviteCodeDigest(code);
   const actionId = actionIdFrom(request.data);
   const store = db();
   const now = Date.now();
   const actionRef = store.collection(contract.COLLECTIONS.actionRequests).doc(actionId);
-  const fingerprint = contract.actionFingerprint('multi-join', uid, '', { inviteDigest });
+  const fingerprint = contract.actionFingerprint('multi-join', uid, '', {
+    inviteDigest, ...(displayName ? { displayName } : {}),
+  });
   const initialActionSnap = await actionRef.get();
   if (initialActionSnap.exists) return replayIfPresent(initialActionSnap, fingerprint);
 
@@ -253,7 +257,7 @@ async function joinHandler(request) {
       }
       if (!decision.ok) fail(decision.code, decision.message);
       const seatId = decision.seatId;
-      tx.update(r.room, contract.joinRoomUpdate(room, seatId, uid, now));
+      tx.update(r.room, contract.joinRoomUpdate(room, seatId, uid, now, displayName));
       tx.create(r.member(uid), contract.initialMemberFields({
         uid,
         seatId,

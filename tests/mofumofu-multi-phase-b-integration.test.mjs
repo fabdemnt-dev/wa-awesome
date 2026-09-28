@@ -121,6 +121,25 @@ if (!emulatorHost) {
       await expectCode(() => createHandler(request('host-a', { actionId: actionId(), extra: 1 })), 'invalid-argument');
     });
 
+    await t.test('displayName: create/joinで公開playersに保存、再参加で維持、不正入力を拒否', async () => {
+      for (const value of [null, 42, {}, 'あ'.repeat(13)]) {
+        await expectCode(() => createHandler(request(`bad-name-${seq}`, { actionId: actionId(), displayName: value })), 'invalid-argument');
+      }
+      const created = await createHandler(request('named-host', { actionId: actionId(), displayName: ' もふ ' }));
+      assert.equal((await readRoom(created.roomId)).players.S1.displayName, 'もふ');
+      for (const value of [null, 42, {}, 'あ'.repeat(13)]) {
+        await expectCode(() => joinHandler(request(`bad-guest-${seq}`, { actionId: actionId(), inviteCode: created.inviteCode, displayName: value })), 'invalid-argument');
+      }
+      const joined = await joinHandler(request('named-guest', { actionId: actionId(), inviteCode: created.inviteCode, displayName: 'もふ' }));
+      assert.equal(joined.seatId, 'S2');
+      const rejoined = await joinHandler(request('named-guest', { actionId: actionId(), inviteCode: created.inviteCode, displayName: '別名' }));
+      assert.equal(rejoined.rejoined, true);
+      const room = await readRoom(created.roomId);
+      assert.equal(room.players.S2.displayName, 'もふ', 'resumeと同一uid再参加で名前が変わらない');
+      assert.equal('privateHands' in room, false);
+      assert.equal('serverState' in room, false);
+    });
+
     await t.test('create: 2つ目の部屋（roomB, 3人用）', async () => {
       const result = await createHandler(request('host-b', { actionId: actionId() }));
       roomB = result.roomId;
