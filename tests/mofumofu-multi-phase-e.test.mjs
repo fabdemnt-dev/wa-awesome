@@ -112,7 +112,7 @@ test('E-3 モード選択: 修飾クリックは素通しし、無効モード�
   assert.ok(multiEntry.includes('event.preventDefault()'));
   assert.ok(multiEntry.includes('document.createElement(mode.enabled ? \'a\' : \'span\')'), '無効モードをリンクで描いている');
   // 3〜6人版ページ自体のキャッシュ版数は固定（ランダム生成・時刻生成をしない）。
-  assert.ok(multiPage.includes('../multi/script.js?v=20260929-5'));
+  assert.ok(multiPage.includes('../multi/script.js?v=20260929-6'));
   assert.ok(multiPage.includes('../multi/style.css?v=20260929-1'));
   assert.equal(/\?v=\$\{/.test(multiPage), false, '版数を変数で組み立てている');
   assert.equal(/Math\.random|Date\.now\(\)\s*\)\s*\?v=/.test(multiPage), false);
@@ -631,6 +631,55 @@ test('E-13 resume失敗: 4つの理由だけ保存roomを解除して入口へ�
   assert.deepEqual(core.loadRoom(storage), { roomId: 'room-1', seatId: 'S2' });
   assert.equal(notices.length, 4);
   assert.equal(new Set(notices).size, 4, '理由ごとに違う案内を出していない');
+});
+
+test('確定した保存room失敗は、既に隠れた入口を再表示して新規作成・参加を使えるようにする', () => {
+  const screenSource = multiClient.slice(multiClient.indexOf('function showScreen(room) {'), multiClient.indexOf('function renderLobby(room) {'));
+  const resetSource = multiClient.slice(multiClient.indexOf('function renderAll() {'), multiClient.indexOf('/* -------------------------------------------------------------------- 通信 */'));
+  for (const [reason, code] of [
+    ['room-expired', 'failed-precondition'], ['room-not-found', 'not-found'],
+    ['not-member', 'permission-denied'], ['room-status', 'failed-precondition'],
+  ]) {
+    const storage = fakeStorage();
+    core.saveRoom(storage, { roomId: 'room-1', seatId: 'S2' });
+    const nodes = new Map();
+    const $ = (id) => {
+      if (!nodes.has(id)) nodes.set(id, { hidden: false, disabled: false, textContent: '',
+        replaceChildren(...children) { this.children = children; } });
+      return nodes.get(id);
+    };
+    const state = { room: { status: core.ROOM_STATUS.PLAYING }, roomId: 'room-1', seatId: 'S2',
+      cards: [card('cat', 'private-card')], entryBusy: false, makeRequest: null, judgeRequest: null };
+    const ui = { cardId: 'private-card', claim: 'cat', lastLogKey: 'old', gatheringShown: true };
+    const context = { $, state, ui, core, renderGame: () => {}, renderLobby: () => {} };
+    const { renderAll, resetEntryView } = vm.runInNewContext(`${screenSource}\n${resetSource}\n({ renderAll, resetEntryView })`, context);
+    renderAll();
+    assert.equal($('entry').hidden, true, `${reason}: 事前に入口が隠れていない`);
+    const transient = resumeHelpers.handleMultiSessionFailure({
+      error: { code: 'functions/unavailable' }, storage, forgetInvite: () => {},
+      resetEntryView: () => { throw new Error('通信失敗で入口へ戻してはならない'); }, message: () => {},
+    });
+    assert.equal(transient, null);
+    assert.deepEqual(core.loadRoom(storage), { roomId: 'room-1', seatId: 'S2' });
+    assert.equal(state.roomId, 'room-1');
+    assert.equal($('entry').hidden, true);
+    const handled = resumeHelpers.handleMultiSessionFailure({
+      error: { code: `functions/${code}`, details: { reason } }, storage,
+      forgetInvite: () => {}, resetEntryView, message: (value) => { $('status').textContent = value; },
+    });
+    assert.equal(handled, reason);
+    assert.equal(core.loadRoom(storage), null);
+    assert.equal(state.room, null);
+    assert.equal(state.roomId, null);
+    assert.equal(state.seatId, null);
+    assert.equal(state.cards.length, 0);
+    assert.equal($('entry').hidden, false, `${reason}: 入口が非表示のまま`);
+    assert.equal($('lobby').hidden, true);
+    assert.equal($('game').hidden, true);
+    assert.equal($('create-room').disabled, false);
+    assert.equal($('join-room').disabled, false);
+    assert.equal($('status').textContent, core.sessionRecoveryNotice(reason));
+  }
 });
 
 test('E-14 復帰の同時実行: 1本にまとめ、lifecycleの連続発火はcooldownで吸収する', async () => {

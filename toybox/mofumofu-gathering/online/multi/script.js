@@ -376,6 +376,7 @@ function resetEntryView() {
   for (const id of ['others', 'self-seat', 'hand', 'judgeHand', 'log', 'players', 'claimButtons', 'targetButtons', 'judgeHand', 'final-players']) $(id).replaceChildren();
   for (const id of ['game', 'lobby', 'final-result', 'reconnect-wait', 'claimStep', 'targetStep', 'judgeStep', 'hand-loading']) $(id).hidden = true;
   $('copy-invite').textContent = core.COPY_LABEL;
+  renderAll();
   renderEntry();
 }
 function renderEntry() {
