@@ -6,6 +6,10 @@
 // このスクリプトは、通常クリックのときだけモード選択ダイアログを開く追加レイヤー。
 import { onlineModeOptions } from './online/multi/multi-core.js?v=20260926-1';
 
+// Firebase接続設定と同じstaging hostnameだけで、検証中の入口を開く。
+// GitHub Pages側の一般公開gateは引き続き閉じたままにする。
+const stagingMultiAvailable = globalThis.location?.hostname === 'wa-awesome-mofumofu-stg.web.app';
+
 const entry = document.getElementById('onlineEntry');
 const dialog = document.getElementById('onlineModeDialog');
 const options = document.getElementById('onlineModeOptions');
@@ -23,7 +27,10 @@ if (entry && dialog && options) {
   document.head.append(style);
 
   const render = () => {
-    options.replaceChildren(...onlineModeOptions().map((mode) => {
+    options.replaceChildren(...onlineModeOptions().map((option) => {
+      const mode = option.id === 'multi' && stagingMultiAvailable
+        ? { ...option, enabled: true, description: 'みんなで遊べる3〜6人版' }
+        : option;
       const node = document.createElement(mode.enabled ? 'a' : 'span');
       node.className = `mode-option${mode.enabled ? '' : ' disabled'}`;
       if (mode.enabled) node.href = mode.href;
