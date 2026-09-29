@@ -87,3 +87,25 @@ export function createMultiResumeCoordinator({
     return flight;
   };
 }
+
+// 公開roomの開始通知では手札の中身は届かない。本人の既存resumeだけを一度呼ぶ。
+// 初期resumeと重なった場合はその結果を待ち、まだ手札がなければ取り直す。
+export function createMultiHandStartResume({ state, requestResume }) {
+  let queued = false;
+  return function onPublicRoom(previousRoom, room) {
+    if (previousRoom?.status !== 'waiting' || room?.status !== 'playing' || queued) return;
+    if (!state.roomId || !state.seatId || room.playerStatus?.[state.seatId] !== 'active') return;
+    if (state.handStatus !== 'pending' || state.cards.length) return;
+    queued = true;
+    const roomId = state.roomId;
+    const seatId = state.seatId;
+    const pending = state.resumeFlight;
+    const fetchOwnHand = () => {
+      if (state.roomId !== roomId || state.seatId !== seatId || state.room?.status !== 'playing') return;
+      if (state.connectionState === 'error' || state.handStatus !== 'pending' || state.cards.length) return;
+      void requestResume('hand-on-game-start');
+    };
+    if (pending) void pending.then(fetchOwnHand);
+    else fetchOwnHand();
+  };
+}
