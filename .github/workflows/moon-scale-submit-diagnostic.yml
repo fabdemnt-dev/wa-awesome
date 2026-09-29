@@ -1,0 +1,47 @@
+name: Moon Scale submit transaction diagnostic
+
+on:
+  workflow_dispatch:
+    inputs:
+      attempts:
+        description: 'Maximum attempts (20 only if the first 10 pass)'
+        type: choice
+        required: true
+        default: '10'
+        options:
+          - '10'
+          - '20'
+
+permissions:
+  contents: read
+
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install test dependencies
+        run: npm ci
+      - name: Create emulator-only dummy secrets
+        env:
+          LOCAL_MOON_INVITE_KEY: local-test-only-moon-invite-key
+          LOCAL_MOON_IP_KEY: local-test-only-moon-ip-key
+        run: |
+          umask 077
+          printf 'MOON_SCALE_DUEL_INVITE_HMAC_KEY=%s\nMOON_SCALE_DUEL_IP_HMAC_KEY=%s\n' "$LOCAL_MOON_INVITE_KEY" "$LOCAL_MOON_IP_KEY" > functions/.secret.local
+      - name: Repeat the existing concurrent submission test
+        env:
+          DIAGNOSTIC_ATTEMPTS: ${{ inputs.attempts }}
+        run: node scripts/moon-scale-submit-diagnostic.mjs
+      - name: Remove emulator-only dummy secrets
+        if: ${{ always() }}
+        run: |
+          rm -f functions/.secret.local
+          test ! -e functions/.secret.local
