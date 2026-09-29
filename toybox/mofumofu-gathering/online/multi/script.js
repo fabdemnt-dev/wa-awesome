@@ -12,6 +12,7 @@ import { getDatabase, connectDatabaseEmulator, ref, onValue, onDisconnect, set, 
 import { resolveEnvironment, REGION } from './firebase-config.js?v=20260926-1';
 import * as core from './multi-core.js?v=20260928-3';
 import { runMofumofuMultiFullResume, createMultiResumeCoordinator, createMultiHandStartResume, handleMultiSessionFailure } from './multi-resume.js?v=20260929-2';
+import { createMultiPendingActionRecovery, definitiveMultiActionRejection, multiActionBlocked, multiJudgeButtonsDisabled } from './multi-action-recovery.js?v=20260929-1';
 
 const environment = resolveEnvironment();
 const app = initializeApp(environment.firebase);
@@ -44,7 +45,7 @@ const state = {
   listenerRetryCount: 0, resumeFlight: null, resumeGeneration: 0, connectionState: 'syncing',
   lastSuccessfulResumeAt: 0, lastSuccessfulResumeRoomId: null,
   entryBusy: false, startBusy: false, makeBusy: false, judgeBusy: false,
-  makeRequest: null, judgeRequest: null, handRetryFlight: null,
+  makeRequest: null, judgeRequest: null, handRetryFlight: null, actionRecoveryFlight: null,
 };
 const ui = { cardId: null, claim: null, flashTimer: null, logoTimer: null, copyTimer: null, lastLogKey: null, gatheringShown: false };
 
@@ -276,7 +277,7 @@ function renderSteps(view) {
     node.append(cardImage(entry.animalType, core.ANIMAL_LABELS[entry.animalType]));
     node.setAttribute('aria-label', core.ANIMAL_LABELS[entry.animalType]);
     if (canMake) node.addEventListener('click', () => {
-      if (!core.canMakeOffer(state.room, state.seatId) || state.makeBusy) return;
+      if (!core.canMakeOffer(state.room, state.seatId) || multiActionBlocked(state)) return;
       ui.cardId = entry.cardId; ui.claim = null; renderGame(state.room);
     });
     return node;
@@ -289,7 +290,7 @@ function renderSteps(view) {
     node.className = ui.claim === option.animalType ? 'selected' : '';
     node.textContent = `${option.emoji} ${option.label}`;
     node.addEventListener('click', () => {
-      if (state.makeBusy || !ui.cardId) return;
+      if (multiActionBlocked(state) || !ui.cardId) return;
       ui.claim = option.animalType; renderGame(state.room);
     });
     return node;
@@ -304,12 +305,14 @@ function renderSteps(view) {
       node.type = 'button';
       node.dataset.target = target.seatId;
       node.textContent = `${target.label}へ渡す`;
+      node.disabled = multiActionBlocked(state);
       node.addEventListener('click', () => void submitOffer(target.seatId, node));
       return node;
     }));
   } else targetButtons.replaceChildren();
   $('targetStep').hidden = !showTargets;
   $('judgeStep').hidden = !view.canJudge;
+  for (const node of $('judge-buttons').querySelectorAll('button')) node.disabled = multiJudgeButtonsDisabled(view, state);
   // 判定できるのは受け取った本人だけ。自分の手札だけを見せる。
   if (view.canJudge) {
     $('judgeHand').replaceChildren(...state.cards.map((entry) => {
@@ -364,6 +367,8 @@ function resetEntryView() {
   state.room = null; state.roomId = null; state.seatId = null; state.cards = [];
   state.presence = {}; state.connectionId = null; state.presenceReady = 0;
   state.makeRequest = null; state.judgeRequest = null;
+  state.makeBusy = false; state.judgeBusy = false; state.startBusy = false;
+  state.actionRecoveryFlight = null;
   ui.cardId = null; ui.claim = null; ui.lastLogKey = null; ui.gatheringShown = false;
   for (const id of ['turn', 'tableCardSub', 'offer-message', 'invite-note', 'start-note', 'flash', 'result']) $(id).textContent = '';
   $('tableCardMain').textContent = '？';
@@ -459,7 +464,7 @@ async function fullResume(reason) {
         await beginPresence(seatId, generation, connectionId);
       },
       resumeRoom: () => call('resumeMofumofuMultiRoom', { roomId: state.roomId }),
-      applyResume: (value) => {
+      applyResume: async (value) => {
         remember(state.roomId, value.seatId);
         state.cards = Array.isArray(value.cards) ? value.cards : [];
         state.handStatus = value.handStatus || 'pending';
@@ -470,6 +475,8 @@ async function fullResume(reason) {
         setConnectionState('connected');
         // 配布直後などで自分の手札がまだ読めない場合だけ、少し待って取り直す（永久ループはしない）。
         if (value.handStatus === 'retry') void retryOwnHand(generation);
+        const recovery = recoverPendingActions(generation);
+        await recovery;
       },
     });
   } catch (error) {
@@ -512,6 +519,27 @@ const requestResume = createMultiResumeCoordinator({
   getRoomId: () => state.roomId,
   runResume: fullResume,
   onError: (error, reason) => setConnectionState('error', `復帰:${errorCode(error)}`),
+});
+const recoverPendingActions = createMultiPendingActionRecovery({
+  state,
+  replay: (kind, request) => call(kind === 'make' ? 'makeMofumofuMultiOffer' : 'judgeMofumofuMultiOffer', request),
+  refresh: async () => {
+    const generation = state.resumeGeneration;
+    const roomId = state.roomId;
+    const value = await call('resumeMofumofuMultiRoom', { roomId });
+    if (generation !== state.resumeGeneration || roomId !== state.roomId) return;
+    state.cards = Array.isArray(value.cards) ? value.cards : [];
+    state.handStatus = value.handStatus || 'pending';
+    state.room = roomFromResume(value);
+    renderAll();
+    if (value.handStatus === 'retry') void retryOwnHand(generation);
+    setConnectionState('connected');
+  },
+  onChecking: () => message('操作結果を確認しています…'),
+  onResolved: (kind) => { if (kind === 'make') { ui.cardId = null; ui.claim = null; } },
+  onUncertain: () => message('操作結果を確認できませんでした。再接続時に同じ操作を確認します。'),
+  onRejected: (_, error) => message(`操作を完了できませんでした（${errorCode(error)}）。`),
+  onSettled: () => { if (state.room) renderAll(); },
 });
 const onHandStart = createMultiHandStartResume({ state, requestResume });
 function applyPublicRoom(room, generation) {
@@ -573,43 +601,59 @@ function startSafetySync(generation) {
 
 async function submitOffer(targetSeatId, button) {
   const room = state.room;
-  if (state.makeBusy || !ui.cardId || !ui.claim || !core.canMakeOffer(room, state.seatId)) return;
+  if (multiActionBlocked(state) || !ui.cardId || !ui.claim || !core.canMakeOffer(room, state.seatId)) return;
   if (button.disabled) return;
   state.makeBusy = true;
   button.disabled = true;
   for (const node of $('targetButtons').children) node.disabled = true;
   // 同じ操作の再送は同じactionIdを使う（サーバー側の冪等性と対で二重消費を防ぐ）。
-  state.makeRequest ||= {
+  const request = {
     roomId: state.roomId, actionId: newId(), cardId: ui.cardId,
     claimedAnimalType: ui.claim, targetPlayerId: targetSeatId,
   };
+  state.makeRequest = request;
   try {
-    await call('makeMofumofuMultiOffer', state.makeRequest);
+    await call('makeMofumofuMultiOffer', request);
+    if (state.makeRequest !== request) return;
     state.makeRequest = null;
+    state.makeBusy = false;
     ui.cardId = null; ui.claim = null;
     renderGame(state.room);
   } catch (error) {
-    message(error.message);
-    for (const node of $('targetButtons').children) node.disabled = false;
-  } finally {
+    if (state.makeRequest !== request) return;
     state.makeBusy = false;
+    if (definitiveMultiActionRejection(error)) {
+      state.makeRequest = null;
+      message(error.message);
+      renderGame(state.room);
+    } else void recoverPendingActions();
+  } finally {
+    if (state.makeRequest === request) state.makeBusy = false;
   }
 }
 async function submitJudgment(judgment, buttons) {
   const room = state.room;
-  if (state.judgeBusy || !core.canJudge(room, state.seatId)) return;
+  if (multiActionBlocked(state) || !core.canJudge(room, state.seatId)) return;
   state.judgeBusy = true;
   for (const node of buttons) node.disabled = true;
-  state.judgeRequest ||= { roomId: state.roomId, actionId: newId(), judgment };
+  const request = { roomId: state.roomId, actionId: newId(), judgment };
+  state.judgeRequest = request;
   try {
-    await call('judgeMofumofuMultiOffer', state.judgeRequest);
+    await call('judgeMofumofuMultiOffer', request);
+    if (state.judgeRequest !== request) return;
     state.judgeRequest = null;
+    state.judgeBusy = false;
     renderGame(state.room);
   } catch (error) {
-    message(error.message);
-    for (const node of buttons) node.disabled = false;
-  } finally {
+    if (state.judgeRequest !== request) return;
     state.judgeBusy = false;
+    if (definitiveMultiActionRejection(error)) {
+      state.judgeRequest = null;
+      message(error.message);
+      renderGame(state.room);
+    } else void recoverPendingActions();
+  } finally {
+    if (state.judgeRequest === request) state.judgeBusy = false;
   }
 }
 $('judge-buttons').addEventListener('click', (event) => {
