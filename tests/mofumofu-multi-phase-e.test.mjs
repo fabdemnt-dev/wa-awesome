@@ -13,6 +13,7 @@ const presence = functionRequire('./mofumofu-multi/presence.js');
 
 const core = await import('../toybox/mofumofu-gathering/online/multi/multi-core.js');
 const resumeHelpers = await import('../toybox/mofumofu-gathering/online/multi/multi-resume.js');
+const { createMultiResumeDiagnostic } = await import('../toybox/mofumofu-gathering/online/multi/multi-resume-diagnostic.js');
 const actionHelpers = await import('../toybox/mofumofu-gathering/online/multi/multi-action-recovery.js');
 
 const read = (relative) => fs.readFileSync(new URL(relative, import.meta.url), 'utf8');
@@ -112,7 +113,7 @@ test('E-3 モード選択: 修飾クリックは素通しし、無効モード�
   assert.ok(multiEntry.includes('event.preventDefault()'));
   assert.ok(multiEntry.includes('document.createElement(mode.enabled ? \'a\' : \'span\')'), '無効モードをリンクで描いている');
   // 3〜6人版ページ自体のキャッシュ版数は固定（ランダム生成・時刻生成をしない）。
-  assert.ok(multiPage.includes('../multi/script.js?v=20260929-6'));
+  assert.ok(multiPage.includes('../multi/script.js?v=20260930-1'));
   assert.ok(multiPage.includes('../multi/style.css?v=20260929-1'));
   assert.equal(/\?v=\$\{/.test(multiPage), false, '版数を変数で組み立てている');
   assert.equal(/Math\.random|Date\.now\(\)\s*\)\s*\?v=/.test(multiPage), false);
@@ -193,7 +194,7 @@ test('waiting・playing・resume後のconnected表示は入口と一致し、接
   assert.equal(core.TEXT.syncing, '再接続中／同期中…');
   assert.equal(core.TEXT.chipReconnecting, '○ 再接続待ち');
   assert.match(multiClient, /next === 'connected' \? core\.TEXT\.connected : next === 'syncing' \? core\.TEXT\.syncing/);
-  assert.match(multiClient, /renderAll\(\);\s*listenRoom\(generation\);\s*startSafetySync\(generation\);\s*setConnectionState\('connected'\);/);
+  assert.match(multiClient, /renderAll\(\);\s*observe\('done', 'apply'\);\s*observe\('wait', 'listeners'\);\s*listenRoom\(generation\);\s*startSafetySync\(generation\);\s*observe\('done', 'listeners'\);\s*observe\('wait', 'connected'\);\s*setConnectionState\('connected'\);/);
   assert.match(multiClient, /if \(room\.status === core\.ROOM_STATUS\.WAITING\) renderLobby\(room\);\s*else renderGame\(room\);/);
 });
 
@@ -600,6 +601,83 @@ test('E-12 resume: 復帰の順序と、古い世代の結果を反映しない�
   };
   assert.equal(await resumeHelpers.runMofumofuMultiFullResume(stale), false);
   assert.deepEqual(staleCalls, ['retire', 'authorize', 'begin'], '古い世代でpresence開始まで進んでいる');
+});
+
+test('staging復帰診断: 固定段階・待機時間・成功・失敗だけ表示しproductionでは要素を作らない', () => {
+  const nodes = [];
+  const fakeDocument = { createElement: () => ({ style: {}, setAttribute() {}, textContent: '' }),
+    body: { append: (node) => nodes.push(node) } };
+  let time = 1000;
+  let tick;
+  const options = { document: fakeDocument, now: () => time,
+    schedule: (fn) => { tick = fn; return 1; }, cancel: () => {} };
+  const production = createMultiResumeDiagnostic({ ...options, enabled: false });
+  production.start(); production.observe('wait', 'auth'); production.fail();
+  assert.equal(nodes.length, 0);
+  assert.equal(production.snapshot(), null);
+
+  const staging = createMultiResumeDiagnostic({ ...options, enabled: true });
+  assert.equal(nodes.length, 1);
+  assert.match(nodes[0].style.cssText, /pointer-events:none/);
+  staging.start();
+  staging.observe('done', 'auth');
+  staging.observe('wait', 'cancel');
+  time += 20_100; tick();
+  assert.match(nodes[0].textContent, /復帰診断 R1・開始から20秒/);
+  assert.match(nodes[0].textContent, /✓ Auth/);
+  assert.match(nodes[0].textContent, /onDisconnect\.cancel（待機中 20秒）/);
+  staging.observe('done', 'cancel');
+  staging.observe('skip', 'oldUpdate');
+  assert.match(nodes[0].textContent, /旧presence update（対象なし）/);
+  for (const stage of ['oldUpdate', 'retire', 'authorize', 'disconnectSet', 'onlineSet', 'presence',
+    'room', 'apply', 'listeners', 'connected', 'recovery']) {
+    staging.observe('wait', stage); staging.observe('done', stage);
+  }
+  assert.equal(staging.snapshot().completed, 'recovery');
+  assert.equal(staging.snapshot().waiting, null);
+  assert.match(nodes[0].textContent, /✓ connected/);
+  staging.start();
+  staging.observe('wait', 'authorize');
+  staging.observe('wait', 'uid-secret-room-card-token');
+  staging.fail();
+  assert.match(nodes[0].textContent, /R2/);
+  assert.match(nodes[0].textContent, /presence認可（失敗）/);
+  assert.doesNotMatch(nodes[0].textContent, /uid-secret-room-card-token/);
+  assert.deepEqual(Object.keys(staging.snapshot()).sort(),
+    ['attempt', 'completed', 'completedKind', 'connectedReached', 'elapsedSeconds', 'failed', 'waiting', 'waitingSeconds'].sort());
+});
+
+test('復帰観測hookは手順・結果・resumeFlight制御を変更しない', async () => {
+  const order = [];
+  const deps = {
+    auth: { authStateReady: async () => order.push('auth'), currentUser: { uid: 'private-uid' } },
+    signInAnonymously: async () => { throw new Error('不要なサインイン'); },
+    isCurrent: () => true,
+    retirePresence: async () => order.push('retire'),
+    createConnectionId: () => 'private-connection',
+    authorizePresence: async () => { order.push('authorize'); return { seatId: 'private-seat' }; },
+    beginPresence: async () => order.push('begin'),
+    resumeRoom: async () => { order.push('room'); return { cards: ['private-card'] }; },
+    applyResume: async () => order.push('apply'),
+  };
+  const resultWithoutHook = await resumeHelpers.runMofumofuMultiFullResume(deps);
+  const originalOrder = [...order];
+  order.length = 0;
+  const observed = [];
+  const resultWithHook = await resumeHelpers.runMofumofuMultiFullResume({
+    ...deps, observe: (kind, stage) => observed.push(`${kind}:${stage}`),
+  });
+  assert.equal(resultWithoutHook, resultWithHook);
+  assert.deepEqual(order, originalOrder);
+  assert.deepEqual(observed, ['wait:auth', 'done:auth', 'wait:retire', 'done:retire',
+    'wait:authorize', 'done:authorize', 'wait:presence', 'done:presence',
+    'wait:room', 'done:room', 'wait:apply']);
+  assert.doesNotMatch(observed.join(' '), /private-/);
+  assert.match(multiClient, /createMultiResumeCoordinator\(\{[\s\S]*?runResume: fullResume/);
+  assert.match(multiClient, /resumeDiagnostic\.fail\(\)/);
+  assert.match(multiClient, /observe\('wait', 'cancel'\)/);
+  assert.match(multiClient, /observe\('wait', 'disconnectSet'\)/);
+  assert.match(multiClient, /observe\('wait', 'onlineSet'\)/);
 });
 
 test('E-13 resume失敗: 4つの理由だけ保存roomを解除して入口へ戻し、他は通常エラーに流す', () => {
