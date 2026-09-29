@@ -111,7 +111,7 @@ test('E-3 モード選択: 修飾クリックは素通しし、無効モード�
   assert.ok(multiEntry.includes('event.preventDefault()'));
   assert.ok(multiEntry.includes('document.createElement(mode.enabled ? \'a\' : \'span\')'), '無効モードをリンクで描いている');
   // 3〜6人版ページ自体のキャッシュ版数は固定（ランダム生成・時刻生成をしない）。
-  assert.ok(multiPage.includes('../multi/script.js?v=20260929-2'));
+  assert.ok(multiPage.includes('../multi/script.js?v=20260929-3'));
   assert.ok(multiPage.includes('../multi/style.css?v=20260928-3'));
   assert.equal(/\?v=\$\{/.test(multiPage), false, '版数を変数で組み立てている');
   assert.equal(/Math\.random|Date\.now\(\)\s*\)\s*\?v=/.test(multiPage), false);
@@ -194,6 +194,69 @@ test('waiting・playing・resume後のconnected表示は入口と一致し、接
   assert.match(multiClient, /next === 'connected' \? core\.TEXT\.connected : next === 'syncing' \? core\.TEXT\.syncing/);
   assert.match(multiClient, /renderAll\(\);\s*listenRoom\(generation\);\s*startSafetySync\(generation\);\s*setConnectionState\('connected'\);/);
   assert.match(multiClient, /if \(room\.status === core\.ROOM_STATUS\.WAITING\) renderLobby\(room\);\s*else renderGame\(room\);/);
+});
+
+test('カード→宣言→相手の表示段階はhidden属性で切り替え、固定CSS非表示にしない', () => {
+  for (const id of ['claimStep', 'targetStep', 'judgeStep']) {
+    assert.match(multiPage, new RegExp(`id="${id}" class="step" hidden`));
+    assert.doesNotMatch(multiPage, new RegExp(`id="${id}"[^>]*class="[^"]*\\bhidden\\b`));
+  }
+  assert.ok(multiStyle.includes('[hidden]{display:none!important}'));
+  assert.match(multiClient, /const showClaims = canMake && Boolean\(ui\.cardId\);[\s\S]*?\$\('claimStep'\)\.hidden = !showClaims/);
+  assert.match(multiClient, /const showTargets = canMake && Boolean\(ui\.claim\);[\s\S]*?\$\('targetStep'\)\.hidden = !showTargets/);
+  assert.match(multiClient, /node\.textContent = `\$\{target\.label\}へ渡す`;[\s\S]*?submitOffer\(target\.seatId, node\)/);
+  assert.match(multiClient, /\$\('judgeStep'\)\.hidden = !view\.canJudge/);
+  for (const count of [3, 4, 5, 6]) {
+    const room = playingRoom(count);
+    const seats = core.validTargets(room, 'S1');
+    assert.deepEqual(seats.map((target) => target.seatId), room.seatOrder.slice(1));
+    room.players.S2.displayName = 'ふわ';
+    assert.equal(core.validTargets(room, 'S1')[0].label, 'ふわ');
+    room.players.S2.displayName = null;
+    assert.equal(core.validTargets(room, 'S1')[0].label, 'あいて1');
+    assert.deepEqual(core.validTargets(room, 'S2'), [], '他人の手番で相手選択できない');
+  }
+});
+
+test('相手への送信は選択完了後だけで、連打してもCallableを一度だけ発行する', async () => {
+  const source = multiClient.slice(multiClient.indexOf('async function submitOffer('), multiClient.indexOf('async function submitJudgment('));
+  const room = playingRoom(3);
+  const state = { room, roomId: room.roomId, seatId: 'S1', makeBusy: false, makeRequest: null };
+  const ui = { cardId: null, claim: null };
+  const buttons = [{ disabled: false }, { disabled: false }];
+  const button = buttons[0];
+  const calls = [];
+  let complete;
+  const context = {
+    state, ui, core, $: () => ({ children: buttons }), newId: () => 'action-1',
+    call: (name, request) => { calls.push({ name, request: { ...request } }); return new Promise((resolve) => { complete = resolve; }); },
+    renderGame: () => {}, message: () => {},
+  };
+  const submit = vm.runInNewContext(`${source}; submitOffer`, context);
+  await submit('S2', button);
+  assert.equal(calls.length, 0, 'カード未選択で送信しない');
+  ui.cardId = 'own-card';
+  await submit('S2', button);
+  assert.equal(calls.length, 0, '宣言未選択で送信しない');
+  ui.claim = 'cat';
+  const first = submit('S2', button);
+  const duplicate = submit('S2', button);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].name, 'makeMofumofuMultiOffer');
+  assert.equal(calls[0].request.targetPlayerId, 'S2');
+  assert.equal(calls[0].request.cardId, 'own-card');
+  assert.equal(calls[0].request.claimedAnimalType, 'cat');
+  assert.equal(button.disabled, true);
+  complete();
+  await Promise.all([first, duplicate]);
+  assert.equal(state.makeRequest, null);
+  assert.equal(ui.cardId, null);
+  assert.equal(ui.claim, null);
+  state.room = playingRoom(3, { currentTurnPlayerId: 'S2' });
+  ui.cardId = 'own-card'; ui.claim = 'cat'; button.disabled = false;
+  await submit('S2', button);
+  assert.equal(calls.length, 1, '他人の手番では送信しない');
+  assert.doesNotMatch(source, /privateHands|playerUids/);
 });
 
 /* ------------------------------------------------------------ 公開契約の一致 */
