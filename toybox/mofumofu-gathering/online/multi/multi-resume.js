@@ -91,12 +91,12 @@ export function createMultiResumeCoordinator({
 // 公開roomの開始通知では手札の中身は届かない。本人の既存resumeだけを一度呼ぶ。
 // 初期resumeと重なった場合はその結果を待ち、まだ手札がなければ取り直す。
 export function createMultiHandStartResume({ state, requestResume }) {
-  let queued = false;
+  let queuedRoomId = null;
   return function onPublicRoom(previousRoom, room) {
-    if (previousRoom?.status !== 'waiting' || room?.status !== 'playing' || queued) return;
+    if (previousRoom?.status !== 'waiting' || room?.status !== 'playing' || queuedRoomId === state.roomId) return;
     if (!state.roomId || !state.seatId || room.playerStatus?.[state.seatId] !== 'active') return;
     if (state.handStatus !== 'pending' || state.cards.length) return;
-    queued = true;
+    queuedRoomId = state.roomId;
     const roomId = state.roomId;
     const seatId = state.seatId;
     const pending = state.resumeFlight;
