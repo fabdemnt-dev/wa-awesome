@@ -10,7 +10,7 @@ import { getFirestore, connectFirestoreEmulator, doc, onSnapshot, getDocFromServ
 import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-functions.js';
 import { getDatabase, connectDatabaseEmulator, ref, onValue, onDisconnect, set, update, serverTimestamp } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js';
 import { resolveEnvironment, REGION } from './firebase-config.js?v=20260926-1';
-import * as core from './multi-core.js?v=20260928-3';
+import * as core from './multi-core.js?v=20260929-4';
 import { runMofumofuMultiFullResume, createMultiResumeCoordinator, createMultiHandStartResume, handleMultiSessionFailure } from './multi-resume.js?v=20260929-2';
 import { createMultiPendingActionRecovery, definitiveMultiActionRejection, multiActionBlocked, multiJudgeButtonsDisabled } from './multi-action-recovery.js?v=20260929-1';
 
@@ -217,6 +217,7 @@ function renderGame(room) {
   if (!view) return;
   $('turn').textContent = view.turnText;
   $('turn').classList.toggle('mine', view.isMyTurn);
+  $('turn').classList.toggle('finished', view.finished);
   // 他のplayerは上側・最大5人・2列折返し。自分は下部の self-seat に固定する。
   $('others').replaceChildren(...view.others.map((seat) => seatBox(seat)));
   $('self-seat').replaceChildren(seatBox(view.self, { self: true }));
@@ -247,7 +248,7 @@ function renderGame(room) {
     if (key !== ui.lastLogKey) {
       ui.lastLogKey = key;
       pushLog(`${core.seatDisplayName(room, offer.fromPlayerId, state.seatId)}「${core.ANIMAL_LABELS[offer.claimAnimal]}だよ」→ ほんとは${core.ANIMAL_LABELS[offer.actualAnimal]}（判定${offer.success ? '成功' : '失敗'}）`);
-      flash(offer.success ? '○ あたり！' : '× うそだった！');
+      flash(offer.success ? '○ 判定成功！' : '× 判定失敗！');
     }
   }
   if (finished && view.result) {

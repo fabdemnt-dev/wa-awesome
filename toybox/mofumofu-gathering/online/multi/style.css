@@ -59,6 +59,7 @@ h1{margin:10px 0;font-size:clamp(32px,9vw,46px);line-height:1.08;color:#d96c8c;t
 .game-header{position:sticky;top:44px;z-index:8;display:flex;align-items:center;justify-content:center;padding:4px 0 8px;background:linear-gradient(var(--cream) 75%,transparent)}
 .turn-badge{padding:8px 18px;border-radius:999px;background:#fff;border:2px solid var(--pink);font-weight:900;box-shadow:var(--shadow)}
 .turn-badge.mine{border-color:#e18aa5;background:#fff0f5}
+.turn-badge.finished{border:0;border-radius:8px;background:transparent;box-shadow:none;color:#796963;cursor:default}
 .mini{position:absolute;right:2px;width:42px;height:42px;border:0;border-radius:50%;background:#fff;box-shadow:var(--shadow);font-weight:900}
 /* 他のplayerは上側・最大5人・2列折返し。 */
 .others-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:14px 0}
