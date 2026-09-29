@@ -112,8 +112,8 @@ test('E-3 モード選択: 修飾クリックは素通しし、無効モード�
   assert.ok(multiEntry.includes('event.preventDefault()'));
   assert.ok(multiEntry.includes('document.createElement(mode.enabled ? \'a\' : \'span\')'), '無効モードをリンクで描いている');
   // 3〜6人版ページ自体のキャッシュ版数は固定（ランダム生成・時刻生成をしない）。
-  assert.ok(multiPage.includes('../multi/script.js?v=20260929-4'));
-  assert.ok(multiPage.includes('../multi/style.css?v=20260928-3'));
+  assert.ok(multiPage.includes('../multi/script.js?v=20260929-5'));
+  assert.ok(multiPage.includes('../multi/style.css?v=20260929-1'));
   assert.equal(/\?v=\$\{/.test(multiPage), false, '版数を変数で組み立てている');
   assert.equal(/Math\.random|Date\.now\(\)\s*\)\s*\?v=/.test(multiPage), false);
 });
@@ -425,9 +425,49 @@ test('E-9 手番と判定: 自分の手番だけ make、受取人本人だけ ju
   });
   const view = core.gameView(done, 'S1', {}, { presenceReady: false, now: NOW });
   assert.equal(view.board.card.animalType, 'fox');
-  assert.equal(view.board.message, '× うそだった！');
+  assert.equal(view.board.message, '× 判定失敗！');
   assert.equal(view.board.resultLine, `本当はきつね。判定失敗。${core.seatDisplayName(done, 'S5', 'S1')}が表向きカードを受け取りました。`);
   assert.deepEqual(presence.publicOfferViolations(done.publicOffer), []);
+});
+
+test('判定結果は宣言の真偽ではなく受け手の判定成否として表示する', () => {
+  for (const [claimAnimal, actualAnimal, judgment, success] of [
+    ['rabbit', 'rabbit', 'truth', true],
+    ['rabbit', 'rabbit', 'lie', false],
+    ['rabbit', 'cat', 'lie', true],
+    ['rabbit', 'cat', 'truth', false],
+  ]) {
+    assert.equal(rules.judgeSuccess(claimAnimal, actualAnimal, judgment), success);
+    const room = playingRoom(3, { publicOffer: {
+      status: 'completed', fromPlayerId: 'S1', toPlayerId: 'S2', claimAnimal,
+      actualAnimal, judgment, success, faceUpRecipientPlayerId: success ? 'S1' : 'S2',
+    } });
+    const board = core.gameView(room, 'S3', {}, { now: NOW }).board;
+    assert.equal(board.message, success ? '○ 判定成功！' : '× 判定失敗！');
+    assert.equal(board.cardSub, `あいて1の宣言は「${core.ANIMAL_LABELS[claimAnimal]}」`);
+    assert.equal(board.card.animalType, actualAnimal);
+    assert.equal(board.resultLine, `本当は${core.ANIMAL_LABELS[actualAnimal]}。判定${success ? '成功' : '失敗'}。${core.seatDisplayName(room, success ? 'S1' : 'S2', 'S3')}が表向きカードを受け取りました。`);
+  }
+  assert.match(multiClient, /flash\(offer\.success \? '○ 判定成功！' : '× 判定失敗！'\)/);
+  assert.match(multiClient, /判定\$\{offer\.success \? '成功' : '失敗'\}/);
+});
+
+test('終了時の手番領域は非操作表示に変わり、集合ロゴと最終結果を維持する', () => {
+  const room = baseRoom(3, { status: rules.ROOM_STATUS.FINISHED,
+    finishReason: rules.FINISH_REASON.GATHERING, gatheringReason: rules.GATHERING_REASON.FOUR_OF_A_KIND,
+    winnerPlayerIds: ['S1', 'S3'], loserPlayerIds: ['S2'],
+    faceUpCards: { S1: [], S2: Array.from({ length: 4 }, (_, index) => card('rabbit', `r${index}`)), S3: [] },
+  });
+  const view = core.gameView(room, 'S1', {}, { now: NOW });
+  assert.equal(view.finished, true);
+  assert.equal(view.turnText, 'ゲーム終了');
+  assert.equal(view.isMyTurn, false);
+  assert.equal(view.result.showGatheringOverlay, true);
+  assert.equal(view.result.logoPath, `${core.ASSET_BASE}mofumofu-logo.png`);
+  assert.match(view.result.title, /もふもふ大集合！/);
+  assert.match(multiPage, /<div id="turn" class="turn-badge">/);
+  assert.match(multiClient, /\$\('turn'\)\.classList\.toggle\('finished', view\.finished\)/);
+  assert.match(multiStyle, /\.turn-badge\.finished\{[^}]*box-shadow:none;[^}]*cursor:default/);
 });
 
 /* ------------------------------------------------------------------ presence */

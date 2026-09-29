@@ -414,7 +414,7 @@ export function boardView(room, mySeatId) {
     ...base,
     card: { animalType: offer.actualAnimal, label: ANIMAL_LABELS[offer.actualAnimal], image: cardImagePath(offer.actualAnimal) },
     cardSub: `${fromLabel}の宣言は「${ANIMAL_LABELS[offer.claimAnimal]}」`,
-    message: offer.success ? '○ あたり！' : '× うそだった！',
+    message: offer.success ? '○ 判定成功！' : '× 判定失敗！',
     // 判定後だけ、宣言・実際の動物・本当/うそ・成功可否・受け取った人を公開する。
     resultLine: `本当は${ANIMAL_LABELS[offer.actualAnimal]}。判定${offer.success ? '成功' : '失敗'}。${recipientLabel}が表向きカードを受け取りました。`,
   };
