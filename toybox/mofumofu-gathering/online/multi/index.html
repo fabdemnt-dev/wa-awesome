@@ -13,7 +13,7 @@
     <nav class="top-nav" aria-label="ページ移動">
       <a href="../">← 2人＋こはるのオンライン版へ</a>
       <a href="../../">もふもふ大集合！へ戻る</a>
-      <a href="../../../toybox/">おもちゃ箱へ戻る</a>
+      <a id="toybox-return" href="../../../toybox/">おもちゃ箱へ戻る</a>
     </nav>
 
     <section id="entry" class="screen active">
@@ -154,6 +154,11 @@
         }),
         appCheckSiteKey: '6LfWOsgtAAAAAIuboWvU-f8EEAh2olIFiGDk_f1X',
       });
+    }
+  </script>
+  <script>
+    if (globalThis.location.hostname === 'wa-awesome-mofumofu-stg.web.app') {
+      document.getElementById('toybox-return').href = '/toybox/';
     }
   </script>
   <script type="module" src="../multi/script.js?v=20260928-3"></script>
