@@ -35,21 +35,22 @@ function trial() {
 
 // Interpret child output privately. Only fixed labels and booleans reach Actions logs.
 function observe(output, result) {
-  const emulatorReady = /All emulators ready!|All emulators ready\./i.test(output);
-  const firestoreReady = emulatorReady && /(?:│|\|)\s*Firestore\s*(?:│|\|)/i.test(output);
-  const functionsReady = emulatorReady && /(?:│|\|)\s*Functions\s*(?:│|\|)/i.test(output);
-  const testLaunched = /emulators: Running script:/i.test(output);
-  const targetReported = output.includes(`- ${target}`);
-  const testPassed = targetReported && /^# pass 1\s*$/m.test(output) && /^# fail 0\s*$/m.test(output);
-  const transactionError = /Transaction is invalid or closed\./i.test(output);
-  const firestoreError = /(?:Error|Failed|Could not|Unable).*firestore|firestore.*(?:Error|Failed|Could not|Unable)/i.test(output);
-  const functionsError = /(?:Error|Failed|Could not|Unable).*functions emulator|functions emulator.*(?:Error|Failed|Could not|Unable)/i.test(output);
+  // Firebase CLI and Node may use colored/spec output even when stdout is piped.
+  const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+  const firestoreReady = /(?:^|\n)\s*[✔i]\s+firestore:\s+Firestore Emulator UI websocket is running on \d+\./im.test(plain);
+  const functionsReady = /(?:^|\n)\s*✔\s+functions:\s+Loaded functions definitions from source:/im.test(plain);
+  const testLaunched = /(?:^|\n)\s*i\s+Running script:\s+node --test --test-force-exit --test-name-pattern=/im.test(plain);
+  const targetReported = plain.split('\n').some((line) => line.trim().includes(target) && /^(?:✔|ok \d+ -)\s/.test(line.trim()));
+  const testPassed = targetReported && /(?:^|\n)(?:#|ℹ)\s*pass 1\s*(?:\n|$)/m.test(plain) && /(?:^|\n)(?:#|ℹ)\s*fail 0\s*(?:\n|$)/m.test(plain);
+  const transactionError = /Transaction is invalid or closed\./i.test(plain);
+  const firestoreError = /(?:Error|Failed|Could not|Unable).*firestore|firestore.*(?:Error|Failed|Could not|Unable)/i.test(plain);
+  const functionsError = /(?:Error|Failed|Could not|Unable).*functions emulator|functions emulator.*(?:Error|Failed|Could not|Unable)/i.test(plain);
   let category = 'unknown';
   if (result.timedOut) category = 'timeout';
   else if (transactionError) category = 'transaction-invalid-or-closed';
   else if (firestoreError && !firestoreReady) category = 'firestore-emulator-start-failure';
   else if (functionsError && !functionsReady) category = 'functions-emulator-start-failure';
-  else if (emulatorReady && !testLaunched) category = 'test-start-failure';
+  else if (firestoreReady && functionsReady && !testLaunched) category = 'test-start-failure';
   else if (testLaunched && targetReported) category = 'test-failure';
   return { firestoreReady, functionsReady, testLaunched, targetReported, testPassed, category };
 }
