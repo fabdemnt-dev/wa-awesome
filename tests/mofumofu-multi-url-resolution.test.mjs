@@ -26,7 +26,7 @@ test('multi page resolves its stylesheet and entry module identically with or wi
   const module = attribute(moduleTag, 'src');
 
   assert.equal(stylesheet, '../multi/style.css?v=20260928-3');
-  assert.equal(module, '../multi/script.js?v=20260929-2');
+  assert.equal(module, '../multi/script.js?v=20260929-3');
   for (const origin of origins) {
     assert.equal(new URL(stylesheet, origin).pathname, '/multi/style.css');
     assert.equal(new URL(module, origin).pathname, '/multi/script.js');

@@ -303,7 +303,7 @@ function renderSteps(view) {
       const node = document.createElement('button');
       node.type = 'button';
       node.dataset.target = target.seatId;
-      node.textContent = `${target.label}へ`;
+      node.textContent = `${target.label}へ渡す`;
       node.addEventListener('click', () => void submitOffer(target.seatId, node));
       return node;
     }));
