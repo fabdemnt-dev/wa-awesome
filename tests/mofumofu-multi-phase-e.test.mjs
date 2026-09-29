@@ -111,7 +111,7 @@ test('E-3 モード選択: 修飾クリックは素通しし、無効モード�
   assert.ok(multiEntry.includes('event.preventDefault()'));
   assert.ok(multiEntry.includes('document.createElement(mode.enabled ? \'a\' : \'span\')'), '無効モードをリンクで描いている');
   // 3〜6人版ページ自体のキャッシュ版数は固定（ランダム生成・時刻生成をしない）。
-  assert.ok(multiPage.includes('../multi/script.js?v=20260929-1'));
+  assert.ok(multiPage.includes('../multi/script.js?v=20260929-2'));
   assert.ok(multiPage.includes('../multi/style.css?v=20260928-3'));
   assert.equal(/\?v=\$\{/.test(multiPage), false, '版数を変数で組み立てている');
   assert.equal(/Math\.random|Date\.now\(\)\s*\)\s*\?v=/.test(multiPage), false);
@@ -569,6 +569,9 @@ test('開始通知で本人の未取得手札だけを一度resumeし、通常�
   onRoom(waiting, playing);
   onRoom(playing, { ...playing, turnNumber: 2 });
   assert.deepEqual(reasons, ['hand-on-game-start']);
+  state.roomId = 'next-room';
+  onRoom(waiting, { ...playing, roomId: 'next-room' });
+  assert.deepEqual(reasons, ['hand-on-game-start', 'hand-on-game-start'], '別roomでも開始通知を扱う');
   assert.match(multiClient, /const previousRoom = state\.room;\s*state\.room = room;\s*renderAll\(\);\s*onHandStart\(previousRoom, room\)/);
   assert.match(multiPage, /id="hand-loading"[^>]*>手札を読み込んでいます…<\/p>/);
   assert.match(multiClient, /\$\('hand-loading'\)\.hidden = !\(state\.room\?\.status === core\.ROOM_STATUS\.PLAYING[\s\S]*?state\.handStatus === 'pending' && state\.cards\.length === 0/);

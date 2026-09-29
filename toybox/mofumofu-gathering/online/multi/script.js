@@ -11,7 +11,7 @@ import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'https://w
 import { getDatabase, connectDatabaseEmulator, ref, onValue, onDisconnect, set, update, serverTimestamp } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js';
 import { resolveEnvironment, REGION } from './firebase-config.js?v=20260926-1';
 import * as core from './multi-core.js?v=20260928-3';
-import { runMofumofuMultiFullResume, createMultiResumeCoordinator, createMultiHandStartResume, handleMultiSessionFailure } from './multi-resume.js?v=20260929-1';
+import { runMofumofuMultiFullResume, createMultiResumeCoordinator, createMultiHandStartResume, handleMultiSessionFailure } from './multi-resume.js?v=20260929-2';
 
 const environment = resolveEnvironment();
 const app = initializeApp(environment.firebase);
