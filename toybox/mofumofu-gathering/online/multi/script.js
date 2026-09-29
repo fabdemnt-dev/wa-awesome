@@ -11,7 +11,7 @@ import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'https://w
 import { getDatabase, connectDatabaseEmulator, ref, onValue, onDisconnect, set, update, serverTimestamp } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js';
 import { resolveEnvironment, REGION } from './firebase-config.js?v=20260926-1';
 import * as core from './multi-core.js?v=20260928-3';
-import { runMofumofuMultiFullResume, createMultiResumeCoordinator, handleMultiSessionFailure } from './multi-resume.js?v=20260926-1';
+import { runMofumofuMultiFullResume, createMultiResumeCoordinator, createMultiHandStartResume, handleMultiSessionFailure } from './multi-resume.js?v=20260929-1';
 
 const environment = resolveEnvironment();
 const app = initializeApp(environment.firebase);
@@ -262,6 +262,9 @@ function renderGame(room) {
 function renderSteps(view) {
   const canMake = view.canMakeOffer;
   const handMode = core.handMode(view);
+  $('hand-loading').hidden = !(state.room?.status === core.ROOM_STATUS.PLAYING
+    && state.handStatus === 'pending' && state.cards.length === 0
+    && Number(state.room?.handCounts?.[state.seatId] || 0) > 0);
   if (!canMake) { ui.cardId = null; ui.claim = null; }
   if (ui.cardId && !state.cards.some((entry) => entry.cardId === ui.cardId)) { ui.cardId = null; ui.claim = null; }
   $('offer-form').hidden = handMode === 'hidden' || handMode === 'judging';
@@ -365,7 +368,7 @@ function resetEntryView() {
   for (const id of ['turn', 'tableCardSub', 'offer-message', 'invite-note', 'start-note', 'flash', 'result']) $(id).textContent = '';
   $('tableCardMain').textContent = '？';
   for (const id of ['others', 'self-seat', 'hand', 'judgeHand', 'log', 'players', 'claimButtons', 'targetButtons', 'judgeHand', 'final-players']) $(id).replaceChildren();
-  for (const id of ['game', 'lobby', 'final-result', 'reconnect-wait', 'claimStep', 'targetStep', 'judgeStep']) $(id).hidden = true;
+  for (const id of ['game', 'lobby', 'final-result', 'reconnect-wait', 'claimStep', 'targetStep', 'judgeStep', 'hand-loading']) $(id).hidden = true;
   $('copy-invite').textContent = core.COPY_LABEL;
   renderEntry();
 }
@@ -510,10 +513,13 @@ const requestResume = createMultiResumeCoordinator({
   runResume: fullResume,
   onError: (error, reason) => setConnectionState('error', `復帰:${errorCode(error)}`),
 });
+const onHandStart = createMultiHandStartResume({ state, requestResume });
 function applyPublicRoom(room, generation) {
   if (generation !== state.resumeGeneration) return;
+  const previousRoom = state.room;
   state.room = room;
   renderAll();
+  onHandStart(previousRoom, room);
 }
 function handleRoomGone() {
   if (!state.roomId) return;

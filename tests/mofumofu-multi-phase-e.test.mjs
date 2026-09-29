@@ -111,7 +111,7 @@ test('E-3 モード選択: 修飾クリックは素通しし、無効モード�
   assert.ok(multiEntry.includes('event.preventDefault()'));
   assert.ok(multiEntry.includes('document.createElement(mode.enabled ? \'a\' : \'span\')'), '無効モードをリンクで描いている');
   // 3〜6人版ページ自体のキャッシュ版数は固定（ランダム生成・時刻生成をしない）。
-  assert.ok(multiPage.includes('../multi/script.js?v=20260928-3'));
+  assert.ok(multiPage.includes('../multi/script.js?v=20260929-1'));
   assert.ok(multiPage.includes('../multi/style.css?v=20260928-3'));
   assert.equal(/\?v=\$\{/.test(multiPage), false, '版数を変数で組み立てている');
   assert.equal(/Math\.random|Date\.now\(\)\s*\)\s*\?v=/.test(multiPage), false);
@@ -553,6 +553,87 @@ test('E-14 復帰の同時実行: 1本にまとめ、lifecycleの連続発火は
   assert.equal(failingState.resumeFlight, null, '失敗後もflightが残っている');
   await failing('manual');
   assert.equal(failedRuns, 2, '失敗後に次の復帰を実行できない');
+});
+
+test('開始通知で本人の未取得手札だけを一度resumeし、通常更新と取得済み手札を除外する', async () => {
+  const waiting = baseRoom(3);
+  const playing = playingRoom(3);
+  const state = {
+    roomId: playing.roomId, seatId: 'S2', room: playing, cards: [], handStatus: 'pending',
+    resumeFlight: null, connectionState: 'connected',
+  };
+  const reasons = [];
+  const onRoom = resumeHelpers.createMultiHandStartResume({
+    state, requestResume: (reason) => { reasons.push(reason); return Promise.resolve(); },
+  });
+  onRoom(waiting, playing);
+  onRoom(playing, { ...playing, turnNumber: 2 });
+  assert.deepEqual(reasons, ['hand-on-game-start']);
+  assert.match(multiClient, /const previousRoom = state\.room;\s*state\.room = room;\s*renderAll\(\);\s*onHandStart\(previousRoom, room\)/);
+  assert.match(multiPage, /id="hand-loading"[^>]*>手札を読み込んでいます…<\/p>/);
+  assert.match(multiClient, /\$\('hand-loading'\)\.hidden = !\(state\.room\?\.status === core\.ROOM_STATUS\.PLAYING[\s\S]*?state\.handStatus === 'pending' && state\.cards\.length === 0/);
+
+  for (const patch of [
+    { cards: [card('cat', 'own-card')], handStatus: 'ready' },
+    { roomId: null },
+    { seatId: null },
+  ]) {
+    const own = { ...state, cards: [], handStatus: 'pending', ...patch };
+    resumeHelpers.createMultiHandStartResume({ state: own, requestResume: () => { throw new Error('不要なresume'); } })(waiting, playing);
+  }
+  const former = { ...state, cards: [], handStatus: 'pending' };
+  resumeHelpers.createMultiHandStartResume({ state: former, requestResume: () => { throw new Error('他人の手札を取得してはならない'); } })(
+    waiting, playingRoom(3, { playerStatus: { ...playing.playerStatus, S2: 'left' } }),
+  );
+  assert.match(multiClient, /call\('resumeMofumofuMultiRoom', \{ roomId: state\.roomId \}\)/);
+  assert.doesNotMatch(multiClient, /privateHands\//);
+});
+
+test('開始通知と初期・visibilitychange・pageshow復帰の近接時は同時Callableを発行しない', async () => {
+  const waiting = baseRoom(3);
+  const playing = playingRoom(3);
+  const state = {
+    roomId: playing.roomId, seatId: 'S1', room: playing, cards: [], handStatus: 'pending',
+    resumeFlight: null, connectionState: 'connected', lastSuccessfulResumeRoomId: null, lastSuccessfulResumeAt: 0,
+  };
+  let release;
+  let runs = 0;
+  const requestResume = resumeHelpers.createMultiResumeCoordinator({
+    state, getRoomId: () => state.roomId,
+    runResume: async () => { runs += 1; await new Promise((resolve) => { release = resolve; }); },
+    onError: () => {},
+  });
+  const initial = requestResume('initial');
+  await Promise.resolve();
+  const onRoom = resumeHelpers.createMultiHandStartResume({ state, requestResume });
+  onRoom(waiting, playing);
+  const visible = requestResume('lifecycle');
+  const page = requestResume('lifecycle');
+  assert.equal(runs, 1);
+  release();
+  await Promise.all([initial, visible, page]);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(runs, 2, '初期復帰が手札を返さなかった場合に限り一度取り直す');
+  onRoom(playing, { ...playing, turnNumber: 2 });
+  assert.equal(runs, 2);
+  state.cards = [card('cat', 'own-card')];
+  state.handStatus = 'ready';
+  release();
+  await state.resumeFlight;
+
+  // 初期復帰がすでに手札を返した場合は追加resumeなし。
+  const ready = { ...state, cards: [], handStatus: 'pending', resumeFlight: null };
+  let finish;
+  const flight = new Promise((resolve) => { finish = resolve; });
+  ready.resumeFlight = flight;
+  let additional = 0;
+  resumeHelpers.createMultiHandStartResume({ state: ready, requestResume: () => { additional += 1; } })(waiting, playing);
+  ready.cards = [card('cat', 'own-card')];
+  ready.handStatus = 'ready';
+  finish();
+  await flight;
+  await Promise.resolve();
+  assert.equal(additional, 0);
 });
 
 /* ------------------------------------------------------------ あそびかた・禁止 */
