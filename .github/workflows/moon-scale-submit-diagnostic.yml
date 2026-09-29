@@ -29,6 +29,8 @@ jobs:
           cache: npm
       - name: Install test dependencies
         run: npm ci
+      - name: Install Functions dependencies
+        run: npm --prefix functions install --ignore-scripts --no-audit --no-fund
       - name: Create emulator-only dummy secrets
         env:
           LOCAL_MOON_INVITE_KEY: local-test-only-moon-invite-key
