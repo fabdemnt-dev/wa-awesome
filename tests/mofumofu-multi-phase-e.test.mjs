@@ -13,6 +13,7 @@ const presence = functionRequire('./mofumofu-multi/presence.js');
 
 const core = await import('../toybox/mofumofu-gathering/online/multi/multi-core.js');
 const resumeHelpers = await import('../toybox/mofumofu-gathering/online/multi/multi-resume.js');
+const actionHelpers = await import('../toybox/mofumofu-gathering/online/multi/multi-action-recovery.js');
 
 const read = (relative) => fs.readFileSync(new URL(relative, import.meta.url), 'utf8');
 const multiPage = read('../toybox/mofumofu-gathering/online/multi/index.html');
@@ -111,7 +112,7 @@ test('E-3 モード選択: 修飾クリックは素通しし、無効モード�
   assert.ok(multiEntry.includes('event.preventDefault()'));
   assert.ok(multiEntry.includes('document.createElement(mode.enabled ? \'a\' : \'span\')'), '無効モードをリンクで描いている');
   // 3〜6人版ページ自体のキャッシュ版数は固定（ランダム生成・時刻生成をしない）。
-  assert.ok(multiPage.includes('../multi/script.js?v=20260929-3'));
+  assert.ok(multiPage.includes('../multi/script.js?v=20260929-4'));
   assert.ok(multiPage.includes('../multi/style.css?v=20260928-3'));
   assert.equal(/\?v=\$\{/.test(multiPage), false, '版数を変数で組み立てている');
   assert.equal(/Math\.random|Date\.now\(\)\s*\)\s*\?v=/.test(multiPage), false);
@@ -177,7 +178,7 @@ test('playing中の自分の手札は手番外も閲覧でき、選択は自分�
   assert.match(multiClient, /\['select', 'view'\]\.includes\(handMode\) \? state\.cards : \[\]/);
   assert.match(multiClient, /document\.createElement\(canMake \? 'button' : 'span'\)/);
   assert.match(multiClient, /if \(canMake\) node\.addEventListener\('click'/);
-  assert.match(multiClient, /if \(!core\.canMakeOffer\(state\.room, state\.seatId\) \|\| state\.makeBusy\) return/);
+  assert.match(multiClient, /if \(!core\.canMakeOffer\(state\.room, state\.seatId\) \|\| multiActionBlocked\(state\)\) return/);
   assert.match(multiClient, /state\.cards = Array\.isArray\(value\.cards\) \? value\.cards : \[\];[\s\S]*?renderAll\(\)/);
   assert.match(multiClient, /if \(view\.canJudge\) \{\s*\$\('judgeHand'\)\.replaceChildren\(\.\.\.state\.cards\.map/);
   assert.ok(multiPage.includes('id="hand" class="hand"'));
@@ -228,7 +229,9 @@ test('相手への送信は選択完了後だけで、連打してもCallableを
   const calls = [];
   let complete;
   const context = {
-    state, ui, core, $: () => ({ children: buttons }), newId: () => 'action-1',
+    state, ui, core, multiActionBlocked: actionHelpers.multiActionBlocked,
+    definitiveMultiActionRejection: actionHelpers.definitiveMultiActionRejection,
+    recoverPendingActions: () => {}, $: () => ({ children: buttons }), newId: () => 'action-1',
     call: (name, request) => { calls.push({ name, request: { ...request } }); return new Promise((resolve) => { complete = resolve; }); },
     renderGame: () => {}, message: () => {},
   };
@@ -700,6 +703,140 @@ test('開始通知と初期・visibilitychange・pageshow復帰の近接時は�
   await flight;
   await Promise.resolve();
   assert.equal(additional, 0);
+});
+
+test('背景復帰: make/judgeの応答喪失を同一payloadで一度確認し、次の操作を開放する', async () => {
+  for (const kind of ['make', 'judge']) {
+    const request = kind === 'make'
+      ? { roomId: 'room-1', actionId: 'action-1', cardId: 'own-card', claimedAnimalType: 'cat', targetPlayerId: 'S2' }
+      : { roomId: 'room-1', actionId: 'action-2', judgment: 'truth' };
+    const state = { roomId: 'room-1', room: { status: 'playing', publicOffer: null },
+      makeRequest: kind === 'make' ? request : null, judgeRequest: kind === 'judge' ? request : null,
+      makeBusy: kind === 'make', judgeBusy: kind === 'judge', actionRecoveryFlight: null };
+    let finish;
+    const calls = [];
+    let refreshed = 0;
+    const recover = actionHelpers.createMultiPendingActionRecovery({
+      state, replay: (type, payload) => { calls.push({ type, payload }); return new Promise((resolve) => { finish = resolve; }); },
+      refresh: async () => { refreshed += 1; }, onUncertain: () => {}, onRejected: () => {},
+    });
+    const first = recover();
+    const nearEvents = [recover(), recover()]; // visibilitychange + pageshow + online
+    await Promise.resolve();
+    assert.equal(calls.length, 1, `${kind}: 同時再送している`);
+    assert.equal(actionHelpers.multiActionBlocked(state), true);
+    assert.deepEqual(calls[0], { type: kind, payload: request });
+    finish({ roomId: 'room-1' });
+    await Promise.all([first, ...nearEvents]);
+    assert.equal(calls.length, 1);
+    assert.equal(refreshed, 1);
+    assert.equal(state[`${kind}Request`], null);
+    assert.equal(state[`${kind}Busy`], false);
+    assert.equal(actionHelpers.multiActionBlocked(state), false);
+  }
+});
+
+test('背景復帰: makeの公開actionId一致は成立済み。未一致とjudgeは元ID再送で判定する', async () => {
+  const request = { roomId: 'room-1', actionId: 'action-1', cardId: 'own-card', claimedAnimalType: 'cat', targetPlayerId: 'S2' };
+  const state = { roomId: 'room-1', room: { publicOffer: { actionId: 'action-1', status: 'completed' } },
+    makeRequest: request, judgeRequest: null, makeBusy: true, judgeBusy: false, actionRecoveryFlight: null };
+  let calls = 0;
+  const recover = actionHelpers.createMultiPendingActionRecovery({ state,
+    replay: async () => { calls += 1; }, refresh: async () => {}, onUncertain: () => {}, onRejected: () => {} });
+  await recover();
+  assert.equal(calls, 0);
+  assert.equal(state.makeRequest, null);
+  assert.equal(state.makeBusy, false);
+  state.room = { publicOffer: { actionId: 'some-other-action', status: 'pending' } };
+  state.makeRequest = request;
+  state.makeBusy = true;
+  await recover();
+  assert.equal(calls, 1, '公開offer不一致だけで未成立と断定してはならない');
+});
+
+test('背景復帰: 不明な通信失敗は保留payloadを保持し、明確な拒否は有限回で止める', async () => {
+  const request = { roomId: 'room-1', actionId: 'action-1', judgment: 'truth' };
+  const state = { roomId: 'room-1', room: { publicOffer: null }, makeRequest: null, judgeRequest: request,
+    makeBusy: false, judgeBusy: true, actionRecoveryFlight: null };
+  let attempts = 0;
+  const errors = [];
+  const recover = actionHelpers.createMultiPendingActionRecovery({ state,
+    replay: async () => { attempts += 1; throw { code: attempts === 1 ? 'functions/unavailable' : 'functions/failed-precondition' }; },
+    refresh: async () => {}, onUncertain: () => errors.push('uncertain'), onRejected: () => errors.push('rejected') });
+  await recover();
+  assert.equal(attempts, 1);
+  assert.equal(state.judgeRequest, request, '通信不明時はpayloadを失わない');
+  assert.equal(actionHelpers.multiActionBlocked(state), true);
+  await recover();
+  assert.equal(attempts, 2);
+  assert.deepEqual(errors, ['uncertain', 'rejected']);
+  assert.equal(state.judgeRequest, null);
+  assert.equal(actionHelpers.multiActionBlocked(state), false);
+});
+
+test('背景復帰: 操作なしは再送せず、時間切れも一度で止めて次回の確認用payloadを残す', async () => {
+  const state = { roomId: 'room-1', room: {}, makeRequest: null, judgeRequest: null,
+    makeBusy: false, judgeBusy: false, actionRecoveryFlight: null };
+  let attempts = 0;
+  let uncertain = 0;
+  const recover = actionHelpers.createMultiPendingActionRecovery({ state, timeoutMs: 5,
+    replay: () => { attempts += 1; return new Promise(() => {}); },
+    refresh: async () => {}, onUncertain: () => { uncertain += 1; }, onRejected: () => {} });
+  await recover();
+  assert.equal(attempts, 0);
+  state.makeRequest = { roomId: 'room-1', actionId: 'action-1', cardId: 'own-card', claimedAnimalType: 'cat', targetPlayerId: 'S2' };
+  await recover();
+  assert.equal(attempts, 1);
+  assert.equal(uncertain, 1);
+  assert.ok(state.makeRequest, '時間切れでactionIdを捨てない');
+  assert.equal(state.actionRecoveryFlight, null);
+  await recover();
+  assert.equal(attempts, 1, '前回の再送が未完了なら新しいCallableを重ねない');
+});
+
+test('背景復帰: 遅れて届いた元のmake応答は回復済みの次の操作を変更しない', async () => {
+  const source = multiClient.slice(multiClient.indexOf('async function submitOffer('), multiClient.indexOf('async function submitJudgment('));
+  const state = { roomId: 'room-1', seatId: 'S1', room: playingRoom(3, { roomId: 'room-1' }),
+    makeRequest: null, judgeRequest: null, makeBusy: false, judgeBusy: false, actionRecoveryFlight: null };
+  const ui = { cardId: 'own-card', claim: 'cat' };
+  let finishOriginal;
+  const calls = [];
+  const context = { state, ui, core, multiActionBlocked: actionHelpers.multiActionBlocked,
+    definitiveMultiActionRejection: actionHelpers.definitiveMultiActionRejection,
+    newId: () => 'action-1', $: () => ({ children: [{ disabled: false }] }),
+    renderGame: () => {}, message: () => {}, recoverPendingActions: () => {},
+    call: (name, request) => { calls.push({ name, request }); return new Promise((resolve) => { finishOriginal = resolve; }); } };
+  const submit = vm.runInNewContext(`${source}; submitOffer`, context);
+  const original = submit('S2', { disabled: false });
+  const pending = state.makeRequest;
+  assert.equal(state.makeBusy, true);
+  const recover = actionHelpers.createMultiPendingActionRecovery({ state,
+    replay: async (kind, request) => { calls.push({ name: kind, request }); return { ok: true }; },
+    refresh: async () => {}, onUncertain: () => {}, onRejected: () => {} });
+  await recover();
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].request, pending);
+  assert.equal(calls[1].request, pending, '新しいpayloadを作っていない');
+  state.makeRequest = { roomId: 'room-1', actionId: 'action-2', cardId: 'next-card', claimedAnimalType: 'dog', targetPlayerId: 'S3' };
+  state.makeBusy = true;
+  ui.cardId = 'next-card'; ui.claim = 'dog';
+  finishOriginal({ ok: true });
+  await original;
+  assert.equal(state.makeRequest.actionId, 'action-2');
+  assert.equal(state.makeBusy, true);
+  assert.equal(ui.cardId, 'next-card');
+});
+
+test('判定ボタンは後のターンでも正本とbusyに合わせて有効に戻す', () => {
+  const state = { makeBusy: false, judgeBusy: false, makeRequest: null, judgeRequest: null, actionRecoveryFlight: null };
+  assert.equal(actionHelpers.multiJudgeButtonsDisabled({ canJudge: true }, state), false);
+  state.judgeBusy = true;
+  assert.equal(actionHelpers.multiJudgeButtonsDisabled({ canJudge: true }, state), true);
+  state.judgeBusy = false;
+  assert.equal(actionHelpers.multiJudgeButtonsDisabled({ canJudge: false }, state), true);
+  assert.equal(actionHelpers.multiJudgeButtonsDisabled({ canJudge: true }, state), false, '次の判定役では有効に戻す');
+  assert.match(multiClient, /for \(const node of \$\('judge-buttons'\)\.querySelectorAll\('button'\)\) node\.disabled = multiJudgeButtonsDisabled\(view, state\)/);
+  assert.match(multiClient, /const recovery = recoverPendingActions\(generation\)/);
 });
 
 /* ------------------------------------------------------------ あそびかた・禁止 */
