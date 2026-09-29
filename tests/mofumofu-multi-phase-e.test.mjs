@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import vm from 'node:vm';
 import { createRequire } from 'node:module';
 
 // Phase E（3〜6人版の入口・クライアント・表示）の純粋テストと静的検査。
@@ -97,7 +98,7 @@ test('E-2 既存2人＋こはる版の入口を壊していない（href・gate�
   assert.ok(onlineClient.includes('mofumofuOnlinePresence/'), '既存2人版のpresenceルートが変わっている');
   // 追加はしたが、既存入口の要素・hrefは残したままmulti-entry.jsを足すだけ。
   assert.ok(gamePage.includes('src="online-entry.js?v=20260922-1"'));
-  assert.ok(gamePage.includes('src="multi-entry.js?v=20260926-1"'));
+  assert.ok(gamePage.includes('src="multi-entry.js?v=20260929-1"'));
   assert.ok(gamePage.includes('<dialog id="onlineModeDialog"'), 'モード選択のmarkupが無い');
   assert.ok(gamePage.indexOf('onlineModeDialog') > gamePage.indexOf('id="onlineEntry"'), '入口より前にダイアログを置いている');
 });
@@ -114,6 +115,45 @@ test('E-3 モード選択: 修飾クリックは素通しし、無効モード�
   assert.ok(multiPage.includes('../multi/style.css?v=20260928-3'));
   assert.equal(/\?v=\$\{/.test(multiPage), false, '版数を変数で組み立てている');
   assert.equal(/Math\.random|Date\.now\(\)\s*\)\s*\?v=/.test(multiPage), false);
+});
+
+test('モード選択はstagingだけ3〜6人版を有効にし、productionでは準備中を保つ', () => {
+  function renderFor(hostname) {
+    const listeners = new Map();
+    const children = [];
+    const elements = {
+      onlineEntry: { addEventListener: (name, fn) => listeners.set(name, fn) },
+      onlineModeDialog: { showModal() {}, close() {} },
+      onlineModeOptions: { replaceChildren: (...nodes) => children.splice(0, children.length, ...nodes) },
+      closeModeDialog: { addEventListener() {} },
+    };
+    const document = {
+      head: { append() {} },
+      getElementById: (id) => elements[id],
+      createElement: (tag) => ({ tag, children: [], attributes: {}, setAttribute(key, value) { this.attributes[key] = value; }, append(...nodes) { this.children.push(...nodes); }, addEventListener() {} }),
+    };
+    vm.runInNewContext(multiEntry.replace(/^import .*;\s*/m, 'const onlineModeOptions = globalThis.testOptions;\n'), {
+      document,
+      location: { hostname },
+      testOptions: core.onlineModeOptions,
+    });
+    listeners.get('click')({ defaultPrevented: false, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, preventDefault() {} });
+    return children.map((node) => ({ tag: node.tag, href: node.href, disabled: node.attributes['aria-disabled'], label: node.children[0].textContent, description: node.children[1].textContent }));
+  }
+  for (const hostname of ['wa-awesome-mofumofu-stg.web.app', 'fabdemnt-dev.github.io']) {
+    const [twoPlayer, multi] = renderFor(hostname);
+    assert.equal(twoPlayer.tag, 'a');
+    assert.equal(twoPlayer.href, './online/');
+    if (hostname === 'wa-awesome-mofumofu-stg.web.app') {
+      assert.equal(multi.tag, 'a');
+      assert.equal(multi.href, './online/multi/');
+      assert.notEqual(multi.description, 'じゅんびちゅう');
+    } else {
+      assert.equal(multi.tag, 'span');
+      assert.equal(multi.disabled, 'true');
+      assert.equal(multi.description, 'じゅんびちゅう');
+    }
+  }
 });
 
 test('保存roomなしの初期認証後は接続完了を表示し、復帰処理を呼ばない', () => {
