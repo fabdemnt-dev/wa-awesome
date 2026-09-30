@@ -86,6 +86,13 @@ export const CARD_IMAGES = {
 export const ASSET_BASE = '../../../../assets/mofumofu-gathering/';
 export const LOGO_PATH = `${ASSET_BASE}mofumofu-logo.png`;
 export function cardImagePath(animalType) { return `${ASSET_BASE}${CARD_IMAGES[animalType] || ''}`; }
+export function sortHandCards(cards) {
+  const order = Object.fromEntries(ANIMALS.map((animalType, index) => [animalType, index]));
+  return [...(Array.isArray(cards) ? cards : [])].sort((a, b) => (
+    (order[a?.animalType] ?? ANIMALS.length) - (order[b?.animalType] ?? ANIMALS.length)
+    || String(a?.cardId || '').localeCompare(String(b?.cardId || ''))
+  ));
+}
 
 export const INVITE_LENGTH = 8;
 // serverの招待コードalphabetと同じ（紛らわしい I / O / 0 / 1 は使わない）。

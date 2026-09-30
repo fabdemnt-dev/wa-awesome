@@ -699,6 +699,12 @@ async function submitJudgment(judgment, buttons) {
     if (state.judgeRequest === request) state.judgeBusy = false;
   }
 }
+$('sortHandBtn').addEventListener('click', () => {
+  if (!state.room || state.room.status !== core.ROOM_STATUS.PLAYING || state.handStatus !== 'ready') return;
+  state.cards = core.sortHandCards(state.cards);
+  renderGame(state.room);
+  message('手札を自動整列しました');
+});
 $('judge-buttons').addEventListener('click', (event) => {
   const judgment = event.target.dataset?.judgment;
   if (!judgment) return;
