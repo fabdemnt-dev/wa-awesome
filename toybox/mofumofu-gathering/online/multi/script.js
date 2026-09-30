@@ -654,6 +654,10 @@ async function submitOffer(targetSeatId, button) {
   try {
     await call('makeMofumofuMultiOffer', request);
     if (state.makeRequest !== request) return;
+    // Callable成功時点でserver正本ではこのcardIdは手札からpendingOfferへ移動済み。
+    // 公開room listenerはhandCountsしか更新しないため、秘密手札の古い画像を残さないよう
+    // 成功した本人のローカル配列から同じcardIdだけを除く（不確定時は既存resume回復を使う）。
+    state.cards = state.cards.filter((entry) => entry.cardId !== request.cardId);
     state.makeRequest = null;
     state.makeBusy = false;
     ui.cardId = null; ui.claim = null;
