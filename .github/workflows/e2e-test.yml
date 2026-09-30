@@ -1,8 +1,14 @@
 name: E2E Tests
 
+# This workflow writes to production. Keep automatic triggers disabled.
 on:
-  push:
   workflow_dispatch:
+    inputs:
+      run_production_e2e:
+        description: 'production wa-awesomeへテストデータを書き込むE2Eの実行を明示的に承認する'
+        type: boolean
+        required: true
+        default: false
 
 permissions:
   contents: read
@@ -13,6 +19,7 @@ concurrency:
 
 jobs:
   playwright:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.run_production_e2e == true }}
     name: Chromium / WebKit
     runs-on: ubuntu-24.04
     timeout-minutes: 45
