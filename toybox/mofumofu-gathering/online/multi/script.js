@@ -14,6 +14,7 @@ import * as core from './multi-core.js?v=20260929-4';
 import { runMofumofuMultiFullResume, createMultiResumeCoordinator, createMultiHandStartResume, handleMultiSessionFailure, canForgetFinishedRoom, forgetFinishedRoom, clearMultiLocalRoom } from './multi-resume.js?v=20260930-2';
 import { createMultiPendingActionRecovery, definitiveMultiActionRejection, multiActionBlocked, multiJudgeButtonsDisabled } from './multi-action-recovery.js?v=20260929-1';
 import { leaveView, loadLeaveRequest, saveLeaveRequest, clearLeaveRequest, boundedLeaveResult } from './multi-leave.js?v=20260930-1';
+import { hostCloseView, loadCloseRequest, saveCloseRequest, clearCloseRequest } from './multi-close.js?v=20260930-1';
 
 const environment = resolveEnvironment();
 const app = initializeApp(environment.firebase);
@@ -49,6 +50,7 @@ const state = {
   entryBusy: false, startBusy: false, waitingLeaveBusy: false, makeBusy: false, judgeBusy: false,
   makeRequest: null, judgeRequest: null, handRetryFlight: null, actionRecoveryFlight: null,
   leaveRequest: null, leaveBusy: false,
+  closeRequest: null, closeBusy: false,
 };
 const ui = { cardId: null, claim: null, flashTimer: null, logoTimer: null, copyTimer: null, lastLogKey: null, gatheringShown: false };
 
@@ -218,10 +220,14 @@ function renderLobby(room) {
     return box;
   }));
   $('start-game').hidden = !view.startVisible;
-  $('start-game').disabled = !view.canStart;
+  $('start-game').disabled = !view.canStart || state.closeBusy || Boolean(state.closeRequest);
   $('start-note').textContent = view.waitingNote || view.startNote || (view.full ? view.fullText : '');
   $('leave-waiting').hidden = view.isHost;
   $('leave-waiting').disabled = state.waitingLeaveBusy;
+  const close = hostCloseView(state, auth.currentUser?.uid);
+  $('close-waiting').hidden = !close.visible;
+  $('close-waiting').textContent = close.label;
+  $('close-waiting').disabled = close.disabled;
 }
 function renderGame(room) {
   const presenceReady = state.presenceReady === state.resumeGeneration;
@@ -389,6 +395,8 @@ function resetEntryView() {
   state.actionRecoveryFlight = null;
   if (state.leaveRequest) clearLeaveRequest(localStorage);
   state.leaveRequest = null; state.leaveBusy = false;
+  if (state.closeRequest) clearCloseRequest(localStorage);
+  state.closeRequest = null; state.closeBusy = false; state.waitingLeaveBusy = false;
   state.finishedConfirmedRoomId = null;
   ui.cardId = null; ui.claim = null; ui.lastLogKey = null; ui.gatheringShown = false;
   for (const id of ['turn', 'tableCardSub', 'offer-message', 'invite-note', 'start-note', 'flash', 'result']) $(id).textContent = '';
@@ -585,11 +593,8 @@ function applyPublicRoom(room, generation, fromServer) {
 }
 function handleRoomGone() {
   if (!state.roomId) return;
-  state.resumeGeneration += 1;
-  stopRealtime();
-  core.clearSavedRoom(localStorage);
-  forgetInvite();
-  resetEntryView();
+  clearMultiLocalRoom({ state, storage: localStorage, stopRealtime, retirePresence, forgetInvite, resetEntryView });
+  finishLocalRoomCleanup();
   message(core.sessionRecoveryNotice(core.SESSION_REASONS.ROOM_NOT_FOUND));
 }
 function listenRoom(generation) {
@@ -766,6 +771,35 @@ $('leave-waiting').addEventListener('click', async () => {
   }
 });
 
+$('close-waiting').addEventListener('click', async () => {
+  if (!hostCloseView(state, auth.currentUser?.uid).visible || state.closeBusy || state.startBusy) return;
+  const existing = state.closeRequest;
+  if (!existing && !globalThis.confirm('待機室を閉じますか？\n参加者全員がこの部屋から退出します。')) return;
+  const request = existing || { roomId: state.roomId, actionId: newId() };
+  if (!existing) {
+    saveCloseRequest(localStorage, request);
+    state.closeRequest = request;
+  }
+  state.closeBusy = true; renderLobby(state.room);
+  try {
+    const result = await boundedLeaveResult(call('closeMofumofuMultiWaitingRoom', request));
+    if (state.closeRequest !== request || state.roomId !== request.roomId) return;
+    if (result?.roomId !== request.roomId || result.status !== 'closed') throw new Error('close-result-mismatch');
+    clearMultiLocalRoom({ state, storage: localStorage, stopRealtime, retirePresence, forgetInvite, resetEntryView });
+    finishLocalRoomCleanup();
+    message('待機室を閉じました。');
+  } catch (error) {
+    if (state.closeRequest !== request || state.roomId !== request.roomId) return;
+    if (['invalid-argument', 'failed-precondition', 'already-exists', 'not-found', 'permission-denied', 'unauthenticated'].includes(errorCode(error))) {
+      clearCloseRequest(localStorage); state.closeRequest = null;
+      message(`待機室を閉じられませんでした（${errorCode(error)}）。`);
+    } else message('閉室結果を確認できません。同じ操作で結果を確認できます。');
+  } finally {
+    if (state.closeRequest === request) state.closeBusy = false;
+    if (state.room?.status === core.ROOM_STATUS.WAITING) renderLobby(state.room);
+  }
+});
+
 $('create-room').addEventListener('click', async () => {
   if (state.entryBusy) return;
   state.entryBusy = true; renderEntry();
@@ -796,7 +830,7 @@ $('join-form').addEventListener('submit', async (event) => {
   finally { state.entryBusy = false; renderEntry(); }
 });
 $('start-game').addEventListener('click', async () => {
-  if (state.startBusy) return;
+  if (state.startBusy || state.closeBusy || state.closeRequest) return;
   const button = $('start-game');
   if (button.disabled) return;
   state.startBusy = true;
@@ -809,6 +843,7 @@ $('start-game').addEventListener('click', async () => {
     button.disabled = false;
   } finally {
     state.startBusy = false;
+    if (state.room?.status === core.ROOM_STATUS.WAITING) renderLobby(state.room);
   }
 });
 document.addEventListener('visibilitychange', () => { if (!document.hidden) void requestResume('lifecycle'); });
@@ -821,6 +856,7 @@ const saved = core.loadRoom(localStorage);
 if (saved) {
   state.roomId = saved.roomId; state.seatId = saved.seatId;
   state.leaveRequest = loadLeaveRequest(localStorage, saved.roomId);
+  state.closeRequest = loadCloseRequest(localStorage, saved.roomId);
 }
 renderEntry();
 await auth.authStateReady();

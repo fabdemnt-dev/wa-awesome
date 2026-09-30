@@ -520,6 +520,64 @@ async function judgeOfferHandler(request) {
 
 /* ------------------------------------------------------ explicit waiting leave */
 
+async function closeWaitingHandler(request) {
+  exactFields(request.data, ['roomId', 'actionId']);
+  const uid = authUid(request);
+  const roomId = roomIdFrom(request.data);
+  const actionId = actionIdFrom(request.data);
+  const r = refs(roomId);
+  const actionRef = r.action(actionId);
+  const fingerprint = contract.actionFingerprint('multi-close-waiting', uid, roomId, {});
+  const initialActionSnap = await actionRef.get();
+  if (initialActionSnap.exists) return replayIfPresent(initialActionSnap, fingerprint);
+  const now = Date.now();
+  await consumeRateLimit({ kind: 'close_waiting_uid', value: contract.digest(uid) }, contract.CREATE_UID_RATE_LIMIT, now);
+  await consumeRateLimit({ kind: 'close_waiting_ip', value: ipHash(request) }, contract.IP_RATE_LIMIT, now);
+  return db().runTransaction(async (tx) => {
+    const actionSnap = await tx.get(actionRef);
+    if (actionSnap.exists) return contract.replayAction(actionSnap.data(), fingerprint);
+    const [roomSnap, hostMemberSnap, secretSnap, serverSnap] = await Promise.all([
+      tx.get(r.room), tx.get(r.member(uid)), tx.get(r.secret), tx.get(r.server),
+    ]);
+    if (!roomSnap.exists) fail('not-found', '部屋が見つかりません。');
+    const decision = contract.waitingHostCloseDecision(roomSnap.data(), { uid });
+    if (!decision.ok) fail(decision.code, decision.message);
+    if (!hostMemberSnap.exists || hostMemberSnap.data().uid !== uid || hostMemberSnap.data().seatId !== 'S1') {
+      fail('permission-denied', 'ホストだけが待機室を閉じられます。');
+    }
+    if (serverSnap.exists) fail('failed-precondition', '配札済みの部屋は閉じられません。');
+    const inviteDigest = secretSnap.exists ? secretSnap.data().inviteDigest : null;
+    if (typeof inviteDigest !== 'string') fail('failed-precondition', '招待情報がありません。');
+    const inviteRef = r.invite(inviteDigest);
+    const [inviteSnap, ...memberSnaps] = await Promise.all([
+      tx.get(inviteRef), ...decision.memberUids.map((memberUid) => tx.get(r.member(memberUid))),
+    ]);
+    if (!inviteSnap.exists || inviteSnap.data().roomId !== roomId) fail('failed-precondition', '招待情報が不整合です。');
+    for (let index = 0; index < memberSnaps.length; index += 1) {
+      const snap = memberSnaps[index];
+      if (!snap.exists || snap.data().uid !== decision.memberUids[index]
+          || snap.data().seatId !== roomSnap.data().seatOrder[index]) {
+        fail('failed-precondition', '参加状態が不整合です。');
+      }
+    }
+    // room削除をstartのroom更新と競合させる。配札前なので手札内容を読まない。
+    tx.update(inviteRef, { status: 'closed', revokedAt: now });
+    for (const memberUid of decision.memberUids) {
+      tx.delete(r.member(memberUid));
+      tx.delete(r.hand(memberUid));
+    }
+    tx.delete(r.server);
+    tx.delete(r.secret);
+    tx.delete(r.room);
+    const result = { roomId, status: 'closed' };
+    tx.create(actionRef, {
+      fingerprint, stateToken: 'close:waiting', result, completedAt: now,
+      deleteAt: Timestamp.fromMillis(now + contract.ACTION_TTL_MS),
+    });
+    return result;
+  }).catch((error) => { throw convertContractError(error); });
+}
+
 async function leaveWaitingHandler(request) {
   exactFields(request.data, ['roomId', 'actionId']);
   const uid = authUid(request);
@@ -709,6 +767,7 @@ const joinMofumofuMultiRoom = onCall(callableOptions, (request) => joinHandler(r
 const startMofumofuMultiGame = onCall(callableOptions, (request) => startHandler(request));
 const makeMofumofuMultiOffer = onCall(callableOptions, (request) => makeOfferHandler(request));
 const judgeMofumofuMultiOffer = onCall(callableOptions, (request) => judgeOfferHandler(request));
+const closeMofumofuMultiWaitingRoom = onCall(callableOptions, (request) => closeWaitingHandler(request));
 const leaveMofumofuMultiWaitingRoom = onCall(callableOptions, (request) => leaveWaitingHandler(request));
 const leaveMofumofuMultiGame = onCall(callableOptions, (request) => leaveGameHandler(request));
 const authorizeMofumofuMultiPresence = onCall(callableOptions, (request) => authorizePresenceHandler(request));
@@ -720,6 +779,7 @@ module.exports = {
   startMofumofuMultiGame,
   makeMofumofuMultiOffer,
   judgeMofumofuMultiOffer,
+  closeMofumofuMultiWaitingRoom,
   leaveMofumofuMultiWaitingRoom,
   leaveMofumofuMultiGame,
   authorizeMofumofuMultiPresence,
@@ -730,6 +790,7 @@ module.exports = {
     startHandler,
     makeOfferHandler,
     judgeOfferHandler,
+    closeWaitingHandler,
     leaveWaitingHandler,
     leaveGameHandler,
     authorizePresenceHandler,
