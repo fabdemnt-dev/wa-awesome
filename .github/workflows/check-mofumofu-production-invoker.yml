@@ -1,0 +1,174 @@
+name: Read-only production Multi Invoker check
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    if: ${{ github.repository == 'fabdemnt-dev/wa-awesome' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt == 1 }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Authenticate with existing service account
+        uses: google-github-actions/auth@v3
+        timeout-minutes: 1
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+          project_id: wa-awesome
+      - name: Install HTTP authentication dependencies
+        timeout-minutes: 2
+        run: python -m pip install --disable-pip-version-check --retries 0 --timeout 15 'google-auth==2.40.3' 'requests==2.32.4'
+      - name: Read fixed production service IAM policies
+        timeout-minutes: 4
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, os, re, signal
+          from pathlib import Path
+          from datetime import datetime, timezone
+          import requests
+          from google.oauth2 import service_account
+          from google.auth.transport.requests import Request
+          
+          FUNCTIONS = (
+              'createMofumofuMultiRoom', 'joinMofumofuMultiRoom',
+              'startMofumofuMultiGame', 'makeMofumofuMultiOffer',
+              'judgeMofumofuMultiOffer', 'leaveMofumofuMultiGame',
+              'leaveMofumofuMultiWaitingRoom', 'closeMofumofuMultiWaitingRoom',
+              'authorizeMofumofuMultiPresence', 'resumeMofumofuMultiRoom',
+          )
+          PREFIX = 'projects/wa-awesome/locations/asia-northeast1/'
+          SERVICE_PATTERN = r'projects/(?:wa-awesome|1074804319870)/locations/asia-northeast1/services/[a-z][a-z0-9-]*'
+          
+          class Deadline(BaseException):
+              pass
+          
+          def judge(policy):
+              bindings = policy.get('bindings', [])
+              if not isinstance(bindings, list):
+                  raise ValueError('invalid_policy')
+              conditional = False
+              for binding in bindings:
+                  if binding.get('role') == 'roles/run.invoker':
+                      members = binding.get('members', [])
+                      if not isinstance(members, list):
+                          raise ValueError('invalid_members')
+                      if 'allUsers' in members:
+                          if not binding.get('condition'):
+                              return 'YES'
+                          conditional = True
+              return 'CONDITIONAL' if conditional else 'NO'
+          
+          def classify(rows):
+              values = [r['result'] for r in rows]
+              if all(v == 'YES' for v in values):
+                  return 'A'
+              if 'NO' in values:
+                  return 'B'
+              if 'PERMISSION_DENIED' in values:
+                  return 'C'
+              return 'D'
+          
+          def main():
+              rows = [{'function': fn, 'result': 'NOT_CHECKED'} for fn in FUNCTIONS]
+              report = {'project': 'wa-awesome', 'region': 'asia-northeast1',
+                        'started_at': datetime.now(timezone.utc).isoformat(), 'results': rows}
+              def deadline(*_):
+                  raise Deadline()
+              signal.signal(signal.SIGALRM, deadline)
+              signal.alarm(180)
+              try:
+                  info = json.loads(Path(os.environ['GOOGLE_APPLICATION_CREDENTIALS']).read_text())
+                  if info.get('type') != 'service_account' or info.get('project_id') != 'wa-awesome':
+                      raise ValueError('credential_project_mismatch')
+                  if info.get('token_uri') != 'https://oauth2.googleapis.com/token':
+                      raise ValueError('credential_token_endpoint_mismatch')
+                  session = requests.Session()
+                  session.mount('https://', requests.adapters.HTTPAdapter(max_retries=0))
+                  transport = Request(session=session)
+                  def token_request(**kwargs):
+                      kwargs['timeout'] = 15
+                      response = transport(**kwargs)
+                      if response.status >= 400:
+                          raise RuntimeError('authentication_failed')
+                      return response
+                  credentials = service_account.Credentials.from_service_account_info(
+                      info, scopes=['https://www.googleapis.com/auth/cloud-platform'])
+                  credentials.refresh(token_request)
+                  headers = {'Authorization': 'Bearer ' + credentials.token}
+                  allowed_functions = {'https://cloudfunctions.googleapis.com/v2/' + PREFIX + 'functions/' + fn for fn in FUNCTIONS}
+                  def get(url, params):
+                      valid = url in allowed_functions or re.fullmatch(
+                          r'https://run.googleapis.com/v2/' + SERVICE_PATTERN + r':getIamPolicy', url)
+                      if not valid:
+                          raise ValueError('outside_fixed_scope')
+                      response = session.get(url, params=params, headers=headers,
+                          timeout=(5, 12), allow_redirects=False)
+                      return response.status_code, response.json()
+                  def http_failure(row, status, data):
+                      error = data.get('error', {})
+                      reasons = {d.get('reason') for d in error.get('details', []) if isinstance(d, dict)}
+                      denied = status == 403 and error.get('status') == 'PERMISSION_DENIED' and not reasons.intersection({'SERVICE_DISABLED', 'API_DISABLED', 'BILLING_DISABLED'})
+                      row['result'] = 'PERMISSION_DENIED' if denied else 'ERROR'
+                      row['http_status'] = status
+                  for row in rows:
+                      try:
+                          row['stage'] = 'service_mapping'
+                          name = PREFIX + 'functions/' + row['function']
+                          status, data = get('https://cloudfunctions.googleapis.com/v2/' + name,
+                                             {'fields': 'name,serviceConfig/service'})
+                          if status != 200:
+                              http_failure(row, status, data)
+                              continue
+                          if data.get('name') != name:
+                              raise ValueError('function_name_mismatch')
+                          service = data.get('serviceConfig', {}).get('service', '')
+                          if not re.fullmatch(SERVICE_PATTERN, service):
+                              raise ValueError('service_project_or_region_mismatch')
+                          row['service'] = service
+                          row['stage'] = 'service_iam'
+                          status, policy = get('https://run.googleapis.com/v2/' + service + ':getIamPolicy',
+                                              {'options.requestedPolicyVersion': 3})
+                          if status != 200:
+                              http_failure(row, status, policy)
+                              continue
+                          row['result'] = judge(policy)
+                          row['http_status'] = 200
+                      except (requests.exceptions.RequestException, Deadline) as error:
+                          row['result'] = 'ERROR'
+                          row['error_type'] = type(error).__name__
+                          report['stopped_after_communication_failure'] = True
+                          break
+                      except Exception as error:
+                          row['result'] = 'ERROR'
+                          row['error_type'] = type(error).__name__
+              except (Exception, Deadline) as error:
+                  report['error_type'] = type(error).__name__
+              finally:
+                  signal.alarm(0)
+                  report['classification'] = classify(rows)
+                  report['finished_at'] = datetime.now(timezone.utc).isoformat()
+                  Path('invoker-result.json').write_text(json.dumps(report, indent=2) + '\n')
+                  lines = ['Function | roles/run.invoker / allUsers', '--- | ---']
+                  lines += [r['function'] + ' | ' + r['result'] for r in rows]
+                  lines += ['', 'Classification: ' + report['classification']]
+                  output = '\n'.join(lines) + '\n'
+                  print(output)
+                  with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+                      summary.write(output)
+              return 0 if report['classification'] in ('A', 'B') else 1
+          
+          if __name__ == '__main__':
+              raise SystemExit(main())
+          PY
+      - name: Save sanitized results only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-multi-invoker-${{ github.run_id }}-${{ github.run_attempt }}
+          path: invoker-result.json
+          retention-days: 30
+          if-no-files-found: warn
