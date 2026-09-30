@@ -21,6 +21,7 @@ h1{margin:10px 0;font-size:clamp(38px,11vw,58px);line-height:1.05;color:#d96c8c;
 .catch{font-weight:800;margin:16px 0 26px}
 .big{width:100%;min-height:54px;border:0;border-radius:18px;margin-top:10px;font-weight:900;box-shadow:0 5px 0 rgba(85,61,49,.15);transition:.12s transform}
 .big:active,button:active{transform:translateY(2px)}
+.title-return-link{display:flex;align-items:center;justify-content:center;text-decoration:none;color:inherit}
 .primary{background:#ef8eaa;color:#fff}
 .secondary{background:#fff;border:2px solid #e8b2c1}
 .game-header{position:sticky;top:0;z-index:8;display:flex;align-items:center;justify-content:center;padding:4px 0 10px;background:linear-gradient(var(--cream) 75%,transparent)}
