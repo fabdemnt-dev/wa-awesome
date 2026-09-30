@@ -217,7 +217,10 @@ test('カード→宣言→相手の表示段階はhidden属性で切り替え�
 test('相手への送信は選択完了後だけで、連打してもCallableを一度だけ発行する', async () => {
   const source = multiClient.slice(multiClient.indexOf('async function submitOffer('), multiClient.indexOf('async function submitJudgment('));
   const room = playingRoom(3);
-  const state = { room, roomId: room.roomId, seatId: 'S1', makeBusy: false, makeRequest: null };
+  const state = {
+    room, roomId: room.roomId, seatId: 'S1', makeBusy: false, makeRequest: null,
+    cards: [card('fox', 'own-card'), card('cat', 'keep-card')],
+  };
   const ui = { cardId: null, claim: null };
   const buttons = [{ disabled: false }, { disabled: false }];
   const button = buttons[0];
@@ -250,6 +253,7 @@ test('相手への送信は選択完了後だけで、連打してもCallableを
   assert.equal(state.makeRequest, null);
   assert.equal(ui.cardId, null);
   assert.equal(ui.claim, null);
+  assert.deepEqual(state.cards, [card('cat', 'keep-card')], '成功済みofferのカード画像を古い秘密手札に残さない');
   state.room = playingRoom(3, { currentTurnPlayerId: 'S2' });
   ui.cardId = 'own-card'; ui.claim = 'cat'; button.disabled = false;
   await submit('S2', button);
