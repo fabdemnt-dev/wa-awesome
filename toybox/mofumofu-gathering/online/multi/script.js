@@ -46,7 +46,7 @@ const state = {
   listenerRetryCount: 0, resumeFlight: null, resumeGeneration: 0, connectionState: 'syncing',
   lastSuccessfulResumeAt: 0, lastSuccessfulResumeRoomId: null,
   finishedConfirmedRoomId: null,
-  entryBusy: false, startBusy: false, makeBusy: false, judgeBusy: false,
+  entryBusy: false, startBusy: false, waitingLeaveBusy: false, makeBusy: false, judgeBusy: false,
   makeRequest: null, judgeRequest: null, handRetryFlight: null, actionRecoveryFlight: null,
   leaveRequest: null, leaveBusy: false,
 };
@@ -220,6 +220,8 @@ function renderLobby(room) {
   $('start-game').hidden = !view.startVisible;
   $('start-game').disabled = !view.canStart;
   $('start-note').textContent = view.waitingNote || view.startNote || (view.full ? view.fullText : '');
+  $('leave-waiting').hidden = view.isHost;
+  $('leave-waiting').disabled = state.waitingLeaveBusy;
 }
 function renderGame(room) {
   const presenceReady = state.presenceReady === state.resumeGeneration;
@@ -567,6 +569,14 @@ const recoverPendingActions = createMultiPendingActionRecovery({
 const onHandStart = createMultiHandStartResume({ state, requestResume });
 function applyPublicRoom(room, generation, fromServer) {
   if (generation !== state.resumeGeneration) return;
+  if (room?.status === core.ROOM_STATUS.WAITING && auth.currentUser?.uid && room.playerUids) {
+    const serverSeat = (room.seatOrder || []).find((seat) => room.playerUids?.[seat] === auth.currentUser.uid);
+    if (serverSeat && serverSeat !== state.seatId) {
+      state.room = room;
+      void requestResume('waiting-seat-remap');
+      return;
+    }
+  }
   const previousRoom = state.room;
   state.room = room;
   state.finishedConfirmedRoomId = fromServer && room.status === core.ROOM_STATUS.FINISHED ? state.roomId : null;
@@ -735,6 +745,24 @@ $('leave-game').addEventListener('click', async () => {
   } finally {
     if (state.leaveRequest === request) state.leaveBusy = false;
     renderLeave();
+  }
+});
+
+$('leave-waiting').addEventListener('click', async () => {
+  if (state.waitingLeaveBusy || state.room?.status !== core.ROOM_STATUS.WAITING) return;
+  const view = core.lobbyView(state.room, state.seatId);
+  if (view.isHost) return;
+  if (!globalThis.confirm('待機室から退出しますか？')) return;
+  state.waitingLeaveBusy = true; renderLobby(state.room);
+  try {
+    const result = await call('leaveMofumofuMultiWaitingRoom', { roomId: state.roomId, actionId: newId() });
+    if (result?.roomId !== state.roomId) throw new Error('waiting-leave-result-mismatch');
+    clearMultiLocalRoom({ state, storage: localStorage, stopRealtime, retirePresence, forgetInvite, resetEntryView });
+    finishLocalRoomCleanup();
+  } catch (error) { message(error.message || '待機室から退出できませんでした。'); }
+  finally {
+    state.waitingLeaveBusy = false;
+    if (state.room?.status === core.ROOM_STATUS.WAITING) renderLobby(state.room);
   }
 });
 
