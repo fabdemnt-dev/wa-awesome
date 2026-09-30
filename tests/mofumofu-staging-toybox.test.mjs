@@ -36,8 +36,8 @@ test('staging choice offers real two-player and multi routes', () => {
 });
 
 test('online modes return only to the Mofumofu title; toybox exit lives on the title page', () => {
-  assert.match(pages[0], /<a href="\.\.\/">← もふもふ大集合！へ戻る<\/a>/);
-  assert.match(pages[1], /<a href="\.\.\/\.\.\/">← もふもふ大集合！へ戻る<\/a>/);
+  assert.match(pages[0], /<a href="\.\.\/">もふもふ大集合！へ戻る<\/a>/);
+  assert.match(pages[1], /<a href="\.\.\/\.\.\/">もふもふ大集合！へ戻る<\/a>/);
   for (const page of pages) {
     assert.doesNotMatch(page, /id="toybox-return"/);
     assert.doesNotMatch(page, /おもちゃ箱へ戻る/);
