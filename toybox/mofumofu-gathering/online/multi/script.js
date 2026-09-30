@@ -10,7 +10,7 @@ import { getFirestore, connectFirestoreEmulator, doc, onSnapshot, getDocFromServ
 import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-functions.js';
 import { getDatabase, connectDatabaseEmulator, ref, onValue, onDisconnect, set, update, serverTimestamp } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js';
 import { resolveEnvironment, REGION } from './firebase-config.js?v=20260926-1';
-import * as core from './multi-core.js?v=20260929-4';
+import * as core from './multi-core.js?v=20261001-1';
 import { runMofumofuMultiFullResume, createMultiResumeCoordinator, createMultiHandStartResume, handleMultiSessionFailure, canForgetFinishedRoom, forgetFinishedRoom, clearMultiLocalRoom } from './multi-resume.js?v=20260930-2';
 import { createMultiPendingActionRecovery, definitiveMultiActionRejection, multiActionBlocked, multiJudgeButtonsDisabled } from './multi-action-recovery.js?v=20260929-1';
 import { leaveView, loadLeaveRequest, saveLeaveRequest, clearLeaveRequest, boundedLeaveResult } from './multi-leave.js?v=20260930-1';
