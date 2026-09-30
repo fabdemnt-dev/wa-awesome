@@ -1,0 +1,337 @@
+name: Fixed-target production incident cleanup
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_accident_cleanup:
+        description: '事故run 36698957268の固定2 roomと固定8 UIDだけを完全削除する'
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fixed-incident-cleanup-36698957268
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    if: ${{ github.repository == 'fabdemnt-dev/wa-awesome' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.confirm_accident_cleanup == true && github.run_attempt == 1 }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Authenticate using the existing production service account
+        uses: google-github-actions/auth@v3
+        timeout-minutes: 1
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+          project_id: wa-awesome
+      - name: Install fixed HTTP authentication dependencies
+        timeout-minutes: 2
+        run: python -m pip install --disable-pip-version-check --retries 0 --timeout 15 'google-auth==2.40.3' 'requests==2.32.4'
+      - name: Preflight, delete only fixed incident targets, and verify absence
+        timeout-minutes: 6
+        shell: bash
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import signal
+          from datetime import datetime, timezone
+          from pathlib import Path
+          
+          import requests
+          from google.auth.transport.requests import Request
+          from google.oauth2 import service_account
+          
+          PROJECT = 'wa-awesome'
+          DATABASE = 'projects/wa-awesome/databases/(default)'
+          DOCUMENTS = DATABASE + '/documents'
+          FIRESTORE = 'https://firestore.googleapis.com/v1/'
+          AUTH = 'https://identitytoolkit.googleapis.com/v1/projects/wa-awesome/accounts:'
+          TARGETS = {
+              'poem_pw-poem-4454cca1-30b8-4b34-a753-ecd972cc077f': (
+                  'T1iiOqgaW3QEXzxlhGBo7alZsw02',
+                  'cH3DDmWIsLcn5podYjkCYvhOQUI3',
+                  'YNMHG8kRBlTWLrzSNGGnSzEYxOD2',
+                  'sHVbSWs33rUsozvVxK1whrYAnHC3',
+              ),
+              'poem_pw-poem-8cea91c3-b62a-41e1-bdf4-4e2854f7a787': (
+                  '6QeG2v73pChJEWZpxsH67WEFCOu1',
+                  '8mNsAu9aDahIrmwaEO6pn7edmzA3',
+                  'O4RzyOH7audq40L19ucmS1O65EO2',
+                  '4MAQV7KTsRghFJuHqg8owZZQC8S2',
+              ),
+          }
+          UIDS = tuple(uid for group in TARGETS.values() for uid in group)
+          ROOM_NAMES = tuple(DOCUMENTS + '/rooms/' + room for room in TARGETS)
+          RESULT = Path('incident-cleanup-result.json')
+          
+          
+          class Stop(Exception):
+              def __init__(self, category, reason):
+                  self.category, self.reason = category, reason
+          
+          
+          class Deadline(BaseException):
+              pass
+          
+          
+          def require(condition, reason):
+              if not condition:
+                  raise Stop('C', reason)
+          
+          
+          def save(report):
+              RESULT.write_text(json.dumps(report, indent=2) + '\n')
+          
+          
+          def new_report():
+              return {
+                  'incident_run': '36698957268', 'identification_run': '36711631309',
+                  'project': PROJECT, 'started_at': datetime.now(timezone.utc).isoformat(),
+                  'classification': 'D', 'preflight': 'pending',
+                  'firestore': {name: {'before': 'unchecked', 'delete': 'not_attempted',
+                                      'after': 'unchecked'} for name in ROOM_NAMES},
+                  'auth': {uid: {'before': 'unchecked', 'delete': 'not_attempted',
+                                 'after': 'unchecked'} for uid in UIDS},
+              }
+          
+          
+          class Api:
+              def __init__(self):
+                  self.path = Path(os.environ['GOOGLE_APPLICATION_CREDENTIALS'])
+                  raw = self.path.read_bytes()
+                  self.fingerprint = hashlib.sha256(raw).digest()
+                  info = json.loads(raw)
+                  require(info.get('type') == 'service_account', 'credential_type_mismatch')
+                  require(info.get('project_id') == PROJECT, 'credential_project_mismatch')
+                  require(info.get('client_email', '').endswith('@wa-awesome.iam.gserviceaccount.com'),
+                          'credential_account_project_mismatch')
+                  require(info.get('token_uri') == 'https://oauth2.googleapis.com/token',
+                          'credential_token_endpoint_mismatch')
+                  self.session = requests.Session()
+                  self.session.mount('https://', requests.adapters.HTTPAdapter(max_retries=0))
+                  transport = Request(session=self.session)
+          
+                  def token_request(**kwargs):
+                      kwargs['timeout'] = 15
+                      response = transport(**kwargs)
+                      if response.status >= 400:
+                          raise Stop('D', 'authentication_failed')
+                      return response
+          
+                  self.credentials = service_account.Credentials.from_service_account_info(
+                      info, scopes=['https://www.googleapis.com/auth/cloud-platform'])
+                  self.credentials.refresh(token_request)
+          
+              def unchanged(self):
+                  require(hashlib.sha256(self.path.read_bytes()).digest() == self.fingerprint,
+                          'credential_changed_during_run')
+          
+              def request(self, method, url, params=None, body=None):
+                  # This method is private to the fixed-target methods below; no input IDs.
+                  response = self.session.request(method, url, params=params, json=body,
+                      headers={'Authorization': 'Bearer ' + self.credentials.token},
+                      timeout=(5, 15), allow_redirects=False)
+                  data = response.json() if response.status_code == 200 else None
+                  return response.status_code, data
+          
+              def room(self, name):
+                  require(name in ROOM_NAMES, 'room_not_allowlisted')
+                  return self.request('GET', FIRESTORE + name,
+                      params=[('mask.fieldPaths', field)
+                              for field in ('players', 'spectators', 'participantUids')])
+          
+              def history(self, name):
+                  require(name in ROOM_NAMES, 'room_not_allowlisted')
+                  return self.request('GET', FIRESTORE + name + '/history',
+                      params={'pageSize': 1, 'fields': 'documents(name),nextPageToken'})
+          
+              def lookup(self, uid):
+                  require(uid in UIDS, 'uid_not_allowlisted')
+                  status, data = self.request('POST', AUTH + 'lookup',
+                      params={'fields': 'users(localId)'}, body={'localId': [uid]})
+                  if status != 200:
+                      raise Stop('D', 'auth_lookup_http_' + str(status))
+                  ids = [user.get('localId') for user in data.get('users', [])]
+                  require(ids == [] or ids == [uid], 'auth_lookup_uid_mismatch')
+                  return 'exists' if ids else 'not_found'
+          
+              def remove_rooms(self, versions):
+                  require(set(versions) == set(ROOM_NAMES), 'delete_room_set_mismatch')
+                  require(all(isinstance(v, str) and v for v in versions.values()),
+                          'missing_update_time')
+                  return self.request('POST', FIRESTORE + DOCUMENTS + ':commit', body={
+                      'writes': [{'delete': name, 'currentDocument': {'updateTime': versions[name]}}
+                                 for name in ROOM_NAMES]})
+          
+              def remove_user(self, uid):
+                  require(uid in UIDS, 'uid_not_allowlisted')
+                  return self.request('POST', AUTH + 'delete', body={'localId': uid})
+          
+          
+          def check_room(api, name, record):
+              status, document = api.room(name)
+              record['before'] = 'exists' if status == 200 else 'not_found' if status == 404 else 'unknown'
+              if status not in (200, 404):
+                  raise Stop('D', 'room_get_http_' + str(status))
+              require(status == 200, 'room_missing_before_delete')
+              require(document.get('name') == name, 'room_id_mismatch')
+              try:
+                  fields = document['fields']
+                  players = [v['stringValue'] for v in fields['players']['arrayValue'].get('values', [])]
+                  spectators = [v['stringValue'] for v in fields['spectators']['arrayValue'].get('values', [])]
+                  mapping = {uid: value['stringValue']
+                             for uid, value in fields['participantUids']['mapValue'].get('fields', {}).items()}
+                  expected = TARGETS[name.rsplit('/', 1)[1]]
+                  match = (set(mapping) == set(expected) and len(players) == 3
+                           and set(players) == {'PW-A', 'PW-B', 'PW-C'}
+                           and spectators == ['PW-見学']
+                           and set(mapping.values()) == set(players + spectators)
+                           and mapping[expected[3]] == spectators[0])
+                  record['participant_uid_match'] = match
+                  require(match, 'participant_uid_or_role_mismatch')
+                  version = document['updateTime']
+                  require(isinstance(version, str) and bool(version), 'missing_update_time')
+              except (KeyError, TypeError, AttributeError):
+                  raise Stop('C', 'room_schema_mismatch')
+              status, history = api.history(name)
+              if status != 200:
+                  raise Stop('D', 'history_get_http_' + str(status))
+              empty = not history.get('documents') and not history.get('nextPageToken')
+              record['history_empty_before_delete'] = empty
+              require(empty, 'unexpected_history')
+              return version
+          
+          
+          def verify(api, report):
+              # Exactly one read per fixed ID, including after any uncertain deletion.
+              for name, record in report['firestore'].items():
+                  try:
+                      status, data = api.room(name)
+                      record['after'] = 'not_found' if status == 404 else (
+                          'exists' if status == 200 and data.get('name') == name else 'unknown')
+                  except Exception:
+                      record['after'] = 'unknown'
+                  save(report)
+              for uid, record in report['auth'].items():
+                  try:
+                      record['after'] = api.lookup(uid)
+                  except Exception:
+                      record['after'] = 'unknown'
+                  save(report)
+          
+          
+          def cleanup(api, report):
+              mutation_attempted = False
+              try:
+                  require(len(UIDS) == len(set(UIDS)) == 8, 'target_uid_set_invalid')
+                  for name, record in report['firestore'].items():
+                      check_room(api, name, record)
+                      save(report)
+                  for uid, record in report['auth'].items():
+                      record['before'] = api.lookup(uid)
+                      require(record['before'] == 'exists', 'auth_user_missing_before_delete')
+                      save(report)
+                  # Refresh both room/roster/history checks immediately before the atomic delete.
+                  versions = {name: check_room(api, name, record)
+                              for name, record in report['firestore'].items()}
+                  api.unchanged()
+                  report['preflight'] = 'passed'
+                  report['preflight_at'] = datetime.now(timezone.utc).isoformat()
+                  for record in report['firestore'].values():
+                      record['delete'] = 'attempted_unconfirmed'
+                  mutation_attempted = True
+                  save(report)
+                  status, data = api.remove_rooms(versions)
+                  if status != 200:
+                      for record in report['firestore'].values():
+                          record['delete_http_status'] = status
+                      raise Stop('D', 'firestore_commit_failed')
+                  for record in report['firestore'].values():
+                      record['delete'] = 'success'
+                  save(report)
+                  # Auth deletion is forbidden unless both root deletions returned success
+                  # and a fresh read confirms both roots absent.
+                  for name, record in report['firestore'].items():
+                      status, _ = api.room(name)
+                      record['after'] = 'not_found' if status == 404 else 'unknown'
+                      if status != 404:
+                          raise Stop('B', 'firestore_delete_not_verified')
+                  save(report)
+                  for uid, record in report['auth'].items():
+                      api.unchanged()
+                      record['delete'] = 'attempted_unconfirmed'
+                      save(report)
+                      status, _ = api.remove_user(uid)
+                      record['delete_http_status'] = status
+                      if status != 200:
+                          raise Stop('B', 'auth_delete_failed')
+                      record['delete'] = 'success'
+                      save(report)
+              except Stop as error:
+                  report['classification'], report['reason'] = error.category, error.reason
+              except (Exception, Deadline) as error:
+                  report['classification'] = 'D'
+                  report['error_type'] = type(error).__name__
+              finally:
+                  if mutation_attempted:
+                      # Short bounded read-only recovery window; never resend deletes.
+                      signal.alarm(120)
+                      try:
+                          verify(api, report)
+                      except Deadline:
+                          report['verification_timeout'] = True
+                      records = list(report['firestore'].values()) + list(report['auth'].values())
+                      if all(r['delete'] == 'success' and r['after'] == 'not_found' for r in records):
+                          report['classification'] = 'A'
+                      elif any(r['delete'] == 'success' or r['after'] == 'not_found' for r in records):
+                          report['classification'] = 'B'
+                      else:
+                          report['classification'] = 'D'
+                  elif report['preflight'] != 'passed':
+                      report['preflight'] = 'stopped_without_deletion'
+                  save(report)
+          
+          
+          def main():
+              report = new_report()
+              def deadline(*_):
+                  raise Deadline()
+              signal.signal(signal.SIGALRM, deadline)
+              signal.alarm(180)
+              try:
+                  cleanup(Api(), report)
+              except Stop as error:
+                  report['classification'], report['reason'] = error.category, error.reason
+              except (Exception, Deadline) as error:
+                  report['error_type'] = type(error).__name__
+              finally:
+                  signal.alarm(0)
+                  report['finished_at'] = datetime.now(timezone.utc).isoformat()
+                  save(report)
+                  output = RESULT.read_text()
+                  print(output)
+                  with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+                      summary.write('### Fixed-target incident cleanup result\n```json\n' + output + '\n```\n')
+              return 0 if report['classification'] == 'A' else 1
+          
+          
+          if __name__ == '__main__':
+              raise SystemExit(main())
+          PY
+      - name: Preserve sanitized per-target results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: incident-cleanup-result-${{ github.run_id }}-${{ github.run_attempt }}
+          path: incident-cleanup-result.json
+          retention-days: 30
+          if-no-files-found: warn
