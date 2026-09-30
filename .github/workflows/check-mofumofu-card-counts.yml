@@ -1,0 +1,93 @@
+name: Read-only QDKE28QK card counts
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  counts:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Verify existing credential project without logging identity
+        env:
+          CREDENTIAL: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          python3 - <<'PY'
+          import os,json
+          assert json.loads(os.environ['CREDENTIAL']).get('project_id') == 'wa-awesome', 'Credential project mismatch'
+          print('Production credential project verified')
+          PY
+      - name: Authenticate using existing credential
+        id: auth
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: wa-awesome
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/datastore
+          access_token_lifetime: 600s
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Read only fixed invite and resolved room at one snapshot time
+        env:
+          READ_TOKEN: ${{ steps.auth.outputs.access_token }}
+        run: |
+          python3 - <<'PY'
+          import os,json,hashlib,datetime,urllib.request,urllib.parse,urllib.error,re,sys
+          PROJECT='wa-awesome'
+          ROOT='projects/'+PROJECT+'/databases/(default)/documents/'
+          READ_TIME=(datetime.datetime.now(datetime.timezone.utc)-datetime.timedelta(seconds=10)).isoformat(timespec='microseconds').replace('+00:00','Z')
+          class Stop(Exception): pass
+          def require(ok):
+              if not ok: raise Stop('Unexpected or incomplete schema; counts not certified')
+          def get(path,fields):
+              q=[('readTime',READ_TIME)]+[('mask.fieldPaths',f) for f in fields]
+              req=urllib.request.Request('https://firestore.googleapis.com/v1/'+ROOT+path+'?'+urllib.parse.urlencode(q),headers={'Authorization':'Bearer '+os.environ['READ_TOKEN']},method='GET')
+              with urllib.request.urlopen(req,timeout=12) as r: d=json.load(r)
+              require(d.get('name')==ROOT+path)
+              return d.get('fields',{})
+          def string(v):
+              require(isinstance(v,dict) and isinstance(v.get('stringValue'),str)); return v['stringValue']
+          def array(v):
+              require(isinstance(v,dict) and isinstance(v.get('arrayValue'),dict)); return v['arrayValue'].get('values',[])
+          def mapping(v):
+              require(isinstance(v,dict) and isinstance(v.get('mapValue'),dict)); return v['mapValue'].get('fields',{})
+          def main():
+              digest=hashlib.sha256(b'QDKE28QK').hexdigest()
+              invite=get('mofumofuMultiRoomInvites/'+digest,['roomId'])
+              room_id=string(invite.get('roomId'));require(bool(re.fullmatch(r'[A-Za-z0-9_-]{1,128}',room_id)))
+              path='mofumofuMultiRooms/'+room_id
+              room=get(path,['status','turnState','seatOrder','playerUids','handCounts','faceUpCards'])
+              seats=[string(v) for v in array(room.get('seatOrder'))];require(seats==['S1','S2','S3'])
+              uids=mapping(room.get('playerUids')); public=mapping(room.get('handCounts')); faces=mapping(room.get('faceUpCards'))
+              require(set(uids)==set(seats) and set(public)==set(seats) and set(faces)==set(seats))
+              participants=[string(uids[s]) for s in seats];require(len(set(participants))==3)
+              require(all(re.fullmatch(r'[A-Za-z0-9_-]{1,128}',u) for u in participants))
+              secret=get(path+'/serverState/current',['pendingOffer','leftovers','discard'])
+              pending=secret.get('pendingOffer');require(isinstance(pending,dict))
+              if 'nullValue' in pending: pending_count=0
+              else:
+                  p=mapping(pending);require('card' in p and 'mapValue' in p['card']);pending_count=1
+              leftovers=len(array(secret.get('leftovers')));discard=len(array(secret.get('discard')))
+              rows=[]
+              for seat,uid in zip(seats,participants):
+                  hand=get(path+'/privateHands/'+uid,['cards'])
+                  count=len(array(hand.get('cards')))
+                  require('integerValue' in public[seat]);pub=int(public[seat]['integerValue']);require(pub>=0)
+                  rows.append({'seat':seat,'publicHandCount':pub,'privateHandLength':count,'faceUpCount':len(array(faces[seat])),'match':pub==count})
+              status=string(room.get('status'));turn=string(room.get('turnState'))
+              require(status in ['playing','finished'] and turn in ['awaitingOffer','awaitingJudgment','finished'])
+              hands=sum(r['privateHandLength'] for r in rows);face=sum(r['faceUpCount'] for r in rows)
+              total=hands+pending_count+face+leftovers+discard
+              verdict=[]
+              if any(not r['match'] for r in rows):verdict.append('B')
+              if total!=32:verdict.append('C')
+              result={'invite':'QDKE28QK','uniquelyResolved':True,'readTime':READ_TIME,'status':status,'turnState':turn,'seats':rows,'privateHandsTotal':hands,'pendingOfferCount':pending_count,'faceUpCardsTotal':face,'leftoversCount':leftovers,'discardCount':discard,'total':total,'verdict':'+'.join(verdict) or 'A'}
+              safe=json.dumps(result,ensure_ascii=True,indent=2)
+              print(safe)
+              with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as out:out.write('```json\n'+safe+'\n```\n')
+          try:main()
+          except urllib.error.HTTPError as e: print('D: read unavailable; HTTP '+str(e.code));sys.exit(1)
+          except Exception: print('D: read unavailable or unexpected schema; no raw data logged');sys.exit(1)
+          PY
