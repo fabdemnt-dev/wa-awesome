@@ -518,6 +518,54 @@ async function judgeOfferHandler(request) {
   }).catch((error) => { throw convertContractError(error); });
 }
 
+/* ------------------------------------------------------ explicit waiting leave */
+
+async function leaveWaitingHandler(request) {
+  exactFields(request.data, ['roomId', 'actionId']);
+  const uid = authUid(request);
+  const roomId = roomIdFrom(request.data);
+  const actionId = actionIdFrom(request.data);
+  const store = db();
+  const now = Date.now();
+  const r = refs(roomId);
+  const actionRef = r.action(actionId);
+  const fingerprint = contract.actionFingerprint('multi-leave-waiting', uid, roomId, {});
+  const initialActionSnap = await actionRef.get();
+  if (initialActionSnap.exists) return replayIfPresent(initialActionSnap, fingerprint);
+  await consumeRateLimit({ kind: 'leave_waiting_uid', value: contract.digest(uid) }, contract.MAKE_UID_RATE_LIMIT, now);
+  await consumeRateLimit({ kind: 'leave_waiting_ip', value: ipHash(request) }, contract.MAKE_IP_RATE_LIMIT, now);
+
+  return store.runTransaction(async (tx) => {
+    const actionSnap = await tx.get(actionRef);
+    if (actionSnap.exists) return contract.replayAction(actionSnap.data(), fingerprint);
+    const [roomSnap, memberSnap, secretSnap] = await Promise.all([
+      tx.get(r.room), tx.get(r.member(uid)), tx.get(r.secret),
+    ]);
+    if (!roomSnap.exists) fail('not-found', '部屋が見つかりません。');
+    const room = roomSnap.data();
+    if (!memberSnap.exists || memberSnap.data().uid !== uid) fail('permission-denied', contract.NOT_MEMBER_ERROR);
+    const decision = contract.waitingLeaveDecision(room, { uid });
+    if (!decision.ok) fail(decision.code, decision.message);
+    if (!secretSnap.exists) fail('failed-precondition', '招待情報がありません。');
+    const inviteRef = r.invite(secretSnap.data().inviteDigest);
+    const inviteSnap = await tx.get(inviteRef);
+    if (!inviteSnap.exists) fail('failed-precondition', '招待情報がありません。');
+    const update = contract.waitingLeaveRoomUpdate(room, decision.remainingUids);
+    tx.update(r.room, update);
+    tx.delete(r.member(uid));
+    for (let index = 0; index < decision.remainingUids.length; index += 1) {
+      tx.update(r.member(decision.remainingUids[index]), { seatId: update.seatOrder[index] });
+    }
+    tx.update(inviteRef, { status: 'active' });
+    const result = { roomId, status: 'waiting', playerCount: decision.remainingUids.length };
+    tx.create(actionRef, {
+      fingerprint, stateToken: `leave-waiting:${decision.remainingUids.length}`, result, completedAt: now,
+      deleteAt: Timestamp.fromMillis(now + contract.ACTION_TTL_MS),
+    });
+    return result;
+  }).catch((error) => { throw convertContractError(error); });
+}
+
 /* ------------------------------------------------------ explicit playing leave */
 
 async function leaveGameHandler(request) {
@@ -661,6 +709,7 @@ const joinMofumofuMultiRoom = onCall(callableOptions, (request) => joinHandler(r
 const startMofumofuMultiGame = onCall(callableOptions, (request) => startHandler(request));
 const makeMofumofuMultiOffer = onCall(callableOptions, (request) => makeOfferHandler(request));
 const judgeMofumofuMultiOffer = onCall(callableOptions, (request) => judgeOfferHandler(request));
+const leaveMofumofuMultiWaitingRoom = onCall(callableOptions, (request) => leaveWaitingHandler(request));
 const leaveMofumofuMultiGame = onCall(callableOptions, (request) => leaveGameHandler(request));
 const authorizeMofumofuMultiPresence = onCall(callableOptions, (request) => authorizePresenceHandler(request));
 const resumeMofumofuMultiRoom = onCall(callableOptions, (request) => resumeRoomHandler(request));
@@ -671,6 +720,7 @@ module.exports = {
   startMofumofuMultiGame,
   makeMofumofuMultiOffer,
   judgeMofumofuMultiOffer,
+  leaveMofumofuMultiWaitingRoom,
   leaveMofumofuMultiGame,
   authorizeMofumofuMultiPresence,
   resumeMofumofuMultiRoom,
@@ -680,6 +730,7 @@ module.exports = {
     startHandler,
     makeOfferHandler,
     judgeOfferHandler,
+    leaveWaitingHandler,
     leaveGameHandler,
     authorizePresenceHandler,
     resumeRoomHandler,
