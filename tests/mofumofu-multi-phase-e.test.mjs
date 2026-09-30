@@ -181,6 +181,22 @@ test('playing中の自分の手札は手番外も閲覧でき、選択は自分�
   assert.equal(multiClient.includes('other.cards'), false);
 });
 
+test('3〜6人版の自動整列は既存版と同じ動物固定順で、server正本を変更しない', () => {
+  const cards = [
+    card('fox', 'fox-b'), card('cat', 'cat-b'), card('fox', 'fox-a'),
+    card('polar', 'polar-a'), card('rabbit', 'rabbit-a'), card('cat', 'cat-a'),
+  ];
+  const sorted = core.sortHandCards(cards);
+  assert.deepEqual(sorted.map((entry) => [entry.animalType, entry.cardId]), [
+    ['cat', 'cat-a'], ['cat', 'cat-b'], ['rabbit', 'rabbit-a'],
+    ['fox', 'fox-a'], ['fox', 'fox-b'], ['polar', 'polar-a'],
+  ]);
+  assert.deepEqual(cards.map((entry) => entry.cardId), ['fox-b', 'cat-b', 'fox-a', 'polar-a', 'rabbit-a', 'cat-a'], '入力配列を変更しない');
+  assert.ok(multiPage.includes('id="sortHandBtn"'));
+  assert.match(multiClient, /state\.cards = core\.sortHandCards\(state\.cards\)/);
+  assert.match(multiClient, /message\('手札を自動整列しました'\)/);
+});
+
 test('waiting・playing・resume後のconnected表示は入口と一致し、接続途中と区別する', () => {
   assert.equal(core.TEXT.connecting, '接続中');
   assert.equal(core.TEXT.connected, '接続しました。');
