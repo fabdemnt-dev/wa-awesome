@@ -1,0 +1,152 @@
+name: Read-only production E2E accident data check
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt == 1 }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Authenticate with existing service account
+        uses: google-github-actions/auth@v3
+        timeout-minutes: 1
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+          project_id: wa-awesome
+      - name: Install read-only HTTP authentication dependencies
+        timeout-minutes: 2
+        run: python -m pip install --disable-pip-version-check --retries 0 --timeout 15 'google-auth==2.40.3' 'requests==2.32.4'
+      - name: Read only the incident documents and known UIDs
+        timeout-minutes: 3
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, os, signal
+          from datetime import datetime, timezone
+          from pathlib import Path
+          import requests
+          from google.oauth2 import service_account
+          from google.auth.transport.requests import Request
+
+          ROOMS = (
+              'poem_pw-poem-4454cca1-30b8-4b34-a753-ecd972cc077f',
+              'poem_pw-poem-8cea91c3-b62a-41e1-bdf4-4e2854f7a787',
+          )
+          UIDS = (
+              'T1iiOqgaW3QEXzxlhGBo7alZsw02',
+              'cH3DDmWIsLcn5podYjkCYvhOQUI3',
+              'YNMHG8kRBlTWLrzSNGGnSzEYxOD2',
+              'sHVbSWs33rUsozvVxK1whrYAnHC3',
+          )
+          BASE = 'https://firestore.googleapis.com/v1/projects/wa-awesome/databases/(default)/documents/rooms/'
+          LOOKUP = 'https://identitytoolkit.googleapis.com/v1/projects/wa-awesome/accounts:lookup'
+          report = {
+              'incident_run': '36698957268',
+              'checked_at': datetime.now(timezone.utc).isoformat(),
+              'rooms': {r: {'state': 'unknown', 'history': {'state': 'not_checked'}} for r in ROOMS},
+              'auth': {u: {'state': 'unknown'} for u in UIDS},
+          }
+          def deadline(*_):
+              raise TimeoutError('deadline')
+          signal.signal(signal.SIGALRM, deadline)
+          signal.alarm(150)
+          session = requests.Session()
+          session.mount('https://', requests.adapters.HTTPAdapter(max_retries=0))
+          transport = Request(session=session)
+          def bounded_auth_request(**kwargs):
+              kwargs['timeout'] = 15
+              response = transport(**kwargs)
+              if response.status >= 429:
+                  raise RuntimeError('authentication_unavailable')
+              return response
+          def read(url, params=None, uid=None):
+              # The only POST is the official read-only Auth lookup operation.
+              assert (uid in UIDS and url == LOOKUP) or (uid is None and url in tuple(BASE+r for r in ROOMS)+tuple(BASE+r+'/history' for r in ROOMS))
+              response = session.request(
+                  'POST' if uid is not None else 'GET', url,
+                  params=params, json={'localId': [uid]} if uid is not None else None,
+                  headers={'Authorization': 'Bearer '+credentials.token},
+                  timeout=(5, 15), allow_redirects=False,
+              )
+              if response.status_code != 200:
+                  return response.status_code, None
+              return 200, response.json()
+          try:
+              credentials = service_account.Credentials.from_service_account_file(
+                  os.environ['GOOGLE_APPLICATION_CREDENTIALS'],
+                  scopes=['https://www.googleapis.com/auth/cloud-platform'],
+              )
+              credentials.refresh(bounded_auth_request)
+              for room in ROOMS:
+                  target = report['rooms'][room]
+                  try:
+                      status, data = read(BASE+room, params=[('mask.fieldPaths', 'schemaVersion'), ('mask.fieldPaths', 'roundCount')])
+                      target['http_status'] = status
+                      if status == 404:
+                          target['state'] = 'not_found'
+                          continue
+                      if status != 200:
+                          target['reason'] = 'credential_read_denied' if status in (401, 403) else 'http_error'
+                          continue
+                      target['state'] = 'exists'
+                      target['history'] = {'state': 'unknown', 'ids': []}
+                      token = None
+                      for page in range(10):
+                          params = {'pageSize': 100, 'mask.fieldPaths': 'round', 'fields': 'documents(name),nextPageToken'}
+                          if token:
+                              params['pageToken'] = token
+                          status, data = read(BASE+room+'/history', params=params)
+                          target['history']['http_status'] = status
+                          if status != 200:
+                              target['history']['reason'] = 'credential_read_denied' if status in (401, 403) else 'http_error'
+                              break
+                          for document in data.get('documents', []):
+                              name = document['name']
+                              prefix = 'projects/wa-awesome/databases/(default)/documents/rooms/'+room+'/history/'
+                              assert name.startswith(prefix) and '/' not in name[len(prefix):]
+                              target['history']['ids'].append(name[len(prefix):])
+                          token = data.get('nextPageToken')
+                          if not token:
+                              target['history']['state'] = 'complete'
+                              break
+                      else:
+                          target['history']['reason'] = 'page_limit'
+                  except Exception as error:
+                      target['read_error'] = type(error).__name__
+              for uid in UIDS:
+                  target = report['auth'][uid]
+                  try:
+                      status, data = read(LOOKUP, params={'fields': 'users(localId)'}, uid=uid)
+                      target['http_status'] = status
+                      if status == 200:
+                          target['state'] = 'exists' if any(u.get('localId') == uid for u in data.get('users', [])) else 'not_found'
+                      else:
+                          target['reason'] = 'credential_read_denied' if status in (401, 403) else 'http_error'
+                  except Exception as error:
+                      target['read_error'] = type(error).__name__
+          except Exception as error:
+              report['authentication_or_overall_error'] = type(error).__name__
+          finally:
+              signal.alarm(0)
+              output = json.dumps(report, ensure_ascii=False, indent=2)
+              Path('incident-read-result.json').write_text(output+'\n')
+              print(output)
+              with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+                  summary.write('### Read-only incident data result\n```json\n'+output+'\n```\n')
+          PY
+      - name: Save only the sanitized read results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: incident-read-result-${{ github.run_id }}-${{ github.run_attempt }}
+          path: incident-read-result.json
+          retention-days: 30
+          if-no-files-found: warn
