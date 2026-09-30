@@ -4,7 +4,29 @@
 // 3〜6人版専用の別系統として自前で持つ（既存モジュールをimportして共有しない）。
 //
 // 依存は注入で受け取る純粋な手順にする（node --test から直接検証できる）。
-import { clearSavedRoom, sessionFailureReason, sessionRecoveryNotice } from './multi-core.js';
+import { clearSavedRoom, ROOM_STATUS, sessionFailureReason, sessionRecoveryNotice } from './multi-core.js';
+
+export function canForgetFinishedRoom(state) {
+  return Boolean(state.roomId && state.seatId && state.room?.status === ROOM_STATUS.FINISHED
+    && state.finishedConfirmedRoomId === state.roomId && state.connectionState === 'connected');
+}
+
+// finished がサーバー正本で確定した端末だけを切り離す。ゲームroomへの書込みは行わない。
+export function forgetFinishedRoom({ state, storage, stopRealtime, retirePresence, forgetInvite, resetEntryView }) {
+  if (!canForgetFinishedRoom(state)) return false;
+  const roomId = state.roomId;
+  state.resumeGeneration += 1;
+  stopRealtime();
+  // RTDB が保留しても入口復帰は止めない。retirePresence は呼出し時に旧refを捕捉する。
+  try { void Promise.resolve(retirePresence()).catch(() => {}); } catch { /* 接続断でも端末の解除を続ける */ }
+  clearSavedRoom(storage);
+  forgetInvite(roomId);
+  resetEntryView();
+  state.handStatus = 'pending'; state.entryBusy = false;
+  state.resumeFlight = null; state.handRetryFlight = null;
+  state.lastSuccessfulResumeAt = 0; state.lastSuccessfulResumeRoomId = null;
+  return true;
+}
 
 // 既存版と同じ順序: 認証 → 旧connectionのretire → connectionId発行 → presence認可 → presence開始 → resume → 反映。
 // 各段の間で isCurrent() を確認し、古い世代の処理結果を反映しない（連打・再接続の競合対策）。
@@ -80,7 +102,7 @@ export function createMultiResumeCoordinator({
       if (getRoomId() !== roomId) return;
       state.lastSuccessfulResumeRoomId = roomId;
       state.lastSuccessfulResumeAt = now();
-    }).catch((error) => onError(error, reason)).finally(() => {
+    }).catch((error) => { if (getRoomId() === roomId) onError(error, reason); }).finally(() => {
       if (state.resumeFlight === flight) state.resumeFlight = null;
     });
     state.resumeFlight = flight;
