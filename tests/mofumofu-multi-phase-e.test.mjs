@@ -112,8 +112,12 @@ test('E-3 モード選択: 修飾クリックは素通しし、無効モード�
   assert.ok(multiEntry.includes('event.preventDefault()'));
   assert.ok(multiEntry.includes('document.createElement(mode.enabled ? \'a\' : \'span\')'), '無効モードをリンクで描いている');
   // 3〜6人版ページ自体のキャッシュ版数は固定（ランダム生成・時刻生成をしない）。
-  assert.ok(multiPage.includes('../multi/script.js?v=20260930-4'));
-  assert.ok(multiPage.includes('../multi/style.css?v=20260929-1'));
+  assert.ok(multiPage.includes('../multi/script.js?v=20261001-1'));
+  assert.ok(multiPage.includes('../multi/style.css?v=20261001-1'));
+  assert.ok(multiClient.includes("import * as core from './multi-core.js?v=20261001-1'"));
+  assert.equal(multiPage.includes('../multi/style.css?v=20260929-1'), false, '旧CSS URLを参照している');
+  assert.equal(multiPage.includes('../multi/script.js?v=20260930-4'), false, '旧script URLを参照している');
+  assert.equal(multiClient.includes("multi-core.js?v=20260929-4"), false, '旧core URLを参照している');
   assert.equal(/\?v=\$\{/.test(multiPage), false, '版数を変数で組み立てている');
   assert.equal(/Math\.random|Date\.now\(\)\s*\)\s*\?v=/.test(multiPage), false);
 });
