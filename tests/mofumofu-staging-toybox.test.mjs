@@ -35,23 +35,16 @@ test('staging choice offers real two-player and multi routes', () => {
   }
 });
 
-test('both online pages return to the correct production or staging toybox', () => {
-  for (const [index, page] of pages.entries()) {
-    const initialHref = page.match(/<a id="toybox-return" href="([^"]+)">おもちゃ箱へ戻る<\/a>/)?.[1];
-    assert.equal(initialHref, index === 0 ? '../../../toybox/' : '/wa-awesome/toybox/');
-    const script = [...page.matchAll(/<script>([\s\S]*?)<\/script>/g)]
-      .map((match) => match[1]).find((body) => body.includes("getElementById('toybox-return')"));
-    assert.ok(script);
-    for (const hostname of ['wa-awesome-mofumofu-stg.web.app', 'fabdemnt-dev.github.io']) {
-      const link = { href: initialHref };
-      vm.runInNewContext(script, { globalThis: { location: { hostname } }, document: { getElementById: () => link } });
-      const pageUrl = hostname === 'fabdemnt-dev.github.io'
-        ? `https://${hostname}/wa-awesome/toybox/mofumofu-gathering/online/${index === 0 ? '' : 'multi/'}`
-        : `https://${hostname}/${index === 0 ? '' : 'multi'}`;
-      assert.equal(new URL(link.href, pageUrl).pathname,
-        hostname === 'fabdemnt-dev.github.io' ? '/wa-awesome/toybox/' : '/toybox/');
-    }
+test('online modes return only to the Mofumofu title; toybox exit lives on the title page', () => {
+  assert.match(pages[0], /<a href="\.\.\/">← もふもふ大集合！へ戻る<\/a>/);
+  assert.match(pages[1], /<a href="\.\.\/\.\.\/">← もふもふ大集合！へ戻る<\/a>/);
+  for (const page of pages) {
+    assert.doesNotMatch(page, /id="toybox-return"/);
+    assert.doesNotMatch(page, /おもちゃ箱へ戻る/);
+    assert.doesNotMatch(page, /2人＋こはるのオンライン版へ/);
   }
+  const title = readFileSync(new URL('../toybox/mofumofu-gathering/index.html', import.meta.url), 'utf8');
+  assert.match(title, /<a class="secondary big title-return-link" href="\.\.\/">おもちゃ箱へ戻る<\/a>/);
 });
 
 test('PR #313 production gate and multi display-name input remain present', () => {
