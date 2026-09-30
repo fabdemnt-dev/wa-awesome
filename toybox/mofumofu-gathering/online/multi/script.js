@@ -11,12 +11,10 @@ import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'https://w
 import { getDatabase, connectDatabaseEmulator, ref, onValue, onDisconnect, set, update, serverTimestamp } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js';
 import { resolveEnvironment, REGION } from './firebase-config.js?v=20260926-1';
 import * as core from './multi-core.js?v=20260929-4';
-import { runMofumofuMultiFullResume, createMultiResumeCoordinator, createMultiHandStartResume, handleMultiSessionFailure } from './multi-resume.js?v=20260930-1';
+import { runMofumofuMultiFullResume, createMultiResumeCoordinator, createMultiHandStartResume, handleMultiSessionFailure } from './multi-resume.js?v=20260929-2';
 import { createMultiPendingActionRecovery, definitiveMultiActionRejection, multiActionBlocked, multiJudgeButtonsDisabled } from './multi-action-recovery.js?v=20260929-1';
-import { createMultiResumeDiagnostic } from './multi-resume-diagnostic.js?v=20260930-1';
 
 const environment = resolveEnvironment();
-const resumeDiagnostic = createMultiResumeDiagnostic({ enabled: environment.name === 'staging', document });
 const app = initializeApp(environment.firebase);
 if (environment.appCheck.debug) globalThis.FIREBASE_APPCHECK_DEBUG_TOKEN = true;
 initializeAppCheck(app, {
@@ -389,19 +387,15 @@ function renderEntry() {
 
 /* -------------------------------------------------------------------- 通信 */
 
-async function beginPresence(seatId, generation, connectionId, observe = () => {}) {
+async function beginPresence(seatId, generation, connectionId) {
   const uid = auth.currentUser.uid;
   const path = `${core.RTDB_ROOTS.presence}/${state.roomId}/${uid}/connections/${connectionId}`;
   state.presenceRef = ref(database, path);
   const ownPresenceRef = state.presenceRef;
   const base = { uid, roomId: state.roomId, seatId, connectionId };
   const connectedAt = Date.now();
-  observe('wait', 'disconnectSet');
   await onDisconnect(ownPresenceRef).set({ ...base, state: 'disconnected', lastHeartbeatAt: serverTimestamp(), connectedAt });
-  observe('done', 'disconnectSet');
-  observe('wait', 'onlineSet');
   await set(ownPresenceRef, { ...base, state: 'online', lastHeartbeatAt: serverTimestamp(), connectedAt });
-  observe('done', 'onlineSet');
   if (generation !== state.resumeGeneration) return;
   state.heartbeatTimer = setInterval(() => {
     if (generation !== state.resumeGeneration) return;
@@ -420,18 +414,12 @@ async function beginPresence(seatId, generation, connectionId, observe = () => {
     if (state.room?.status !== core.ROOM_STATUS.WAITING) renderGame(state.room);
   }, () => requestResume('rtdb-listener-error'));
 }
-async function retirePresence(observe = () => {}) {
+async function retirePresence() {
   const oldRef = state.presenceRef;
   state.presenceRef = null;
-  if (!oldRef) { observe('skip', 'cancel'); observe('skip', 'oldUpdate'); return; }
-  observe('wait', 'cancel');
-  let cancelFailed = false;
-  await onDisconnect(oldRef).cancel().catch(() => { cancelFailed = true; });
-  observe(cancelFailed ? 'error' : 'done', 'cancel');
-  observe('wait', 'oldUpdate');
-  let updateFailed = false;
-  await update(oldRef, { state: 'disconnected', lastHeartbeatAt: serverTimestamp() }).catch(() => { updateFailed = true; });
-  observe(updateFailed ? 'error' : 'done', 'oldUpdate');
+  if (!oldRef) return;
+  await onDisconnect(oldRef).cancel().catch(() => {});
+  await update(oldRef, { state: 'disconnected', lastHeartbeatAt: serverTimestamp() }).catch(() => {});
 }
 function stopRealtime(generation = state.resumeGeneration) {
   if (generation !== state.resumeGeneration) return;
@@ -460,8 +448,6 @@ function roomFromResume(value) {
 }
 async function fullResume(reason) {
   if (!state.roomId) return;
-  resumeDiagnostic.start();
-  const observe = resumeDiagnostic.observe;
   const generation = state.resumeGeneration + 1;
   state.resumeGeneration = generation;
   state.presenceReady = 0;
@@ -472,13 +458,12 @@ async function fullResume(reason) {
       auth,
       signInAnonymously,
       isCurrent: () => generation === state.resumeGeneration,
-      retirePresence: () => retirePresence(observe),
-      observe,
+      retirePresence,
       createConnectionId: newId,
       authorizePresence: () => call('authorizeMofumofuMultiPresence', { roomId: state.roomId }),
       beginPresence: async (seatId, connectionId) => {
         state.connectionId = connectionId;
-        await beginPresence(seatId, generation, connectionId, observe);
+        await beginPresence(seatId, generation, connectionId);
       },
       resumeRoom: () => call('resumeMofumofuMultiRoom', { roomId: state.roomId }),
       applyResume: async (value) => {
@@ -487,24 +472,16 @@ async function fullResume(reason) {
         state.handStatus = value.handStatus || 'pending';
         state.room = roomFromResume(value);
         renderAll();
-        observe('done', 'apply');
-        observe('wait', 'listeners');
         listenRoom(generation);
         startSafetySync(generation);
-        observe('done', 'listeners');
-        observe('wait', 'connected');
         setConnectionState('connected');
-        observe('done', 'connected');
         // 配布直後などで自分の手札がまだ読めない場合だけ、少し待って取り直す（永久ループはしない）。
         if (value.handStatus === 'retry') void retryOwnHand(generation);
-        observe('wait', 'recovery');
         const recovery = recoverPendingActions(generation);
         await recovery;
-        observe('done', 'recovery');
       },
     });
   } catch (error) {
-    resumeDiagnostic.fail();
     if (generation === state.resumeGeneration) {
       stopRealtime(generation);
       await retirePresence();

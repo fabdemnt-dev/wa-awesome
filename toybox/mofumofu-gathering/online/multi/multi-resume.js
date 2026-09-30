@@ -18,36 +18,24 @@ export async function runMofumofuMultiFullResume({
   beginPresence,
   resumeRoom,
   applyResume,
-  observe = () => {},
 }) {
-  observe('wait', 'auth');
   await auth.authStateReady();
   if (!auth.currentUser) await signInAnonymously(auth);
-  observe('done', 'auth');
   if (!isCurrent()) return false;
 
-  observe('wait', 'retire');
   await retirePresence();
-  observe('done', 'retire');
   if (!isCurrent()) return false;
 
   const connectionId = createConnectionId();
-  observe('wait', 'authorize');
   const admission = await authorizePresence(connectionId);
-  observe('done', 'authorize');
   if (!isCurrent()) return false;
 
-  observe('wait', 'presence');
   await beginPresence(admission.seatId, connectionId);
-  observe('done', 'presence');
   if (!isCurrent()) return false;
 
-  observe('wait', 'room');
   const value = await resumeRoom();
-  observe('done', 'room');
   if (!isCurrent()) return false;
 
-  observe('wait', 'apply');
   await applyResume(value, connectionId);
   return true;
 }
