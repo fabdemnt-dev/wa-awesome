@@ -51,7 +51,7 @@ test('productionでdebug provider/tokenを使わず秘密情報を成果物へ�
 
 test('オンラインUIは戻り導線、説明Dialog、live region、44px、重要操作busy guardを備える', async () => {
   const [html, css, client, entry] = await Promise.all([read('toybox/mofumofu-gathering/online/index.html'), read('toybox/mofumofu-gathering/online/style.css'), read('toybox/mofumofu-gathering/online/script.js'), read('toybox/mofumofu-gathering/online-entry.js')]);
-  assert.match(html, /もふもふ大集合！へ戻る/); assert.match(html, /おもちゃ箱へ戻る/); assert.match(html, /<dialog id="help-dialog" aria-labelledby="help-title">/); assert.match(html, /招待コード.*8文字/s);
+  assert.match(html, /もふもふ大集合！へ戻る/); assert.doesNotMatch(html, /おもちゃ箱へ戻る/); assert.match(html, /<dialog id="help-dialog" aria-labelledby="help-title">/); assert.match(html, /招待コード.*8文字/s);
   assert.ok((html.match(/aria-live=/g) || []).length >= 4); assert.match(css, /min-height: 44px/); assert.match(css, /max-width: 340px/); assert.match(css, /max-width: 100%/);
   assert.match(client, /create-room'[\s\S]*button\.disabled/); assert.match(client, /join-room'[\s\S]*button\.disabled/); assert.match(client, /state\.makeBusy[\s\S]*button\.disabled = true/); assert.match(client, /state\.judgeBusy[\s\S]*buttons\.forEach/);
   assert.match(entry, /ONLINE_PUBLIC_ENABLED = true/);
