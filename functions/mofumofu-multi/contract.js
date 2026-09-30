@@ -193,6 +193,41 @@ function joinRoomUpdate(room, seatId, uid, now, displayName = null) {
   };
 }
 
+/* ------------------------------------------------------ waiting 退出の判定 */
+
+// waiting中の一般参加者だけを安全に退出させる。ホスト退出は別仕様として扱う。
+// 配札前なので残った参加者をS1から連続する席へ詰め直し、startDecisionの連続席契約を維持する。
+function waitingLeaveDecision(room, { uid }) {
+  if (!room || room.kind !== KIND) return { ok: false, code: 'not-found', message: '部屋が見つかりません。' };
+  if (room.status !== 'waiting' || room.dealt || room.startedAt) return { ok: false, code: 'failed-precondition', message: '待機中だけ退出できます。' };
+  const seatId = seatForUid(room, uid);
+  if (!seatId) return { ok: false, code: 'permission-denied', message: NOT_MEMBER_ERROR };
+  if (room.hostUid === uid) return { ok: false, code: 'failed-precondition', message: 'ホストはこの操作では退出できません。' };
+  const remainingUids = (room.seatOrder || []).map((seat) => room.playerUids?.[seat]).filter((memberUid) => memberUid && memberUid !== uid);
+  return { ok: true, seatId, remainingUids };
+}
+function waitingLeaveRoomUpdate(room, remainingUids) {
+  const seatOrder = SEAT_IDS.slice(0, remainingUids.length);
+  const oldSeatByUid = new Map((room.seatOrder || []).map((seat) => [room.playerUids?.[seat], seat]));
+  const players = {};
+  const playerUids = {};
+  const playerStatus = {};
+  const handCounts = {};
+  const faceUpCards = {};
+  for (let index = 0; index < remainingUids.length; index += 1) {
+    const uid = remainingUids[index];
+    const seat = seatOrder[index];
+    const oldSeat = oldSeatByUid.get(uid);
+    const oldPlayer = room.players?.[oldSeat] || {};
+    players[seat] = { ...oldPlayer, seatId: seat };
+    playerUids[seat] = uid;
+    playerStatus[seat] = PLAYER_STATUS.ACTIVE;
+    handCounts[seat] = 0;
+    faceUpCards[seat] = [];
+  }
+  return { seatOrder, players, playerUids, playerStatus, handCounts, faceUpCards };
+}
+
 /* ----------------------------------------------------------- start の判定 */
 
 function startDecision(room, { uid, now }) {
@@ -568,6 +603,8 @@ module.exports = {
   inviteStatusAfterJoin,
   joinDecision,
   joinRoomUpdate,
+  waitingLeaveDecision,
+  waitingLeaveRoomUpdate,
   startDecision,
   handsByUid,
   roomAfterStart,
