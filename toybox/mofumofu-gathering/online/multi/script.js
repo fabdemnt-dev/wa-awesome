@@ -11,7 +11,7 @@ import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'https://w
 import { getDatabase, connectDatabaseEmulator, ref, onValue, onDisconnect, set, update, serverTimestamp } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js';
 import { resolveEnvironment, REGION } from './firebase-config.js?v=20260926-1';
 import * as core from './multi-core.js?v=20260929-4';
-import { runMofumofuMultiFullResume, createMultiResumeCoordinator, createMultiHandStartResume, handleMultiSessionFailure } from './multi-resume.js?v=20260929-2';
+import { runMofumofuMultiFullResume, createMultiResumeCoordinator, createMultiHandStartResume, handleMultiSessionFailure, canForgetFinishedRoom, forgetFinishedRoom } from './multi-resume.js?v=20260930-1';
 import { createMultiPendingActionRecovery, definitiveMultiActionRejection, multiActionBlocked, multiJudgeButtonsDisabled } from './multi-action-recovery.js?v=20260929-1';
 
 const environment = resolveEnvironment();
@@ -44,6 +44,7 @@ const state = {
   unsubscribe: null, heartbeatTimer: null, accessTimer: null, safetySyncTimer: null, listenerRetryTimer: null,
   listenerRetryCount: 0, resumeFlight: null, resumeGeneration: 0, connectionState: 'syncing',
   lastSuccessfulResumeAt: 0, lastSuccessfulResumeRoomId: null,
+  finishedConfirmedRoomId: null,
   entryBusy: false, startBusy: false, makeBusy: false, judgeBusy: false,
   makeRequest: null, judgeRequest: null, handRetryFlight: null, actionRecoveryFlight: null,
 };
@@ -167,6 +168,7 @@ async function copyText(value, button, resetLabel) {
 function setConnectionState(next, detail = '') {
   state.connectionState = next;
   message(next === 'connected' ? core.TEXT.connected : next === 'syncing' ? core.TEXT.syncing : `同期エラー${detail ? `（${detail}）` : ''}`);
+  $('new-game').hidden = !canForgetFinishedRoom(state);
 }
 function errorCode(error) { return String(error?.code || 'unknown').replace(/^functions\//, ''); }
 
@@ -241,6 +243,7 @@ function renderGame(room) {
   const finished = view.finished;
   $('result').hidden = true;
   $('final-result').hidden = true;
+  $('new-game').hidden = !canForgetFinishedRoom(state);
   if (offer && offer.status === 'completed') {
     $('result').hidden = false;
     $('result').textContent = view.board.resultLine;
@@ -326,6 +329,7 @@ function renderSteps(view) {
 }
 function renderResult(result) {
   $('final-result').hidden = false;
+  $('new-game').hidden = !canForgetFinishedRoom(state);
   $('final-title').textContent = result.title;
   $('final-reason').textContent = result.reason;
   $('final-winners').textContent = result.winnerText;
@@ -370,11 +374,12 @@ function resetEntryView() {
   state.makeRequest = null; state.judgeRequest = null;
   state.makeBusy = false; state.judgeBusy = false; state.startBusy = false;
   state.actionRecoveryFlight = null;
+  state.finishedConfirmedRoomId = null;
   ui.cardId = null; ui.claim = null; ui.lastLogKey = null; ui.gatheringShown = false;
   for (const id of ['turn', 'tableCardSub', 'offer-message', 'invite-note', 'start-note', 'flash', 'result']) $(id).textContent = '';
   $('tableCardMain').textContent = '？';
   for (const id of ['others', 'self-seat', 'hand', 'judgeHand', 'log', 'players', 'claimButtons', 'targetButtons', 'judgeHand', 'final-players']) $(id).replaceChildren();
-  for (const id of ['game', 'lobby', 'final-result', 'reconnect-wait', 'claimStep', 'targetStep', 'judgeStep', 'hand-loading']) $(id).hidden = true;
+  for (const id of ['game', 'lobby', 'final-result', 'new-game', 'reconnect-wait', 'claimStep', 'targetStep', 'judgeStep', 'hand-loading']) $(id).hidden = true;
   $('copy-invite').textContent = core.COPY_LABEL;
   renderAll();
   renderEntry();
@@ -471,6 +476,7 @@ async function fullResume(reason) {
         state.cards = Array.isArray(value.cards) ? value.cards : [];
         state.handStatus = value.handStatus || 'pending';
         state.room = roomFromResume(value);
+        state.finishedConfirmedRoomId = value.status === core.ROOM_STATUS.FINISHED ? state.roomId : null;
         renderAll();
         listenRoom(generation);
         startSafetySync(generation);
@@ -500,7 +506,7 @@ async function fullResume(reason) {
 // resumeがhandStatus='retry'を返した場合の1回だけの取り直し。
 async function retryOwnHand(generation) {
   if (state.handRetryFlight || generation !== state.resumeGeneration) return;
-  state.handRetryFlight = (async () => {
+  const flight = (async () => {
     await new Promise((resolve) => { setTimeout(resolve, 1_500); });
     if (generation !== state.resumeGeneration) return;
     try {
@@ -511,9 +517,10 @@ async function retryOwnHand(generation) {
         state.handStatus = value.handStatus;
         if (state.room) renderGame(state.room);
       }
-    } catch (error) { message(error.message); }
-    finally { state.handRetryFlight = null; }
+    } catch (error) { if (generation === state.resumeGeneration) message(error.message); }
+    finally { if (state.handRetryFlight === flight) state.handRetryFlight = null; }
   })();
+  state.handRetryFlight = flight;
   return state.handRetryFlight;
 }
 const requestResume = createMultiResumeCoordinator({
@@ -533,6 +540,7 @@ const recoverPendingActions = createMultiPendingActionRecovery({
     state.cards = Array.isArray(value.cards) ? value.cards : [];
     state.handStatus = value.handStatus || 'pending';
     state.room = roomFromResume(value);
+    state.finishedConfirmedRoomId = value.status === core.ROOM_STATUS.FINISHED ? roomId : null;
     renderAll();
     if (value.handStatus === 'retry') void retryOwnHand(generation);
     setConnectionState('connected');
@@ -544,10 +552,11 @@ const recoverPendingActions = createMultiPendingActionRecovery({
   onSettled: () => { if (state.room) renderAll(); },
 });
 const onHandStart = createMultiHandStartResume({ state, requestResume });
-function applyPublicRoom(room, generation) {
+function applyPublicRoom(room, generation, fromServer) {
   if (generation !== state.resumeGeneration) return;
   const previousRoom = state.room;
   state.room = room;
+  state.finishedConfirmedRoomId = fromServer && room.status === core.ROOM_STATUS.FINISHED ? state.roomId : null;
   renderAll();
   onHandStart(previousRoom, room);
 }
@@ -567,7 +576,7 @@ function listenRoom(generation) {
     if (generation !== state.resumeGeneration) return;
     if (!snap.exists()) { handleRoomGone(); return; }
     state.listenerRetryCount = 0;
-    applyPublicRoom({ ...snap.data() }, generation);
+    applyPublicRoom({ ...snap.data() }, generation, snap.metadata?.fromCache === false);
   }, (error) => {
     if (generation !== state.resumeGeneration) return;
     state.unsubscribe?.(); state.unsubscribe = null;
@@ -588,7 +597,7 @@ async function lightweightSync(generation) {
     const snap = await getDocFromServer(doc(firestore, ROOM_COLLECTION, state.roomId));
     if (generation !== state.resumeGeneration) return;
     if (!snap.exists()) { handleRoomGone(); return; }
-    applyPublicRoom({ ...snap.data() }, generation);
+    applyPublicRoom({ ...snap.data() }, generation, true);
   } catch (error) {
     if (generation !== state.resumeGeneration) return;
     setConnectionState('error', `Firestore fetch:${errorCode(error)}`);
@@ -672,6 +681,18 @@ $('copy-room-id').addEventListener('click', () => {
 });
 $('display-name').addEventListener('input', (event) => {
   event.target.value = Array.from(event.target.value).slice(0, 12).join('');
+});
+$('new-game').addEventListener('click', () => {
+  const forgotten = forgetFinishedRoom({
+    state, storage: localStorage, stopRealtime, retirePresence, forgetInvite, resetEntryView,
+  });
+  if (!forgotten) return;
+  clearTimeout(ui.flashTimer); clearTimeout(ui.logoTimer); clearTimeout(ui.copyTimer);
+  $('flash').classList.remove('show');
+  $('gathering-overlay').classList.add('hidden');
+  $('display-name').value = ''; $('invite-code').value = '';
+  renderEntry();
+  setConnectionState('connected');
 });
 
 $('create-room').addEventListener('click', async () => {

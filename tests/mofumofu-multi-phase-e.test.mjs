@@ -112,7 +112,7 @@ test('E-3 モード選択: 修飾クリックは素通しし、無効モード�
   assert.ok(multiEntry.includes('event.preventDefault()'));
   assert.ok(multiEntry.includes('document.createElement(mode.enabled ? \'a\' : \'span\')'), '無効モードをリンクで描いている');
   // 3〜6人版ページ自体のキャッシュ版数は固定（ランダム生成・時刻生成をしない）。
-  assert.ok(multiPage.includes('../multi/script.js?v=20260929-6'));
+  assert.ok(multiPage.includes('../multi/script.js?v=20260930-1'));
   assert.ok(multiPage.includes('../multi/style.css?v=20260929-1'));
   assert.equal(/\?v=\$\{/.test(multiPage), false, '版数を変数で組み立てている');
   assert.equal(/Math\.random|Date\.now\(\)\s*\)\s*\?v=/.test(multiPage), false);
@@ -470,6 +470,99 @@ test('終了時の手番領域は非操作表示に変わり、集合ロゴと�
   assert.match(multiStyle, /\.turn-badge\.finished\{[^}]*box-shadow:none;[^}]*cursor:default/);
 });
 
+test('新しく遊ぶは正本のfinishedと接続完了でだけ表示され、結果表示は押すまで残る', () => {
+  const state = { roomId: 'room-1', seatId: 'S1', room: { status: core.ROOM_STATUS.FINISHED },
+    finishedConfirmedRoomId: 'room-1', connectionState: 'connected' };
+  assert.equal(resumeHelpers.canForgetFinishedRoom(state), true);
+  for (const status of [core.ROOM_STATUS.PLAYING, core.ROOM_STATUS.WAITING]) {
+    assert.equal(resumeHelpers.canForgetFinishedRoom({ ...state, room: { status } }), false);
+  }
+  assert.equal(resumeHelpers.canForgetFinishedRoom({ ...state, finishedConfirmedRoomId: null }), false);
+  assert.equal(resumeHelpers.canForgetFinishedRoom({ ...state, connectionState: 'syncing' }), false);
+  assert.equal(resumeHelpers.canForgetFinishedRoom({ ...state, connectionState: 'error' }), false);
+  assert.match(multiPage, /<section id="final-result"[^>]*>[\s\S]*<button id="new-game" class="primary big" type="button" hidden>新しく遊ぶ<\/button>/);
+  assert.match(multiStyle, /\.big\{[^}]*min-height:54px/);
+  assert.match(multiClient, /\$\('new-game'\)\.hidden = !canForgetFinishedRoom\(state\)/);
+  assert.match(multiClient, /state\.finishedConfirmedRoomId = value\.status === core\.ROOM_STATUS\.FINISHED/);
+  assert.match(multiClient, /snap\.metadata\?\.fromCache === false/);
+});
+
+test('finishedだけ端末credentialと旧購読を解除し、presence通信が保留でも新規入口へ戻る', () => {
+  const storage = fakeStorage();
+  core.saveRoom(storage, { roomId: 'room-1', seatId: 'S1' });
+  const state = { roomId: 'room-1', seatId: 'S1', room: { status: core.ROOM_STATUS.FINISHED },
+    cards: [card('cat', 'secret')], finishedConfirmedRoomId: 'room-1', connectionState: 'connected',
+    resumeGeneration: 3, resumeFlight: Promise.resolve(), handRetryFlight: Promise.resolve(),
+    makeRequest: { actionId: 'old' }, judgeRequest: { actionId: 'old' },
+    makeBusy: true, judgeBusy: true, entryBusy: false, lastSuccessfulResumeAt: 42,
+    lastSuccessfulResumeRoomId: 'room-1' };
+  const events = [];
+  const forgot = resumeHelpers.forgetFinishedRoom({
+    state, storage,
+    stopRealtime: () => { events.push('stop'); },
+    retirePresence: () => { events.push('retire'); return new Promise(() => {}); },
+    forgetInvite: (roomId) => { assert.equal(roomId, 'room-1'); events.push('invite'); },
+    resetEntryView: () => {
+      events.push('entry'); state.roomId = null; state.seatId = null; state.room = null;
+      state.cards = []; state.makeRequest = null; state.judgeRequest = null;
+      state.makeBusy = false; state.judgeBusy = false; state.finishedConfirmedRoomId = null;
+    },
+  });
+  assert.equal(forgot, true);
+  assert.deepEqual(events, ['stop', 'retire', 'invite', 'entry']);
+  assert.equal(core.loadRoom(storage), null);
+  assert.equal(state.resumeGeneration, 4);
+  assert.equal(state.room, null);
+  assert.equal(state.cards.length, 0);
+  assert.equal(state.makeRequest, null);
+  assert.equal(state.judgeRequest, null);
+  assert.equal(state.resumeFlight, null);
+  assert.equal(state.handRetryFlight, null);
+  assert.equal(state.lastSuccessfulResumeRoomId, null);
+  assert.equal(state.handStatus, 'pending');
+  assert.match(multiClient, /stopRealtime\(\)/);
+  assert.match(multiClient, /\$\('display-name'\)\.value = ''; \$\('invite-code'\)\.value = ''/);
+  assert.match(multiClient, /\$\('gathering-overlay'\)\.classList\.add\('hidden'\)/);
+  assert.match(multiClient, /setConnectionState\('connected'\)/);
+  assert.doesNotMatch(resumeHelpers.forgetFinishedRoom.toString(), /httpsCallable|Firestore|deleteDoc/);
+});
+
+test('waiting/playing中は新しく遊ぶ操作からcredentialもserver roomも変更しない', () => {
+  for (const status of [core.ROOM_STATUS.WAITING, core.ROOM_STATUS.PLAYING]) {
+    const storage = fakeStorage();
+    core.saveRoom(storage, { roomId: 'room-1', seatId: 'S1' });
+    const state = { roomId: 'room-1', seatId: 'S1', room: { status },
+      finishedConfirmedRoomId: 'room-1', connectionState: 'connected', resumeGeneration: 3 };
+    const fail = () => { throw new Error('未完了roomには触れてはいけない'); };
+    assert.equal(resumeHelpers.forgetFinishedRoom({ state, storage,
+      stopRealtime: fail, retirePresence: fail, forgetInvite: fail, resetEntryView: fail }), false);
+    assert.deepEqual(core.loadRoom(storage), { roomId: 'room-1', seatId: 'S1' });
+    assert.equal(state.resumeGeneration, 3);
+  }
+});
+
+test('古いresumeが入口復帰後に失敗しても新しい接続状態を書き換えない', async () => {
+  let rejectOld;
+  const state = { resumeFlight: null, connectionState: 'connected',
+    lastSuccessfulResumeAt: 0, lastSuccessfulResumeRoomId: null };
+  let roomId = 'room-1';
+  const errors = [];
+  const requestResume = resumeHelpers.createMultiResumeCoordinator({
+    state, getRoomId: () => roomId,
+    runResume: () => new Promise((_, reject) => { rejectOld = reject; }),
+    onError: (error) => errors.push(error.message),
+  });
+  const oldFlight = requestResume('lifecycle');
+  await Promise.resolve();
+  roomId = null;
+  state.resumeFlight = null;
+  rejectOld(new Error('old connection'));
+  await oldFlight;
+  assert.deepEqual(errors, []);
+  assert.equal(state.connectionState, 'connected');
+  assert.equal(state.resumeFlight, null);
+});
+
 /* ------------------------------------------------------------------ presence */
 
 test('E-10 presence: 接続中／再接続待ちの表示と、再接続待ちの案内は手番・判定の人だけ', () => {
@@ -727,7 +820,7 @@ test('開始通知で本人の未取得手札だけを一度resumeし、通常�
   state.roomId = 'next-room';
   onRoom(waiting, { ...playing, roomId: 'next-room' });
   assert.deepEqual(reasons, ['hand-on-game-start', 'hand-on-game-start'], '別roomでも開始通知を扱う');
-  assert.match(multiClient, /const previousRoom = state\.room;\s*state\.room = room;\s*renderAll\(\);\s*onHandStart\(previousRoom, room\)/);
+  assert.match(multiClient, /const previousRoom = state\.room;\s*state\.room = room;\s*state\.finishedConfirmedRoomId = fromServer[^;]+;\s*renderAll\(\);\s*onHandStart\(previousRoom, room\)/);
   assert.match(multiPage, /id="hand-loading"[^>]*>手札を読み込んでいます…<\/p>/);
   assert.match(multiClient, /\$\('hand-loading'\)\.hidden = !\(state\.room\?\.status === core\.ROOM_STATUS\.PLAYING[\s\S]*?state\.handStatus === 'pending' && state\.cards\.length === 0/);
 
