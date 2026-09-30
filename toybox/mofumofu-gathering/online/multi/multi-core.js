@@ -20,9 +20,9 @@ export const RTDB_ROOTS = Object.freeze({
 
 /* ------------------------------------------------------------------ 公開gate */
 
-// 3〜6人版の一般導線gate。Phase Eではまだ一般公開しないため false 固定。
+// 3〜6人版の一般導線gate。productionのFirebase公開ゲート確認後に有効化。
 // false の間はゲームページのモード選択で「3〜6人」を選べない（直接URLは開発・検証用に開いている）。
-export const MULTI_ONLINE_PUBLIC_ENABLED = false;
+export const MULTI_ONLINE_PUBLIC_ENABLED = true;
 
 // 既存2人＋こはる版のgateは online-entry.js の ONLINE_PUBLIC_ENABLED=true のまま（このファイルでは触らない）。
 export const TWO_PLAYER_PAGE_PATH = './online/';

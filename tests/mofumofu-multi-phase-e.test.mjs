@@ -72,8 +72,8 @@ function connection(uid, seatId, offsetMs = 0) {
 
 /* ------------------------------------------------------------------- gate */
 
-test('E-1 gate: 3〜6人版は非公開のまま、2人＋こはるは今までどおり選べる', () => {
-  assert.equal(core.MULTI_ONLINE_PUBLIC_ENABLED, false);
+test('E-1 gate: 3〜6人版を一般公開し、2人＋こはるも今までどおり選べる', () => {
+  assert.equal(core.MULTI_ONLINE_PUBLIC_ENABLED, true);
   const options = core.onlineModeOptions();
   assert.equal(options.length, 2);
   const [twoPlayer, multi] = options;
@@ -83,8 +83,8 @@ test('E-1 gate: 3〜6人版は非公開のまま、2人＋こはるは今まで�
   );
   assert.equal(multi.id, 'multi');
   assert.equal(multi.href, './online/multi/');
-  assert.equal(multi.enabled, false, 'gate=falseで3〜6人版が選べてしまう');
-  assert.equal(multi.description, 'じゅんびちゅう');
+  assert.equal(multi.enabled, true, '公開済み3〜6人版が選べない');
+  assert.equal(multi.description, 'みんなで遊べる3〜6人版');
   assert.equal(core.MULTI_PAGE_PATH, './online/multi/');
   assert.equal(core.TWO_PLAYER_PAGE_PATH, './online/');
 });
@@ -118,7 +118,7 @@ test('E-3 モード選択: 修飾クリックは素通しし、無効モード�
   assert.equal(/Math\.random|Date\.now\(\)\s*\)\s*\?v=/.test(multiPage), false);
 });
 
-test('モード選択はstagingだけ3〜6人版を有効にし、productionでは準備中を保つ', () => {
+test('モード選択はproductionとstagingの両方で3〜6人版を選択できる', () => {
   function renderFor(hostname) {
     const listeners = new Map();
     const children = [];
@@ -145,15 +145,10 @@ test('モード選択はstagingだけ3〜6人版を有効にし、productionで�
     const [twoPlayer, multi] = renderFor(hostname);
     assert.equal(twoPlayer.tag, 'a');
     assert.equal(twoPlayer.href, './online/');
-    if (hostname === 'wa-awesome-mofumofu-stg.web.app') {
-      assert.equal(multi.tag, 'a');
-      assert.equal(multi.href, './online/multi/');
-      assert.notEqual(multi.description, 'じゅんびちゅう');
-    } else {
-      assert.equal(multi.tag, 'span');
-      assert.equal(multi.disabled, 'true');
-      assert.equal(multi.description, 'じゅんびちゅう');
-    }
+    assert.equal(multi.tag, 'a');
+    assert.equal(multi.href, './online/multi/');
+    assert.equal(multi.disabled, undefined);
+    assert.equal(multi.description, 'みんなで遊べる3〜6人版');
   }
 });
 
