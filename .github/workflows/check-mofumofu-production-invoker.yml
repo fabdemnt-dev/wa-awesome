@@ -1,0 +1,146 @@
+name: Check Mofumofu production Invoker (read only)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-mofumofu-production-invoker
+  cancel-in-progress: false
+
+jobs:
+  check:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Authenticate with existing credential
+        id: auth
+        continue-on-error: true
+        uses: google-github-actions/auth@v3
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+          project_id: wa-awesome
+
+      - name: Prepare read-only client
+        id: client
+        if: steps.auth.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 1
+        run: python3 -m pip install --quiet --disable-pip-version-check --retries 0 --timeout 15 google-auth requests
+
+      - name: Read ten service policies once
+        if: always()
+        env:
+          AUTH_OUTCOME: ${{ steps.auth.outcome }}
+          CLIENT_OUTCOME: ${{ steps.client.outcome }}
+        shell: bash
+        run: |
+          python3 <<'PY'
+          import concurrent.futures
+          import json
+          import os
+          import subprocess
+          import sys
+
+          names = [
+              'createMofumofuMultiRoom',
+              'joinMofumofuMultiRoom',
+              'startMofumofuMultiGame',
+              'makeMofumofuMultiOffer',
+              'judgeMofumofuMultiOffer',
+              'leaveMofumofuMultiGame',
+              'leaveMofumofuMultiWaitingRoom',
+              'closeMofumofuMultiWaitingRoom',
+              'authorizeMofumofuMultiPresence',
+              'resumeMofumofuMultiRoom',
+          ]
+          project = 'wa-awesome'
+          region = 'asia-northeast1'
+          token = None
+          if (os.environ.get('AUTH_OUTCOME') == 'success'
+                  and os.environ.get('CLIENT_OUTCOME') == 'success'):
+              try:
+                  import google.auth
+                  from google.auth.transport.requests import Request
+                  credentials, _ = google.auth.default(
+                      scopes=['https://www.googleapis.com/auth/cloud-platform'])
+                  request = Request()
+                  def bounded_request(*args, **kwargs):
+                      kwargs['timeout'] = 10
+                      return request(*args, **kwargs)
+                  credentials.refresh(bounded_request)
+                  token = credentials.token
+              except Exception:
+                  pass  # Never print credential data or authentication exceptions.
+
+          def check(name):
+              if not token:
+                  return name, 'UNKNOWN (authentication/client unavailable)'
+              resource = f'projects/{project}/locations/{region}/services/{name.lower()}'
+              url = f'https://run.googleapis.com/v2/{resource}:getIamPolicy'
+              url += '?options.requestedPolicyVersion=3'
+              try:
+                  result = subprocess.run(
+                      ['curl', '--silent', '--request', 'GET',
+                       '--connect-timeout', '5', '--max-time', '15',
+                       '--retry', '0', '--config', '-',
+                       '--write-out', '\n%{http_code}', url],
+                      input=f'header = "Authorization: Bearer {token}"\n',
+                      capture_output=True, text=True, timeout=18)
+                  if result.returncode != 0:
+                      return name, 'UNKNOWN (connection failure)'
+                  body, status = result.stdout.rsplit('\n', 1)
+                  if status == '403':
+                      error = json.loads(body).get('error', {})
+                      denied = any(
+                          detail.get('reason') == 'IAM_PERMISSION_DENIED'
+                          and detail.get('metadata', {}).get('permission')
+                              == 'run.services.getIamPolicy'
+                          for detail in error.get('details', []))
+                      return name, ('UNKNOWN (IAM permission denied)' if denied
+                                    else 'UNKNOWN (HTTP 403; cause unconfirmed)')
+                  if status != '200':
+                      return name, f'UNKNOWN (HTTP {status})'
+                  policy = json.loads(body)
+                  bindings = policy.get('bindings', [])
+                  if not isinstance(policy, dict) or not isinstance(bindings, list):
+                      return name, 'UNKNOWN (invalid policy response)'
+                  matches = [binding for binding in bindings
+                             if binding.get('role') == 'roles/run.invoker'
+                             and 'allUsers' in binding.get('members', [])]
+                  if any(not binding.get('condition') for binding in matches):
+                      return name, 'YES'
+                  if matches:
+                      return name, 'CONDITIONAL (unconditional binding absent)'
+                  return name, 'NO'
+              except Exception:
+                  return name, 'UNKNOWN (read failure)'
+
+          with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+              rows = list(executor.map(check, names))
+          values = [value for _, value in rows]
+          if all(value == 'YES' for value in values):
+              verdict = 'A'
+          elif any(value == 'NO' or value.startswith('CONDITIONAL') for value in values):
+              verdict = 'B'
+          elif any(value == 'UNKNOWN (IAM permission denied)' for value in values):
+              verdict = 'C'
+          else:
+              verdict = 'D'
+          lines = ['Function | allUsers / roles/run.invoker', '--- | ---']
+          lines += [f'{name} | {value}' for name, value in rows]
+          lines += ['', f'Verdict: {verdict}']
+          report = '\n'.join(lines) + '\n'
+          print(report)
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as output:
+              output.write(report)
+          sys.exit(0 if verdict == 'A' else 1)
+          PY
