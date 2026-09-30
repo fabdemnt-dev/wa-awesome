@@ -228,6 +228,24 @@ function waitingLeaveRoomUpdate(room, remainingUids) {
   return { seatOrder, players, playerUids, playerStatus, handCounts, faceUpCards };
 }
 
+// ホストの明示操作だけでwaiting roomを閉じる。startと同じroom正本をtransactionで競合させる。
+function waitingHostCloseDecision(room, { uid }) {
+  if (!room || room.kind !== KIND) return { ok: false, code: 'not-found', message: '部屋が見つかりません。' };
+  if (room.hostUid !== uid || seatForUid(room, uid) !== 'S1') {
+    return { ok: false, code: 'permission-denied', message: 'ホストだけが待機室を閉じられます。' };
+  }
+  if (room.status !== 'waiting' || room.dealt || room.startedAt || room.turnState !== TURN_STATE.WAITING
+      || (room.seatOrder || []).some((seat) => Number(room.handCounts?.[seat] || 0) !== 0)) {
+    return { ok: false, code: 'failed-precondition', message: '待機中の部屋だけ閉じられます。' };
+  }
+  const memberUids = (room.seatOrder || []).map((seat) => room.playerUids?.[seat]);
+  if (!memberUids.length || memberUids.some((memberUid) => !memberUid)
+      || new Set(memberUids).size !== memberUids.length) {
+    return { ok: false, code: 'failed-precondition', message: '参加状態が不整合です。' };
+  }
+  return { ok: true, memberUids };
+}
+
 /* ----------------------------------------------------------- start の判定 */
 
 function startDecision(room, { uid, now }) {
@@ -605,6 +623,7 @@ module.exports = {
   joinRoomUpdate,
   waitingLeaveDecision,
   waitingLeaveRoomUpdate,
+  waitingHostCloseDecision,
   startDecision,
   handsByUid,
   roomAfterStart,
