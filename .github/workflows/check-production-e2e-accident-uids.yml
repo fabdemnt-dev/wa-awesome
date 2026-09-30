@@ -1,0 +1,144 @@
+name: Read-only second incident room UID check
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt == 1 }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Authenticate with existing service account
+        uses: google-github-actions/auth@v3
+        timeout-minutes: 1
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+          project_id: wa-awesome
+      - name: Install read-only HTTP authentication dependencies
+        timeout-minutes: 2
+        run: python -m pip install --disable-pip-version-check --retries 0 --timeout 15 'google-auth==2.40.3' 'requests==2.32.4'
+      - name: Read only second-room roster and its UIDs
+        timeout-minutes: 3
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, os, signal
+          from datetime import datetime, timezone
+          from pathlib import Path
+          import requests
+          from google.oauth2 import service_account
+          from google.auth.transport.requests import Request
+
+          ROOM = 'poem_pw-poem-8cea91c3-b62a-41e1-bdf4-4e2854f7a787'
+          ROOT = 'https://firestore.googleapis.com/v1/projects/wa-awesome/databases/(default)/documents/rooms/'+ROOM
+          LOOKUP = 'https://identitytoolkit.googleapis.com/v1/projects/wa-awesome/accounts:lookup'
+          KNOWN = {'T1iiOqgaW3QEXzxlhGBo7alZsw02', 'cH3DDmWIsLcn5podYjkCYvhOQUI3', 'YNMHG8kRBlTWLrzSNGGnSzEYxOD2', 'sHVbSWs33rUsozvVxK1whrYAnHC3'}
+          report = {'incident_run': '36698957268', 'checked_at': datetime.now(timezone.utc).isoformat(), 'room': ROOM, 'room_state': 'unknown', 'participants': [], 'classification': 'D'}
+          class Deadline(BaseException):
+              pass
+          def deadline(*_):
+              raise Deadline()
+          signal.signal(signal.SIGALRM, deadline)
+          signal.alarm(120)
+          session = requests.Session()
+          session.mount('https://', requests.adapters.HTTPAdapter(max_retries=0))
+          transport = Request(session=session)
+          def bounded_auth_request(**kwargs):
+              kwargs['timeout'] = 15
+              response = transport(**kwargs)
+              if response.status >= 429:
+                  raise RuntimeError('authentication_unavailable')
+              return response
+          def read(url, uid=None):
+              assert (uid is None and url == ROOT) or (url == LOOKUP and uid in extracted_uids)
+              params = [('mask.fieldPaths', p) for p in ('players', 'spectators', 'participantUids')] if uid is None else {'fields': 'users(localId)'}
+              # Auth lookup uses POST but only reads the explicitly supplied UID.
+              response = session.request('GET' if uid is None else 'POST', url, params=params,
+                  json=None if uid is None else {'localId': [uid]},
+                  headers={'Authorization': 'Bearer '+credentials.token}, timeout=(5, 15), allow_redirects=False)
+              return response.status_code, response.json() if response.status_code == 200 else None
+          try:
+              credentials = service_account.Credentials.from_service_account_file(os.environ['GOOGLE_APPLICATION_CREDENTIALS'], scopes=['https://www.googleapis.com/auth/cloud-platform'])
+              credentials.refresh(bounded_auth_request)
+              status, data = read(ROOT)
+              report['room_http_status'] = status
+              if status == 200:
+                  report['room_state'] = 'exists'
+                  fields = data.get('fields', {})
+                  def names(field):
+                      value = fields[field]
+                      assert 'arrayValue' in value
+                      values = value['arrayValue'].get('values', [])
+                      assert all(isinstance(v.get('stringValue'), str) for v in values)
+                      return [v['stringValue'] for v in values]
+                  try:
+                      players, spectators = names('players'), names('spectators')
+                      raw_map = fields['participantUids']['mapValue'].get('fields', {})
+                      assert all(isinstance(v.get('stringValue'), str) for v in raw_map.values())
+                      mapping = {uid: v['stringValue'] for uid, v in raw_map.items()}
+                      extracted_uids = sorted(mapping)
+                      assert all(0 < len(uid) <= 128 for uid in extracted_uids)
+                      report['counts'] = {'players': len(players), 'spectators': len(spectators), 'unique_uids': len(extracted_uids)}
+                      match = (len(players) == 3 and set(players) == {'PW-A', 'PW-B', 'PW-C'} and spectators == ['PW-見学'] and len(mapping) == 4 and set(mapping.values()) == {'PW-A', 'PW-B', 'PW-C', 'PW-見学'})
+                      report['incident_roster_match'] = match
+                      report['overlap_with_first_room_uids'] = sorted(set(extracted_uids) & KNOWN)
+                      for uid in extracted_uids:
+                          locations = ['participantUids:key']
+                          if mapping[uid] in players:
+                              locations.append('players:via-participantUids')
+                          if mapping[uid] in spectators:
+                              locations.append('spectators:via-participantUids')
+                          report['participants'].append({'uid': uid, 'locations': locations, 'auth_state': 'not_checked'})
+                      if not match:
+                          report['classification'] = 'C'
+                          report['reason'] = 'room_roster_does_not_match_incident'
+                      else:
+                          report['classification'] = 'A'
+                          for participant in report['participants']:
+                              try:
+                                  status, result = read(LOOKUP, uid=participant['uid'])
+                                  participant['auth_http_status'] = status
+                                  if status == 200:
+                                      participant['auth_state'] = 'exists' if any(u.get('localId') == participant['uid'] for u in result.get('users', [])) else 'not_found'
+                                  else:
+                                      participant['auth_state'] = 'unknown'
+                                      participant['reason'] = 'credential_read_denied' if status in (401, 403) else 'http_error'
+                                      report['classification'] = 'B'
+                              except Exception as error:
+                                  participant['auth_state'] = 'unknown'
+                                  participant['error_type'] = type(error).__name__
+                                  report['classification'] = 'B'
+                  except Exception as error:
+                      report['classification'] = 'C'
+                      report['roster_error_type'] = type(error).__name__
+              elif status == 404:
+                  report['room_state'] = 'not_found'
+                  report['classification'] = 'C'
+              else:
+                  report['reason'] = 'credential_read_denied' if status in (401, 403) else 'http_error'
+          except (Exception, Deadline) as error:
+              report['classification'] = 'B' if report.get('incident_roster_match') else 'D'
+              report['error_type'] = type(error).__name__
+          finally:
+              signal.alarm(0)
+              output = json.dumps(report, ensure_ascii=False, indent=2)
+              Path('incident-uid-result.json').write_text(output+'\n')
+              print(output)
+              with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+                  summary.write('### Read-only second-room UID result\n```json\n'+output+'\n```\n')
+          PY
+      - name: Save only the sanitized read results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: incident-uid-result-${{ github.run_id }}-${{ github.run_attempt }}
+          path: incident-uid-result.json
+          retention-days: 30
+          if-no-files-found: warn
