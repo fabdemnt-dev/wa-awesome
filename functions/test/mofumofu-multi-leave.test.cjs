@@ -104,6 +104,6 @@ if (!process.env.FIRESTORE_EMULATOR_HOST) {
     const waiting = await createHandler(req(waitingUid, { actionId: crypto.randomUUID() }));
     await code(() => leaveGameHandler(req(waitingUid, {
       roomId: waiting.roomId, actionId: crypto.randomUUID(),
-    })), 'permission-denied');
+    })), 'failed-precondition');
   });
 }

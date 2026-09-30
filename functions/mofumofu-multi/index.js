@@ -561,7 +561,7 @@ async function leaveGameHandler(request) {
     writeHands(tx, r, room, contract.changedHands(previous, next), deleteAt);
     // 判定待ちの非当事者が退出したときは秘密の pendingOffer を維持する。
     tx.set(r.server, contract.serverStateAfterOffer(next, deleteAt));
-    const roomWrites = contract.roomWritesAfterJudgment(next);
+    const roomWrites = contract.roomWritesAfterLeave(next);
     if (finished) roomWrites.deleteAt = deleteAt;
     tx.update(r.room, roomWrites);
     const result = { roomId, status: next.status, finishReason: next.finishReason ?? null };

@@ -483,6 +483,12 @@ function roomWritesAfterJudgment(next) {
     finalResult: next.finalResult ? structuredClone(next.finalResult) : null,
   };
 }
+function roomWritesAfterLeave(next) {
+  return {
+    ...roomWritesAfterJudgment(next),
+    playerStatus: { ...next.playerStatus },
+  };
+}
 function serverStateAfterJudgment(next, deleteAt) {
   return {
     seatOrder: [...next.seatOrder],
@@ -609,6 +615,7 @@ module.exports = {
   roomWritesAfterOffer,
   serverStateAfterOffer,
   roomWritesAfterJudgment,
+  roomWritesAfterLeave,
   serverStateAfterJudgment,
   offerResult,
   judgmentResult,

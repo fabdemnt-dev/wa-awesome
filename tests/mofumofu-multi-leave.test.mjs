@@ -34,6 +34,7 @@ test('既存leaveGame: 4人継続、次手番と非手番、秘密手札・捨�
   assert.deepEqual(next.hands.S1, []);
   assert.deepEqual(next.discard, oldHand);
   assert.equal(next.handCounts.S1, 0);
+  assert.equal(contract.roomWritesAfterLeave(next).playerStatus.S1, 'left');
   assert.deepEqual(next.faceUpCards.S1, base.faceUpCards.S1);
   assert.equal(rules.validTargets(next, 'S2').includes('S1'), false);
   const later = rules.leaveGame(playing(5), 'S5');
@@ -101,4 +102,5 @@ test('既存finished cleanupと新規入口を維持し、clientはFirestoreへ�
   assert.match(server, /const leaveMofumofuMultiGame = onCall\(callableOptions/);
   assert.match(server, /const seatId = seatIdOrNull\(memberSnap\.exists \? memberSnap\.data\(\) : null\)/);
   assert.match(server, /tx\.set\(r\.server, contract\.serverStateAfterOffer\(next, deleteAt\)\)/);
+  assert.match(server, /const roomWrites = contract\.roomWritesAfterLeave\(next\)/);
 });
