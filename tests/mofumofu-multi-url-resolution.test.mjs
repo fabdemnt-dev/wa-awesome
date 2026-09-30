@@ -90,14 +90,14 @@ test('multi public gate is enabled and existing two-player entry remains unchang
   assert.match(existingPage, /<script type="module" src="\.\/script\.js\?v=20260925-4"><\/script>/);
 });
 
-test('production multi stylesheet, module and return URL resolve under the GitHub Pages project', () => {
+test('production multi stylesheet, module and title return resolve under the GitHub Pages project', () => {
   const origin = 'https://fabdemnt-dev.github.io/wa-awesome/toybox/mofumofu-gathering/online/multi/';
   const stylesheet = attribute(page.match(/<link[^>]+rel="stylesheet"[^>]*>/)?.[0] ?? '', 'href');
   const module = attribute(page.match(/<script[^>]+type="module"[^>]*><\/script>/)?.[0] ?? '', 'src');
-  const back = attribute(page.match(/<a[^>]+id="toybox-return"[^>]*>/)?.[0] ?? '', 'href');
+  const back = attribute(page.match(/<a[^>]+href="\.\.\/\.\.\/"[^>]*>/)?.[0] ?? '', 'href');
   assert.equal(new URL(stylesheet, origin).pathname, '/wa-awesome/toybox/mofumofu-gathering/online/multi/style.css');
   assert.equal(new URL(module, origin).pathname, '/wa-awesome/toybox/mofumofu-gathering/online/multi/script.js');
-  assert.equal(new URL(back, origin).href, 'https://fabdemnt-dev.github.io/wa-awesome/toybox/');
+  assert.equal(new URL(back, origin).href, 'https://fabdemnt-dev.github.io/wa-awesome/toybox/mofumofu-gathering/');
 });
 
 test('every statically referenced UI id exists before the multi client starts', () => {
