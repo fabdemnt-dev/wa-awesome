@@ -169,7 +169,7 @@ test('3人生存時も3人目を含めて最少枚数を選ぶ実装である', 
 
 
 test('公開更新時にCSSとJSの古いキャッシュを使わず、ゲーム中に自動スクロールしない', () => {
-  assert.ok(html.includes('style.css?v=20260921-2'));
+  assert.ok(html.includes('style.css?v=20261001-1'));
   assert.ok(html.includes('script.js?v=20260921-2'));
   assert.doesNotMatch(script, /window\.scrollTo/);
   assert.doesNotMatch(script, /scrollIntoView/);
@@ -182,6 +182,10 @@ test('山札は裏向きカードを残し、カード中央の？だけ表示�
   assert.doesNotMatch(html, /class="deck-card"[^>]*>？<\/div>/);
 });
 
+
+test('タイトル画面だけがおもちゃ箱への戻り口を持つ', () => {
+  assert.match(html, /class="secondary big title-return-link" href="\.\.\/">おもちゃ箱へ戻る<\/a>/);
+});
 
 test('タイトル画面でひとり用とローカルふたり用を選べる', () => {
   assert.match(html, /id="soloBtn">ひとりであそぶ/);
