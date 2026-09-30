@@ -8,12 +8,12 @@ import { clearSavedRoom, ROOM_STATUS, sessionFailureReason, sessionRecoveryNotic
 
 export function canForgetFinishedRoom(state) {
   return Boolean(state.roomId && state.seatId && state.room?.status === ROOM_STATUS.FINISHED
-    && state.finishedConfirmedRoomId === state.roomId && state.connectionState === 'connected');
+    && state.finishedConfirmedRoomId === state.roomId && state.connectionState === 'connected'
+    && !state.leaveRequest);
 }
 
-// finished がサーバー正本で確定した端末だけを切り離す。ゲームroomへの書込みは行わない。
-export function forgetFinishedRoom({ state, storage, stopRealtime, retirePresence, forgetInvite, resetEntryView }) {
-  if (!canForgetFinishedRoom(state)) return false;
+// 端末だけの切離し。playing退出ではCallable成功後にだけ呼ぶ。
+export function clearMultiLocalRoom({ state, storage, stopRealtime, retirePresence, forgetInvite, resetEntryView }) {
   const roomId = state.roomId;
   state.resumeGeneration += 1;
   stopRealtime();
@@ -26,6 +26,11 @@ export function forgetFinishedRoom({ state, storage, stopRealtime, retirePresenc
   state.resumeFlight = null; state.handRetryFlight = null;
   state.lastSuccessfulResumeAt = 0; state.lastSuccessfulResumeRoomId = null;
   return true;
+}
+
+export function forgetFinishedRoom(options) {
+  if (!canForgetFinishedRoom(options.state)) return false;
+  return clearMultiLocalRoom(options);
 }
 
 // 既存版と同じ順序: 認証 → 旧connectionのretire → connectionId発行 → presence認可 → presence開始 → resume → 反映。

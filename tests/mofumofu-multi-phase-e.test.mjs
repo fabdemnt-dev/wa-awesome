@@ -112,7 +112,7 @@ test('E-3 モード選択: 修飾クリックは素通しし、無効モード�
   assert.ok(multiEntry.includes('event.preventDefault()'));
   assert.ok(multiEntry.includes('document.createElement(mode.enabled ? \'a\' : \'span\')'), '無効モードをリンクで描いている');
   // 3〜6人版ページ自体のキャッシュ版数は固定（ランダム生成・時刻生成をしない）。
-  assert.ok(multiPage.includes('../multi/script.js?v=20260930-1'));
+  assert.ok(multiPage.includes('../multi/script.js?v=20260930-2'));
   assert.ok(multiPage.includes('../multi/style.css?v=20260929-1'));
   assert.equal(/\?v=\$\{/.test(multiPage), false, '版数を変数で組み立てている');
   assert.equal(/Math\.random|Date\.now\(\)\s*\)\s*\?v=/.test(multiPage), false);
@@ -1034,18 +1034,18 @@ test('E-15 あそびかた: いま遊べるルールだけを書き、未実装�
   assert.ok(multiPage.includes('id="help-body"'));
 });
 
-test('E-16 未実装機能をUIとクライアントに出さない（退出・部屋を閉じる・観戦・NPC・40枚）', () => {
+test('E-16 未実装機能をUIとクライアントに出さない（部屋を閉じる・観戦・NPC・40枚）', () => {
   const ui = `${multiPage}\n${multiClient}\n${multiEntry}`;
   assert.equal(ui.includes('close-room'), false, '2人版の閉室UIが混ざっている');
   assert.equal(ui.includes('closeMofumofuMultiRoom'), false, '未実装の閉室Callableを呼んでいる');
-  assert.equal(/leaveMofumofuMulti|退出(する|ボタン)|ゲームから抜ける/.test(ui), false, '未実装の退出導線がある');
+  assert.ok(ui.includes('leaveMofumofuMultiGame'), '明示退出Callableがない');
   assert.equal(ui.includes('観戦'), false);
   assert.equal(ui.includes('NPC'), false);
   assert.equal(/\b40枚\b/.test(ui), false);
   assert.equal(ui.includes('id="offer-card"'), false);
   assert.equal(ui.includes('<select'), false, 'selectを使っている（既存UI契約と不一致）');
   // 未実装機能のためのCSS/ボタンも置かない。
-  assert.equal(/\.leave|\.close-room|\.spectator/.test(multiStyle), false);
+  assert.equal(/\.close-room|\.spectator/.test(multiStyle), false);
 });
 
 /* --------------------------------------------------------------- Firebase結線 */
@@ -1054,6 +1054,7 @@ test('E-17 Firebase結線: 専用Callableだけを使い、Firestoreへの書き
   for (const callable of [
     'createMofumofuMultiRoom', 'joinMofumofuMultiRoom', 'startMofumofuMultiGame',
     'makeMofumofuMultiOffer', 'judgeMofumofuMultiOffer',
+    'leaveMofumofuMultiGame',
     'authorizeMofumofuMultiPresence', 'resumeMofumofuMultiRoom',
   ]) {
     assert.ok(multiClient.includes(callable), `${callable} を使っていない`);

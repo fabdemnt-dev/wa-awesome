@@ -11,8 +11,9 @@ import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'https://w
 import { getDatabase, connectDatabaseEmulator, ref, onValue, onDisconnect, set, update, serverTimestamp } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js';
 import { resolveEnvironment, REGION } from './firebase-config.js?v=20260926-1';
 import * as core from './multi-core.js?v=20260929-4';
-import { runMofumofuMultiFullResume, createMultiResumeCoordinator, createMultiHandStartResume, handleMultiSessionFailure, canForgetFinishedRoom, forgetFinishedRoom } from './multi-resume.js?v=20260930-1';
+import { runMofumofuMultiFullResume, createMultiResumeCoordinator, createMultiHandStartResume, handleMultiSessionFailure, canForgetFinishedRoom, forgetFinishedRoom, clearMultiLocalRoom } from './multi-resume.js?v=20260930-2';
 import { createMultiPendingActionRecovery, definitiveMultiActionRejection, multiActionBlocked, multiJudgeButtonsDisabled } from './multi-action-recovery.js?v=20260929-1';
+import { leaveView, loadLeaveRequest, saveLeaveRequest, clearLeaveRequest, boundedLeaveResult } from './multi-leave.js?v=20260930-1';
 
 const environment = resolveEnvironment();
 const app = initializeApp(environment.firebase);
@@ -47,6 +48,7 @@ const state = {
   finishedConfirmedRoomId: null,
   entryBusy: false, startBusy: false, makeBusy: false, judgeBusy: false,
   makeRequest: null, judgeRequest: null, handRetryFlight: null, actionRecoveryFlight: null,
+  leaveRequest: null, leaveBusy: false,
 };
 const ui = { cardId: null, claim: null, flashTimer: null, logoTimer: null, copyTimer: null, lastLogKey: null, gatheringShown: false };
 
@@ -169,8 +171,16 @@ function setConnectionState(next, detail = '') {
   state.connectionState = next;
   message(next === 'connected' ? core.TEXT.connected : next === 'syncing' ? core.TEXT.syncing : `同期エラー${detail ? `（${detail}）` : ''}`);
   $('new-game').hidden = !canForgetFinishedRoom(state);
+  renderLeave();
 }
 function errorCode(error) { return String(error?.code || 'unknown').replace(/^functions\//, ''); }
+function renderLeave() {
+  const view = leaveView(state);
+  $('leave-panel').hidden = !view.visible;
+  $('leave-game').textContent = view.label || 'ゲームから退出';
+  $('leave-game').disabled = Boolean(view.disabled);
+  $('leave-note').textContent = view.note || '';
+}
 
 /* -------------------------------------------------------------- 画面の切り替え */
 
@@ -238,6 +248,7 @@ function renderGame(room) {
   $('tableCardSub').textContent = view.board.cardSub;
   $('offer-message').textContent = view.board.message;
   renderSteps(view);
+  renderLeave();
   // 判定済みの結果は公開room（正本）の publicOffer だけで組み立てる。
   const offer = room.publicOffer;
   const finished = view.finished;
@@ -374,12 +385,14 @@ function resetEntryView() {
   state.makeRequest = null; state.judgeRequest = null;
   state.makeBusy = false; state.judgeBusy = false; state.startBusy = false;
   state.actionRecoveryFlight = null;
+  if (state.leaveRequest) clearLeaveRequest(localStorage);
+  state.leaveRequest = null; state.leaveBusy = false;
   state.finishedConfirmedRoomId = null;
   ui.cardId = null; ui.claim = null; ui.lastLogKey = null; ui.gatheringShown = false;
   for (const id of ['turn', 'tableCardSub', 'offer-message', 'invite-note', 'start-note', 'flash', 'result']) $(id).textContent = '';
   $('tableCardMain').textContent = '？';
   for (const id of ['others', 'self-seat', 'hand', 'judgeHand', 'log', 'players', 'claimButtons', 'targetButtons', 'judgeHand', 'final-players']) $(id).replaceChildren();
-  for (const id of ['game', 'lobby', 'final-result', 'new-game', 'reconnect-wait', 'claimStep', 'targetStep', 'judgeStep', 'hand-loading']) $(id).hidden = true;
+  for (const id of ['game', 'lobby', 'final-result', 'new-game', 'leave-panel', 'reconnect-wait', 'claimStep', 'targetStep', 'judgeStep', 'hand-loading']) $(id).hidden = true;
   $('copy-invite').textContent = core.COPY_LABEL;
   renderAll();
   renderEntry();
@@ -682,17 +695,47 @@ $('copy-room-id').addEventListener('click', () => {
 $('display-name').addEventListener('input', (event) => {
   event.target.value = Array.from(event.target.value).slice(0, 12).join('');
 });
-$('new-game').addEventListener('click', () => {
-  const forgotten = forgetFinishedRoom({
-    state, storage: localStorage, stopRealtime, retirePresence, forgetInvite, resetEntryView,
-  });
-  if (!forgotten) return;
+function finishLocalRoomCleanup() {
   clearTimeout(ui.flashTimer); clearTimeout(ui.logoTimer); clearTimeout(ui.copyTimer);
   $('flash').classList.remove('show');
   $('gathering-overlay').classList.add('hidden');
   $('display-name').value = ''; $('invite-code').value = '';
   renderEntry();
   setConnectionState('connected');
+}
+$('new-game').addEventListener('click', () => {
+  if (!forgetFinishedRoom({
+    state, storage: localStorage, stopRealtime, retirePresence, forgetInvite, resetEntryView,
+  })) return;
+  finishLocalRoomCleanup();
+});
+$('leave-game').addEventListener('click', async () => {
+  if (state.leaveBusy || leaveView(state).disabled || !leaveView(state).visible) return;
+  const existing = state.leaveRequest;
+  if (!existing && !globalThis.confirm('このゲームから退出しますか？\n退出後は戻れず、手札はゲームから外れます。人数が足りなくなるとゲームは終了します。')) return;
+  const request = existing || { roomId: state.roomId, actionId: newId() };
+  if (!existing) {
+    saveLeaveRequest(localStorage, request);
+    state.leaveRequest = request;
+  }
+  state.leaveBusy = true; renderLeave();
+  try {
+    const result = await boundedLeaveResult(call('leaveMofumofuMultiGame', request));
+    if (state.leaveRequest !== request || state.roomId !== request.roomId) return;
+    if (result?.roomId !== request.roomId) throw new Error('leave-result-mismatch');
+    clearMultiLocalRoom({ state, storage: localStorage, stopRealtime, retirePresence, forgetInvite, resetEntryView });
+    finishLocalRoomCleanup();
+  } catch (error) {
+    if (state.leaveRequest !== request || state.roomId !== request.roomId) return;
+    if (['invalid-argument', 'failed-precondition', 'already-exists', 'not-found', 'permission-denied', 'unauthenticated'].includes(errorCode(error))) {
+      clearLeaveRequest(localStorage);
+      state.leaveRequest = null;
+      message(`退出できませんでした（${errorCode(error)}）。`);
+    } else message('退出結果を確認できません。同じ操作で結果を確認できます。');
+  } finally {
+    if (state.leaveRequest === request) state.leaveBusy = false;
+    renderLeave();
+  }
 });
 
 $('create-room').addEventListener('click', async () => {
@@ -747,7 +790,10 @@ globalThis.addEventListener('online', () => void requestResume('lifecycle'));
 /* -------------------------------------------------------------------- 起動 */
 
 const saved = core.loadRoom(localStorage);
-if (saved) { state.roomId = saved.roomId; state.seatId = saved.seatId; }
+if (saved) {
+  state.roomId = saved.roomId; state.seatId = saved.seatId;
+  state.leaveRequest = loadLeaveRequest(localStorage, saved.roomId);
+}
 renderEntry();
 await auth.authStateReady();
 if (!auth.currentUser) await signInAnonymously(auth);

@@ -312,6 +312,7 @@ const RULES_ERROR_MAP = Object.freeze({
   'not-your-turn': { code: 'failed-precondition', message: NOT_YOUR_TURN_ERROR },
   'not-active': { code: 'permission-denied', message: NOT_ACTIVE_ERROR },
   'pending-offer': { code: 'failed-precondition', message: '判定待ちのカードがあります。' },
+  'pending-offer-involves-seat': { code: 'failed-precondition', message: 'この判定が終わるまで退出できません。' },
   'card-not-in-hand': { code: 'failed-precondition', message: 'そのカードは手札にありません。' },
   'invalid-target': { code: 'failed-precondition', message: '渡せない相手です。' },
   'invalid-claim': { code: 'invalid-argument', message: INVALID_CLAIM_ERROR },

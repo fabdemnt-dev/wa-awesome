@@ -518,6 +518,61 @@ async function judgeOfferHandler(request) {
   }).catch((error) => { throw convertContractError(error); });
 }
 
+/* ------------------------------------------------------ explicit playing leave */
+
+async function leaveGameHandler(request) {
+  exactFields(request.data, ['roomId', 'actionId']);
+  const uid = authUid(request);
+  const roomId = roomIdFrom(request.data);
+  const actionId = actionIdFrom(request.data);
+  const store = db();
+  const now = Date.now();
+  const r = refs(roomId);
+  const actionRef = r.action(actionId);
+  const fingerprint = contract.actionFingerprint('multi-leave-game', uid, roomId, {});
+  const initialActionSnap = await actionRef.get();
+  if (initialActionSnap.exists) return replayIfPresent(initialActionSnap, fingerprint);
+  await consumeRateLimit({ kind: 'leave_uid', value: contract.digest(uid) }, contract.MAKE_UID_RATE_LIMIT, now);
+  await consumeRateLimit({ kind: 'leave_ip', value: ipHash(request) }, contract.MAKE_IP_RATE_LIMIT, now);
+
+  return store.runTransaction(async (tx) => {
+    const actionSnap = await tx.get(actionRef);
+    if (actionSnap.exists) return contract.replayAction(actionSnap.data(), fingerprint);
+    const [roomSnap, serverSnap, memberSnap] = await Promise.all([
+      tx.get(r.room), tx.get(r.server), tx.get(r.member(uid)),
+    ]);
+    if (!roomSnap.exists) fail('not-found', '部屋が見つかりません。');
+    const room = roomSnap.data();
+    const server = serverSnap.exists ? serverSnap.data() : null;
+    const seatId = seatIdOrNull(memberSnap.exists ? memberSnap.data() : null);
+    if (!seatId || memberSnap.data().uid !== uid || room.playerUids?.[seatId] !== uid) {
+      fail('permission-denied', 'この部屋の参加者ではありません。');
+    }
+    if (room.status !== rules.ROOM_STATUS.PLAYING) fail('failed-precondition', 'ゲーム中だけ退出できます。');
+    if (room.playerStatus?.[seatId] !== rules.PLAYER_STATUS.ACTIVE) fail('permission-denied', 'この席は参加中ではありません。');
+    if (!server) fail('failed-precondition', 'ゲーム状態が見つかりません。');
+    const handsByUid = await readHands(tx, r, room);
+    const previous = rulesStateFrom(room, server, handsByUid);
+    const next = contract.runRules(() => rules.leaveGame(previous, seatId));
+    const finished = next.status === rules.ROOM_STATUS.FINISHED;
+    const deleteAt = finished
+      ? Timestamp.fromMillis(now + contract.FINISHED_TTL_MS)
+      : (server.deleteAt || Timestamp.fromMillis(now + contract.PLAYING_TTL_MS));
+    writeHands(tx, r, room, contract.changedHands(previous, next), deleteAt);
+    // 判定待ちの非当事者が退出したときは秘密の pendingOffer を維持する。
+    tx.set(r.server, contract.serverStateAfterOffer(next, deleteAt));
+    const roomWrites = contract.roomWritesAfterJudgment(next);
+    if (finished) roomWrites.deleteAt = deleteAt;
+    tx.update(r.room, roomWrites);
+    const result = { roomId, status: next.status, finishReason: next.finishReason ?? null };
+    tx.create(actionRef, {
+      fingerprint, stateToken: `leave:${next.turnNumber}`, result, completedAt: now,
+      deleteAt: Timestamp.fromMillis(now + contract.ACTION_TTL_MS),
+    });
+    return result;
+  }).catch((error) => { throw convertContractError(error); });
+}
+
 /* ============================================ Phase D: presence / resume */
 
 // 失敗理由（room-not-found / not-member / room-expired / room-status）をdetailsで区別して返す。
@@ -606,6 +661,7 @@ const joinMofumofuMultiRoom = onCall(callableOptions, (request) => joinHandler(r
 const startMofumofuMultiGame = onCall(callableOptions, (request) => startHandler(request));
 const makeMofumofuMultiOffer = onCall(callableOptions, (request) => makeOfferHandler(request));
 const judgeMofumofuMultiOffer = onCall(callableOptions, (request) => judgeOfferHandler(request));
+const leaveMofumofuMultiGame = onCall(callableOptions, (request) => leaveGameHandler(request));
 const authorizeMofumofuMultiPresence = onCall(callableOptions, (request) => authorizePresenceHandler(request));
 const resumeMofumofuMultiRoom = onCall(callableOptions, (request) => resumeRoomHandler(request));
 
@@ -615,6 +671,7 @@ module.exports = {
   startMofumofuMultiGame,
   makeMofumofuMultiOffer,
   judgeMofumofuMultiOffer,
+  leaveMofumofuMultiGame,
   authorizeMofumofuMultiPresence,
   resumeMofumofuMultiRoom,
   _handlers: {
@@ -623,6 +680,7 @@ module.exports = {
     startHandler,
     makeOfferHandler,
     judgeOfferHandler,
+    leaveGameHandler,
     authorizePresenceHandler,
     resumeRoomHandler,
     cleanupMofumofuMultiDataNow,
