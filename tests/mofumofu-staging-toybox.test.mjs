@@ -35,16 +35,21 @@ test('staging choice offers real two-player and multi routes', () => {
   }
 });
 
-test('both online pages return to staging choice while GitHub Pages links stay unchanged', () => {
-  for (const page of pages) {
-    assert.match(page, /<a id="toybox-return" href="\.\.\/\.\.\/\.\.\/toybox\/">おもちゃ箱へ戻る<\/a>/);
+test('both online pages return to the correct production or staging toybox', () => {
+  for (const [index, page] of pages.entries()) {
+    const initialHref = page.match(/<a id="toybox-return" href="([^"]+)">おもちゃ箱へ戻る<\/a>/)?.[1];
+    assert.equal(initialHref, index === 0 ? '../../../toybox/' : '/wa-awesome/toybox/');
     const script = [...page.matchAll(/<script>([\s\S]*?)<\/script>/g)]
       .map((match) => match[1]).find((body) => body.includes("getElementById('toybox-return')"));
     assert.ok(script);
     for (const hostname of ['wa-awesome-mofumofu-stg.web.app', 'fabdemnt-dev.github.io']) {
-      const link = { href: '../../../toybox/' };
+      const link = { href: initialHref };
       vm.runInNewContext(script, { globalThis: { location: { hostname } }, document: { getElementById: () => link } });
-      assert.equal(link.href, hostname.startsWith('wa-awesome-') ? '/toybox/' : '../../../toybox/');
+      const pageUrl = hostname === 'fabdemnt-dev.github.io'
+        ? `https://${hostname}/wa-awesome/toybox/mofumofu-gathering/online/${index === 0 ? '' : 'multi/'}`
+        : `https://${hostname}/${index === 0 ? '' : 'multi'}`;
+      assert.equal(new URL(link.href, pageUrl).pathname,
+        hostname === 'fabdemnt-dev.github.io' ? '/wa-awesome/toybox/' : '/toybox/');
     }
   }
 });
