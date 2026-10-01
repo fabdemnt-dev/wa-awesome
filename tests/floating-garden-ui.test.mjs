@@ -67,7 +67,7 @@ test('renderer exposes 16 named tap targets, prototype limits and accessible con
   assert.match(html, /data-action="cancel"[^>]*disabled/);
   assert.match(html, /data-action="undo"[^>]*disabled/);
   assert.match(html, /CPU、複数人対戦、通信/);
-  assert.match(read('lab/floating-garden/index.html'), /対戦・CPU・通信・手番や力の消費は、まだありません/);
+  assert.match(read('lab/floating-garden/index.html'), /CPU対戦は下のリンクから遊べます/);
 });
 
 test('actual click listener selects, previews, rotates, commits, and ignores repeated commit', () => {

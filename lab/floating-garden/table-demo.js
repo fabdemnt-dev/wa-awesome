@@ -1,4 +1,4 @@
-import { createGarden, createTile, placeStone, placeTile } from './engine.js';
+import { createGarden, createTile, placeStone, placeTile } from './engine.js?v=20261001-cpu-matches';
 
 /** Fixed public fixtures for layout review, not players, a deck, or a game loop. */
 export function createTableDemo() {

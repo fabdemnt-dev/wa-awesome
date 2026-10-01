@@ -1,0 +1,32 @@
+#match-app { max-width: 1070px; margin: auto; padding: 0 24px; }
+.mode-links { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 18px; font-size: .85rem; }
+.mode-links a { color: var(--gold); display: inline-flex; align-items: center; min-height: 44px; }
+.mode-links span { align-content: center; color: var(--muted); }
+.match-setup { max-width: 650px; margin: 0 auto 20px; }
+.match-setup p { margin: 12px 0; font-size: .85rem; }
+.match-options, .match-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 14px 0; }
+.match-options small { display: block; }
+.match-setup + .rules-panel { max-width: 650px; margin: auto; }
+.match-actions > button { flex: 1 1 140px; }
+.match-actions .selection-preview { display: block; flex-shrink: 0; margin-left: 0; }
+.match-stones { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; width: 100%; }
+.match-controls .status { font-size: .85rem; }
+.match-controls { margin-top: 20px; }
+.decision-hint { color: var(--muted); font-size: .78rem; }
+.power-warning { color: #ffdaae; font-size: .8rem; }
+.match-results { margin-top: 18px; }
+.match-results ol { list-style: none; padding: 0; }
+.match-results li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.match-results span { color: var(--gold); }
+.match-results p { font-size: .8rem; }
+.match-log ol { max-height: 300px; overflow-y: auto; font-size: .73rem; padding-left: 1.4em; }
+.match-log li { margin-bottom: 6px; }
+.match-layout .read-only-board:not(.mini-board) .empty-star { display: grid; place-items: center; height: 100%; }
+@media (max-width: 779px) {
+  #match-app { padding: 0 14px; }
+  .match-layout .opponent-cards { grid-template-columns: repeat(var(--opponent-count), minmax(0, 1fr)); }
+  .match-layout .opponent-card { width: 100%; max-width: 160px; justify-self: center; }
+  .match-layout .card-zoom { overflow-wrap: anywhere; font-size: .6rem; }
+  .match-layout .match-controls { position: static; }
+  .match-controls .status { font-size: .78rem; }
+}
