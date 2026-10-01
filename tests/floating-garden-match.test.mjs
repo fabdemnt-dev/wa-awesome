@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createMatch, applyMatchAction, legalActions, getDecision, publicMatch, rankMatch, assertMatchInvariants, POWER } from '../lab/floating-garden/match-engine.js';
+import { remainingTileCounts } from '../lab/floating-garden/match-assist.js';
 import { chooseCpuAction, bestTilePlacement } from '../lab/floating-garden/cpu.js';
 import { createTile, placeTile, scoreGarden } from '../lab/floating-garden/engine.js';
 const act = (state, type, fields = {}) => {
@@ -265,4 +266,83 @@ test('150 seeded randomized legal matches terminate and replay identically, incl
     assert.deepEqual(replay, state);
   }
   for (const type of ['decline', 'pass-invite', 'pass-final']) assert.ok(seen.has(type));
+});
+
+function assertRemainingInventory(state) {
+  const before = structuredClone(state);
+  const visible = publicMatch(state);
+  const inventory = remainingTileCounts(visible);
+  assert.deepEqual(Object.keys(inventory), ['total', 'kinds']);
+  assert.equal(inventory.total, state.deck.length - state.deckCursor);
+  assert.equal(inventory.kinds.length, 10);
+  for (const kind of inventory.kinds) {
+    assert.deepEqual(Object.keys(kind), ['terrain', 'shape', 'count']);
+    assert.ok(Number.isInteger(kind.count) && kind.count >= 0);
+    assert.equal(kind.count, state.deck.slice(state.deckCursor).filter((tile) => tile.terrain === kind.terrain && tile.shape === kind.shape).length);
+  }
+  assert.deepEqual(state, before, 'counting cannot change the match');
+  return inventory;
+}
+
+test('assist counts all ten fixed kinds using only public inventory, with no order or identity output', () => {
+  for (const playerCount of [2, 3, 4]) {
+    const state = createMatch({ playerCount });
+    const inventory = assertRemainingInventory(state);
+    assert.equal(inventory.total, playerCount * 20);
+    assert.ok(inventory.kinds.every((kind) => kind.count === playerCount * 2));
+    const visible = publicMatch(state);
+    const guarded = new Proxy(visible, { get(target, key) { assert.ok(!['seed', 'deck', 'deckCursor', 'tileIds', 'nextTile'].includes(key)); return target[key]; } });
+    assert.deepEqual(remainingTileCounts(guarded), inventory);
+    assert.doesNotMatch(JSON.stringify(inventory), /tile-\d|rotation|seed|deck|nextTile/);
+    freeze(visible); assert.deepEqual(remainingTileCounts(visible), inventory);
+  }
+});
+
+test('assist excludes placed, stored and currently public tiles, and reports zero remaining for an exhausted kind', () => {
+  const state = createMatch({ playerCount: 2 });
+  state.deck.sort((a, b) => Number(b.terrain === 'cloud' && b.shape === 'straight') - Number(a.terrain === 'cloud' && a.shape === 'straight'));
+  fill(state, 0, 2);
+  state.players[1].storage = state.deck[state.deckCursor++];
+  const current = act(state, 'draw');
+  assert.equal(current.drawn.tile.terrain, 'cloud'); assert.equal(current.drawn.tile.shape, 'straight');
+  const inventory = assertRemainingInventory(current);
+  assert.equal(inventory.total, 36);
+  assert.equal(inventory.kinds.find((kind) => kind.terrain === 'cloud' && kind.shape === 'straight').count, 0);
+  assert.ok(inventory.kinds.filter((kind) => kind.terrain !== 'cloud' || kind.shape !== 'straight').every((kind) => kind.count === 4));
+});
+
+test('assist updates exactly once for draws and replacements, without recounting storage swaps or gifts', () => {
+  let state = drawn(2); const afterDraw = assertRemainingInventory(state);
+  state = act(state, 'store');
+  assert.equal(assertRemainingInventory(state).total, afterDraw.total - 1, 'empty storage draws one replacement');
+  state = act(state, 'place'); assert.equal(assertRemainingInventory(state).total, afterDraw.total - 1);
+  state = createMatch({ playerCount: 2 }); state.players[0].storage = state.deck[state.deckCursor++];
+  state = act(state, 'draw'); const beforeSwap = assertRemainingInventory(state);
+  state = act(state, 'store'); assert.deepEqual(assertRemainingInventory(state), beforeSwap, 'full storage swaps two already public tiles');
+  state = requests(state); state = act(state, 'place'); assert.deepEqual(assertRemainingInventory(state), beforeSwap);
+  state = createMatch({ playerCount: 2 }); state.players[0].storage = state.deck[state.deckCursor++];
+  const beforeUse = assertRemainingInventory(state);
+  state = act(state, 'use-storage'); assert.deepEqual(assertRemainingInventory(state), beforeUse);
+  state = act(state, 'offer', { target: 1 }); assert.deepEqual(assertRemainingInventory(state), beforeUse);
+  state = act(state, 'accept'); assert.deepEqual(assertRemainingInventory(state), beforeUse);
+  state = act(state, 'place'); assert.equal(assertRemainingInventory(state).total, beforeUse.total - 1);
+  const replacement = assertRemainingInventory(state);
+  state = act(state, 'place'); assert.deepEqual(assertRemainingInventory(state), replacement);
+});
+
+test('assist inventory stays correct through invitation/yield and complete 2/3/4-player matches', () => {
+  let state = requests(act(drawn(), 'self'), [1, 2, 3]);
+  const beforeYield = assertRemainingInventory(state);
+  state = act(state, 'yield'); assert.deepEqual(assertRemainingInventory(state), beforeYield);
+  state = act(state, 'place'); assert.equal(assertRemainingInventory(state).total, beforeYield.total - 1);
+  state = act(state, 'place'); assertRemainingInventory(state);
+  for (const playerCount of [2, 3, 4]) {
+    const { state: completed } = play(createMatch({ playerCount, seed: `inventory-${playerCount}`, humanSeat: -1 }), (current, legal) => {
+      assertRemainingInventory(current);
+      return chooseCpuAction(publicMatch(current), legal);
+    });
+    assertRemainingInventory(completed);
+    const snapshot = publicMatch(completed);
+    for (const field of ['seed', 'deck', 'deckCursor', 'assist', 'inventory', 'remainingTileCounts']) assert.ok(!Object.hasOwn(snapshot, field));
+  }
 });

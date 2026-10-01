@@ -95,3 +95,18 @@
   #match-comparison .paired-garden .compact-score .score-summary dt { font-size: .65rem; }
   #match-comparison .paired-garden .stone-breakdown li > div { flex-wrap: wrap; gap: 3px 6px; }
 }
+
+/* Optional CPU-only inventory aid. No hidden order or extra game controls. */
+.match-assist { margin: 0 0 14px; padding: 12px 0; border-block: 1px solid var(--line); }
+.assist-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.assist-heading small { color: var(--muted); font-size: .7rem; }
+.assist-current { margin: 12px 0 6px; color: #d1e2e3; font-size: .78rem; }
+.assist-current strong { color: var(--gold); }
+.assist-current > span { display: inline-block; margin-top: 6px; }
+.assist-inventory { width: 100%; border-collapse: collapse; font-size: .78rem; }
+.assist-inventory th, .assist-inventory td { border-bottom: 1px solid var(--line); padding: 8px 5px; text-align: right; }
+.assist-inventory th:first-child { text-align: left; }
+.assist-inventory th { color: #d1e2e3; font-weight: 400; }
+.assist-inventory td { color: var(--gold); }
+.assist-inventory small { margin-left: 4px; font-size: .65rem; }
+.assist-content .demo-note { margin-top: 10px; overflow-wrap: anywhere; }

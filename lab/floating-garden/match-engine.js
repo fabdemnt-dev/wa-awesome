@@ -1,5 +1,5 @@
 /** Serializable deterministic rules. No DOM, clock, network or ambient randomness. */
-import { createGarden, createTile, placeTile, placeStone, scoreGarden, validateGarden, TERRAIN, STONES } from './engine.js?v=20261001-score-details';
+import { createGarden, createTile, placeTile, placeStone, scoreGarden, validateGarden, TERRAIN, STONES } from './engine.js?v=20261001-tile-assist';
 
 export const MATCH_VERSION = 'floating-garden-match-1';
 export const POWER = Object.freeze({ initial: 4, max: 6, meditate: 1, give: 2, invite: 3, welcome: 2, stone: 3 });

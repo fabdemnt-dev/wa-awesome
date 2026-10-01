@@ -8,7 +8,7 @@ import * as cpu from '../lab/floating-garden/cpu.js';
 import * as view from '../lab/floating-garden/match-view.js';
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 
-function mount() {
+function mount({ seed = 'garden-1', chooseAction = cpu.chooseCpuAction } = {}) {
   const listeners = new Map(); let buttons = []; let details = []; let dialog = null; let html = '';
   const page = { scrollX: 0, scrollY: 250, scrollTo(x, y) { this.scrollX = x; this.scrollY = y; } };
   const root = {
@@ -35,7 +35,7 @@ function mount() {
     removeEventListener(type) { listeners.delete(type); },
   };
   const source = read('lab/floating-garden/match-app.js').replace(/^import[^\n]*\n/gm, '').replace('export function mountMatch', 'function mountMatch').replace(/const root = document\.querySelector[\s\S]*$/, '');
-  const api = runInNewContext(`${source}\nmountMatch(root, { seed: 'garden-1' });`, { ...engine, ...match, ...cpu, ...view, root, structuredClone });
+  const api = runInNewContext(`${source}\nmountMatch(root, { seed });`, { ...engine, ...match, ...cpu, chooseCpuAction: chooseAction, ...view, root, seed, structuredClone });
   const clickButton = (button) => { root.ownerDocument.activeElement = button; listeners.get('click')?.({ target: { closest: () => button } }); };
   return { api, root, page, listeners, button: (key) => root.querySelector(`[data-focus="${key}"]`), clickButton,
     click(key) { const button = this.button(key); assert.ok(button, `${key} exists`); clickButton(button); },
@@ -43,7 +43,7 @@ function mount() {
     cancel() { listeners.get('cancel')?.({ target: dialog, preventDefault() {} }); },
   };
 }
-function start(count = 4) { const app = mount(); app.click(`count-${count}`); app.click('start'); return app; }
+function start(count = 4, options) { const app = mount(options); app.click(`count-${count}`); app.click('start'); return app; }
 function applyHuman(app, command) {
   if (command.type === 'place') {
     for (let n = 0; n < command.rotation; n += 1) app.click('rotate');
@@ -73,7 +73,7 @@ function toggleExample(app, id) {
 test('CPU entry is separate and preserves free placement/demo with versioned module assets', () => {
   assert.match(read('lab/floating-garden/index.html'), /href="\.\/match.html"/);
   assert.match(read('lab/floating-garden/match.html'), /href="\.\/index.html"/);
-  for (const filename of ['match.html', 'match-app.js', 'match-view.js']) assert.match(read(`lab/floating-garden/${filename}`), /v=20261001-score-details/);
+  for (const filename of ['match.html', 'match-app.js', 'match-view.js']) assert.match(read(`lab/floating-garden/${filename}`), /v=20261001-tile-assist/);
   const app = mount(); assert.equal(app.api.getState(), null); assert.match(app.root.innerHTML, /CPUは山札の順番を見ません/);
   app.click('count-2'); app.click('start'); assert.equal(app.api.getState().players.length, 2);
   assert.equal((app.root.innerHTML.match(/class="opponent-card"/g) || []).length, 1);
@@ -170,7 +170,7 @@ test('real UI listeners complete 2/3/4 player matches including gift responses, 
 
 test('all browser module edges and entry assets use one release key and resolve to existing files', () => {
   const directory = new URL('../lab/floating-garden/', import.meta.url);
-  const version = '20261001-score-details';
+  const version = '20261001-tile-assist';
   for (const name of readdirSync(directory).filter((name) => name.endsWith('.js'))) {
     const source = read(`lab/floating-garden/${name}`);
     for (const [, path, key] of source.matchAll(/from '(\.\/[^'?]+)(?:\?v=([^']+))?'/g)) {
@@ -458,4 +458,116 @@ test('opponent switches refresh details and cannot advance a waiting CPU', () =>
     assert.equal(app.root.querySelector(`#comparison-score-${seat}-details`).open, true);
   }
   app.click('comparison-close'); app.click('cpu-next'); assert.ok(app.api.getState().revision > before.revision);
+});
+
+test('CPU-only assist starts OFF, renders no inventory until ON, and keeps hidden order out of its markup', () => {
+  const app = start();
+  assert.equal(app.api.getUi().assist, false);
+  assert.match(app.root.innerHTML, /data-action="toggle-assist"[^>]*aria-pressed="false"/);
+  assert.doesNotMatch(app.root.innerHTML, /class="assist-content"|class="assist-inventory"/);
+  app.click('toggle-assist'); assert.equal(app.api.getUi().assist, true);
+  const state = app.api.getState();
+  const html = view.renderMatchAssist(state, app.api.getUi());
+  assert.match(html, /山札全体: 残り80枚/);
+  assert.equal((html.match(/<td>8<small>枚<\/small><\/td>/g) || []).length, 10);
+  assert.match(html, /公開中の1枚・保管中・各庭のタイルは含めません/);
+  assert.match(html, /回転した向きは区別しません/); assert.match(html, /CPUの考え方は変わりません/);
+  assert.equal(app.root.querySelector('#match-assist-details').open, false);
+  const alternate = structuredClone(state); alternate.seed = 'never-serialize-this-secret';
+  alternate.deck = alternate.deck.slice().reverse();
+  assert.equal(view.renderMatchAssist(alternate, app.api.getUi()), html, 'hidden order and seed do not affect assistance');
+  assert.doesNotMatch(html, /tile-\d|rotation|seed|deckCursor|nextTile|never-serialize/);
+  app.click('toggle-assist'); assert.doesNotMatch(app.root.innerHTML, /class="assist-content"|class="assist-inventory"/);
+  for (const path of ['index.html', 'app.js', 'view.js', 'cpu.js', 'match-engine.js']) assert.doesNotMatch(read(`lab/floating-garden/${path}`), /match-assist|toggle-assist|remainingTileCounts/);
+});
+
+test('assist follows the current public tile including storage and protected replacements, with zero shown explicitly', () => {
+  const app = start(2); app.click('toggle-assist'); app.click('command-draw');
+  let state = app.api.getState();
+  const expectedText = (current) => {
+    const tile = current.drawn.tile;
+    const count = current.deck.slice(current.deckCursor).filter((other) => other.terrain === tile.terrain && other.shape === tile.shape).length;
+    return `${engine.TERRAIN[tile.terrain].name}・${tile.shape === 'bend' ? '曲線' : '直線'} · 山札にあと${count}枚`;
+  };
+  assert.ok(app.root.innerHTML.includes(expectedText(state))); assert.match(app.root.innerHTML, /山札全体: 残り39枚/);
+  app.click('command-store'); state = app.api.getState();
+  assert.equal(state.drawn.source, 'replacement'); assert.ok(app.root.innerHTML.includes(expectedText(state))); assert.match(app.root.innerHTML, /山札全体: 残り38枚/);
+  const stored = match.createMatch({ playerCount: 2 }); stored.players[0].storage = stored.deck[stored.deckCursor++];
+  const fromStorage = match.applyMatchAction(stored, match.legalActions(stored).find((action) => action.type === 'use-storage'));
+  const storedHtml = view.renderMatchAssist(fromStorage, { assist: true });
+  assert.ok(storedHtml.includes(expectedText(fromStorage))); assert.match(storedHtml, /山札全体: 残り39枚/);
+  const depleted = match.createMatch({ playerCount: 2 });
+  const candidates = depleted.deck.filter((tile) => tile.terrain === 'cloud' && tile.shape === 'straight');
+  depleted.players[0].garden[0] = candidates[0]; depleted.players[0].garden[1] = candidates[1];
+  depleted.players[1].storage = candidates[2]; depleted.drawn = { tile: candidates[3] };
+  const zero = view.renderMatchAssist(depleted, { assist: true });
+  assert.match(zero, /雲海・直線 · 山札にあと0枚/);
+  assert.match(zero, /<th scope="row">雲海<\/th><td>0<small>枚/);
+});
+
+test('assist toggles preserve pending tiles and stones, selected rotation, score details and comparison', () => {
+  for (const preview of ['tile', 'stone']) {
+    const app = start(2); app.click('command-draw'); app.click('command-store'); app.click('cell-5');
+    if (preview === 'stone') { app.click('commit'); app.click('stone-wind'); app.click('cell-5'); }
+    else app.click('rotate');
+    const state = app.api.getState(); const ui = app.api.getUi();
+    app.root.querySelector('#score-details').open = false;
+    app.click('toggle-assist'); app.click('toggle-assist');
+    assert.deepEqual(app.api.getState(), state); assert.deepEqual(app.api.getUi(), ui);
+    assert.equal(app.root.querySelector('#score-details').open, false);
+    app.click('toggle-assist'); app.root.querySelector('#match-assist-details').open = true;
+    app.click('inspect-1'); app.click('compare-pair');
+    const comparing = app.api.getUi();
+    app.click('toggle-assist'); // A queued background toggle must not affect the modal.
+    assert.deepEqual(app.api.getUi(), comparing); assert.deepEqual(app.api.getState(), state);
+    app.escape(); assert.equal(app.api.getUi().assist, true);
+    assert.deepEqual(app.api.getUi().pending, ui.pending); assert.equal(app.api.getUi().rotation, ui.rotation);
+    assert.equal(app.root.querySelector('#match-assist-details').open, true);
+    assert.equal(app.root.ownerDocument.activeElement.dataset.focus, 'inspect-1');
+  }
+});
+
+test('assist expansion and repeated toggles do not advance CPU or clear status, and restart resets it OFF', () => {
+  const app = start(); app.click('command-draw'); app.click('command-self');
+  const state = app.api.getState(); assert.ok(app.button('cpu-next'));
+  app.click('toggle-assist');
+  const ui = app.api.getUi(); const detail = app.root.querySelector('#match-assist-details'); detail.open = true;
+  app.listeners.get('click')({ target: { closest: () => null } });
+  assert.deepEqual(app.api.getState(), state); assert.deepEqual(app.api.getUi(), ui);
+  for (let count = 0; count < 6; count += 1) app.click('toggle-assist');
+  assert.deepEqual(app.api.getState(), state); assert.deepEqual(app.api.getUi(), ui);
+  app.click('restart'); app.click('cancel-reset'); assert.deepEqual(app.api.getUi(), ui);
+  const stale = app.button('toggle-assist'); app.click('restart'); app.click('confirm-reset');
+  assert.equal(app.api.getUi().assist, false); assert.notEqual(app.api.getState().seed, state.seed);
+  app.clickButton(stale); assert.equal(app.api.getUi().assist, false);
+  app.click('toggle-assist'); app.click('setup'); app.click('confirm-reset');
+  assert.equal(app.api.getState(), null); assert.equal(app.api.getUi().assist, false); assert.equal(app.button('toggle-assist'), null);
+  app.click('count-3'); app.click('start'); assert.equal(app.api.getUi().assist, false);
+  app.click('toggle-assist'); assert.match(app.root.innerHTML, /山札全体: 残り60枚/);
+});
+
+test('same-seed UI replay and every CPU input stay identical with assist OFF versus repeatedly toggled', () => {
+  for (const count of [2, 3, 4]) {
+    const plainCpu = []; const assistedCpu = [];
+    const capture = (calls) => (visible, legal) => { calls.push(structuredClone({ visible, legal })); return cpu.chooseCpuAction(visible, legal); };
+    const plain = start(count, { seed: `assist-replay-${count}`, chooseAction: capture(plainCpu) });
+    const assisted = start(count, { seed: `assist-replay-${count}`, chooseAction: capture(assistedCpu) });
+    let steps = 0;
+    while (plain.api.getState().phase !== 'finished') {
+      assert.ok(++steps < 500);
+      assisted.click('toggle-assist');
+      const state = plain.api.getState(); const decision = match.getDecision(state);
+      if (!state.players[decision.seat].isHuman) { plain.click('cpu-next'); assisted.click('cpu-next'); }
+      else {
+        const action = cpu.chooseCpuAction(match.publicMatch(state), match.legalActions(state));
+        applyHuman(plain, action); applyHuman(assisted, action);
+      }
+      assert.deepEqual(assisted.api.getState(), plain.api.getState(), `same state after step ${steps} in ${count}-player match`);
+      assert.deepEqual(match.publicMatch(assisted.api.getState()), match.publicMatch(plain.api.getState()));
+      assert.equal(assisted.api.getUi().error, false, assisted.api.getUi().message);
+    }
+    assert.deepEqual(assistedCpu, plainCpu, 'the CPU never receives added inventory, flags or hidden information');
+    for (const { visible } of assistedCpu) for (const key of ['seed', 'deck', 'deckCursor', 'assist', 'inventory', 'remainingTileCounts']) assert.ok(!Object.hasOwn(visible, key));
+    assert.deepEqual(match.rankMatch(assisted.api.getState()), match.rankMatch(plain.api.getState()));
+  }
 });

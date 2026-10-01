@@ -1,5 +1,5 @@
-import { cellName, createGarden, createTile, placeStone, placeTile, scoreGarden, STONE_CAP, STONES, TERRAIN, tilePorts } from './engine.js?v=20261001-score-details';
-import { tileArt } from './view.js?v=20261001-score-details';
+import { cellName, createGarden, createTile, placeStone, placeTile, scoreGarden, STONE_CAP, STONES, TERRAIN, tilePorts } from './engine.js?v=20261001-tile-assist';
+import { tileArt } from './view.js?v=20261001-tile-assist';
 
 const escape = (text) => String(text).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 
