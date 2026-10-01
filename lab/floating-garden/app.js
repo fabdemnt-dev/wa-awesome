@@ -1,7 +1,7 @@
-import { createExampleGarden, createGarden } from './engine.js?v=20261001-gift-layout';
-import { createSession, updateSession } from './session.js?v=20261001-gift-layout';
-import { renderComparison, renderSession } from './view.js?v=20261001-gift-layout';
-import { createTableDemo } from './table-demo.js?v=20261001-gift-layout';
+import { createExampleGarden, createGarden } from './engine.js?v=20261001-score-details';
+import { createSession, updateSession } from './session.js?v=20261001-score-details';
+import { renderComparison, renderSession } from './view.js?v=20261001-score-details';
+import { createTableDemo } from './table-demo.js?v=20261001-score-details';
 
 export function mountGarden(root) {
   let session = createSession();

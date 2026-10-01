@@ -1,5 +1,5 @@
-import { cellName, scoreGarden, STONES, TERRAIN } from './engine.js?v=20261001-gift-layout';
-import { displayedGarden } from './session.js?v=20261001-gift-layout';
+import { cellName, scoreGarden, STONES, TERRAIN } from './engine.js?v=20261001-score-details';
+import { displayedGarden } from './session.js?v=20261001-score-details';
 
 const escape = (text) => String(text).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const portNames = ['上', '右', '下', '左'];
@@ -34,18 +34,24 @@ export function renderBoard(session, { readOnly = false, compact = false, previe
   </${boardTag}>`;
 }
 
-export function renderScore(garden, committedTotal, isPreview) {
+export function renderScore(garden, committedTotal, isPreview, { idPrefix = 'score', title = isPreview ? '仮置きした庭の得点' : 'いまの庭の得点', detailsOpen = true, compact = false } = {}) {
   const score = scoreGarden(garden);
   const delta = score.total - committedTotal;
-  return `<section class="score-panel panel" aria-labelledby="score-title">
-    <div class="section-label"><h2 id="score-title">${isPreview ? '仮置きした庭の得点' : 'いまの庭の得点'}</h2><span>${isPreview ? 'PREVIEW' : 'SCORE'}</span></div>
+  const heading = compact ? 'h4' : 'h2';
+  const detailHeading = compact ? 'h5' : 'h3';
+  const cornerTypes = score.objective.corners.map((index) => garden[index]?.terrain);
+  const objectiveReason = score.objective.achieved ? '達成！ 四隅がすべて別の地形です' : cornerTypes.some((terrain) => !terrain) ? '未達成: 四隅にまだ空きマスがあります' : '未達成: 四隅に同じ地形があります';
+  const objective = `<div class="objective ${score.objective.achieved ? 'achieved' : ''}"><span aria-hidden="true">${score.objective.achieved ? '✦' : '◇'}</span><div><strong>四隅異なる地形 · ${score.objective.points}点</strong><p>${objectiveReason}<br>A1・D1・A4・D4を4種類の地形で埋めると4点</p><p>${score.objective.corners.map((index) => `${cellName(index)}: ${garden[index] ? TERRAIN[garden[index].terrain].name : '空き'}`).join(' / ')}</p></div></div>`;
+  return `<section class="score-panel panel${compact ? ' compact-score' : ''}" aria-labelledby="${escape(idPrefix)}-title">
+    <div class="section-label"><${heading} id="${escape(idPrefix)}-title">${escape(title)}</${heading}><span>${isPreview ? 'PREVIEW' : 'SCORE'}</span></div>
     <div class="total"><strong>${score.total}</strong><span>点</span>${isPreview ? `<span class="score-delta">確定済み ${committedTotal}点 → ${delta >= 0 ? '+' : ''}${delta}点</span>` : ''}</div>
     <dl class="score-summary"><div><dt>つながる流れ</dt><dd>${score.connectionPoints}<small>点</small></dd></div><div><dt>星の石</dt><dd>${score.stonePoints}<small>点</small></dd></div><div><dt>共通のお題</dt><dd>${score.objective.points}<small>点</small></dd></div></dl>
-    <div class="objective ${score.objective.achieved ? 'achieved' : ''}"><span aria-hidden="true">${score.objective.achieved ? '✦' : '◇'}</span><div><strong>四隅異なる地形</strong><p>${score.objective.achieved ? '達成！ 四隅がすべて別の地形です' : 'A1・D1・A4・D4を4種類の地形で埋めると4点'}</p></div></div>
-    <details id="score-details" open><summary>得点の内訳を見る</summary><div class="score-details">
-      <h3>流れ · ${score.connectionPoints}点</h3><p>${score.connections.length ? score.connections.map(({ from, to }) => `${cellName(from)}–${cellName(to)}`).join(' / ') : '向かい合う辺の流れが合うと1点。地形は違ってもつながります。'}</p>
-      <h3>星の石 · ${score.stonePoints}点</h3>
-      ${score.stones.length ? `<ul class="stone-breakdown">${score.stones.map((stone) => `<li><div><strong>${STONES[stone.stone].name} <small>${cellName(stone.index)}</small></strong><b>${stone.points}点</b></div><p>${stone.count}${stone.stone === 'color' ? '種類' : stone.stone === 'echo' ? '個' : '枚'} × 2${stone.capped ? ` = ${stone.rawPoints}点 → 上限6点` : ` = ${stone.points}点`}<br>${stone.matches.length ? `対象: ${stone.matches.map(cellName).join('・')}${stone.stone === 'color' ? '（重複する地形は1種類）' : ''}` : 'いまは対象がありません'}</p></li>`).join('')}</ul>` : '<p>石を置くと、何が得点になったかここに表示します。</p>'}
+    ${compact ? '' : objective}
+    <details id="${escape(idPrefix)}-details"${detailsOpen ? ' open' : ''}><summary>得点の内訳・理由を見る</summary><div class="score-details">
+      <${detailHeading}>流れ · ${score.connectionPoints}点</${detailHeading}><p>向かい合う辺の流れが合うと1点。地形は違ってもつながります。<br>${score.connections.length ? `接続: ${score.connections.map(({ from, to }) => `${cellName(from)}–${cellName(to)}`).join(' / ')}` : 'いまはつながる辺がありません'}</p>
+      <${detailHeading}>星の石 · ${score.stonePoints}点</${detailHeading}>
+      ${score.stones.length ? `<ul class="stone-breakdown">${score.stones.map((stone) => `<li><div><strong>${STONES[stone.stone].name} <small>${cellName(stone.index)}</small></strong><b>${stone.points}点</b></div><p>${STONES[stone.stone].rule}。上限6点。</p><p>${stone.count}${stone.stone === 'color' ? '種類' : stone.stone === 'echo' ? '個' : '枚'} × 2${stone.capped ? ` = ${stone.rawPoints}点 → 上限6点` : ` = ${stone.points}点`}<br>${stone.matches.length ? `対象: ${stone.matches.map(cellName).join('・')}${stone.stone === 'color' ? '（重複する地形は1種類）' : ''}` : 'いまは対象がありません'}</p></li>`).join('')}</ul>` : '<p>まだ石は置かれていません。星の石は0点です。</p>'}
+      ${compact ? `<${detailHeading}>共通のお題 · ${score.objective.points}点</${detailHeading}>${objective}` : ''}
     </div></details>
   </section>`;
 }

@@ -72,3 +72,26 @@
 .rule-example-copy > p { margin: 8px 0 12px; overflow-wrap: anywhere; }
 .rule-example-caution { padding-left: 10px; border-left: 2px solid #8399a4; color: #d1dfe1; }
 .rule-example-terrain-legend { margin-top: 10px; font-size: .73rem; color: var(--muted); }
+
+/* Reuse scoring without sharing sidebar IDs or expanding long explanations by default. */
+#match-comparison .compact-score { padding: 12px; margin-top: 12px; min-width: 0; }
+#match-comparison .compact-score .section-label { flex-wrap: wrap; gap: 4px 8px; }
+#match-comparison .compact-score h4 { margin: 0; font-size: .82rem; }
+#match-comparison .compact-score h5 { margin: 10px 0 0; color: #d7e6e6; font-size: .78rem; }
+#match-comparison .compact-score .total { margin: 4px 0 12px; }
+#match-comparison .compact-score .total > strong { font-size: 2.8rem; }
+#match-comparison .compact-score .score-summary { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+#match-comparison .compact-score .score-summary > div { display: flex; gap: 6px; }
+#match-comparison .compact-score .score-summary dt { font-size: .74rem; }
+#match-comparison .compact-score .score-summary dd { margin: 0; white-space: nowrap; }
+#match-comparison .compact-score summary { overflow-wrap: anywhere; margin-top: 6px; }
+#match-comparison .compact-score .objective { padding: 8px; margin: 8px 0; }
+#match-comparison .compact-score .objective > span { display: none; }
+@media (max-width: 599px) {
+  #match-comparison .paired-garden .compact-score { padding: 8px; }
+  #match-comparison .paired-garden .compact-score .section-label > span { display: none; }
+  #match-comparison .paired-garden .compact-score h4,
+  #match-comparison .paired-garden .compact-score summary { font-size: .72rem; }
+  #match-comparison .paired-garden .compact-score .score-summary dt { font-size: .65rem; }
+  #match-comparison .paired-garden .stone-breakdown li > div { flex-wrap: wrap; gap: 3px 6px; }
+}

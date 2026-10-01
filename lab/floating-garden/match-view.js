@@ -1,8 +1,8 @@
-import { cellName, STONES, TERRAIN, scoreGarden, tilePorts } from './engine.js?v=20261001-gift-layout';
-import { displayedGarden } from './session.js?v=20261001-gift-layout';
-import { renderBoard, renderScore, tileArt } from './view.js?v=20261001-gift-layout';
-import { getDecision, legalActions, rankMatch } from './match-engine.js?v=20261001-gift-layout';
-import { renderRuleExamples } from './match-rule-examples.js?v=20261001-gift-layout';
+import { cellName, STONES, TERRAIN, scoreGarden, tilePorts } from './engine.js?v=20261001-score-details';
+import { displayedGarden } from './session.js?v=20261001-score-details';
+import { renderBoard, renderScore, tileArt } from './view.js?v=20261001-score-details';
+import { getDecision, legalActions, rankMatch } from './match-engine.js?v=20261001-score-details';
+import { renderRuleExamples } from './match-rule-examples.js?v=20261001-score-details';
 const escape = (text) => String(text).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const shape = (tile) => tile.shape === 'bend' ? '曲線' : '直線';
 const tileText = (tile) => tile ? `${TERRAIN[tile.terrain].name}・${shape(tile)}` : 'なし';
@@ -84,7 +84,11 @@ export function renderMatchComparison(state, ui) {
   const human = state.players.find((player) => player.isHuman);
   const opponent = state.players[ui.comparison.seat];
   const pair = ui.comparison.pair;
-  const garden = (player, pending = null) => `<section class="comparison-garden${pair ? ' paired-garden' : ''}"><div class="board-title"><h3>${escape(player.name)}</h3><span>力 ${player.power}/6</span></div>${renderBoard({ garden: player.garden, pending }, { readOnly: true })}<p class="comparison-breakdown">${scoreGarden(displayedGarden({ garden: player.garden, pending })).total}点 · 保管: ${tileText(player.storage)}</p></section>`;
+  const garden = (player, pending = null) => {
+    const session = { garden: player.garden, pending };
+    const committed = scoreGarden(player.garden);
+    return `<section class="comparison-garden${pair ? ' paired-garden' : ''}"><div class="board-title"><h3>${escape(player.name)}</h3><span>力 ${player.power}/6</span></div>${renderBoard(session, { readOnly: true, label: `${player.name}、${pending ? '仮置きを含む' : '確定済み'}、4行4列の閲覧用の庭` })}<p class="comparison-breakdown">${pending ? `${cellName(pending.index)}の仮置きを含む` : '確定済み'} · 保管: ${tileText(player.storage)}</p>${renderScore(displayedGarden(session), committed.total, Boolean(pending), { idPrefix: `comparison-score-${player.seat}`, title: pending ? '仮置きした庭の得点' : '確定した庭の得点', detailsOpen: false, compact: true })}</section>`;
+  };
   return `<dialog id="match-comparison" class="garden-dialog" aria-labelledby="match-comparison-title"><div class="dialog-heading"><h2 id="match-comparison-title">${pair ? '譲る・招く前に見比べる' : `${escape(opponent.name)}を拡大`}</h2>${control('comparison-close', '閉じる', 'autofocus')}</div><div class="comparison-players">${state.players.filter((player) => !player.isHuman).map((player) => control(`compare-${player.seat}`, `P${player.seat + 1} ${escape(player.name)}`, `aria-pressed="${opponent.seat === player.seat}"`)).join('')}</div><div class="comparison-modes">${control('compare-single', '大きく見る', `aria-pressed="${!pair}"`)}${control('compare-pair', '自庭と比較', `aria-pressed="${pair}"`)}</div><p class="comparison-help">${state.drawn ? `公開の1枚: ${tileText(state.drawn.tile)}。` : ''}比較中は手番が進みません。閉じると仮置きや選択を保って戻ります。</p><div class="comparison-boards${pair ? ' is-pair' : ''}">${pair ? garden(human, ui.pending) : ''}${garden(opponent)}</div><p class="comparison-legend">${Object.values(TERRAIN).map(({ mark, name }) => `${mark}＝${name}`).join(' / ')}<br>${Object.values(STONES).map(({ mark, name }) => `${mark}＝${name}`).join(' / ')}</p></dialog>`;
 }
 

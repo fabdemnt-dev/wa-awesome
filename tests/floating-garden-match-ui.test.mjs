@@ -73,7 +73,7 @@ function toggleExample(app, id) {
 test('CPU entry is separate and preserves free placement/demo with versioned module assets', () => {
   assert.match(read('lab/floating-garden/index.html'), /href="\.\/match.html"/);
   assert.match(read('lab/floating-garden/match.html'), /href="\.\/index.html"/);
-  for (const filename of ['match.html', 'match-app.js', 'match-view.js']) assert.match(read(`lab/floating-garden/${filename}`), /v=20261001-gift-layout/);
+  for (const filename of ['match.html', 'match-app.js', 'match-view.js']) assert.match(read(`lab/floating-garden/${filename}`), /v=20261001-score-details/);
   const app = mount(); assert.equal(app.api.getState(), null); assert.match(app.root.innerHTML, /CPUは山札の順番を見ません/);
   app.click('count-2'); app.click('start'); assert.equal(app.api.getState().players.length, 2);
   assert.equal((app.root.innerHTML.match(/class="opponent-card"/g) || []).length, 1);
@@ -170,7 +170,7 @@ test('real UI listeners complete 2/3/4 player matches including gift responses, 
 
 test('all browser module edges and entry assets use one release key and resolve to existing files', () => {
   const directory = new URL('../lab/floating-garden/', import.meta.url);
-  const version = '20261001-gift-layout';
+  const version = '20261001-score-details';
   for (const name of readdirSync(directory).filter((name) => name.endsWith('.js'))) {
     const source = read(`lab/floating-garden/${name}`);
     for (const [, path, key] of source.matchAll(/from '(\.\/[^'?]+)(?:\?v=([^']+))?'/g)) {
@@ -309,4 +309,153 @@ test('recipient buttons use one full-width grid column rather than last-row flex
   assert.match(css, /\.match-choice-buttons\s*>\s*button\s*\{[^}]*width:\s*100%;[^}]*min-width:\s*0;[^}]*overflow-wrap:\s*anywhere/);
   assert.match(css, /\.match-own-choices \.match-choice-buttons\s*\{[^}]*repeat\(auto-fit, minmax\(min\(100%, 140px\), 1fr\)\)/);
   assert.doesNotMatch(css, /\.match-offer-choices[^}]*:(?:last|nth)-child/);
+});
+
+function comparisonScore(html, seat) {
+  return html.match(new RegExp(`<section class="score-panel panel compact-score" aria-labelledby="comparison-score-${seat}-title">([\\s\\S]*?)<\\/section>`))?.[1];
+}
+function assertBreakdown(html, garden) {
+  const score = engine.scoreGarden(garden);
+  assert.match(html, new RegExp(`<strong>${score.total}</strong><span>点</span>`));
+  for (const [label, points] of [['つながる流れ', score.connectionPoints], ['星の石', score.stonePoints], ['共通のお題', score.objective.points]]) {
+    assert.ok(html.includes(`<dt>${label}</dt><dd>${points}<small>点</small>`));
+  }
+  for (const stone of score.stones) {
+    assert.ok(html.includes(`${engine.STONES[stone.stone].name} <small>${engine.cellName(stone.index)}</small></strong><b>${stone.points}点</b>`));
+    assert.ok(html.includes(engine.STONES[stone.stone].rule));
+    if (stone.matches.length) assert.ok(html.includes(`対象: ${stone.matches.map(engine.cellName).join('・')}`));
+  }
+  for (const edge of score.connections) assert.ok(html.includes(`${engine.cellName(edge.from)}–${engine.cellName(edge.to)}`));
+}
+
+// Reconstruct the reported 36-point moon garden: the score must stay unchanged.
+function reportedMoonGarden() {
+  const terrain = ['cloud', 'cloud', 'lake', 'magic', 'forest', 'lake', 'lake', 'lake', 'crystal', 'forest', 'cloud', 'forest', 'lake', 'lake', 'magic', 'crystal'];
+  const bends = new Map([[1, 1], [5, 0], [6, 2], [8, 0], [9, 2], [10, 0], [11, 3], [14, 0]]);
+  let garden = terrain.map((type, index) => engine.createTile(type, bends.has(index) ? 'bend' : 'straight', bends.get(index) ?? ([2, 15].includes(index) ? 1 : 0)));
+  for (const [index, stone] of [[2, 'wind'], [4, 'color'], [5, 'moon'], [6, 'echo']]) garden = engine.placeStone(garden, index, stone);
+  return garden;
+}
+
+test('reported 36-point opponent shows flow edges, each stone formula, and corner reasons without changing scoring', () => {
+  const state = match.createMatch(); state.players[1].garden = reportedMoonGarden();
+  const score = engine.scoreGarden(state.players[1].garden);
+  assert.deepEqual([score.total, score.connectionPoints, score.stonePoints, score.objective.points], [36, 12, 20, 4]);
+  assert.deepEqual(score.stones.map(({ stone, points }) => [stone, points]), [['wind', 2], ['color', 6], ['moon', 6], ['echo', 6]]);
+  const before = structuredClone(state);
+  const html = view.renderMatchComparison(state, { comparison: { seat: 1, pair: false }, pending: null });
+  const panel = comparisonScore(html, 1); assert.ok(panel);
+  assertBreakdown(panel, state.players[1].garden);
+  assert.match(panel, /接続: A1–A2/); assert.match(panel, /向かい合う辺の流れが合うと1点/);
+  assert.match(panel, /3枚 × 2 = 6点/); assert.match(panel, /3種類 × 2 = 6点/); assert.match(panel, /3個 × 2 = 6点/);
+  assert.match(panel, /A1: 雲海 \/ D1: 魔力地 \/ A4: 月光湖 \/ D4: 結晶原/);
+  assert.match(panel, /達成！ 四隅がすべて別の地形です/);
+  assert.match(panel, /<details id="comparison-score-1-details">/);
+  assert.doesNotMatch(html, /data-action="cell"|PREVIEW|score-delta/);
+  assert.deepEqual(state, before);
+});
+
+test('every single and paired opponent gets an independent, current score panel with unique IDs', () => {
+  for (const count of [2, 3, 4]) {
+    const state = match.createMatch({ playerCount: count });
+    state.players[1].garden = reportedMoonGarden();
+    if (count > 2) state.players[2].garden = engine.createExampleGarden();
+    for (let seat = 1; seat < count; seat += 1) for (const pair of [false, true]) {
+      const ui = { pending: null, rotation: 0, stone: null, comparison: { seat, pair } };
+      const html = view.renderMatch(state, ui);
+      const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map(([, id]) => id);
+      assert.equal(new Set(ids).size, ids.length, `no duplicate IDs at ${count}/${seat}/${pair}`);
+      assert.equal((html.match(/class="score-panel panel compact-score"/g) || []).length, pair ? 2 : 1);
+      assertBreakdown(comparisonScore(html, seat), state.players[seat].garden);
+      if (pair) assertBreakdown(comparisonScore(html, 0), state.players[0].garden);
+      else assert.equal(comparisonScore(html, 0), undefined);
+      for (const other of state.players.filter((player) => !player.isHuman && player.seat !== seat)) assert.equal(comparisonScore(html, other.seat), undefined);
+    }
+  }
+});
+
+test('comparison distinguishes tile and stone preview from committed opponent and human totals', () => {
+  const state = match.createMatch();
+  state.players[0].garden = engine.createExampleGarden();
+  state.players[0].garden[9] = null;
+  state.players[1].garden = reportedMoonGarden();
+  const tile = engine.createTile('lake', 'straight', 1);
+  const previews = [{ type: 'tile', index: 9, tile }, { type: 'stone', index: 10, stone: 'color' }];
+  for (const pending of previews) {
+    const before = structuredClone({ state, pending });
+    const html = view.renderMatchComparison(state, { comparison: { seat: 1, pair: true }, pending });
+    const human = comparisonScore(html, 0); const opponent = comparisonScore(html, 1);
+    const committed = engine.scoreGarden(state.players[0].garden);
+    const preview = engine.applyPlacement(state.players[0].garden, pending);
+    assertBreakdown(human, preview); assertBreakdown(opponent, state.players[1].garden);
+    assert.match(human, /仮置きした庭の得点/); assert.match(human, new RegExp(`確定済み ${committed.total}点 →`));
+    assert.ok(html.includes(`${engine.cellName(pending.index)}の仮置きを含む`));
+    assert.match(opponent, /確定した庭の得点/); assert.doesNotMatch(opponent, /PREVIEW|score-delta|仮置き/);
+    assert.deepEqual({ state, pending }, before);
+  }
+});
+
+test('score reasons explain empty stones, missing or repeated corners, and capped stones', () => {
+  const state = match.createMatch();
+  let panel = comparisonScore(view.renderMatchComparison(state, { comparison: { seat: 1, pair: false } }), 1);
+  assert.match(panel, /まだ石は置かれていません。星の石は0点です/);
+  assert.match(panel, /いまはつながる辺がありません/); assert.match(panel, /四隅にまだ空きマスがあります/);
+  state.players[1].garden = engine.createExampleGarden();
+  panel = comparisonScore(view.renderMatchComparison(state, { comparison: { seat: 1, pair: false } }), 1);
+  assert.match(panel, /4種類 × 2 = 8点 → 上限6点/);
+  state.players[1].garden[0] = engine.createTile('magic');
+  panel = comparisonScore(view.renderMatchComparison(state, { comparison: { seat: 1, pair: false } }), 1);
+  assert.match(panel, /四隅に同じ地形があります/);
+  assert.match(panel, /<dt>共通のお題<\/dt><dd>0<small>点/);
+});
+
+function toggleScore(app, seat) {
+  const detail = app.root.querySelector(`#comparison-score-${seat}-details`); assert.ok(detail);
+  detail.open = !detail.open;
+  const target = { closest: () => null };
+  app.listeners.get('click')?.({ target });
+  app.listeners.get('keydown')?.({ key: 'Enter', target, preventDefault() {} });
+}
+
+test('comparison details remain independent of sidebar and preserve tile/stone preview, dismissal and focus', () => {
+  for (const preview of ['tile', 'stone']) {
+    const app = start(2);
+    app.click('command-draw'); app.click('command-store'); app.click('cell-5');
+    if (preview === 'stone') { app.click('commit'); app.click('stone-wind'); app.click('cell-5'); }
+    else app.click('rotate');
+    const before = app.api.getState(); const ui = app.api.getUi();
+    app.root.querySelector('#score-details').open = false;
+    app.click('inspect-1');
+    assert.equal(app.root.querySelector('#comparison-score-1-details').open, false);
+    toggleScore(app, 1); app.click('compare-pair');
+    assert.equal(app.root.querySelector('#comparison-score-1-details').open, true);
+    assert.equal(app.root.querySelector('#comparison-score-0-details').open, false);
+    toggleScore(app, 0); toggleScore(app, 1); app.click('compare-single');
+    assert.equal(app.root.querySelector('#comparison-score-1-details').open, false);
+    assert.equal(app.root.querySelector('#score-details').open, false);
+    assert.deepEqual(app.api.getState(), before); assert.deepEqual(app.api.getUi().pending, ui.pending);
+    for (const close of ['comparison-close', 'escape', 'cancel']) {
+      if (!app.api.getUi().comparison) app.click('inspect-1');
+      toggleScore(app, 1);
+      if (close === 'comparison-close') app.click(close); else app[close]();
+      assert.deepEqual(app.api.getState(), before); assert.deepEqual(app.api.getUi(), ui);
+      assert.equal(app.root.ownerDocument.activeElement.dataset.focus, 'inspect-1');
+      assert.equal(app.root.querySelector('#score-details').open, false);
+    }
+  }
+});
+
+test('opponent switches refresh details and cannot advance a waiting CPU', () => {
+  const app = start(); app.click('command-draw'); app.click('command-self');
+  assert.ok(app.button('cpu-next')); const before = app.api.getState();
+  app.click('inspect-1'); toggleScore(app, 1); app.click('compare-pair');
+  for (const seat of [2, 3, 1]) {
+    app.click(`compare-${seat}`);
+    assertBreakdown(comparisonScore(app.root.innerHTML, seat), before.players[seat].garden);
+    assert.equal(app.root.querySelector(`#comparison-score-${seat}-details`).open, false);
+    toggleScore(app, seat); app.click('cpu-next');
+    assert.deepEqual(app.api.getState(), before);
+    assert.equal(app.root.querySelector(`#comparison-score-${seat}-details`).open, true);
+  }
+  app.click('comparison-close'); app.click('cpu-next'); assert.ok(app.api.getState().revision > before.revision);
 });
