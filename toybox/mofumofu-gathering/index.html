@@ -102,9 +102,9 @@
     </div>
   </div>
 
-  <dialog id="howDialog">
+  <dialog id="howDialog" aria-labelledby="howTitle">
     <div class="dialog-body">
-      <h2>あそびかた</h2>
+      <h2 id="howTitle" tabindex="-1" autofocus>あそびかた</h2>
       <p>手札から1枚を裏向きで渡し、動物の名前を宣言します。宣言は本当でも、うそでもOK！</p>
       <p>受け取った人は「ほんと？」か「うそ！」で判定します。</p>
       <ul>
@@ -132,7 +132,7 @@
     </div>
   </dialog>
 
-  <script src="script.js?v=20260921-2"></script>
+  <script src="script.js?v=20261001-3"></script>
   <script type="module" src="online-entry.js?v=20260922-1"></script>
   <script type="module" src="multi-entry.js?v=20260929-1"></script>
 </body>

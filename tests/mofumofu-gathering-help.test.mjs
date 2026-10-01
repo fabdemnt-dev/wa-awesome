@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dialogScrollTargets } from '../toybox/mofumofu-gathering/online/connection-control.js';
+import { runInNewContext } from 'node:vm';
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 const soloHtml = read('toybox/mofumofu-gathering/index.html');
@@ -93,11 +94,73 @@ test('13. 閉じる操作領域は44px以上（CSS保証）', () => {
   assert.ok(onlineCss.includes('.big{width:100%;min-height:54px;'), 'わかった！等の主要ボタンは54px');
 });
 
-test('14. ダイアログのスクロール初期位置は収まれば先頭、収まらなければ末尾（全文が読める）', () => {
+test('14. 2人＋こはるオンライン版の既存スクロール処理は変更しない', () => {
   assert.deepEqual(dialogScrollTargets({ contentH: 400, viewH: 600, wasAtBottom: false }), [0]);
   assert.deepEqual(dialogScrollTargets({ contentH: 600, viewH: 600, wasAtBottom: false }), [0]);
   assert.deepEqual(dialogScrollTargets({ contentH: 900, viewH: 600, wasAtBottom: false }), [0, 300]);
   assert.deepEqual(dialogScrollTargets({ contentH: 900, viewH: 600, wasAtBottom: true }), [300]);
   assert.deepEqual(dialogScrollTargets({ contentH: 900, viewH: 0, wasAtBottom: false }), [0], '高さ未確定時は動かさない');
   assert.deepEqual(dialogScrollTargets({ contentH: 0, viewH: 600, wasAtBottom: false }), [0]);
+});
+
+// Run the real help event handlers without Firebase or a room. Browser-native
+// modal focus/keyboard behavior is additionally checked in the UI smoke test.
+function helpHarness(source, dialogId) {
+  const nodes = new Map();
+  const node = (id) => {
+    if (!nodes.has(id)) nodes.set(id, {
+      listeners: {}, open: false, scrollTop: 0, scrollHeight: 900, clientHeight: 600,
+      addEventListener(type, callback) { (this.listeners[type] ||= []).push(callback); },
+      dispatch(type) { for (const callback of this.listeners[type] || []) callback({ target: this }); },
+      append() {},
+      showModal() { this.open = true; this.scrollTop = 300; },
+      close() { this.open = false; },
+    });
+    return nodes.get(id);
+  };
+  runInNewContext(source, {
+    document: { getElementById: node, createElement: () => ({ append() {} }) },
+    core: { helpSections: () => [] },
+    $: node,
+  });
+  return { node, dialog: node(dialogId) };
+}
+
+const localClient = read('toybox/mofumofu-gathering/script.js');
+const multiClient = read('toybox/mofumofu-gathering/online/multi/script.js');
+const multiHtml = read('toybox/mofumofu-gathering/online/multi/index.html');
+const helpStart = multiClient.indexOf("const helpDialog = $('help-dialog');");
+const helpEnd = multiClient.indexOf('/* ------------------------------------------------------------------ 描画部品 */');
+assert.ok(helpStart >= 0 && helpEnd > helpStart, 'locate the real multiplayer help wiring');
+
+for (const [name, source, dialogId, openers, closer] of [
+  ['local', localClient, 'howDialog', ['howBtn', 'gameHowBtn'], 'closeHowBtn'],
+  ['multi', multiClient.slice(helpStart, helpEnd), 'help-dialog', ['open-help', 'open-help-lobby', 'game-help'], 'close-help'],
+]) {
+  for (const opener of openers) {
+    test(`${name} help opens and reopens at the beginning from ${opener}`, () => {
+      const { node, dialog } = helpHarness(source, dialogId);
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        node(opener).dispatch('click');
+        assert.equal(dialog.open, true, 'still uses a modal dialog');
+        dialog.dispatch('toggle'); // Catch delayed handlers which scroll back down.
+        assert.equal(dialog.scrollTop, 0, 'the explanation begins at the top');
+        dialog.scrollTop = 300; // A reader may scroll to the end before closing.
+        node(closer).dispatch('click');
+        assert.equal(dialog.open, false, 'the existing close button still works');
+      }
+    });
+  }
+}
+
+test('both help dialogs initially focus their labelled heading, not the last button', () => {
+  for (const [html, dialogId, titleId] of [
+    [soloHtml, 'howDialog', 'howTitle'], [multiHtml, 'help-dialog', 'help-title'],
+  ]) {
+    const dialog = html.match(new RegExp(`<dialog\\b[^>]*id="${dialogId}"[^>]*>`))?.[0];
+    assert.ok(dialog?.includes(`aria-labelledby="${titleId}"`));
+    const heading = html.match(new RegExp(`<h2\\b[^>]*id="${titleId}"[^>]*>`))?.[0];
+    assert.ok(heading?.includes('tabindex="-1"'), 'heading accepts programmatic focus');
+    assert.match(heading, /\bautofocus(?:\s|>)/, 'native showModal focuses the start of the content');
+  }
 });

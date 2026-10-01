@@ -450,7 +450,13 @@ $("duoBtn").addEventListener("click",()=>startGame("duo"));
 $("passReadyBtn").addEventListener("click",acceptPass);
 $("retryBtn").addEventListener("click",()=>startGame(selectedMode));
 $("titleBtn").addEventListener("click",()=>{clearTimers();game=null;showScreen("titleScreen");});
-$("howBtn").addEventListener("click",()=>$("howDialog").showModal());
-$("gameHowBtn").addEventListener("click",()=>$("howDialog").showModal());
+function openHowDialog() {
+  const dialog = $("howDialog");
+  dialog.showModal();
+  // Reopening after reading the end should also start at the explanation.
+  dialog.scrollTop = 0;
+}
+$("howBtn").addEventListener("click",openHowDialog);
+$("gameHowBtn").addEventListener("click",openHowDialog);
 $("closeHowBtn").addEventListener("click",()=>$("howDialog").close());
 $("howDialog").addEventListener("click",e=>{if(e.target===$("howDialog")) $("howDialog").close();});
