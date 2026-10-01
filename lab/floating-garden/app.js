@@ -1,7 +1,7 @@
-import { createExampleGarden, createGarden } from './engine.js?v=20261001-cpu-matches-r2';
-import { createSession, updateSession } from './session.js?v=20261001-cpu-matches-r2';
-import { renderComparison, renderSession } from './view.js?v=20261001-cpu-matches-r2';
-import { createTableDemo } from './table-demo.js?v=20261001-cpu-matches-r2';
+import { createExampleGarden, createGarden } from './engine.js?v=20261001-rule-examples';
+import { createSession, updateSession } from './session.js?v=20261001-rule-examples';
+import { renderComparison, renderSession } from './view.js?v=20261001-rule-examples';
+import { createTableDemo } from './table-demo.js?v=20261001-rule-examples';
 
 export function mountGarden(root) {
   let session = createSession();

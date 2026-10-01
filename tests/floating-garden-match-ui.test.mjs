@@ -60,10 +60,20 @@ function toHumanPlace(app) {
   assert.equal(app.api.getState().step, 'place');
 }
 
+// Native details toggle themselves; clicks/Enter bubble without a game button.
+function toggleExample(app, id) {
+  const detail = app.root.querySelector(`#rule-example-${id}`);
+  assert.ok(detail);
+  detail.open = !detail.open;
+  const target = { closest: () => null };
+  app.listeners.get('click')?.({ target });
+  app.listeners.get('keydown')?.({ key: 'Enter', target, preventDefault() {} });
+}
+
 test('CPU entry is separate and preserves free placement/demo with versioned module assets', () => {
   assert.match(read('lab/floating-garden/index.html'), /href="\.\/match.html"/);
   assert.match(read('lab/floating-garden/match.html'), /href="\.\/index.html"/);
-  for (const filename of ['match.html', 'match-app.js', 'match-view.js']) assert.match(read(`lab/floating-garden/${filename}`), /v=20261001-cpu-matches-r2/);
+  for (const filename of ['match.html', 'match-app.js', 'match-view.js']) assert.match(read(`lab/floating-garden/${filename}`), /v=20261001-rule-examples/);
   const app = mount(); assert.equal(app.api.getState(), null); assert.match(app.root.innerHTML, /CPUは山札の順番を見ません/);
   app.click('count-2'); app.click('start'); assert.equal(app.api.getState().players.length, 2);
   assert.equal((app.root.innerHTML.match(/class="opponent-card"/g) || []).length, 1);
@@ -160,7 +170,7 @@ test('real UI listeners complete 2/3/4 player matches including gift responses, 
 
 test('all browser module edges and entry assets use one release key and resolve to existing files', () => {
   const directory = new URL('../lab/floating-garden/', import.meta.url);
-  const version = '20261001-cpu-matches-r2';
+  const version = '20261001-rule-examples';
   for (const name of readdirSync(directory).filter((name) => name.endsWith('.js'))) {
     const source = read(`lab/floating-garden/${name}`);
     for (const [, path, key] of source.matchAll(/from '(\.\/[^'?]+)(?:\?v=([^']+))?'/g)) {
@@ -185,4 +195,50 @@ test('public tile and flow are visible beside the choices, with an upper-page ac
   assert.match(controls, /公開の1枚:/);
   assert.match(controls, /流れ: (上|右|下|左)/);
   assert.match(controls, /data-action="command-self"/);
+});
+
+test('native rule examples do not start a match or change tile preview, rotation or progress', () => {
+  const app = mount();
+  app.root.querySelector('#match-rules').open = true;
+  for (const id of ['flow', 'moon', 'wind', 'color', 'echo', 'corners']) toggleExample(app, id);
+  assert.equal(app.api.getState(), null);
+  app.click('count-2'); app.click('start');
+  assert.equal(app.root.querySelector('#match-rules').open, true);
+  assert.equal(app.root.querySelector('#rule-example-moon').open, true);
+  toHumanPlace(app); app.click('cell-5'); app.click('rotate');
+  const before = app.api.getState(); const ui = app.api.getUi();
+  for (const id of ['flow', 'moon', 'wind', 'color', 'echo', 'corners']) {
+    toggleExample(app, id); toggleExample(app, id);
+  }
+  assert.deepEqual(app.api.getState(), before); assert.deepEqual(app.api.getUi(), ui);
+  app.click('rotate');
+  assert.equal(app.root.querySelector('#rule-example-moon').open, true, 'open examples survive game rerenders');
+});
+
+test('rule examples preserve stone selection/preview and comparison through repeated open/close', () => {
+  const app = start(2); app.click('command-draw'); app.click('command-store');
+  app.click('cell-5'); app.click('commit'); app.click('stone-wind'); app.click('cell-5');
+  const before = app.api.getState(); const ui = app.api.getUi();
+  toggleExample(app, 'wind'); toggleExample(app, 'wind');
+  assert.deepEqual(app.api.getState(), before); assert.deepEqual(app.api.getUi(), ui);
+  toggleExample(app, 'color');
+  app.click('inspect-1'); app.click('compare-pair');
+  const comparing = app.api.getUi();
+  toggleExample(app, 'echo'); toggleExample(app, 'echo');
+  assert.deepEqual(app.api.getState(), before); assert.deepEqual(app.api.getUi(), comparing);
+  app.click('comparison-close');
+  assert.deepEqual(app.api.getState(), before); assert.deepEqual(app.api.getUi(), ui);
+  assert.equal(app.root.querySelector('#rule-example-color').open, true);
+});
+
+test('opening or closing scoring examples cannot advance a waiting CPU', () => {
+  const app = start(); app.click('command-draw'); app.click('command-self');
+  assert.ok(app.button('cpu-next'));
+  const before = app.api.getState(); const ui = app.api.getUi();
+  for (let repeat = 0; repeat < 3; repeat += 1) {
+    for (const id of ['flow', 'moon', 'wind', 'color', 'echo', 'corners']) toggleExample(app, id);
+  }
+  assert.deepEqual(app.api.getState(), before); assert.deepEqual(app.api.getUi(), ui);
+  app.click('cpu-next'); assert.ok(app.api.getState().revision > before.revision);
+  assert.equal(app.root.querySelector('#rule-example-echo').open, true);
 });

@@ -1,5 +1,5 @@
-import { cellName, scoreGarden, STONES, TERRAIN } from './engine.js?v=20261001-cpu-matches-r2';
-import { displayedGarden } from './session.js?v=20261001-cpu-matches-r2';
+import { cellName, scoreGarden, STONES, TERRAIN } from './engine.js?v=20261001-rule-examples';
+import { displayedGarden } from './session.js?v=20261001-rule-examples';
 
 const escape = (text) => String(text).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const portNames = ['上', '右', '下', '左'];

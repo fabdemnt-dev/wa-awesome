@@ -1,7 +1,8 @@
-import { cellName, STONES, TERRAIN, scoreGarden, tilePorts } from './engine.js?v=20261001-cpu-matches-r2';
-import { displayedGarden } from './session.js?v=20261001-cpu-matches-r2';
-import { renderBoard, renderScore, tileArt } from './view.js?v=20261001-cpu-matches-r2';
-import { getDecision, legalActions, rankMatch } from './match-engine.js?v=20261001-cpu-matches-r2';
+import { cellName, STONES, TERRAIN, scoreGarden, tilePorts } from './engine.js?v=20261001-rule-examples';
+import { displayedGarden } from './session.js?v=20261001-rule-examples';
+import { renderBoard, renderScore, tileArt } from './view.js?v=20261001-rule-examples';
+import { getDecision, legalActions, rankMatch } from './match-engine.js?v=20261001-rule-examples';
+import { renderRuleExamples } from './match-rule-examples.js?v=20261001-rule-examples';
 const escape = (text) => String(text).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const shape = (tile) => tile.shape === 'bend' ? '曲線' : '直線';
 const tileText = (tile) => tile ? `${TERRAIN[tile.terrain].name}・${shape(tile)}` : 'なし';
@@ -83,5 +84,5 @@ export function renderMatchComparison(state, ui) {
 }
 
 export function renderMatchRules() {
-  return `<section class="rules-panel panel"><details id="match-rules"><summary>対戦のルールと操作</summary><div class="rule-content"><h3>引く・譲る・保管</h3><p>1枚引くか保管を使い、自分で使う・1人に譲る提案・保管を選びます。譲渡成立は力+2。拒否されたら自用か保管へ。再提案はできません。保管は1枚、満杯なら新しい1枚を保管して前の1枚を使います。取り出した保管は再保管できません。</p><h3>精霊を招く・庭に迎える</h3><p>他の人が自用にした未配置の1枚へ、力3で招く希望を出せます。希望は撤回できず、複数なら優先マーカーから席順。持主は力2で庭に迎えるか、渡します。実際に受け取った人だけ力3を使い、優先マーカーはその次の席へ。完成した庭、保護代替、受け取ったタイルには招けません。</p><h3>必ず庭が進む</h3><p>譲渡・招き成立、空の保管に入れたときは、保護代替を引いて自庭へ必ず配置。タイルの後に手入れを1回。瞑想は力+1、石は力3。力は初期4、上限6。確定した庭は変更できません。</p><h3>庭の完成</h3><p>通常12巡、その後は最大4巡の仕上げ。仕上げは保管を先に使い1枚配置し、譲渡・招き・保管はありません。完成済みの人も手入れを続け、全員完成した巡末で最後の石へ。全員同じ回数の手入れをします。最後は手持ちの力で石1個かパス。余力は得点にならず、同点は同順位です。</p><h3>星の石と採点</h3><p>石は各種類1個、地形1枚に1個。各石の上限は6点。</p><ul>${Object.values(STONES).map((stone) => `<li>${stone.name}: ${stone.rule}</li>`).join('')}</ul><p>隣り合う流れの接続1辺につき1点。四隅を4種類の地形で埋めると4点。盤外や斜めはつながりません。</p><h3>CPUの進行</h3><p>「CPUの手を進める」で、次にあなたの選択が必要なところまで進みます。仮置き・比較・確認中は進みません。画面を閉じたり更新すると対戦は消えます。</p></div></details></section>`;
+  return `<section class="rules-panel panel"><details id="match-rules"><summary>対戦のルールと操作</summary><div class="rule-content"><h3>引く・譲る・保管</h3><p>1枚引くか保管を使い、自分で使う・1人に譲る提案・保管を選びます。譲渡成立は力+2。拒否されたら自用か保管へ。再提案はできません。保管は1枚、満杯なら新しい1枚を保管して前の1枚を使います。取り出した保管は再保管できません。</p><h3>精霊を招く・庭に迎える</h3><p>他の人が自用にした未配置の1枚へ、力3で招く希望を出せます。希望は撤回できず、複数なら優先マーカーから席順。持主は力2で庭に迎えるか、渡します。実際に受け取った人だけ力3を使い、優先マーカーはその次の席へ。完成した庭、保護代替、受け取ったタイルには招けません。</p><h3>必ず庭が進む</h3><p>譲渡・招き成立、空の保管に入れたときは、保護代替を引いて自庭へ必ず配置。タイルの後に手入れを1回。瞑想は力+1、石は力3。力は初期4、上限6。確定した庭は変更できません。</p><h3>庭の完成</h3><p>通常12巡、その後は最大4巡の仕上げ。仕上げは保管を先に使い1枚配置し、譲渡・招き・保管はありません。完成済みの人も手入れを続け、全員完成した巡末で最後の石へ。全員同じ回数の手入れをします。最後は手持ちの力で石1個かパス。余力は得点にならず、同点は同順位です。</p><h3>星の石と採点</h3><p>石は各種類1個、地形1枚に1個。各石の上限は6点。</p><ul>${Object.values(STONES).map((stone) => `<li>${stone.name}: ${stone.rule}</li>`).join('')}</ul><p>隣り合う流れの接続1辺につき1点。四隅を4種類の地形で埋めると4点。盤外や斜めはつながりません。</p>${renderRuleExamples()}<h3>CPUの進行</h3><p>「CPUの手を進める」で、次にあなたの選択が必要なところまで進みます。仮置き・比較・確認中は進みません。画面を閉じたり更新すると対戦は消えます。</p></div></details></section>`;
 }
