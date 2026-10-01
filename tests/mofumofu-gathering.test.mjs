@@ -184,7 +184,7 @@ test('山札は裏向きカードを残し、カード中央の？だけ表示�
 
 
 test('タイトル画面だけがおもちゃ箱への戻り口を持つ', () => {
-  assert.match(html, /class="secondary big title-return-link" href="\.\.\/">おもちゃ箱へ戻る<\/a>/);
+  assert.match(html, /class="secondary big title-return-link" href="\.\.\/">← 🎪 おもちゃ箱へ戻る<\/a>/);
 });
 
 test('タイトル画面でひとり用とローカルふたり用を選べる', () => {
