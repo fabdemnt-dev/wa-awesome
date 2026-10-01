@@ -343,3 +343,13 @@ test('comparison score uses current self preview and exposes no action to give, 
   assert.doesNotMatch(html, /data-action="(?:give|invite|spend|commit|cell)"/);
   assert.equal(view.renderComparison(state, tableDemo.createTableDemo(), { opponentId: 'missing', intent: 'give' }), '');
 });
+
+test('changed entry, view and stylesheet share a release key to avoid mixed cached versions', () => {
+  const html = read('lab/floating-garden/index.html');
+  const scriptVersion = html.match(/src="\.\/app\.js\?v=([^"\s]+)"/)?.[1];
+  const styleVersion = html.match(/href="\.\/style\.css\?v=([^"\s]+)"/)?.[1];
+  const viewVersion = read('lab/floating-garden/app.js').match(/from '\.\/view\.js\?v=([^']+)'/)?.[1];
+  assert.ok(scriptVersion);
+  assert.equal(styleVersion, scriptVersion);
+  assert.equal(viewVersion, scriptVersion);
+});
