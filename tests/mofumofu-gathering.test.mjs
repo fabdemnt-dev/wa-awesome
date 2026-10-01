@@ -170,7 +170,7 @@ test('3人生存時も3人目を含めて最少枚数を選ぶ実装である', 
 
 test('公開更新時にCSSとJSの古いキャッシュを使わず、ゲーム中に自動スクロールしない', () => {
   assert.ok(html.includes('style.css?v=20261001-2'));
-  assert.ok(html.includes('script.js?v=20260921-2'));
+  assert.ok(html.includes('script.js?v=20261001-3'));
   assert.doesNotMatch(script, /window\.scrollTo/);
   assert.doesNotMatch(script, /scrollIntoView/);
 });

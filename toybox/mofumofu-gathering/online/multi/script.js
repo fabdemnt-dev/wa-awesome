@@ -81,13 +81,13 @@ const helpDialog = $('help-dialog');
     body.append(heading, list);
   }
 })();
-for (const id of ['open-help', 'open-help-lobby', 'game-help']) $(id).addEventListener('click', () => helpDialog.showModal());
+function openHelpDialog() {
+  helpDialog.showModal();
+  // Reset on every open, including after the reader scrolled to the end.
+  helpDialog.scrollTop = 0;
+}
+for (const id of ['open-help', 'open-help-lobby', 'game-help']) $(id).addEventListener('click', openHelpDialog);
 $('close-help').addEventListener('click', () => helpDialog.close());
-// 画面に収まらないときは、初期表示を末尾（「わかった！」の見える位置）へ寄せる。
-helpDialog.addEventListener('toggle', () => {
-  if (!helpDialog.open) return;
-  if (helpDialog.scrollHeight > helpDialog.clientHeight + 24) helpDialog.scrollTop = helpDialog.scrollHeight;
-});
 
 /* ------------------------------------------------------------------ 描画部品 */
 
