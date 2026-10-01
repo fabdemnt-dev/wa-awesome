@@ -1,5 +1,5 @@
 /** CPU receives only publicMatch + legal actions, never the seed or deck order. */
-import { CORNERS, createTile, neighbors, placeTile, placeStone, scoreGarden, tilePorts } from './engine.js?v=20261001-gift-layout';
+import { CORNERS, createTile, neighbors, placeTile, placeStone, scoreGarden, tilePorts } from './engine.js?v=20261001-score-details';
 
 function potential(garden) {
   const corners = CORNERS.flatMap((index) => garden[index] ? [garden[index].terrain] : []);

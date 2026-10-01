@@ -1,7 +1,7 @@
-import { applyPlacement, createTile } from './engine.js?v=20261001-gift-layout';
-import { createMatch, applyMatchAction, getDecision, legalActions, publicMatch } from './match-engine.js?v=20261001-gift-layout';
-import { chooseCpuAction } from './cpu.js?v=20261001-gift-layout';
-import { renderMatch, renderMatchSetup } from './match-view.js?v=20261001-gift-layout';
+import { applyPlacement, createTile } from './engine.js?v=20261001-score-details';
+import { createMatch, applyMatchAction, getDecision, legalActions, publicMatch } from './match-engine.js?v=20261001-score-details';
+import { chooseCpuAction } from './cpu.js?v=20261001-score-details';
+import { renderMatch, renderMatchSetup } from './match-view.js?v=20261001-score-details';
 
 export function mountMatch(root, { seed = globalThis.crypto?.randomUUID?.() ?? `garden-${Date.now()}` } = {}) {
   let state = null;
