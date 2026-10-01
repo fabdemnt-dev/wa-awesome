@@ -1,6 +1,6 @@
 import { createExampleGarden, createGarden } from './engine.js';
 import { createSession, updateSession } from './session.js';
-import { renderComparison, renderSession } from './view.js';
+import { renderComparison, renderSession } from './view.js?v=20261001-four-gardens';
 import { createTableDemo } from './table-demo.js';
 
 export function mountGarden(root) {
