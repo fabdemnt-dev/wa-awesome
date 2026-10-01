@@ -1,7 +1,7 @@
-import { createExampleGarden, createGarden } from './engine.js';
-import { createSession, updateSession } from './session.js';
-import { renderComparison, renderSession } from './view.js?v=20261001-four-gardens';
-import { createTableDemo } from './table-demo.js';
+import { createExampleGarden, createGarden } from './engine.js?v=20261001-cpu-matches';
+import { createSession, updateSession } from './session.js?v=20261001-cpu-matches';
+import { renderComparison, renderSession } from './view.js?v=20261001-cpu-matches';
+import { createTableDemo } from './table-demo.js?v=20261001-cpu-matches';
 
 export function mountGarden(root) {
   let session = createSession();

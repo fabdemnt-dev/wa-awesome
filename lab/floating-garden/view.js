@@ -1,5 +1,5 @@
-import { cellName, scoreGarden, STONES, TERRAIN } from './engine.js';
-import { displayedGarden } from './session.js';
+import { cellName, scoreGarden, STONES, TERRAIN } from './engine.js?v=20261001-cpu-matches';
+import { displayedGarden } from './session.js?v=20261001-cpu-matches';
 
 const escape = (text) => String(text).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const portNames = ['上', '右', '下', '左'];
@@ -77,7 +77,7 @@ export function renderSession(session, { message = '', error = false, replacemen
     ${replacement ? `<section class="replacement-confirm panel" role="region" aria-labelledby="replace-title"><h2 id="replace-title">${replacement === 'example' ? '見本の庭に切り替えますか？' : '庭を空にしますか？'}</h2><p>いまの配置と「1手戻す」の履歴が消えます。</p><div><button type="button" class="primary" data-action="replace-confirm" data-focus="replace-confirm">${replacement === 'example' ? '見本に切り替える' : '空の庭に戻す'}</button><button type="button" data-action="replace-cancel" data-focus="replace-cancel">やめる</button></div></section>` : ''}
     <p class="sandbox-note">自由配置モード · 素材は何度でも選べます。「1手戻す」は検証用です。対戦ルールでは確定した地形や石を動かしません。</p>
   </div><aside class="sidebar">${renderScore(garden, committed.total, Boolean(session.pending))}
-    <section class="rules-panel panel"><details id="rules-details"><summary>この試作のルール</summary><div class="rule-content"><h3>流れをつなぐ</h3><p>隣り合う2枚の向かい合う辺で流れがつながると1点。同じ辺は1回だけ数えます。盤外や空きマスは0点。</p><h3>星の石を置く</h3><p>各種類1個、地形1枚に石1個。すべて上限6点。得点は庭が変わるたびに計算します。</p><ul>${Object.values(STONES).map((stone) => `<li><strong>${stone.name}</strong> — ${stone.rule}</li>`).join('')}</ul><p>風守・彩りは足元と斜めを数えません。共鳴は自分の石を数えません。彩りは4種類あっても6点です。</p><h3>まだ作っていない部分</h3><p>引いた1枚を使う・譲る判断、保管、精霊を招く／庭に迎える、力、12巡と仕上げ、CPU、複数人対戦、通信。今は配置・回転・石・採点の感触を確かめる段階です。</p></div></details></section>
+    <section class="rules-panel panel"><details id="rules-details"><summary>この試作のルール</summary><div class="rule-content"><h3>流れをつなぐ</h3><p>隣り合う2枚の向かい合う辺で流れがつながると1点。同じ辺は1回だけ数えます。盤外や空きマスは0点。</p><h3>星の石を置く</h3><p>各種類1個、地形1枚に石1個。すべて上限6点。得点は庭が変わるたびに計算します。</p><ul>${Object.values(STONES).map((stone) => `<li><strong>${stone.name}</strong> — ${stone.rule}</li>`).join('')}</ul><p>風守・彩りは足元と斜めを数えません。共鳴は自分の石を数えません。彩りは4種類あっても6点です。</p><h3>自由配置とは別のモード</h3><p>引いた1枚を使う・譲る判断、保管、精霊を招く／庭に迎える、力、12巡と仕上げ、CPU、複数人対戦、通信。この画面は配置・採点の実験室です。CPU対戦はページ上部のリンクから遊べます。オンライン通信は未実装です。</p></div></details></section>
   </aside></div>`;
 }
 
