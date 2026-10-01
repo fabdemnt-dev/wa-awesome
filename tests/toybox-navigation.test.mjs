@@ -106,7 +106,8 @@ test("全6ゲームの現在対応人数を文字入りピルで表示する", (
   assert.equal((toybox.match(/player-count--1">1人用/g) || []).length, 2);
   assert.match(toybox, /\.player-count--1\s*\{[^}]*background:\s*#ecfdf5[^}]*color:\s*#166534/s);
   assert.match(toybox, /\.player-count--1-2\s*\{[^}]*background:\s*#f5f3ff[^}]*color:\s*#5b21b6/s);
-  assert.match(toybox, /\.player-count--1-4\s*\{[^}]*background:\s*#fff7ed[^}]*color:\s*#9a3412/s);\n  assert.match(toybox, /\.player-count--1-6\s*\{[^}]*background:\s*#f5f3ff[^}]*color:\s*#5b21b6/s);
+  assert.match(toybox, /\.player-count--1-4\s*\{[^}]*background:\s*#fff7ed[^}]*color:\s*#9a3412/s);
+  assert.match(toybox, /\.player-count--1-6\s*\{[^}]*background:\s*#f5f3ff[^}]*color:\s*#5b21b6/s);
   assert.doesNotMatch(toybox, /👤|👥/);
   assert.match(toybox, /\.card-panel\s*\{[^}]*position:\s*relative/s);
   assert.match(toybox, /\.player-count\s*\{[^}]*position:\s*absolute[^}]*top:\s*12px[^}]*right:\s*12px/s);
