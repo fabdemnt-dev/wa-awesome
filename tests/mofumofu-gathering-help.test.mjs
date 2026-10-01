@@ -12,7 +12,7 @@ const onlineScript = read('toybox/mofumofu-gathering/online/script.js');
 const onlineCss = read('toybox/mofumofu-gathering/online/style.css');
 
 // 集合判定の説明に使う共通コア（solo/duo/onlineで表現が揃っていること）。
-const CORE = ['同じ動物が4枚', '8種類', '手札', '残り2人'];
+const CORE = ['同じ動物が4枚', '8種類', '手札', 'その人の負け'];
 
 test('1. 同種4枚の敗北条件が説明されている（solo/duo/online）', () => {
   for (const [name, src] of [['solo', soloHtml], ['online', onlineHtml], ['readme', readme]]) {
