@@ -1,4 +1,4 @@
-import { applyPlacement, createGarden, createTile, scoreGarden, STONES, validateGarden } from './engine.js?v=20261001-rule-examples';
+import { applyPlacement, createGarden, createTile, scoreGarden, STONES, validateGarden } from './engine.js?v=20261001-gift-layout';
 
 export function createSession(garden = createGarden()) {
   validateGarden(garden);

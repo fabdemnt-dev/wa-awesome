@@ -1,8 +1,8 @@
-import { cellName, STONES, TERRAIN, scoreGarden, tilePorts } from './engine.js?v=20261001-rule-examples';
-import { displayedGarden } from './session.js?v=20261001-rule-examples';
-import { renderBoard, renderScore, tileArt } from './view.js?v=20261001-rule-examples';
-import { getDecision, legalActions, rankMatch } from './match-engine.js?v=20261001-rule-examples';
-import { renderRuleExamples } from './match-rule-examples.js?v=20261001-rule-examples';
+import { cellName, STONES, TERRAIN, scoreGarden, tilePorts } from './engine.js?v=20261001-gift-layout';
+import { displayedGarden } from './session.js?v=20261001-gift-layout';
+import { renderBoard, renderScore, tileArt } from './view.js?v=20261001-gift-layout';
+import { getDecision, legalActions, rankMatch } from './match-engine.js?v=20261001-gift-layout';
+import { renderRuleExamples } from './match-rule-examples.js?v=20261001-gift-layout';
 const escape = (text) => String(text).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const shape = (tile) => tile.shape === 'bend' ? '曲線' : '直線';
 const tileText = (tile) => tile ? `${TERRAIN[tile.terrain].name}・${shape(tile)}` : 'なし';
@@ -45,7 +45,12 @@ function renderControls(state, ui) {
   for (const type of Object.keys(labels)) {
     if (legal.some((action) => action.type === type)) choices.push(control(`command-${type}`, labels[type], `data-revision="${state.revision}"`));
   }
-  for (const action of legal.filter((item) => item.type === 'offer')) choices.push(control(`offer-${action.target}`, `${escape(state.players[action.target].name)}に譲る`, `data-revision="${state.revision}"`));
+  if (state.step === 'choose') {
+    const offers = legal.filter((item) => item.type === 'offer').map((action) => control(`offer-${action.target}`, `${escape(state.players[action.target].name)}に譲る`, `data-revision="${state.revision}"`));
+    const group = (kind, label, buttons) => `<fieldset class="match-choice-group match-${kind}-choices"><legend>${label}</legend><div class="match-choice-buttons">${buttons.join('')}</div></fieldset>`;
+    const ownLabel = legal.some((action) => action.type === 'store') ? '自分で使う・保管' : '自分で使う';
+    return `<div class="match-choice-groups">${group('own', ownLabel, choices)}${offers.length ? group('offer', '相手に譲る', offers) : ''}</div>`;
+  }
   if (state.step === 'welcome' && !legal.some((action) => action.type === 'welcome')) choices.push('<p class="power-warning">力が2未満のため「庭に迎える」は選べません。渡したあと、保護代替を必ず自庭に置きます。</p>');
   if (state.step === 'place') choices.push(control('rotate', '↻ 90°回す'), `<span class="selection-preview terrain-${state.drawn.tile.terrain}" aria-label="配置する向き ${ui.rotation * 90}度">${tileArt({ ...state.drawn.tile, rotation: ui.rotation })}</span>`);
   if (['care', 'final-stone'].includes(state.step)) {
