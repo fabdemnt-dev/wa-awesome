@@ -95,3 +95,102 @@ summary { cursor: pointer; min-height: 44px; display: list-item; align-content: 
 @media (min-width: 780px) { .sidebar { position: sticky; top: 20px; } }
 @media (max-width: 779px) { .page-header { padding: 22px 16px 18px; }.eyebrow { gap: 10px; font-size: .6rem; }.eyebrow span { font-size: .5rem; }.lead { font-size: .8rem; }.prototype-note { font-size: .67rem; }#garden-app { padding: 0 14px; }.garden-layout { grid-template-columns: 1fr; gap: 18px; max-width: 560px; margin: auto; }.panel { padding: 14px; }.section-label h2, .board-title h2 { font-size: .85rem; }.terrain-choices { gap: 7px; }.terrain-choice { font-size: .7rem; }.shape-controls { gap: 7px; }.shape-controls button { font-size: .76rem; padding: 7px 11px; }.stone-choices { gap: 7px; }.stone-choices button { grid-template-columns: 1fr; text-align: center; font-size: .76rem; padding: 5px 2px; }.stone-choices button > span { grid-row: auto; font-size: 1.15rem; }.stone-choices small { grid-column: auto; font-size: .56rem; }.selection-hint { font-size: .69rem; }.garden-section { margin-top: 20px; }.board { border-radius: 18px; gap: 7px; padding: 10px; }.cell { border-radius: 10px; }.terrain-mark { font-size: 17px; }.terrain-name { font-size: .58rem; bottom: 4px; }.coordinate { top: 3px; left: 3px; font-size: .55rem; }.stone-badge { width: 24px; height: 24px; right: 3px; top: 3px; font-size: .92rem; }.placement-bar { position: sticky; bottom: 8px; z-index: 10; background: #132939f5; border-color: #8e9f9d; box-shadow: 0 5px 28px #0007; }.placement-actions button { font-size: .72rem; padding: 9px 10px; }.status { font-size: .7rem; }.total > strong { font-size: 3.6rem; }.score-summary { grid-template-columns: repeat(3, 1fr); gap: 12px; }.score-summary > div { display: block; }.score-summary dd { margin-top: 4px; }.score-summary dt { font-size: .74rem; }.score-details p { font-size: .75rem; }.board-caption { font-size: .61rem; }.board-title > span { font-size: .68rem; } }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+
+/* Four-player layout review. These panels never change the placement session. */
+.view-switch { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 20px; }
+.view-switch small { display: inline-block; color: var(--muted); font-size: .65rem; margin-left: 5px; }
+.shared-table { margin-bottom: 22px; }
+.shared-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.demo-label { color: var(--gold); font-size: .7rem; }
+.turn-badge { margin-left: auto; color: var(--teal); background: #234749; padding: 5px 10px; border-radius: 16px; font-size: .78rem; }
+.shared-draw { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+.drawn-tile { flex: 0 0 56px; height: 56px; position: relative; border: 1px solid #98b6c1; border-radius: 10px; }
+.drawn-tile .terrain-mark { font-size: 16px; }
+.shared-draw p { font-size: .83rem; }
+.shared-draw p > span { display: block; color: var(--muted); font-size: .74rem; }
+.shared-objective { margin-left: auto; color: var(--muted); }
+.shared-objective strong { display: block; color: var(--text); }
+.demo-note { margin-top: 12px; font-size: .69rem; color: var(--muted); }
+.table-layout { grid-template-areas: 'editor opponents' 'editor score'; row-gap: 18px; }
+.table-layout > .workbench { grid-area: editor; min-width: 0; }
+.table-layout .garden-section { margin-top: 0; }
+.table-layout .tools { margin-bottom: 16px; }
+.table-layout > .opponents { grid-area: opponents; min-width: 0; }
+.table-layout > .sidebar { grid-area: score; position: static; min-width: 0; }
+.board-title h2 small { color: var(--muted); font-size: .68rem; font-weight: normal; display: block; }
+.opponents .section-label { margin-bottom: 3px; }
+.opponents-hint { color: var(--muted); font-size: .74rem; margin-bottom: 12px; }
+.opponent-cards { display: grid; gap: 10px; }
+.opponent-card { display: grid; grid-template-columns: 104px minmax(0, 1fr); align-items: center; gap: 3px 12px; text-align: left; padding: 10px; min-width: 0; }
+.opponent-name { grid-column: 2; display: block; line-height: 1.4; }
+.opponent-name small { color: var(--teal); display: block; font-size: .63rem; }
+.opponent-name strong { font-size: .82rem; }
+.opponent-score { grid-column: 2; display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px; }
+.opponent-score b { font-size: 1.1rem; color: var(--gold); }
+.opponent-score > span, .card-zoom { font-size: .66rem; color: var(--muted); }
+.card-zoom { grid-column: 2; }
+.read-only-board .cell { display: grid; place-items: center; cursor: default; }
+.read-only-board .cell:hover { filter: none; }
+.mini-board { grid-column: 1; grid-row: 1 / 4; width: 104px; gap: 3px; padding: 5px; border-radius: 10px; box-shadow: none; pointer-events: none; }
+.mini-board .cell { border-radius: 3px; }
+.mini-board .coordinate, .mini-board .terrain-name, .mini-board .connection { display: none; }
+.mini-board .terrain-mark { font-size: 8px; top: 28%; left: 28%; width: 44%; height: 44%; border: 0; }
+.mini-board .empty-star { font-size: .65rem; }
+.mini-board .stone-badge { width: 11px; height: 11px; border-width: 1px; font-size: 8px; right: -2px; top: -2px; }
+.garden-dialog { color: var(--text); background: #132939; border: 1px solid #9eb8bb; border-radius: 20px; padding: 20px; width: min(850px, calc(100% - 24px)); max-width: none; max-height: calc(100dvh - 24px); overscroll-behavior: contain; }
+.garden-dialog::backdrop { background: #040d1bdd; }
+.dialog-heading { position: sticky; top: -20px; z-index: 20; background: #132939; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; margin-top: -10px; border-bottom: 1px solid var(--line); }
+.dialog-heading h2 { margin-top: 3px; }
+.dialog-heading > button { flex-shrink: 0; }
+.comparison-players, .comparison-modes { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.comparison-players button, .comparison-modes button { flex: 1; font-size: .78rem; padding: 8px; }
+.comparison-help { font-size: .77rem; color: #d3e2e4; margin: 16px 0; }
+.comparison-boards { max-width: 440px; margin: 0 auto; }
+.comparison-boards.is-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; max-width: none; }
+.comparison-garden { min-width: 0; }
+.comparison-garden .board-title { flex-wrap: wrap; gap: 3px 8px; }
+.comparison-garden .board { box-shadow: 0 6px 0 #071927; }
+.comparison-breakdown { font-size: .72rem; color: var(--muted); margin: 16px 0 8px; }
+.comparison-legend { color: #d4e2e3; margin-top: 18px; font-size: .72rem; }
+@media (max-width: 779px) {
+  .view-switch, .shared-table { max-width: 560px; margin-left: auto; margin-right: auto; }
+  .view-switch { gap: 8px; }
+  .view-switch button { flex: 1; font-size: .78rem; padding: 8px; }
+  .view-switch small { display: block; margin-left: 0; }
+  .shared-heading h2 { font-size: .88rem; }
+  .shared-draw { flex-wrap: wrap; }
+  .shared-objective { flex-basis: 100%; margin-left: 0; font-size: .74rem !important; }
+  .shared-objective strong { display: inline; margin-left: 8px; }
+  .table-layout { grid-template-areas: 'opponents' 'editor' 'score'; }
+  .opponent-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .opponent-card { display: flex; flex-direction: column; align-items: stretch; gap: 6px; padding: 8px; text-align: center; }
+  .opponent-name strong { font-size: .74rem; }
+  .opponent-score { justify-content: center; }
+  .opponent-score b { font-size: .9rem; }
+  .mini-board { width: 100%; }
+  .card-zoom { font-size: .6rem; }
+  .opponents.panel { padding: 12px; }
+}
+@media (max-width: 599px) {
+  .garden-dialog { padding: 12px; border-radius: 14px; }
+  .dialog-heading { top: -12px; gap: 8px; }
+  .dialog-heading h2 { font-size: .88rem; }
+  .comparison-players, .comparison-modes { gap: 6px; }
+  .comparison-players button, .comparison-modes button { font-size: .7rem; padding: 7px 3px; }
+  .comparison-boards.is-pair { gap: 10px; }
+  .paired-garden h3 { font-size: .76rem; }
+  .paired-garden .board-title > span { font-size: .65rem; }
+  .paired-garden .board { gap: 3px; padding: 5px; border-radius: 10px; }
+  .paired-garden .cell { border-radius: 4px; }
+  .paired-garden .terrain-name { display: none; }
+  .paired-garden .coordinate { font-size: .42rem; top: 0; left: 1px; padding: 0 1px; }
+  .paired-garden .terrain-mark { top: 40%; left: 30%; width: 40%; height: 40%; font-size: 9px; border: 0; }
+  .paired-garden .stone-badge { width: 12px; height: 12px; right: 0; top: 0; border-width: 1px; font-size: 9px; }
+  .paired-garden .connection { width: 4px; height: 4px; box-shadow: none; }
+  .paired-garden .connection-top { top: -2px; left: calc(50% - 2px); }
+  .paired-garden .connection-bottom { bottom: -2px; left: calc(50% - 2px); }
+  .paired-garden .connection-left { left: -2px; top: calc(50% - 2px); }
+  .paired-garden .connection-right { right: -2px; top: calc(50% - 2px); }
+  .paired-garden .empty-star { font-size: .8rem; }
+  .comparison-breakdown { font-size: .64rem; }
+}

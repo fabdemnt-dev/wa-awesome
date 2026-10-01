@@ -1,19 +1,48 @@
 import { createExampleGarden, createGarden } from './engine.js';
 import { createSession, updateSession } from './session.js';
-import { renderSession } from './view.js';
+import { renderComparison, renderSession } from './view.js';
+import { createTableDemo } from './table-demo.js';
 
 export function mountGarden(root) {
   let session = createSession();
   let message = '';
   let error = false;
   let replacement = null;
+  const table = createTableDemo();
+  let tableVisible = false;
+  let comparison = null;
+  let returnFocus = null;
+  let savedPage = null;
+  const document = root.ownerDocument;
+
+  function lockPage() {
+    const window = document.defaultView;
+    savedPage = { x: window?.scrollX || 0, y: window?.scrollY || 0, overflow: document.body.style.overflow };
+    document.body.style.overflow = 'hidden';
+  }
+
+  function restorePage() {
+    if (!savedPage) return;
+    document.body.style.overflow = savedPage.overflow;
+    document.defaultView?.scrollTo(savedPage.x, savedPage.y);
+    savedPage = null;
+  }
+
+  function closeComparison() {
+    if (!comparison) return;
+    comparison = null;
+    restorePage();
+    render(returnFocus);
+  }
+
   let lastTile = { terrain: 'cloud', shape: 'straight', rotation: 0 };
 
   function render(focusKey) {
     const details = [...root.querySelectorAll('details')].map((element) => ({ id: element.id, open: element.open }));
     const previousFocus = focusKey || root.ownerDocument.activeElement?.dataset?.focus;
-    root.innerHTML = renderSession(session, { message, error, replacement });
+    root.innerHTML = renderSession(session, { message, error, replacement, table: tableVisible ? table : null }) + renderComparison(session, table, comparison);
     for (const detail of details) root.querySelector(`#${detail.id}`).open = detail.open;
+    if (comparison) root.querySelector('#garden-comparison').showModal();
     if (previousFocus) root.querySelector(`[data-focus="${previousFocus}"]`)?.focus({ preventScroll: true });
   }
 
@@ -31,6 +60,29 @@ export function mountGarden(root) {
     const button = event.target.closest('button[data-action]');
     if (!button || !root.contains(button) || button.disabled) return;
     const action = button.dataset.action;
+    if (action === 'comparison-close') { closeComparison(); return; }
+    if (comparison) {
+      if (action === 'comparison-player' && table.opponents.some(({ id }) => id === button.dataset.opponent)) {
+        comparison = { ...comparison, opponentId: button.dataset.opponent };
+        render(button.dataset.focus);
+      } else if (action === 'comparison-mode' && ['inspect', 'give', 'invite'].includes(button.dataset.intent)) {
+        comparison = { ...comparison, intent: button.dataset.intent };
+        render(button.dataset.focus);
+      }
+      return;
+    }
+    if (action === 'view-solo' || action === 'view-table') {
+      tableVisible = action === 'view-table';
+      render(button.dataset.focus);
+      return;
+    }
+    if (action === 'inspect' && tableVisible && table.opponents.some(({ id }) => id === button.dataset.opponent)) {
+      returnFocus = button.dataset.focus;
+      comparison = { opponentId: button.dataset.opponent, intent: 'inspect' };
+      lockPage();
+      render('comparison-close');
+      return;
+    }
     if (action === 'reset' || action === 'example') {
       replacement = action;
       render('replace-cancel');
@@ -64,6 +116,7 @@ export function mountGarden(root) {
 
   function onKeydown(event) {
     if (event.key !== 'Escape') return;
+    if (comparison) { event.preventDefault(); closeComparison(); return; }
     if (replacement) {
       const origin = replacement;
       replacement = null;
@@ -73,10 +126,17 @@ export function mountGarden(root) {
     }
   }
 
+  function onDialogCancel(event) {
+    if (event.target.id !== 'garden-comparison') return;
+    event.preventDefault();
+    closeComparison();
+  }
+
+  root.addEventListener('cancel', onDialogCancel, true);
   root.addEventListener('click', onClick);
   root.addEventListener('keydown', onKeydown);
   render();
-  return { getSession: () => structuredClone(session), dispatch, unmount: () => { root.removeEventListener('click', onClick); root.removeEventListener('keydown', onKeydown); } };
+  return { getSession: () => structuredClone(session), dispatch, unmount: () => { comparison = null; root.querySelector('#garden-comparison')?.close(); restorePage(); root.removeEventListener('cancel', onDialogCancel, true); root.removeEventListener('click', onClick); root.removeEventListener('keydown', onKeydown); } };
 }
 
 const root = document.querySelector('#garden-app');
