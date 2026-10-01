@@ -1,7 +1,7 @@
-import { applyPlacement, createTile } from './engine.js?v=20261001-score-details';
-import { createMatch, applyMatchAction, getDecision, legalActions, publicMatch } from './match-engine.js?v=20261001-score-details';
-import { chooseCpuAction } from './cpu.js?v=20261001-score-details';
-import { renderMatch, renderMatchSetup } from './match-view.js?v=20261001-score-details';
+import { applyPlacement, createTile } from './engine.js?v=20261001-tile-assist';
+import { createMatch, applyMatchAction, getDecision, legalActions, publicMatch } from './match-engine.js?v=20261001-tile-assist';
+import { chooseCpuAction } from './cpu.js?v=20261001-tile-assist';
+import { renderMatch, renderMatchSetup } from './match-view.js?v=20261001-tile-assist';
 
 export function mountMatch(root, { seed = globalThis.crypto?.randomUUID?.() ?? `garden-${Date.now()}` } = {}) {
   let state = null;
@@ -12,7 +12,7 @@ export function mountMatch(root, { seed = globalThis.crypto?.randomUUID?.() ?? `
   let returnFocus = null;
   let mounted = true;
   const document = root.ownerDocument;
-  function freshUi() { return { pending: null, rotation: 0, stone: null, comparison: null, confirm: null, message: '', error: false }; }
+  function freshUi() { return { assist: false, pending: null, rotation: 0, stone: null, comparison: null, confirm: null, message: '', error: false }; }
   function restorePage() {
     if (!savedPage) return;
     document.body.style.overflow = savedPage.overflow;
@@ -81,6 +81,7 @@ export function mountMatch(root, { seed = globalThis.crypto?.randomUUID?.() ?? `
         if (action === 'cancel-reset') { const origin = ui.confirm; ui.confirm = null; render(origin); }
         return;
       }
+      if (action === 'toggle-assist') { ui.assist = !ui.assist; render('toggle-assist'); return; }
       if (action === 'restart' || action === 'setup') { ui.confirm = action; render('cancel-reset'); return; }
       if (action === 'inspect' && state.players[Number(button.dataset.seat)] && !state.players[Number(button.dataset.seat)].isHuman) {
         returnFocus = button.dataset.focus;

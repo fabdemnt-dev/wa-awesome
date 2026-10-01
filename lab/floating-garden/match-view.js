@@ -1,8 +1,9 @@
-import { cellName, STONES, TERRAIN, scoreGarden, tilePorts } from './engine.js?v=20261001-score-details';
-import { displayedGarden } from './session.js?v=20261001-score-details';
-import { renderBoard, renderScore, tileArt } from './view.js?v=20261001-score-details';
-import { getDecision, legalActions, rankMatch } from './match-engine.js?v=20261001-score-details';
-import { renderRuleExamples } from './match-rule-examples.js?v=20261001-score-details';
+import { cellName, STONES, TERRAIN, scoreGarden, tilePorts } from './engine.js?v=20261001-tile-assist';
+import { displayedGarden } from './session.js?v=20261001-tile-assist';
+import { renderBoard, renderScore, tileArt } from './view.js?v=20261001-tile-assist';
+import { getDecision, legalActions, publicMatch, rankMatch } from './match-engine.js?v=20261001-tile-assist';
+import { remainingTileCounts } from './match-assist.js?v=20261001-tile-assist';
+import { renderRuleExamples } from './match-rule-examples.js?v=20261001-tile-assist';
 const escape = (text) => String(text).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const shape = (tile) => tile.shape === 'bend' ? '曲線' : '直線';
 const tileText = (tile) => tile ? `${TERRAIN[tile.terrain].name}・${shape(tile)}` : 'なし';
@@ -33,6 +34,18 @@ function renderDecisionTile(state, ui) {
   const tile = { ...state.drawn.tile, rotation: state.step === 'place' && state.players[getDecision(state).seat].isHuman ? ui.rotation : state.drawn.tile.rotation };
   const ports = tilePorts(tile).map((port) => ['上', '右', '下', '左'][port]).join('・');
   return `<div class="decision-tile"><span class="drawn-tile terrain-${tile.terrain}" aria-hidden="true">${tileArt(tile)}<span class="terrain-mark">${TERRAIN[tile.terrain].mark}</span></span><div><strong>公開の1枚: ${tileText(tile)}</strong><p>流れ: ${ports}${state.drawn.protected ? ' · 保護タイル' : ''}</p></div></div>`;
+}
+
+export function renderMatchAssist(state, ui) {
+  const enabled = Boolean(ui.assist);
+  let content = '';
+  if (enabled) {
+    const inventory = remainingTileCounts(publicMatch(state));
+    const current = state.drawn?.tile;
+    const sameKind = current && inventory.kinds.find((kind) => kind.terrain === current.terrain && kind.shape === current.shape);
+    content = `<div class="assist-content"><p class="assist-current">${current ? `公開の1枚と同じ種類<br><strong>${tileText(current)} · 山札にあと${sameKind.count}枚</strong>` : 'いま公開中のタイルはありません'}<br><span>山札全体: 残り${inventory.total}枚</span></p><details id="match-assist-details"><summary>10種類の残数一覧</summary><table class="assist-inventory"><caption class="sr-only">地形と流れの形ごとの、まだ引かれていない枚数</caption><thead><tr><th scope="col">地形</th><th scope="col">直線</th><th scope="col">曲線</th></tr></thead><tbody>${Object.entries(TERRAIN).map(([terrain, data]) => `<tr><th scope="row">${data.name}</th>${inventory.kinds.filter((kind) => kind.terrain === terrain).map((kind) => `<td>${kind.count}<small>枚</small></td>`).join('')}</tr>`).join('')}</tbody></table></details><p class="demo-note">まだ引かれていない山札だけを数えます。公開中の1枚・保管中・各庭のタイルは含めません。回転した向きは区別しません。</p><p class="demo-note">引く順番は表示しません。CPUの考え方は変わりません。</p></div>`;
+  }
+  return `<div class="match-assist"><div class="assist-heading">${control('toggle-assist', `残数アシスト ${enabled ? 'ON' : 'OFF'}`, `aria-pressed="${enabled}"`)}<small>CPU戦専用</small></div>${content}</div>`;
 }
 
 function renderControls(state, ui) {
@@ -73,7 +86,7 @@ export function renderMatch(state, ui) {
   const board = renderBoard(session, { readOnly: !interactive });
   return `<section class="shared-table panel"><div class="shared-heading"><h2>${phase}</h2><span class="turn-badge">${decision ? `${escape(state.players[decision.seat].name)}の${state.phase === 'final-stone' || state.activeSeat === decision.seat ? '番' : '応答'}` : '結果'}</span><a class="match-jump" href="#match-controls">操作・結果へ ↓</a></div><div class="shared-draw">${state.drawn ? `<span class="drawn-tile terrain-${state.drawn.tile.terrain}" aria-hidden="true">${tileArt(state.drawn.tile)}<span class="terrain-mark">${TERRAIN[state.drawn.tile.terrain].mark}</span></span><p><strong>公開の1枚: ${tileText(state.drawn.tile)}</strong><span>${escape(state.players[state.drawn.ownerSeat].name)}の手番 · ${state.drawn.protected ? '保護されています' : '公開中'}</span></p>` : `<p>${state.phase === 'finished' ? 'すべての庭が完成しました' : state.phase === 'final-stone' ? '最後の石を配置します' : '次の1枚を待っています'}</p>`}<p class="shared-objective">共通のお題<strong>四隅異なる地形 · 4点</strong></p></div><p class="demo-note">山札 残り${state.deck.length - state.deckCursor}枚 · 招く優先マーカー: P${state.prioritySeat + 1} ${escape(state.players[state.prioritySeat].name)}から席順</p></section>
     <div class="garden-layout table-layout match-layout"><section class="opponents panel"><div class="section-label"><h2>相手の庭</h2><span>${opponents.length} GARDENS</span></div><p class="opponents-hint">タップして拡大・比較</p><div class="opponent-cards" style="--opponent-count:${opponents.length}">${opponents.map((player) => `<button type="button" class="opponent-card" data-action="inspect" data-seat="${player.seat}" data-focus="inspect-${player.seat}" aria-haspopup="dialog" aria-label="P${player.seat + 1} ${escape(player.name)}を拡大・比較"><span class="opponent-name"><small>P${player.seat + 1} · 力 ${player.power}/6</small><strong>${escape(player.name)}</strong></span>${renderBoard({ garden: player.garden }, { readOnly: true, compact: true })}<span class="opponent-score"><b>${scoreGarden(player.garden).total}点</b><span>${player.garden.filter(Boolean).length}/16</span></span><span class="card-zoom">保管: ${tileText(player.storage)}<br>拡大・比較 ↗</span></button>`).join('')}</div></section>
-    <div class="workbench"><section class="garden-section"><div class="board-title"><h2>あなたの庭 <small>P1 · 力 ${human.power}/6 · 手入れ ${human.careCount}回</small></h2><span>${score.filled}/16 マス</span></div>${board}<p class="board-caption">保管: ${tileText(human.storage)}<br>確定した地形や石は動かせません</p></section><section id="match-controls" class="panel match-controls" aria-label="対戦操作">${renderDecisionTile(state, ui)}<p class="status ${ui.error ? 'error' : ''}" role="status" aria-live="polite" aria-atomic="true">${escape(ui.message || phaseHint(state))}</p>${ui.message ? `<p class="decision-hint">${escape(phaseHint(state))}</p>` : ''}${renderControls(state, ui)}</section>
+    <div class="workbench"><section class="garden-section"><div class="board-title"><h2>あなたの庭 <small>P1 · 力 ${human.power}/6 · 手入れ ${human.careCount}回</small></h2><span>${score.filled}/16 マス</span></div>${board}<p class="board-caption">保管: ${tileText(human.storage)}<br>確定した地形や石は動かせません</p></section><section id="match-controls" class="panel match-controls" aria-label="対戦操作">${renderDecisionTile(state, ui)}${renderMatchAssist(state, ui)}<p class="status ${ui.error ? 'error' : ''}" role="status" aria-live="polite" aria-atomic="true">${escape(ui.message || phaseHint(state))}</p>${ui.message ? `<p class="decision-hint">${escape(phaseHint(state))}</p>` : ''}${renderControls(state, ui)}</section>
     ${state.phase === 'finished' ? `<section class="panel match-results"><h2>庭の得点</h2><ol>${rankMatch(state).map((item) => `<li><strong>${item.rank}位 · ${escape(state.players[item.seat].name)}</strong><span>${item.score}点</span></li>`).join('')}</ol><p>同点は同じ順位です · 全員 ${human.careCount}回の手入れ</p></section>` : ''}
     <div class="experiment-actions">${control('restart', state.phase === 'finished' ? 'もう一度遊ぶ' : '対戦をやり直す')}${control('setup', '人数を変える')}</div>${ui.confirm ? `<section class="replacement-confirm panel"><h2>いまの対戦を終了しますか？</h2><p>配置と進行が消えます。取り消すと、そのまま続けられます。</p>${control('confirm-reset', '終了して進む', 'class="primary"')}${control('cancel-reset', '対戦を続ける')}</section>` : ''}</div>
     <aside class="sidebar">${renderScore(garden, score.total, Boolean(ui.pending))}${renderMatchRules()}<section class="panel match-log"><details id="match-log"><summary>庭の記録（${state.log.length}件）</summary><ol>${state.log.slice().reverse().map((message) => `<li>${escape(message)}</li>`).join('')}</ol></details><p class="demo-note">${state.log.slice(-3).map(escape).join('<br>')}</p></section></aside></div>${renderMatchComparison(state, ui)}`;
