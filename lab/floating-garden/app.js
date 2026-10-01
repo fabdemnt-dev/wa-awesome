@@ -1,7 +1,7 @@
-import { createExampleGarden, createGarden } from './engine.js?v=20261001-rule-examples';
-import { createSession, updateSession } from './session.js?v=20261001-rule-examples';
-import { renderComparison, renderSession } from './view.js?v=20261001-rule-examples';
-import { createTableDemo } from './table-demo.js?v=20261001-rule-examples';
+import { createExampleGarden, createGarden } from './engine.js?v=20261001-gift-layout';
+import { createSession, updateSession } from './session.js?v=20261001-gift-layout';
+import { renderComparison, renderSession } from './view.js?v=20261001-gift-layout';
+import { createTableDemo } from './table-demo.js?v=20261001-gift-layout';
 
 export function mountGarden(root) {
   let session = createSession();

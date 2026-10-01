@@ -73,7 +73,7 @@ function toggleExample(app, id) {
 test('CPU entry is separate and preserves free placement/demo with versioned module assets', () => {
   assert.match(read('lab/floating-garden/index.html'), /href="\.\/match.html"/);
   assert.match(read('lab/floating-garden/match.html'), /href="\.\/index.html"/);
-  for (const filename of ['match.html', 'match-app.js', 'match-view.js']) assert.match(read(`lab/floating-garden/${filename}`), /v=20261001-rule-examples/);
+  for (const filename of ['match.html', 'match-app.js', 'match-view.js']) assert.match(read(`lab/floating-garden/${filename}`), /v=20261001-gift-layout/);
   const app = mount(); assert.equal(app.api.getState(), null); assert.match(app.root.innerHTML, /CPUは山札の順番を見ません/);
   app.click('count-2'); app.click('start'); assert.equal(app.api.getState().players.length, 2);
   assert.equal((app.root.innerHTML.match(/class="opponent-card"/g) || []).length, 1);
@@ -170,7 +170,7 @@ test('real UI listeners complete 2/3/4 player matches including gift responses, 
 
 test('all browser module edges and entry assets use one release key and resolve to existing files', () => {
   const directory = new URL('../lab/floating-garden/', import.meta.url);
-  const version = '20261001-rule-examples';
+  const version = '20261001-gift-layout';
   for (const name of readdirSync(directory).filter((name) => name.endsWith('.js'))) {
     const source = read(`lab/floating-garden/${name}`);
     for (const [, path, key] of source.matchAll(/from '(\.\/[^'?]+)(?:\?v=([^']+))?'/g)) {
@@ -241,4 +241,72 @@ test('opening or closing scoring examples cannot advance a waiting CPU', () => {
   assert.deepEqual(app.api.getState(), before); assert.deepEqual(app.api.getUi(), ui);
   app.click('cpu-next'); assert.ok(app.api.getState().revision > before.revision);
   assert.equal(app.root.querySelector('#rule-example-echo').open, true);
+});
+
+test('draw choices separate self/storage from equally styled recipients for 2/3/4 players', () => {
+  for (const count of [2, 3, 4]) {
+    const app = start(count); app.click('command-draw');
+    const controls = app.root.innerHTML.match(/<section id="match-controls"[\s\S]*?<\/section>/)[0];
+    const own = controls.match(/<fieldset class="match-choice-group match-own-choices">([\s\S]*?)<\/fieldset>/)?.[1];
+    const offers = controls.match(/<fieldset class="match-choice-group match-offer-choices">([\s\S]*?)<\/fieldset>/)?.[1];
+    assert.ok(own); assert.ok(offers);
+    assert.match(own, /<legend>自分で使う・保管<\/legend>/);
+    assert.match(own, /data-action="command-self"/); assert.match(own, /data-action="command-store"/);
+    assert.doesNotMatch(own, /data-action="offer-/);
+    assert.match(offers, /<legend>相手に譲る<\/legend>/);
+    assert.doesNotMatch(offers, /data-action="command-/);
+    const buttons = [...offers.matchAll(/<button\b([^>]*)>([^<]+)<\/button>/g)];
+    assert.equal(buttons.length, count - 1);
+    for (let i = 0; i < buttons.length; i += 1) {
+      assert.match(buttons[i][1], new RegExp(`data-action="offer-${i + 1}"`));
+      assert.doesNotMatch(buttons[i][1], /class=|style=|aria-pressed=/, 'no recipient gets special emphasis');
+      assert.equal(buttons[i][2], `${app.api.getState().players[i + 1].name}に譲る`);
+    }
+  }
+});
+
+test('each grouped recipient still offers to that exact seat once and comparison preserves the choice', () => {
+  for (const count of [2, 3, 4]) {
+    for (let target = 1; target < count; target += 1) {
+      const app = start(count); app.click('command-draw');
+      const before = app.api.getState();
+      app.click(`inspect-${target}`); app.click('compare-pair'); app.click('comparison-close');
+      assert.deepEqual(app.api.getState(), before);
+      const stale = app.button(`offer-${target}`);
+      app.click(`offer-${target}`);
+      const after = app.api.getState();
+      assert.equal(after.step, 'offer-response'); assert.equal(after.offerTarget, target);
+      assert.equal(after.revision, before.revision + 1);
+      assert.equal(app.api.getUi().error, false);
+      app.clickButton(stale); assert.deepEqual(app.api.getState(), after);
+    }
+  }
+});
+
+test('recipient groups shrink to eligible choices and disappear when no offer is allowed', () => {
+  const initial = match.createMatch();
+  const state = match.applyMatchAction(initial, match.legalActions(initial)[0]);
+  const ui = { pending: null, rotation: 0, stone: null };
+  const offerCount = () => (view.renderMatch(state, ui).match(/data-action="offer-/g) || []).length;
+  assert.equal(offerCount(), 3);
+  state.players[1].garden = Array.from({ length: 16 }, () => engine.createTile('lake', 'straight', 0));
+  assert.equal(offerCount(), 2);
+  state.players[2].garden = [...state.players[1].garden];
+  assert.equal(offerCount(), 1);
+  state.players[3].garden = [...state.players[1].garden];
+  assert.equal(offerCount(), 0);
+  assert.doesNotMatch(view.renderMatch(state, ui), /match-offer-choices/);
+  state.drawn.canOffer = false;
+  state.drawn.canStore = false;
+  const controls = view.renderMatch(state, ui).match(/<section id="match-controls"[\s\S]*?<\/section>/)[0];
+  assert.match(controls, /<legend>自分で使う<\/legend>/);
+  assert.doesNotMatch(controls, /match-offer-choices|command-store/);
+});
+
+test('recipient buttons use one full-width grid column rather than last-row flex growth', () => {
+  const css = read('lab/floating-garden/match-style.css');
+  assert.match(css, /\.match-choice-buttons\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+  assert.match(css, /\.match-choice-buttons\s*>\s*button\s*\{[^}]*width:\s*100%;[^}]*min-width:\s*0;[^}]*overflow-wrap:\s*anywhere/);
+  assert.match(css, /\.match-own-choices \.match-choice-buttons\s*\{[^}]*repeat\(auto-fit, minmax\(min\(100%, 140px\), 1fr\)\)/);
+  assert.doesNotMatch(css, /\.match-offer-choices[^}]*:(?:last|nth)-child/);
 });
