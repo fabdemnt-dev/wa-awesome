@@ -44,10 +44,12 @@ test('5. 集合成立で即終了と分かる', () => {
   assert.ok(readme.includes('成立した瞬間にゲームは終了'));
 });
 
-test('6. 残り2人が勝ちと説明されている', () => {
-  assert.ok(soloHtml.includes('残り2人の勝ち'));
-  assert.ok(onlineHtml.includes('残り2人の勝ち'));
-  assert.ok(readme.includes('残り2人が勝者'));
+test('6. 人数に依存せず、もふもふ大集合！になった本人が負けと説明されている', () => {
+  assert.ok(soloHtml.includes('その人の負け'));
+  assert.ok(onlineHtml.includes('その人の負け'));
+  assert.ok(readme.includes('成立した人の負け'));
+  assert.ok(!soloHtml.includes('残り2人の勝ち'));
+  assert.ok(!onlineHtml.includes('残り2人の勝ち'));
 });
 
 test('7. 脱落戦継続という旧説明がない（solo/duo/online説明・README）', () => {
