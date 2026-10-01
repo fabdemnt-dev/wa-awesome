@@ -1,4 +1,4 @@
-import { applyPlacement, createGarden, createTile, scoreGarden, STONES, validateGarden } from './engine.js?v=20261001-cpu-matches';
+import { applyPlacement, createGarden, createTile, scoreGarden, STONES, validateGarden } from './engine.js?v=20261001-cpu-matches-r2';
 
 export function createSession(garden = createGarden()) {
   validateGarden(garden);

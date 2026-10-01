@@ -63,7 +63,7 @@ function toHumanPlace(app) {
 test('CPU entry is separate and preserves free placement/demo with versioned module assets', () => {
   assert.match(read('lab/floating-garden/index.html'), /href="\.\/match.html"/);
   assert.match(read('lab/floating-garden/match.html'), /href="\.\/index.html"/);
-  for (const filename of ['match.html', 'match-app.js', 'match-view.js']) assert.match(read(`lab/floating-garden/${filename}`), /v=20261001-cpu-matches/);
+  for (const filename of ['match.html', 'match-app.js', 'match-view.js']) assert.match(read(`lab/floating-garden/${filename}`), /v=20261001-cpu-matches-r2/);
   const app = mount(); assert.equal(app.api.getState(), null); assert.match(app.root.innerHTML, /CPUは山札の順番を見ません/);
   app.click('count-2'); app.click('start'); assert.equal(app.api.getState().players.length, 2);
   assert.equal((app.root.innerHTML.match(/class="opponent-card"/g) || []).length, 1);
@@ -160,7 +160,7 @@ test('real UI listeners complete 2/3/4 player matches including gift responses, 
 
 test('all browser module edges and entry assets use one release key and resolve to existing files', () => {
   const directory = new URL('../lab/floating-garden/', import.meta.url);
-  const version = '20261001-cpu-matches';
+  const version = '20261001-cpu-matches-r2';
   for (const name of readdirSync(directory).filter((name) => name.endsWith('.js'))) {
     const source = read(`lab/floating-garden/${name}`);
     for (const [, path, key] of source.matchAll(/from '(\.\/[^'?]+)(?:\?v=([^']+))?'/g)) {
@@ -173,4 +173,16 @@ test('all browser module edges and entry assets use one release key and resolve 
       assert.equal(key, version); assert.ok(existsSync(new URL(path, directory)));
     }
   }
+});
+
+
+test('public tile and flow are visible beside the choices, with an upper-page action jump', () => {
+  const app = start();
+  assert.match(app.root.innerHTML, /href="#match-controls"/);
+  app.click('command-draw');
+  const controls = app.root.innerHTML.match(/<section id="match-controls"[\s\S]*?<\/section>/)[0];
+  assert.match(controls, /class="decision-tile"/);
+  assert.match(controls, /公開の1枚:/);
+  assert.match(controls, /流れ: (上|右|下|左)/);
+  assert.match(controls, /data-action="command-self"/);
 });

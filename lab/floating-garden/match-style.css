@@ -30,3 +30,8 @@
   .match-layout .match-controls { position: static; }
   .match-controls .status { font-size: .78rem; }
 }
+
+.match-jump { display: inline-flex; align-items: center; min-height: 44px; padding: 6px 12px; color: var(--gold); border: 1px solid var(--line); border-radius: 10px; font-size: .8rem; }
+.match-controls { scroll-margin-top: 16px; }
+.decision-tile { display: flex; align-items: center; gap: 12px; margin: 0 0 14px; padding-bottom: 12px; border-bottom: 1px solid var(--line); font-size: .83rem; }
+.decision-tile p { color: var(--muted); font-size: .75rem; }
