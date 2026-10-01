@@ -12,7 +12,7 @@ const onlineScript = read('toybox/mofumofu-gathering/online/script.js');
 const onlineCss = read('toybox/mofumofu-gathering/online/style.css');
 
 // 集合判定の説明に使う共通コア（solo/duo/onlineで表現が揃っていること）。
-const CORE = ['同じ動物が4枚', '8種類', '手札', '残り2人'];
+const CORE = ['同じ動物が4枚', '8種類', '手札', 'その人の負け'];
 
 test('1. 同種4枚の敗北条件が説明されている（solo/duo/online）', () => {
   for (const [name, src] of [['solo', soloHtml], ['online', onlineHtml], ['readme', readme]]) {
@@ -44,10 +44,12 @@ test('5. 集合成立で即終了と分かる', () => {
   assert.ok(readme.includes('成立した瞬間にゲームは終了'));
 });
 
-test('6. 残り2人が勝ちと説明されている', () => {
-  assert.ok(soloHtml.includes('残り2人の勝ち'));
-  assert.ok(onlineHtml.includes('残り2人の勝ち'));
-  assert.ok(readme.includes('残り2人が勝者'));
+test('6. 人数に依存せず、もふもふ大集合！になった本人が負けと説明されている', () => {
+  assert.ok(soloHtml.includes('その人の負け'));
+  assert.ok(onlineHtml.includes('その人の負け'));
+  assert.ok(readme.includes('成立した人の負け'));
+  assert.ok(!soloHtml.includes('残り2人の勝ち'));
+  assert.ok(!onlineHtml.includes('残り2人の勝ち'));
 });
 
 test('7. 脱落戦継続という旧説明がない（solo/duo/online説明・README）', () => {
