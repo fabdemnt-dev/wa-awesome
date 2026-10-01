@@ -110,3 +110,12 @@
 .assist-inventory td { color: var(--gold); }
 .assist-inventory small { margin-left: 4px; font-size: .65rem; }
 .assist-content .demo-note { margin-top: 10px; overflow-wrap: anywhere; }
+
+/* Save/recovery notices stay separate from decisions; never show the private deck. */
+.match-save-status { margin-bottom: 1rem; }
+.match-save-status p { margin: .35rem 0; overflow-wrap: anywhere; }
+.save-warning { border-color: var(--gold, #d8b46b); }
+.save-actions { display: flex; flex-wrap: wrap; gap: .55rem; margin: .7rem 0; }
+.save-actions button { min-height: 44px; max-width: 100%; white-space: normal; }
+.save-recovery { padding: .9rem; margin: .8rem 0 1.2rem; border: 1px solid var(--line, #425360); border-radius: 12px; }
+.save-recovery h3 { margin-top: 0; }
