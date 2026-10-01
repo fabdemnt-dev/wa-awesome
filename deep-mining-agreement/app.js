@@ -356,7 +356,7 @@ function renderResult() {
     <header><p class="eyebrow">MINING COMPLETE</p><h1 id="result-heading">${headline}</h1><p class="subtitle">${reason}ため、持ち帰った鉱石を精算しました。</p></header>
     <section class="panel ranking">${[...state.players].sort((a,b)=>a.rank-b.rank).map(resultCardMarkup).join("")}</section>
     <section class="panel answer-panel"><h2>答え合わせ</h2>${answerRowsMarkup("隠匿採掘", (player) => `${player.secretActions}回`)}${answerRowsMarkup("共同保管庫分配", (player) => `${oreCount(player.vaultOre)}個`)}</section>
-    <details class="panel history"><summary>全8ラウンドの履歴</summary><div class="history-list">${historyMarkup()}</div></details>
+    <details class="panel history"><summary>全${state.history.length}ラウンドの履歴</summary><div class="history-list">${historyMarkup()}</div></details>
     <div class="button-stack"><button class="button button--primary" data-action="new-game">もう一度</button><a class="text-link" href="../toybox/">🎪 おもちゃ箱へ戻る</a></div>
     ${renderNotice()}
   </section>`;
