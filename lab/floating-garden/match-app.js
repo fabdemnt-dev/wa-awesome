@@ -1,7 +1,7 @@
-import { applyPlacement, createTile } from './engine.js?v=20261001-cpu-matches';
-import { createMatch, applyMatchAction, getDecision, legalActions, publicMatch } from './match-engine.js?v=20261001-cpu-matches';
-import { chooseCpuAction } from './cpu.js?v=20261001-cpu-matches';
-import { renderMatch, renderMatchSetup } from './match-view.js?v=20261001-cpu-matches';
+import { applyPlacement, createTile } from './engine.js?v=20261001-cpu-matches-r2';
+import { createMatch, applyMatchAction, getDecision, legalActions, publicMatch } from './match-engine.js?v=20261001-cpu-matches-r2';
+import { chooseCpuAction } from './cpu.js?v=20261001-cpu-matches-r2';
+import { renderMatch, renderMatchSetup } from './match-view.js?v=20261001-cpu-matches-r2';
 
 export function mountMatch(root, { seed = globalThis.crypto?.randomUUID?.() ?? `garden-${Date.now()}` } = {}) {
   let state = null;
