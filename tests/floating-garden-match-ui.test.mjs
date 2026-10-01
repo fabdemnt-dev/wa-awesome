@@ -6,11 +6,13 @@ import * as engine from '../lab/floating-garden/engine.js';
 import * as match from '../lab/floating-garden/match-engine.js';
 import * as cpu from '../lab/floating-garden/cpu.js';
 import * as view from '../lab/floating-garden/match-view.js';
+import * as save from '../lab/floating-garden/match-save.js';
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 
-function mount({ seed = 'garden-1', chooseAction = cpu.chooseCpuAction } = {}) {
+function mount({ seed = 'garden-1', chooseAction = cpu.chooseCpuAction, saveStore = null, now = () => 1790870400000 } = {}) {
   const listeners = new Map(); let buttons = []; let details = []; let dialog = null; let html = '';
-  const page = { scrollX: 0, scrollY: 250, scrollTo(x, y) { this.scrollX = x; this.scrollY = y; } };
+  const pageListeners = new Map();
+  const page = { addEventListener(type, handler) { pageListeners.set(type, handler); }, removeEventListener(type) { pageListeners.delete(type); }, scrollX: 0, scrollY: 250, scrollTo(x, y) { this.scrollX = x; this.scrollY = y; } };
   const root = {
     ownerDocument: { activeElement: null, body: { style: { overflow: 'auto' } }, defaultView: page },
     set innerHTML(value) {
@@ -35,10 +37,10 @@ function mount({ seed = 'garden-1', chooseAction = cpu.chooseCpuAction } = {}) {
     removeEventListener(type) { listeners.delete(type); },
   };
   const source = read('lab/floating-garden/match-app.js').replace(/^import[^\n]*\n/gm, '').replace('export function mountMatch', 'function mountMatch').replace(/const root = document\.querySelector[\s\S]*$/, '');
-  const api = runInNewContext(`${source}\nmountMatch(root, { seed });`, { ...engine, ...match, ...cpu, chooseCpuAction: chooseAction, ...view, root, seed, structuredClone });
-  const clickButton = (button) => { root.ownerDocument.activeElement = button; listeners.get('click')?.({ target: { closest: () => button } }); };
-  return { api, root, page, listeners, button: (key) => root.querySelector(`[data-focus="${key}"]`), clickButton,
-    click(key) { const button = this.button(key); assert.ok(button, `${key} exists`); clickButton(button); },
+  const api = runInNewContext(`${source}\nmountMatch(root, { seed, saveStore, now });`, { ...engine, ...match, ...cpu, ...save, chooseCpuAction: chooseAction, ...view, root, seed, saveStore, now, structuredClone });
+  const clickButton = (button) => { root.ownerDocument.activeElement = button; return listeners.get('click')?.({ target: { closest: () => button } }); };
+  return { api, root, page, listeners, pageListeners, button: (key) => root.querySelector(`[data-focus="${key}"]`), clickButton,
+    click(key) { const button = this.button(key); assert.ok(button, `${key} exists`); return clickButton(button); },
     escape() { listeners.get('keydown')?.({ key: 'Escape', preventDefault() {} }); },
     cancel() { listeners.get('cancel')?.({ target: dialog, preventDefault() {} }); },
   };
@@ -73,7 +75,7 @@ function toggleExample(app, id) {
 test('CPU entry is separate and preserves free placement/demo with versioned module assets', () => {
   assert.match(read('lab/floating-garden/index.html'), /href="\.\/match.html"/);
   assert.match(read('lab/floating-garden/match.html'), /href="\.\/index.html"/);
-  for (const filename of ['match.html', 'match-app.js', 'match-view.js']) assert.match(read(`lab/floating-garden/${filename}`), /v=20261001-tile-assist/);
+  for (const filename of ['match.html', 'match-app.js', 'match-view.js']) assert.match(read(`lab/floating-garden/${filename}`), /v=20261002-match-save/);
   const app = mount(); assert.equal(app.api.getState(), null); assert.match(app.root.innerHTML, /CPUは山札の順番を見ません/);
   app.click('count-2'); app.click('start'); assert.equal(app.api.getState().players.length, 2);
   assert.equal((app.root.innerHTML.match(/class="opponent-card"/g) || []).length, 1);
@@ -170,7 +172,7 @@ test('real UI listeners complete 2/3/4 player matches including gift responses, 
 
 test('all browser module edges and entry assets use one release key and resolve to existing files', () => {
   const directory = new URL('../lab/floating-garden/', import.meta.url);
-  const version = '20261001-tile-assist';
+  const version = '20261002-match-save';
   for (const name of readdirSync(directory).filter((name) => name.endsWith('.js'))) {
     const source = read(`lab/floating-garden/${name}`);
     for (const [, path, key] of source.matchAll(/from '(\.\/[^'?]+)(?:\?v=([^']+))?'/g)) {
@@ -570,4 +572,208 @@ test('same-seed UI replay and every CPU input stay identical with assist OFF ver
     for (const { visible } of assistedCpu) for (const key of ['seed', 'deck', 'deckCursor', 'assist', 'inventory', 'remainingTileCounts']) assert.ok(!Object.hasOwn(visible, key));
     assert.deepEqual(match.rankMatch(assisted.api.getState()), match.rankMatch(plain.api.getState()));
   }
+});
+
+// CPU match persistence is separate from the free-placement demo.
+import { memoryEnvironment, savedFixture, saveScenarios, settleLocks } from './helpers/floating-garden-save.mjs';
+
+async function startSaved(env, count = 4, options = {}) {
+  const app = mount({ saveStore: env.store(), ...options }); app.click(`count-${count}`); await app.click('start'); return app;
+}
+
+test('saved game startup waits for explicit resume, preserves rules exactly and never advances CPU', async () => {
+  for (const { state, actions } of saveScenarios()) {
+    const env = memoryEnvironment(savedFixture(state, actions, true)); const before = env.raw();
+    const app = mount({ saveStore: env.store() });
+    assert.equal(app.api.getState(), null); assert.equal(env.raw(), before);
+    assert.ok(app.button('resume')); await app.click('resume');
+    assert.deepEqual(app.api.getState(), state); assert.equal(env.raw(), before, 'resume does not even rewrite the save');
+    assert.equal(app.api.getUi().assist, true); assert.equal(app.api.getUi().pending, null);
+    assert.equal(app.api.getUi().rotation, 0); assert.equal(app.api.getUi().stone, null); assert.equal(app.api.getUi().comparison, null);
+    assert.doesNotMatch(app.root.innerHTML, new RegExp(state.seed));
+    assert.doesNotMatch(app.root.innerHTML, /tile-\d+/);
+    assert.deepEqual(match.publicMatch(app.api.getState()), match.publicMatch(state));
+    app.api.unmount(); await settleLocks();
+  }
+});
+
+test('reload discards uncommitted preview/selection but keeps assist, exact drawn tile and committed placement once', async () => {
+  for (const kind of ['tile', 'stone']) {
+    const env = memoryEnvironment(); const app = await startSaved(env, 2);
+    app.click('command-draw'); app.click('command-store'); app.click('cell-5');
+    if (kind === 'stone') { app.click('commit'); app.click('stone-wind'); app.click('cell-5'); }
+    else app.click('rotate');
+    app.click('toggle-assist');
+    const state = app.api.getState(); const text = env.raw();
+    app.api.unmount(); await settleLocks();
+    const resumed = mount({ saveStore: env.store() }); await resumed.click('resume');
+    assert.deepEqual(resumed.api.getState(), state); assert.equal(env.raw(), text);
+    assert.equal(resumed.api.getUi().pending, null); assert.equal(resumed.api.getUi().stone, null); assert.equal(resumed.api.getUi().rotation, 0);
+    assert.equal(resumed.api.getUi().assist, true);
+    if (kind === 'tile') { resumed.click('cell-5'); const old = resumed.button('commit'); resumed.click('commit'); resumed.clickButton(old); assert.equal(resumed.api.getState().revision, state.revision + 1); }
+    resumed.api.unmount(); await settleLocks();
+  }
+});
+
+test('existing valid, finished, old-version or corrupt saves require replacement confirmation and cancellation keeps bytes', async () => {
+  const finished = saveScenarios().find(({ state }) => state.phase === 'finished');
+  for (const text of [savedFixture(match.createMatch()), savedFixture(finished.state, finished.actions), '{', '{"version":"old"}']) {
+    const env = memoryEnvironment(text); const app = mount({ saveStore: env.store() });
+    app.click('count-3'); app.click('start'); assert.equal(app.api.getState(), null); assert.equal(env.raw(), text);
+    assert.ok(app.button('confirm-reset')); app.click('cancel-reset'); assert.equal(env.raw(), text);
+    app.click('start'); const stale = app.button('confirm-reset'); const promise = app.click('confirm-reset'); app.clickButton(stale); await promise;
+    assert.equal(app.api.getState().players.length, 3); assert.equal(app.api.getState().revision, 0);
+    assert.equal(save.decodeMatchSave(env.raw()).state.players.length, 3); app.api.unmount(); await settleLocks();
+  }
+});
+
+test('two tabs cannot resume/write together and unexpected changes pause without overwriting', async () => {
+  const env = memoryEnvironment(); const a = await startSaved(env, 2); a.click('command-draw');
+  const text = env.raw(); const b = mount({ saveStore: env.store() }); await b.click('resume');
+  assert.equal(b.api.getState(), null); assert.match(b.root.innerHTML, /別のタブ/); assert.equal(env.raw(), text);
+  a.api.unmount(); await settleLocks(); b.click('reload-save'); await b.click('resume');
+  assert.equal(b.api.getState().revision, 1);
+  const external = savedFixture(match.createMatch({ seed: 'other-match', playerCount: 3 })); env.storage.setItem(save.SAVE_KEY, external);
+  b.pageListeners.get('storage')({ key: save.SAVE_KEY, newValue: external });
+  const before = b.api.getState(); assert.match(b.root.innerHTML, /上書きせず/); b.click('toggle-assist'); assert.deepEqual(b.api.getState(), before);
+  assert.equal(env.raw(), external); b.click('reload-save'); b.click('cancel-reset'); assert.deepEqual(b.api.getState(), before);
+  b.click('reload-save'); b.click('confirm-reset'); assert.equal(b.api.getState(), null); await settleLocks(); await b.click('resume');
+  assert.equal(b.api.getState().seed, 'other-match'); assert.equal(env.raw(), external); b.api.unmount();
+});
+
+test('quota failure pauses after one action and supports retry or explicit unsaved play without destroying last save', async () => {
+  const env = memoryEnvironment(); const app = await startSaved(env, 2); const before = env.raw();
+  env.faults.write = true; app.click('command-draw');
+  assert.equal(app.api.getState().revision, 1); assert.equal(env.raw(), before); assert.match(app.root.innerHTML, /保存できませんでした/);
+  app.click('toggle-assist'); assert.equal(app.api.getUi().assist, false);
+  env.faults.write = false; app.click('retry-save'); assert.equal(save.decodeMatchSave(env.raw()).state.revision, 1);
+  env.faults.write = true; app.click('command-store'); const last = env.raw(); const revision = app.api.getState().revision;
+  app.click('continue-unsaved'); app.click('cell-0'); app.click('commit');
+  assert.equal(app.api.getState().revision, revision + 1); assert.equal(env.raw(), last); assert.match(app.root.innerHTML, /保存なしでプレイ中/);
+  app.api.unmount();
+});
+
+test('storage denial and unsupported locks allow clearly labeled unsaved play without a write', async () => {
+  const original = savedFixture(match.createMatch());
+  const env = memoryEnvironment(original); env.faults.read = true;
+  const a = mount({ saveStore: env.store() }); a.click('start'); a.click('command-draw');
+  assert.equal(a.api.getState().revision, 1); assert.equal(env.raw(), original); assert.match(a.root.innerHTML, /保存なし/); a.api.unmount();
+  env.faults.read = false;
+  const b = mount({ saveStore: save.createMatchSaveStore({ storage: env.storage }) }); await b.click('resume'); b.click('command-draw');
+  assert.equal(b.api.getState().revision, 1); assert.equal(env.raw(), original); assert.match(b.root.innerHTML, /保存なし/); b.api.unmount();
+});
+
+test('saved rematch and player changes reset assist and preserve previous save until a confirmed new start', async () => {
+  const env = memoryEnvironment(); const app = await startSaved(env, 2); app.click('command-draw'); app.click('toggle-assist');
+  const before = env.raw(); app.click('setup'); app.click('cancel-reset'); assert.equal(env.raw(), before);
+  app.click('setup'); app.click('confirm-reset'); assert.equal(app.api.getState(), null); assert.equal(env.raw(), before);
+  app.click('count-4'); await app.click('start'); assert.equal(app.api.getState().players.length, 4); assert.equal(app.api.getUi().assist, false);
+  assert.equal(save.decodeMatchSave(env.raw()).state.players.length, 4);
+  app.click('toggle-assist'); app.click('restart'); app.click('confirm-reset');
+  assert.equal(app.api.getUi().assist, false); assert.equal(save.decodeMatchSave(env.raw()).assist, false); app.api.unmount();
+});
+
+test('same-seed saved/resumed play finishes identically, including repeated resume at CPU waits', async () => {
+  for (const count of [2, 3, 4]) {
+    const env = memoryEnvironment(); let app = await startSaved(env, count, { seed: `resume-replay-${count}` });
+    let reference = match.createMatch({ playerCount: count, seed: `resume-replay-${count}` }); let iterations = 0;
+    while (reference.phase !== 'finished') {
+      assert.ok(++iterations < 500);
+      if (iterations % 9 === 0) { app.api.unmount(); await settleLocks(); app = mount({ saveStore: env.store() }); await app.click('resume'); assert.deepEqual(app.api.getState(), reference); }
+      const decision = match.getDecision(reference);
+      if (!reference.players[decision.seat].isHuman) {
+        app.click('cpu-next');
+        while (match.getDecision(reference) && !reference.players[match.getDecision(reference).seat].isHuman) reference = match.applyMatchAction(reference, cpu.chooseCpuAction(match.publicMatch(reference), match.legalActions(reference)));
+      } else { const action = cpu.chooseCpuAction(match.publicMatch(reference), match.legalActions(reference)); applyHuman(app, action); reference = match.applyMatchAction(reference, action); }
+      assert.deepEqual(app.api.getState(), reference); assert.equal(app.api.getUi().error, false);
+    }
+    assert.deepEqual(save.decodeMatchSave(env.raw()).state, reference); assert.deepEqual(match.rankMatch(app.api.getState()), match.rankMatch(reference));
+    app.api.unmount(); await settleLocks();
+  }
+});
+
+test('bfcache restoration is paused until choosing a safe recovery and unmount removes storage listeners', async () => {
+  const env = memoryEnvironment(); const app = await startSaved(env, 2); const before = env.raw();
+  app.pageListeners.get('pagehide')(); app.pageListeners.get('pageshow')({ persisted: true });
+  assert.match(app.root.innerHTML, /一時停止/); assert.equal(env.raw(), before); assert.equal(app.api.getState().revision, 0);
+  app.api.unmount(); assert.equal(app.pageListeners.size, 0); await settleLocks();
+  const next = env.store(); assert.equal(await next.acquire(), 'acquired'); next.release();
+});
+
+test('a pending lock acquisition rejects repeated start and cannot resume after unmount', async () => {
+  const env = memoryEnvironment(); const base = env.store(); let resolve;
+  const gate = new Promise((done) => { resolve = done; });
+  const delayed = { read: base.read, write: base.write, release: base.release, available: true, acquire: () => gate.then(() => base.acquire()) };
+  const app = mount({ saveStore: delayed }); const old = app.button('start');
+  const work = app.click('start'); app.clickButton(old); assert.equal(app.api.getState(), null); assert.equal(env.raw(), null);
+  app.api.unmount(); resolve(); await work; await settleLocks();
+  assert.equal(app.api.getState(), null); assert.equal(env.raw(), null);
+  const next = env.store(); assert.equal(await next.acquire(), 'acquired'); next.release();
+});
+
+test('a save changed during startup confirmation is re-presented and never overwritten by the old confirmation', async () => {
+  const old = savedFixture(match.createMatch({ seed: 'old' })); const env = memoryEnvironment(old);
+  const app = mount({ saveStore: env.store() }); app.click('start');
+  const latest = savedFixture(match.createMatch({ seed: 'latest', playerCount: 2 })); env.storage.setItem(save.SAVE_KEY, latest);
+  await app.click('confirm-reset'); assert.equal(app.api.getState(), null); assert.equal(env.raw(), latest);
+  assert.match(app.root.innerHTML, /保存の内容が更新/);
+  await app.click('resume'); assert.equal(app.api.getState().seed, 'latest'); assert.equal(env.raw(), latest); app.api.unmount();
+});
+
+test('CPU quota failure stops the batch after exactly one transition and retry resumes from that saved decision', async () => {
+  const env = memoryEnvironment(); const app = await startSaved(env, 4);
+  app.click('command-draw'); app.click('command-self'); const state = app.api.getState(); const old = env.raw();
+  assert.ok(!state.players[match.getDecision(state).seat].isHuman);
+  env.faults.write = true; app.click('cpu-next');
+  assert.equal(app.api.getState().revision, state.revision + 1); assert.equal(env.raw(), old);
+  env.faults.write = false; app.click('retry-save'); assert.equal(save.decodeMatchSave(env.raw()).state.revision, state.revision + 1);
+  app.api.unmount();
+});
+
+
+test('unsaved bfcache restoration refreshes generation without freezing match or setup controls', () => {
+  const app = start(2);
+  const before = app.api.getState();
+  const stale = app.button('command-draw');
+  app.pageListeners.get('pagehide')(); app.pageListeners.get('pageshow')({ persisted: true });
+  assert.deepEqual(app.api.getState(), before);
+  app.clickButton(stale); assert.deepEqual(app.api.getState(), before);
+  app.click('command-draw'); assert.equal(app.api.getState().revision, before.revision + 1);
+  app.api.unmount();
+  const setup = mount(); setup.pageListeners.get('pagehide')(); setup.pageListeners.get('pageshow')({ persisted: true });
+  setup.click('count-3'); setup.click('start'); assert.equal(setup.api.getState().players.length, 3);
+  setup.api.unmount();
+});
+
+
+test('a storage event during pending replacement cannot transfer the old approval to newer saved data', async () => {
+  const old = savedFixture(match.createMatch({ seed: 'old' })); const env = memoryEnvironment(old);
+  const base = env.store(); let resolve; const gate = new Promise((done) => { resolve = done; });
+  const delayed = { read: base.read, write: base.write, release: base.release, available: true, acquire: () => gate.then(() => base.acquire()) };
+  const app = mount({ saveStore: delayed }); app.click('start'); const work = app.click('confirm-reset');
+  const latest = savedFixture(match.createMatch({ seed: 'latest', playerCount: 2 })); env.storage.setItem(save.SAVE_KEY, latest);
+  app.pageListeners.get('storage')({ key: save.SAVE_KEY, newValue: latest });
+  resolve(); await work; await settleLocks();
+  assert.equal(app.api.getState(), null); assert.equal(env.raw(), latest); assert.match(app.root.innerHTML, /保存の内容が更新/);
+  app.click('start'); assert.ok(app.button('confirm-reset')); assert.equal(env.raw(), latest); app.api.unmount();
+});
+
+test('bfcache during pending acquisition recovers enabled setup controls once the stale request settles', async () => {
+  const env = memoryEnvironment(); const base = env.store(); let resolve;
+  const gate = new Promise((done) => { resolve = done; });
+  const delayed = { read: base.read, write: base.write, release: base.release, available: true, acquire: () => gate.then(() => base.acquire()) };
+  const app = mount({ saveStore: delayed }); const work = app.click('start');
+  app.pageListeners.get('pagehide')(); app.pageListeners.get('pageshow')({ persisted: true });
+  resolve(); await work; await settleLocks();
+  assert.equal(app.api.getState(), null); assert.equal(env.raw(), null);
+  assert.doesNotMatch(app.root.innerHTML, /保存の使用状況を確認しています/); assert.equal(app.button('start').disabled, false);
+  app.click('reload-save'); await app.click('start'); assert.equal(app.api.getState().revision, 0); app.api.unmount();
+});
+
+test('explicit unsaved continuation remains interactive after bfcache without changing the last save', async () => {
+  const env = memoryEnvironment(); const app = await startSaved(env, 2); const before = env.raw();
+  env.faults.write = true; app.click('command-draw'); app.click('continue-unsaved');
+  app.pageListeners.get('pagehide')(); app.pageListeners.get('pageshow')({ persisted: true });
+  app.click('command-store'); assert.equal(app.api.getState().revision, 2); assert.equal(env.raw(), before);
+  assert.match(app.root.innerHTML, /保存なしでプレイ中/); app.api.unmount();
 });
