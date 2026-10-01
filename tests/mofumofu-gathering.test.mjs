@@ -184,7 +184,7 @@ test('山札は裏向きカードを残し、カード中央の？だけ表示�
 
 
 test('タイトル画面だけがおもちゃ箱への戻り口を持つ', () => {
-  assert.match(html, /class="secondary big title-return-link" href="\.\.\/">おもちゃ箱へ戻る<\/a>/);
+  assert.match(html, /class="secondary big title-return-link" href="\.\.\/">← 🎪 おもちゃ箱へ戻る<\/a>/);
 });
 
 test('タイトル画面でひとり用とローカルふたり用を選べる', () => {
@@ -242,7 +242,7 @@ test('おもちゃ箱にはもふもふ大集合！への導線カードが1枚�
   assert.equal((box.match(/mofumofu-gathering/g) || []).length, 1, 'exactly one entry link');
   assert.match(box, /href="\.\/mofumofu-gathering\/"/);
   assert.match(box, /もふもふ大集合！/);
-  assert.match(box, /player-count--1-2">1〜2人用</);
+  assert.match(box, /player-count--1-6">1〜6人用</);
   for (const link of ['../shadow-card.html', '../moon-scale-duel-select.html', '../twin-shadow-caskets/', '../birdcage-observer/', '../deep-mining-agreement/']) {
     assert.ok(box.includes(link), 'existing link kept: ' + link);
   }

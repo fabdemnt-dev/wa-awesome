@@ -44,7 +44,7 @@ test('online modes return only to the Mofumofu title; toybox exit lives on the t
     assert.doesNotMatch(page, /2人＋こはるのオンライン版へ/);
   }
   const title = readFileSync(new URL('../toybox/mofumofu-gathering/index.html', import.meta.url), 'utf8');
-  assert.match(title, /<a class="secondary big title-return-link" href="\.\.\/">おもちゃ箱へ戻る<\/a>/);
+  assert.match(title, /<a class="secondary big title-return-link" href="\.\.\/">← 🎪 おもちゃ箱へ戻る<\/a>/);
 });
 
 test('PR #313 production gate and multi display-name input remain present', () => {
