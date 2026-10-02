@@ -1,0 +1,60 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Generated immutable trial bounds plus a server-owned emergency stop/enrollment.
+    // Firestore Rules do not authenticate HTTP Origin or App Check tokens. Configure
+    // Firestore App Check enforcement separately before any cloud trial is enabled.
+    function validTrial() {
+      let gate = get(/databases/$(database)/documents/floatingGardenTrial/config).data;
+      return __TRIAL_ENABLED__
+        && request.auth != null
+        && gate.enabled == true
+        && gate.projectId == __TRIAL_PROJECT_ID__
+        && gate.previewOrigin == __TRIAL_PREVIEW_ORIGIN__
+        && gate.startsAtMillis == __TRIAL_STARTS_AT_MILLIS__
+        && gate.endsAtMillis == __TRIAL_ENDS_AT_MILLIS__
+        && gate.maxRooms == 20
+        && request.time.toMillis() >= __TRIAL_STARTS_AT_MILLIS__
+        && request.time.toMillis() < __TRIAL_ENDS_AT_MILLIS__
+        && gate.testerUids is list
+        && gate.testerUids.size() == 2
+        && gate.testerUids[0] is string && gate.testerUids[1] is string
+        && gate.testerUids[0].matches('^[A-Za-z0-9_-]{1,128}$')
+        && gate.testerUids[1].matches('^[A-Za-z0-9_-]{1,128}$')
+        && gate.testerUids[0] != gate.testerUids[1]
+        && request.auth.uid in gate.testerUids;
+    }
+    function enrolledTester() {
+      let tester = get(/databases/$(database)/documents/floatingGardenTrialTesters/$(request.auth.uid)).data;
+      return tester.active == true
+        && tester.expiresAtMillis is int
+        && tester.expiresAtMillis > request.time.toMillis()
+        && tester.expiresAtMillis > __TRIAL_STARTS_AT_MILLIS__
+        && tester.expiresAtMillis <= __TRIAL_ENDS_AT_MILLIS__;
+    }
+    function activeMember(roomId) {
+      let room = get(/databases/$(database)/documents/floatingGardenRooms/$(roomId)).data;
+      let member = get(/databases/$(database)/documents/floatingGardenRooms/$(roomId)/members/$(request.auth.uid)).data;
+      return room.status in ['waiting', 'playing', 'finished']
+        && room.expiresAtMillis is int
+        && room.expiresAtMillis > request.time.toMillis()
+        && room.expiresAtMillis <= __TRIAL_ENDS_AT_MILLIS__
+        && member.active == true
+        && member.expiresAtMillis is int
+        && member.expiresAtMillis > request.time.toMillis()
+        && member.expiresAtMillis <= __TRIAL_ENDS_AT_MILLIS__;
+    }
+    match /floatingGardenRooms/{roomId} {
+      allow get: if validTrial() && enrolledTester() && activeMember(roomId);
+      allow list, write: if false;
+    }
+    match /floatingGardenRooms/{roomId}/members/{uid} {
+      allow get: if request.auth != null && request.auth.uid == uid
+        && validTrial() && enrolledTester() && activeMember(roomId);
+      allow list, write: if false;
+    }
+    // Config, tester roster, counters, receipts, invitations, limits, private engine
+    // state and every unrelated collection are admin-only. There is no shared rule.
+    match /{document=**} { allow read, write: if false; }
+  }
+}

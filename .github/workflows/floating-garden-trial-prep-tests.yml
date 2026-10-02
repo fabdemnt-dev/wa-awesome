@@ -1,0 +1,68 @@
+name: Floating Garden Trial Preparation Tests
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/floating-garden-trial-prep-tests.yml'
+      - 'config/floating-garden-trial/**'
+      - 'functions/floating-garden-trial/**'
+      - 'functions/floating-garden-online/**'
+      - 'lab/floating-garden/**'
+      - 'scripts/prepare-floating-garden-trial.mjs'
+      - 'tests/floating-garden-trial-*'
+      - 'tests/helpers/*floating-garden-trial*'
+      - 'tests/e2e/package*.json'
+      - 'firebase.floating-garden-trial-emulator.json'
+      - 'package*.json'
+permissions:
+  contents: read
+concurrency:
+  group: garden-trial-preparation-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  safety-and-rules:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm ci --prefix functions --ignore-scripts --no-audit --no-fund
+      - run: npm ci --prefix functions/floating-garden-trial --ignore-scripts --no-audit --no-fund
+      - name: Verify generated Functions entry and middleware
+        run: npm run test:floating-garden:trial:entry
+      - name: Verify core and all existing behavior
+        run: npm run check:floating-garden:core && npm test
+      - name: Test trial gates and denied-by-default Firestore rules
+        run: npm run test:floating-garden:trial:rules
+      - name: Install browser test dependencies
+        run: npm ci --prefix tests/e2e --ignore-scripts --no-audit --no-fund
+      - name: Prepare Chromium
+        run: tests/e2e/node_modules/.bin/playwright install --with-deps chromium
+      - name: Test the generated trial app with two real emulator identities
+        env:
+          FLOATING_GARDEN_BROWSER_ARTIFACTS: /tmp/floating-garden-trial-browser-qa
+        run: |
+          set -euo pipefail
+          FIXTURE="$RUNNER_TEMP/garden-trial-browser"
+          node tests/helpers/prepare-floating-garden-trial-emulator.mjs "$FIXTURE"
+          FLOATING_GARDEN_TRIAL_FIXTURE="$FIXTURE" FLOATING_GARDEN_TRIAL_EMULATOR_FIXTURE=1 node_modules/.bin/firebase --config "$FIXTURE/firebase.emulator.json" emulators:exec --only auth,firestore,functions --project demo-floating-garden-trial "node --test --test-force-exit tests/floating-garden-trial-browser-emulator.mjs"
+      - name: Retain isolated trial diagnostics and screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: floating-garden-trial-ci-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            *-debug.log
+            /tmp/floating-garden-trial-browser-qa/
+          retention-days: 7
+          if-no-files-found: warn
