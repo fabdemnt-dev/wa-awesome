@@ -37,7 +37,7 @@
 - bundle検証を4件から7件へ拡張。全出力allowlist、source hash、credential/runtime canaryの除外、backend importの閉包、危険な入力時の出力拒否を確認
 - 実SDK entry検証9件。実際のFirebase Functions 6.6.0/Admin 12.7.0で生成済みentryを読み、5関数だけ、実行上限、service account、create/joinだけのsecret bindingを確認
 - entry試験では本物のCallable middlewareへインメモリHTTP requestを渡す。App Check欠落の401、正確なCORS、無効設定/別project/期間外/Auth不足の拒否を確認。socket/http/fetchは全て試験中禁止し、ネットワーク利用0を検査
-- 同一origin試験中継とCLI discoveryの回帰6件を追加。許可経路・拒否経路、reload時の実Firestore request取消だけの分類、SDK設定と実SDKのURL構築（通信なし）、marker/demo/loopbackの拒否、生成ソース不変を確認
+- 同一origin試験中継とCLI discoveryの回帰8件を追加。許可経路・拒否経路、reload時の実Firestore request取消だけの分類、SDK設定と実SDKのURL構築（通信なし）、marker/demo/loopbackの拒否、生成ソース不変、限定したREST読取り経路、秘密値を含めないエラー診断を確認
 - trial用CIはNode22/Java21で独立packageを実installし、全体回帰、entry、専用Rules/Firestore競合、生成済みtrial画面の2ブラウザー試験を実行する
 - 個々のCI結果は、[Draft PR #365](https://github.com/fabdemnt-dev/wa-awesome/pull/365)の最終headとChecksを参照。前のheadの成功を流用しない
 
@@ -51,6 +51,8 @@
 - SDK constructorsでprojectを`demo-floating-garden-trial`へ限定し、同一HTTPS origin上の試験用経路から、許可したloopback emulatorだけへ本物のHTTP request/responseを中継する。browserのsecurity flagsやpermissionは変更しない
 - App Checkは合成marker。Functions fixtureもこのmarkerを付けるが、本物のAuth middlewareと元のtrial認可は省略しない
 - browser runnerは専用flag、Functions fixtureは生成済みfixture markerとCLI自身のemulator markerを要求する。demo project、loopback Auth/Firestore、正確なOriginも必須。生成された配信用entry/公開bundleへコピーしない
+
+参加取消後の読取り検査は、既存のSDK watch targetが受信済みの状態を再利用する場合と、新規サーバー認可を分ける。同じ本物のAuth tokenで新しいREST document GETを送り、取消前/再登録後の200と取消中の403を確認する。既存listenerも、公開roomの既存expiry値を一時的に1ms変更した更新を受け取らず、permission-deniedになることを要求し、roomは元へ戻す。既に受信・表示された公開情報が取消と同時に消えるとは主張しない。
 
 これは本物のEnterprise attestation、Hosting/TLS、live CORS/PNA、配信用entryとApp Checkの成功系全体、IAM、Secret Manager、実Android2台の証明ではない。配信用entryの拒否動作と設定は独立した9件で検査する。許可先以外のbrowser通信は拒否し、token・header・browser storage dumpをartifactへ残さない。
 

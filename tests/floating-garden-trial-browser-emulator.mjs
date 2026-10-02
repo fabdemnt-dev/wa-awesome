@@ -14,7 +14,7 @@ import { createRequire } from 'node:module';
 import { chromium } from './e2e/node_modules/playwright/index.mjs';
 import { emulatorConfig } from './helpers/floating-garden-emulators.mjs';
 import { abortDeniedBrowserRequest } from './helpers/floating-garden-browser-network.mjs';
-import { trialSdkFixture, trialEmulatorRoute, isTrialRelayNavigationCancellation } from './helpers/floating-garden-trial-sdk-fixture.mjs';
+import { trialSdkFixture, trialEmulatorRoute, isTrialRelayNavigationCancellation, sanitizeTrialRelayFailure } from './helpers/floating-garden-trial-sdk-fixture.mjs';
 import { ONLINE_SAVE_KEY } from '../lab/floating-garden/online/controller.js';
 import { legalActions, getDecision, rankMatch, applyMatchAction } from '../lab/floating-garden/match-engine.js';
 
@@ -98,15 +98,26 @@ async function authUid(page) {
 // invoke handlers, forge Auth, edit persistence, or substitute a game transport.
 async function clientProbe(page, operation) {
   return page.evaluate(async ({ appName, region, operation }) => {
-    const [{ getApp }, fs, fn] = await Promise.all([
+    const [{ getApp }, fs, fn, { getAuth }] = await Promise.all([
       import('https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js'),
       import('https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js'),
       import('https://www.gstatic.com/firebasejs/10.8.0/firebase-functions.js'),
+      import('https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js'),
     ]);
     const app = getApp(appName), db = fs.getFirestore(app);
     try {
       if (operation.kind === 'call') return { ok: true, value: (await fn.httpsCallable(fn.getFunctions(app, region), operation.name)(operation.data)).data };
       if (operation.kind === 'read') return { ok: true, value: (await fs.getDocFromServer(fs.doc(db, operation.path))).data() };
+      if (operation.kind === 'fresh-read') {
+        const user = getAuth(app).currentUser;
+        if (!user?.isAnonymous) throw new Error('Real anonymous identity required for fresh read');
+        // The token stays inside this browser request header. Never return it or
+        // record request headers, full request errors, query strings or bodies.
+        const response = await fetch(`/v1/projects/demo-floating-garden-trial/databases/(default)/documents/${operation.path.split('/').map(encodeURIComponent).join('/')}`, {
+          method: 'GET', cache: 'no-store', headers: { authorization: `Bearer ${await user.getIdToken()}` },
+        });
+        return { ok: response.ok, status: response.status, code: response.status === 403 ? 'permission-denied' : response.status === 401 ? 'unauthenticated' : 'unexpected-http-status' };
+      }
       if (operation.kind === 'list') return { ok: true, count: (await fs.getDocsFromServer(fs.collection(db, operation.path))).size };
       if (operation.kind === 'write') { await fs.setDoc(fs.doc(db, operation.path), { forged: true }); return { ok: true }; }
       throw new Error('Unknown security probe');
@@ -114,11 +125,30 @@ async function clientProbe(page, operation) {
   }, { appName: APP_NAME, region: fixture.config.region, operation });
 }
 async function deniedProbe(page, operation, reason) {
-  const result = await clientProbe(page, operation);
+  // getDocFromServer can reuse an active, already-current watch target. For a
+  // revocation assertion require a new HTTP authorization decision every time.
+  const result = await clientProbe(page, operation.kind === 'read' ? { ...operation, kind: 'fresh-read' } : operation);
   assert.equal(result.ok, false, `unexpectedly allowed ${operation.kind} ${operation.path || operation.name}`);
   assert.match(result.code, /(?:permission-denied|unauthenticated|failed-precondition)$/);
+  if (operation.kind === 'read') assert.equal(result.status, 403, 'fresh authenticated Firestore document read is denied by rules');
   if (reason) assert.equal(result.reason, reason);
   return result;
+}
+async function beginRevocationWatch(page, roomPath, canaryExpiry) {
+  await page.evaluate(async ({ appName, path, canaryExpiry }) => {
+    const [{ getApp }, fs] = await Promise.all([
+      import('https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js'),
+      import('https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js'),
+    ]);
+    const state = { ready: false, denied: null, canarySeen: false };
+    globalThis.__trialRevocationWatch = state;
+    state.stop = fs.onSnapshot(fs.doc(fs.getFirestore(getApp(appName)), path), (snapshot) => {
+      if (snapshot.metadata.fromCache) return;
+      state.ready = true;
+      if (snapshot.data()?.expiresAtMillis === canaryExpiry) state.canarySeen = true;
+    }, (error) => { state.denied = error.code; });
+  }, { appName: APP_NAME, path: roomPath, canaryExpiry });
+  await page.waitForFunction(() => globalThis.__trialRevocationWatch?.ready === true);
 }
 function publicOnly(room) {
   assert.deepEqual(Object.keys(room).sort(), ['id', 'status', 'hostSeat', 'playerCount', 'gameId', 'revision', 'rulesVersion', 'expiresAtMillis', 'players', 'match', 'scores'].sort());
@@ -167,12 +197,14 @@ test('trial app: two enrolled real anonymous browsers play and recover against e
           const relay = { seat, request, kind: target.kind, cancelled: false }; activeRelays.set(route, relay);
           const attempt = drop && !drop.intercepted && drop.seat === seat && target.kind === 'functions'
             && url.pathname === `${callablePath}floatingGardenSubmitAction` ? drop : null;
+          let responseStatus = null;
           if (attempt) { attempt.intercepted = true; attempt.payload = request.postDataJSON().data; }
           try {
             // Same-origin reverse proxy: forward the original method, headers,
             // Auth token and body. No browser security flags/permissions change.
             // Responses are real emulator responses, and redirects are forbidden.
             const response = await route.fetch({ url: target.url, maxRedirects: 0, timeout: 30000 });
+            responseStatus = response.status();
             assert.ok(response.status() < 300 || response.status() >= 400, 'emulator relay must never follow redirects');
             if (relay.cancelled || closing) return;
             if (offlineSeats.has(seat)) { relay.cancelled = true; await route.abort('internetdisconnected'); return; }
@@ -185,7 +217,10 @@ test('trial app: two enrolled real anonymous browsers play and recover against e
             } else await route.fulfill({ response });
           } catch (error) {
             if (isTrialRelayNavigationCancellation(target.kind, request.failure())) relay.cancelled = true;
-            if (!relay.cancelled && !closing) { routeErrors.push(error.message); await route.abort('failed').catch(() => {}); }
+            if (!relay.cancelled && !closing) {
+              routeErrors.push(sanitizeTrialRelayFailure({ kind: target.kind, url: request.url(), error, status: responseStatus }));
+              await route.abort('failed').catch(() => {});
+            }
           } finally { activeRelays.delete(route); if (attempt) attempt.done = true; }
           return;
         }
@@ -376,6 +411,10 @@ test('trial app: two enrolled real anonymous browsers play and recover against e
     assert.equal(pending.uid, uids[0]);
     assert.equal(await pages[0].locator('[data-action="command-self"]').isDisabled(), true, 'new actions are blocked while the old result is uncertain');
     const committed = await room(), beforeRetry = await serverGame();
+    assert.equal((await clientProbe(pages[0], { kind: 'fresh-read', path: roomPath })).status, 200, 'real member token allows a fresh read before revocation');
+    const canaryExpiry = committed.expiresAtMillis - 1;
+    assert.ok(canaryExpiry > Date.now() + 60000, 'listener canary must remain a valid future room expiry');
+    await beginRevocationWatch(pages[0], roomPath, canaryExpiry);
     stage = 'revoked and expired tester cannot read or replay a committed pending action';
     for (const [label, tester] of [
       ['revoked', { active: false, expiresAtMillis: fixture.config.endsAtMillis }],
@@ -383,6 +422,15 @@ test('trial app: two enrolled real anonymous browsers play and recover against e
     ]) {
       await db.doc(`floatingGardenTrialTesters/${uids[0]}`).set(tester);
       await deniedProbe(pages[0], { kind: 'read', path: roomPath });
+      if (label === 'revoked') {
+        // Cached, previously authorized data may remain visible. A NEW document
+        // update after revocation must never be delivered by the existing watch.
+        await db.doc(roomPath).update({ expiresAtMillis: canaryExpiry });
+        await pages[0].waitForFunction(() => globalThis.__trialRevocationWatch?.denied === 'permission-denied');
+        assert.equal(await pages[0].evaluate(() => globalThis.__trialRevocationWatch.canarySeen), false);
+        await pages[0].evaluate(() => globalThis.__trialRevocationWatch.stop());
+        await db.doc(roomPath).set(committed);
+      }
       await deniedProbe(pages[0], { kind: 'call', name: 'floatingGardenGetSnapshot', data: { roomId } }, 'trial-tester-not-enrolled');
       const deniedRetry = pages[0].waitForResponse((response) => response.url().endsWith('/floatingGardenSubmitAction') && response.request().method() === 'POST');
       await pages[0].reload();
@@ -397,6 +445,7 @@ test('trial app: two enrolled real anonymous browsers play and recover against e
     stage = 're-enrollment permits the original receipt replay without a second action';
     const lost = drop; drop = null;
     await pages[0].reload(); await ready(pages[0]); await waitRevision(pages[0], committed.match.revision);
+    assert.equal((await clientProbe(pages[0], { kind: 'fresh-read', path: roomPath })).status, 200, 'the same real member token allows a fresh read after re-enrollment');
     assert.equal(await authUid(pages[0]), uids[0], 'reload retains real Auth persistence');
     assert.equal((await recovery(pages[0])).pending, null);
     const retryCalls = observed[0].calls.filter((call) => call.method === 'floatingGardenSubmitAction' && call.payload.requestId === pending.payload.requestId);
@@ -533,7 +582,7 @@ test('trial app: two enrolled real anonymous browsers play and recover against e
     for (const type of ['draw', 'offer', 'accept', 'decline', 'place', 'self', 'store-empty', 'store-swap', 'use-storage', 'request-invite', 'pass-invite', 'yield', 'welcome', 'meditate', 'stone', 'final-stone', 'final-pass-final']) assert.ok(covered.has(type), `missing browser branch: ${type}`);
     assert.deepEqual(blocked, [], 'no unexpected denied destination; known SDK connectivity probes also remain blocked');
     assert.deepEqual(pageErrors, []); assert.deepEqual(routeErrors, []); assert.deepEqual(sameOriginMisses, [], 'all same-origin requests must resolve to actual assets or an allowlisted emulator route');
-    await writeFile(resolve(output, 'summary.json'), JSON.stringify({ projectId: config.projectId, status: 'passed', actions: finished.match.revision, branches: [...covered], independentAuthUsers: 2, sameIdRetry: true, offlineReconnect: true, gateChecks: ['unenrolled initial create', 'enrolled nonmember', 'revoked tester', 'expired tester', 'roster removed', 'expired room', 'disabled gate', 'private reads/lists/writes denied'], unchangedTrialPublicGraph: true, fixtureBoundaries: fixture.boundaries, liveAppCheckValidated: false, relayTargets: [...allowedLocalOrigins], browserNetworkOrigins: [origin, sdkOrigin], deniedConnectivityProbes }, null, 2));
+    await writeFile(resolve(output, 'summary.json'), JSON.stringify({ projectId: config.projectId, status: 'passed', actions: finished.match.revision, branches: [...covered], independentAuthUsers: 2, sameIdRetry: true, offlineReconnect: true, freshAuthorizationReads: 'real browser Auth token over new Firestore REST GETs; active SDK watch cache is not treated as a fresh authorization check', revokedListenerFutureUpdatesDenied: true, gateChecks: ['unenrolled initial create', 'enrolled nonmember', 'revoked tester', 'expired tester', 'roster removed', 'expired room', 'disabled gate', 'private reads/lists/writes denied'], unchangedTrialPublicGraph: true, fixtureBoundaries: fixture.boundaries, liveAppCheckValidated: false, relayTargets: [...allowedLocalOrigins], browserNetworkOrigins: [origin, sdkOrigin], deniedConnectivityProbes }, null, 2));
     console.log(`Trial-app emulator browser QA passed: ${finished.match.revision} committed actions; artifacts ${output}`);
   } catch (error) {
     // Test-only demo identities/room state only. Never record Auth tokens, headers,

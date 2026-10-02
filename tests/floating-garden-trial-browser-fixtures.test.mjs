@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { initializeApp, deleteApp } from 'firebase/app';
 import { getFunctions } from 'firebase/functions';
 import { prepareTrialEmulator } from './helpers/prepare-floating-garden-trial-emulator.mjs';
-import { trialEmulatorRoute, trialSdkFixture, isTrialRelayNavigationCancellation } from './helpers/floating-garden-trial-sdk-fixture.mjs';
+import { trialEmulatorRoute, trialSdkFixture, isTrialRelayNavigationCancellation, sanitizeTrialRelayFailure } from './helpers/floating-garden-trial-sdk-fixture.mjs';
 
 const origin = 'https://wa-garden-ci-trial--garden-7day-ci0001.web.app';
 const fixture = { kind: 'floating-garden-trial-browser-emulator-only-v1', projectId: 'demo-floating-garden-trial',
@@ -57,6 +57,37 @@ test('relay ignores only browser-confirmed aborted Firestore navigation requests
   assert.equal(isTrialRelayNavigationCancellation('firestore', { errorText: 'net::ERR_ABORTED' }), true);
   for (const kind of ['auth', 'functions', undefined]) assert.equal(isTrialRelayNavigationCancellation(kind, { errorText: 'net::ERR_ABORTED' }), false);
   for (const failure of [null, {}, { errorText: 'net::ERR_FAILED' }, { errorText: 'net::ERR_CONNECTION_REFUSED' }, { errorText: 'net::ERR_TIMED_OUT' }]) assert.equal(isTrialRelayNavigationCancellation('firestore', failure), false);
+});
+
+test('fresh authorization read relay permits only GETs for bounded demo document paths', () => {
+  const prefix = '/v1/projects/demo-floating-garden-trial/databases/(default)/documents/';
+  for (const path of ['floatingGardenRooms/room-id', 'floatingGardenRooms/room-id/members/real_uid',
+    'floatingGardenRooms/room-id/serverGames/game-id', 'floatingGardenTrial/config', 'floatingGardenTrial/usage',
+    'floatingGardenTrialTesters/real_uid', 'floatingGardenActionRequests/hash_request-id']) {
+    const url = origin + prefix + path;
+    assert.deepEqual(trialEmulatorRoute(url, 'GET', fixture), { kind: 'firestore', url: `http://127.0.0.1:8183${prefix}${path}` });
+    for (const method of ['POST', 'PATCH', 'DELETE']) assert.equal(trialEmulatorRoute(url, method, fixture), null);
+    assert.equal(trialEmulatorRoute(url + '?access_token=never-forward', 'GET', fixture), null);
+  }
+  for (const path of ['floatingGardenRooms', 'unrelatedCollection/secret', 'floatingGardenRooms/room-id/private/data', 'floatingGardenTrial/unknown']) {
+    assert.equal(trialEmulatorRoute(origin + prefix + path, 'GET', fixture), null);
+  }
+  assert.equal(trialEmulatorRoute(origin + prefix.replace('demo-floating-garden-trial', 'wa-awesome') + 'floatingGardenRooms/room-id', 'GET', fixture), null);
+  const diagnostic = sanitizeTrialRelayFailure({ kind: 'firestore', url: `${origin}${prefix}floatingGardenTrialTesters/private-uid?access_token=never-record`, error: new Error('Authorization: Bearer never-record') });
+  assert.equal(diagnostic.path, prefix + '[redacted]');
+  assert.doesNotMatch(JSON.stringify(diagnostic), /private-uid|never-record|access_token|Bearer/);
+});
+
+test('relay diagnostics never preserve Playwright bearer headers, query tokens, message or stack', () => {
+  const bearer = 'synthetic-bearer-do-not-record', token = 'synthetic-query-token';
+  const error = new Error(`route.fetch failed\nCall log:\nAuthorization: Bearer ${bearer}\nGET ${origin}/floatingGardenGetSnapshot?token=${token}`);
+  error.stack += `\nsecret ${bearer}`;
+  const diagnostic = sanitizeTrialRelayFailure({ kind: 'functions', url: `${origin}/floatingGardenGetSnapshot?token=${token}`, error });
+  assert.deepEqual(diagnostic, { kind: 'functions', path: '/floatingGardenGetSnapshot', errorName: 'Error', category: 'relay-failed' });
+  for (const forbidden of [bearer, token, 'Authorization', 'Call log', 'message', 'stack', '?']) assert.equal(JSON.stringify(diagnostic).includes(forbidden), false);
+  assert.deepEqual(sanitizeTrialRelayFailure({ kind: bearer, url: `${origin}/${token}`, error: { name: bearer, message: token }, status: 302 }),
+    { kind: 'unknown', path: '[unrecognized]', errorName: 'Error', category: 'redirect-refused', status: 302 });
+  assert.equal(sanitizeTrialRelayFailure({ kind: 'auth', url: 'malformed', error: { name: 'TimeoutError' } }).category, 'timeout');
 });
 
 test('trial SDK facades use supported HTTPS same-origin configuration without browser security changes', () => {
