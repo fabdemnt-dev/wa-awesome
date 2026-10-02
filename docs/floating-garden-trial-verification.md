@@ -37,28 +37,32 @@
 - bundle検証を4件から7件へ拡張。全出力allowlist、source hash、credential/runtime canaryの除外、backend importの閉包、危険な入力時の出力拒否を確認
 - 実SDK entry検証9件。実際のFirebase Functions 6.6.0/Admin 12.7.0で生成済みentryを読み、5関数だけ、実行上限、service account、create/joinだけのsecret bindingを確認
 - entry試験では本物のCallable middlewareへインメモリHTTP requestを渡す。App Check欠落の401、正確なCORS、無効設定/別project/期間外/Auth不足の拒否を確認。socket/http/fetchは全て試験中禁止し、ネットワーク利用0を検査
-- 同一origin試験中継とCLI discoveryの回帰9件を追加。許可経路・拒否経路、reload時の実Firestore request取消だけの分類、SDK設定と実SDKのURL構築（通信なし）、marker/demo/loopbackの拒否、生成ソース不変、限定したREST読取り経路、秘密値を含めないエラー診断、offline切替前の中継取消フラグ設定順を確認
+- 試験用接続とCLI discoveryの回帰。正確なloopback Origin・demo project・emulator marker、配信ソース不変、直接SDK接続、秘密値を含めない診断を検査する
 - trial用CIはNode22/Java21で独立packageを実installし、全体回帰、entry、専用Rules/Firestore競合、生成済みtrial画面の2ブラウザー試験を実行する
 - 個々のCI結果は、[Draft PR #365](https://github.com/fabdemnt-dev/wa-awesome/pull/365)の最終headとChecksを参照。前のheadの成功を流用しない
 
 ### ブラウザー試験の境界
 
-生成されたtrialのapp/bootstrap/config/firebase/controller/画面はbyteを変更せず使用する。2つの独立したブラウザー保存領域が本物の匿名Auth emulatorでUIDを取得し、Callable HTTP・trial認可・Firestore transaction/listener/Rulesを通す。ゲームのcreate/join/startから譲渡・招き・採点、同UID reload、commit後の応答消失と同ID再送、offline/reconnectを確認する。
+配信用の生成済みindex.htmlをlocalhostで開き、試験外OriginではSDK読込み・Auth・emulator通信を始めず停止することを実ブラウザーで確認する。
 
-配信前のため、次だけは`tests/helpers/`内の明示したfixtureで置き換える。
+成功系は別の試験専用HTML/entryを使い、既存のbootstrapTrialへ明示的なテスト用locationを注入する。bootstrap/config/transport/controller/画面/ルールのproduction sourceは変更しない。2つの独立したブラウザー保存領域から、本物の匿名Auth emulator、Callable HTTP、Firestore transaction/listener/RulesへSDKを直接接続する。create/join/start、譲渡・招き・採点、同UID reload、commit後の応答消失と同ID再送、offline/reconnectを検査する。
 
-- syntheticな専用preview originへのリクエストを、実Hostingへ送らずローカルの生成済みpublic assetsで返す
-- SDK constructorsでprojectを`demo-floating-garden-trial`へ限定し、同一HTTPS origin上の試験用経路から、許可したloopback emulatorだけへ本物のHTTP request/responseを中継する。browserのsecurity flagsやpermissionは変更しない
-- App Checkは合成marker。Functions fixtureもこのmarkerを付けるが、本物のAuth middlewareと元のtrial認可は省略しない
-- browser runnerは専用flag、Functions fixtureは生成済みfixture markerとCLI自身のemulator markerを要求する。demo project、loopback Auth/Firestore、正確なOriginも必須。生成された配信用entry/公開bundleへコピーしない
+代替するのはtests/helpers内の明示した環境部分だけ。
 
-参加取消後の読取り検査は、既存のSDK watch targetが受信済みの状態を再利用する場合と、新規サーバー認可を分ける。同じ本物のAuth tokenで新しいREST document GETを送り、取消前/再登録後の200と取消中の403を確認する。既存listenerも、公開roomの既存expiry値を一時的に1ms変更した更新を受け取らず、permission-deniedになることを要求し、roomは元へ戻す。既に受信・表示された公開情報が取消と同時に消えるとは主張しない。
+- SDK constructorsでprojectをdemo-floating-garden-trialと固定loopback portsへ限定。通常のAuth/Firestore/Callable通信はbrowserから直接流し、全体応答をためるstreaming proxyを挟まない
+- App Checkは合成。Functions fixtureも合成App Check contextを付けるが、本物のAuth middlewareと元のtrial認可は省略しない
+- Functions fixtureは、生成済みmarker・CLI emulator marker・demo project・loopback hostsと、実際のbrowserから来た正確なloopback Originを確認してから、試験用のrequest Originだけを静的trial設定へ合わせる
+- 試験専用entryは配信用public bundleとは分離する。生成済みproduction entry/public source/独立Functions entryのbyte一致を別途検査する
 
-これは本物のEnterprise attestation、Hosting/TLS、live CORS/PNA、配信用entryとApp Checkの成功系全体、IAM、Secret Manager、実Android2台の証明ではない。配信用entryの拒否動作と設定は独立した9件で検査する。許可先以外のbrowser通信は拒否し、token・header・browser storage dumpをartifactへ残さない。
+したがって、成功系でproduction app.jsがdefault-window-locationから起動する経路、実HTTPS/CORS、Enterprise attestation、IAM、Secret Manager、実Android2台は未検証。配信用entryの拒否動作・CORS設定・App Check必須化は実SDK entry試験で確認する。Callableの成功応答を意図的に捨てる試験だけは有限のHTTP応答を取得してから遮断するが、ゲーム結果・Auth・Firestore応答を合成しない。
 
-### 初回CIで修正した試験接続
+参加取消は、受信済みの公開情報を即時消去することと、新しいサーバー認可を分けて検査する。同じ本物のAuth tokenで新しいREST document GETを送り、取消前/再登録後の200と取消中の403を要求する。既存listenerも、公開roomの既存expiry値を一時的に1ms変更した更新を受け取らずpermission-deniedになることを確認し、roomは元へ戻す。token・header・browser storage dumpはartifactへ残さない。
 
-初回trial CIでは全体699件・entry9件・Rules10件が成功し、browser fixtureの開始で失敗した。Firebase CLIが関数定義読み込み時に任意のshell変数を引き継がないため、CLI自身のemulator markerと生成済みfixture markerを検証する形へ修正。また、合成HTTPS originからloopbackへ直接通信するfixtureはbrowserのaddress-space制約に拒否されたため、browser権限を変更せず、明示した同一origin試験中継へ変更する。production sourceや認可条件を緩める修正は行わない。
+### 試験構成を変更した理由
+
+初期の合成HTTPS originとPlaywright中継では、SDK接続先の不一致、取消タイミング、Firestoreのlong-pollの扱いを切り分ける必要があった。独立したsource調査で、Playwrightの中継は応答body終了まで待ち、browser取消だけでは裏側のfetchを止めないことを確認した。固定Firebase10.8が送る5秒のTO hintをemulator1.19.8は使わず、buffered idle pollの既定値は30秒で、中継のtimeoutと重なっていた。ただし、記録されたconnection-resetが特定の画面更新停滞の直接原因だったとまでは断定しない。
+
+不確かな再試行や待ち時間延長を足す代わりに、このstreaming proxyを取り除いた。browserのsecurity flagsやpermissionは変更せず、上記の直接接続と明示した試験境界で検証する。production sourceや認可条件を緩める修正は行わない。
 
 ## まだ検証していないこと
 

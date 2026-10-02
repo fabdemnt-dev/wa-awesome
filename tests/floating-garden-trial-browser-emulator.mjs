@@ -1,9 +1,11 @@
-// Generated trial app/bootstrap/config/firebase are served byte-for-byte. Real
-// anonymous SDK Auth, callable HTTP, trial guards, transactions and rules execute
-// against demo emulators. Explicit test-only SDK endpoint/attestation and Functions
-// entry fixtures bridge live-only deployment gates. This is NOT live App Check,
-// real Hosting/TLS, production Functions entry, IAM or Secret Manager validation.
+// The actual production entry is tested fail-closed at loopback before SDK/Auth.
+// Successful UI coverage uses a NEW test entry and bootstrapTrial's explicit
+// location seam. Original trial/bootstrap/transport/config/game sources remain
+// byte-for-byte unchanged. Auth/Functions/Firestore traffic goes DIRECTLY to demo
+// emulators; native browser listeners, offline and reload are not proxied.
+// Live App Check/HTTPS/CORS/default-window-location success are NOT validated.
 import test from 'node:test';
+import { createServer } from 'node:http';
 import assert from 'node:assert/strict';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -14,7 +16,7 @@ import { createRequire } from 'node:module';
 import { chromium } from './e2e/node_modules/playwright/index.mjs';
 import { emulatorConfig } from './helpers/floating-garden-emulators.mjs';
 import { abortDeniedBrowserRequest } from './helpers/floating-garden-browser-network.mjs';
-import { trialSdkFixture, trialEmulatorRoute, isTrialRelayNavigationCancellation, sanitizeTrialRelayFailure, setTrialContextOffline } from './helpers/floating-garden-trial-sdk-fixture.mjs';
+import { trialSdkFixture, sanitizeTrialRelayFailure } from './helpers/floating-garden-trial-sdk-fixture.mjs';
 import { ONLINE_SAVE_KEY } from '../lab/floating-garden/online/controller.js';
 import { legalActions, getDecision, rankMatch, applyMatchAction } from '../lab/floating-garden/match-engine.js';
 
@@ -38,29 +40,33 @@ const { initializeApp, deleteApp } = require('firebase-admin/app');
 const { getFirestore } = require('firebase-admin/firestore');
 const sdkOrigin = 'https://www.gstatic.com';
 const sdkPrefix = '/firebasejs/10.8.0/';
-const entryPath = '/lab/floating-garden/trial/index.html';
-const callablePath = '/';
+const productionEntryPath = '/lab/floating-garden/trial/index.html';
+const entryPath = '/lab/floating-garden/trial/emulator-index.html';
+const callablePath = '/demo-floating-garden-trial/asia-northeast1/';
 const output = resolve(process.env.FLOATING_GARDEN_BROWSER_ARTIFACTS || '/tmp/floating-garden-trial-browser-emulator-qa');
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
 
-// The HTTPS preview origin is a browser routing fixture only. Requests are always
-// fulfilled from the generated public graph, never sent to Firebase Hosting.
-async function serveTrialAsset(route, served) {
-  const request = route.request(), url = new URL(request.url());
+// Static loopback server only. It never handles Auth, callable, Firestore or any
+// other backend request; public assets are served unchanged from the bundle.
+async function serveTrialBundle(served, missing) {
+  assert.equal(fixture.browserOrigin, 'http://127.0.0.1:8783');
   const publicRoot = resolve(fixtureRoot, 'public');
-  const path = resolve(publicRoot, `.${decodeURIComponent(url.pathname)}`);
-  if (!['GET', 'HEAD'].includes(request.method()) || !path.startsWith(publicRoot + '/') || !['.html', '.js', '.css'].includes(extname(path))) {
-    await route.fulfill({ status: 404, body: '' }); return 404;
-  }
-  try {
-    const bytes = await readFile(path); served.set(url.pathname, digest(bytes));
-    await route.fulfill({ status: 200, body: bytes, headers: { 'content-type': { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' }[extname(path)], 'cache-control': 'no-store' } });
-    return 200;
-  } catch (error) {
-    if (error.code !== 'ENOENT') throw error;
-    await route.fulfill({ status: 404, body: '' });
-    return 404;
-  }
+  const testAssets = new Map([[entryPath, resolve(fixtureRoot, 'browser-fixture/index.html')],
+    ['/lab/floating-garden/trial/emulator-entry.js', resolve(fixtureRoot, 'browser-fixture/entry.js')]]);
+  const server = createServer(async (request, response) => {
+    const url = new URL(request.url, fixture.browserOrigin);
+    if (url.pathname === '/favicon.ico' && request.method === 'GET') { response.writeHead(204); response.end(); return; }
+    const path = testAssets.get(url.pathname) || resolve(publicRoot, `.${decodeURIComponent(url.pathname)}`);
+    const notFound = () => { missing.push({ path: url.pathname, method: request.method, status: 404 }); response.writeHead(404); response.end(); };
+    if (!['GET', 'HEAD'].includes(request.method) || (!testAssets.has(url.pathname) && !path.startsWith(resolve(publicRoot, 'lab/floating-garden') + '/')) || !['.html', '.js', '.css'].includes(extname(path))) return notFound();
+    try {
+      const bytes = await readFile(path); served.set(url.pathname, digest(bytes));
+      response.writeHead(200, { 'content-type': { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' }[extname(path)], 'cache-control': 'no-store' });
+      response.end(request.method === 'HEAD' ? undefined : bytes);
+    } catch (error) { if (error.code === 'ENOENT') notFound(); else { response.writeHead(500); response.end(); } }
+  });
+  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(8783, '127.0.0.1', resolve); });
+  return server;
 }
 
 async function until(read, description, timeout = 20000) {
@@ -97,7 +103,7 @@ async function authUid(page) {
 // Security probes share the app's real authenticated SDK instance. They do not
 // invoke handlers, forge Auth, edit persistence, or substitute a game transport.
 async function clientProbe(page, operation) {
-  return page.evaluate(async ({ appName, region, operation }) => {
+  return page.evaluate(async ({ appName, region, firestoreOrigin, operation }) => {
     const [{ getApp }, fs, fn, { getAuth }] = await Promise.all([
       import('https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js'),
       import('https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js'),
@@ -113,7 +119,7 @@ async function clientProbe(page, operation) {
         if (!user?.isAnonymous) throw new Error('Real anonymous identity required for fresh read');
         // The token stays inside this browser request header. Never return it or
         // record request headers, full request errors, query strings or bodies.
-        const response = await fetch(`/v1/projects/demo-floating-garden-trial/databases/(default)/documents/${operation.path.split('/').map(encodeURIComponent).join('/')}`, {
+        const response = await fetch(`${firestoreOrigin}/v1/projects/demo-floating-garden-trial/databases/(default)/documents/${operation.path.split('/').map(encodeURIComponent).join('/')}`, {
           method: 'GET', cache: 'no-store', headers: { authorization: `Bearer ${await user.getIdToken()}` },
         });
         return { ok: response.ok, status: response.status, code: response.status === 403 ? 'permission-denied' : response.status === 401 ? 'unauthenticated' : 'unexpected-http-status' };
@@ -122,7 +128,7 @@ async function clientProbe(page, operation) {
       if (operation.kind === 'write') { await fs.setDoc(fs.doc(db, operation.path), { forged: true }); return { ok: true }; }
       throw new Error('Unknown security probe');
     } catch (error) { return { ok: false, code: error.code, reason: error.details?.reason }; }
-  }, { appName: APP_NAME, region: fixture.config.region, operation });
+  }, { appName: APP_NAME, region: fixture.config.region, firestoreOrigin: `http://127.0.0.1:${EMULATOR_PORTS.firestore}`, operation });
 }
 async function deniedProbe(page, operation, reason) {
   // getDocFromServer can reuse an active, already-current watch target. For a
@@ -160,24 +166,42 @@ function publicOnly(room) {
   visit(room);
 }
 
-test('trial app: two enrolled real anonymous browsers play and recover against emulator callables/rules; authorization fails closed', { timeout: 600000 }, async () => {
-  let browser, admin, db;
+test('trial bootstrap UI: two enrolled real anonymous browsers play and recover against emulator callables/rules; authorization fails closed', { timeout: 600000 }, async () => {
+  let server, browser, admin, db;
   const contexts = [], pages = [], observed = [], pageErrors = [], blocked = [], deniedConnectivityProbes = [], routeErrors = [], sameOriginMisses = [];
-  const interruptedSeats = new Set(), offlineSeats = new Set(), activeRelays = new Map();
-  let closing = false;
-  const setOffline = (seat, offline) => setTrialContextOffline({ context: contexts[seat], seat, offline, offlineSeats, activeRelays });
+  const interruptedSeats = new Set();
+  const setOffline = (seat, offline) => contexts[seat].setOffline(offline);
   const transcript = [], captures = new Set();
   let roomId = null, stage = 'initialization', drop = null;
   await mkdir(output, { recursive: true });
   try {
-    const origin = fixture.runtime.previewOrigin, served = new Map();
+    const origin = fixture.browserOrigin, served = new Map();
+    server = await serveTrialBundle(served, sameOriginMisses);
     admin = initializeApp({ projectId: config.projectId }, `garden-trial-browser-observer-${randomUUID()}`);
     db = getFirestore(admin);
     const room = async () => { const snapshot = await db.doc(`floatingGardenRooms/${roomId}`).get(); assert.ok(snapshot.exists); return snapshot.data(); };
     const serverGame = async () => { const current = await room(); return (await db.doc(`floatingGardenRooms/${roomId}/serverGames/${current.gameId}`).get()).data(); };
     const executablePath = process.env.CHROMIUM_PATH || (existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined);
     browser = await chromium.launch({ executablePath, headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
-    const allowedLocalOrigins = new Set(['auth', 'firestore', 'functions'].map((kind) => `http://127.0.0.1:${EMULATOR_PORTS[kind]}`));
+    const allowedLocalOrigins = new Set([origin, ...['auth', 'firestore', 'functions'].map((kind) => `http://127.0.0.1:${EMULATOR_PORTS[kind]}`)]);
+
+    stage = 'actual production entry fails closed before SDK, Auth or backend traffic';
+    const rejectedEntry = await browser.newContext({ serviceWorkers: 'block' });
+    const prematureRequests = [];
+    try {
+      await rejectedEntry.route('**/*', async (route) => {
+        const url = new URL(route.request().url());
+        if (url.origin === origin) return route.continue();
+        prematureRequests.push({ origin: url.origin, path: url.pathname, method: route.request().method() });
+        await route.abort('blockedbyclient');
+      });
+      const page = await rejectedEntry.newPage();
+      await page.goto(origin + productionEntryPath);
+      await page.getByRole('heading', { name: '試験用の接続を開始できません' }).waitFor();
+      assert.deepEqual(prematureRequests, [], 'production entry must reject loopback before loading SDK or sending any Auth/backend request');
+      assert.equal(await page.locator('#trial-own-uid').count(), 0);
+    } finally { await rejectedEntry.close(); }
+
     for (const [seat, viewport] of [{ width: 1180, height: 900 }, { width: 390, height: 844 }].entries()) {
       const context = await browser.newContext({ viewport, serviceWorkers: 'block' });
       contexts.push(context);
@@ -185,54 +209,33 @@ test('trial app: two enrolled real anonymous browsers play and recover against e
       observed.push(observation);
       await context.route('**/*', async (route) => {
         const request = route.request(), url = new URL(request.url());
-        const target = trialEmulatorRoute(request.url(), request.method(), fixture);
-        if (target) {
-          if (offlineSeats.has(seat)) return route.abort('internetdisconnected');
-          const relay = { seat, request, kind: target.kind, cancelled: false }; activeRelays.set(route, relay);
-          const attempt = drop && !drop.intercepted && drop.seat === seat && target.kind === 'functions'
-            && url.pathname === `${callablePath}floatingGardenSubmitAction` ? drop : null;
-          let responseStatus = null;
-          if (attempt) { attempt.intercepted = true; attempt.payload = request.postDataJSON().data; }
-          try {
-            // Same-origin reverse proxy: forward the original method, headers,
-            // Auth token and body. No browser security flags/permissions change.
-            // Responses are real emulator responses, and redirects are forbidden.
-            const response = await route.fetch({ url: target.url, maxRedirects: 0, timeout: 30000 });
-            responseStatus = response.status();
-            assert.ok(response.status() < 300 || response.status() >= 400, 'emulator relay must never follow redirects');
-            if (relay.cancelled || closing) return;
-            if (offlineSeats.has(seat)) { relay.cancelled = true; await route.abort('internetdisconnected'); return; }
-            if (attempt) {
-              const body = await response.json();
-              assert.equal(response.status(), 200);
-              assert.ok(body.result?.room, 'the dropped response must be a real committed success');
-              attempt.result = body.result;
-              await route.abort('failed');
-            } else await route.fulfill({ response });
-          } catch (error) {
-            if (isTrialRelayNavigationCancellation(target.kind, request.failure())) relay.cancelled = true;
-            if (!relay.cancelled && !closing) {
-              routeErrors.push(sanitizeTrialRelayFailure({ kind: target.kind, url: request.url(), error, status: responseStatus }));
-              await route.abort('failed').catch(() => {});
-            }
-          } finally { activeRelays.delete(route); if (attempt) attempt.done = true; }
-          return;
-        }
-        if (url.origin === origin) {
-          const status = await serveTrialAsset(route, served);
-          if (status === 404) sameOriginMisses.push({ seat, path: url.pathname, method: request.method(), status });
-          return;
-        }
         if (url.origin === sdkOrigin && url.pathname.startsWith(sdkPrefix) && !url.search) {
           const source = trialSdkFixture(url.pathname.slice(sdkPrefix.length), fixture);
           if (source) return route.fulfill({ status: 200, body: source, headers: { 'content-type': 'text/javascript', 'access-control-allow-origin': '*' } });
         }
-        const allowed = url.origin === sdkOrigin && url.pathname.startsWith(sdkPrefix) && url.pathname.endsWith('.js') && request.method() === 'GET';
+        const allowed = allowedLocalOrigins.has(url.origin) || (url.origin === sdkOrigin && url.pathname.startsWith(sdkPrefix) && url.pathname.endsWith('.js') && request.method() === 'GET');
         if (!allowed) {
-          // Raw browser requests to loopback are blocked as well. Only the
-          // allowlisted server-side relay above reaches emulator network ports.
           const diagnostic = await abortDeniedBrowserRequest(route, { offlineExercised: interruptedSeats.has(seat) });
           (diagnostic ? deniedConnectivityProbes : blocked).push({ seat, origin: url.origin, path: url.pathname, method: request.method(), resourceType: request.resourceType() });
+          return;
+        }
+        // The ONLY APIRequestContext fetch is this finite, intentional lost-reply
+        // experiment. All listeners/Auth/other callables use native networking.
+        if (drop && !drop.intercepted && drop.seat === seat && request.method() === 'POST' && url.origin === `http://127.0.0.1:${EMULATOR_PORTS.functions}` && url.pathname === `${callablePath}floatingGardenSubmitAction`) {
+          const attempt = drop; attempt.intercepted = true;
+          let status = null, phase = 'fetch';
+          try {
+            attempt.payload = request.postDataJSON().data;
+            const response = await route.fetch({ maxRedirects: 0, maxRetries: 0, timeout: 30000 });
+            status = response.status(); assert.equal(status, 200);
+            phase = 'decode'; const body = await response.json();
+            assert.ok(body.result?.room, 'the discarded response must be a real committed success');
+            attempt.result = body.result;
+            phase = 'drop-response'; await route.abort('failed');
+          } catch (error) {
+            routeErrors.push({ seat, stage, phase, method: request.method(), ...sanitizeTrialRelayFailure({ kind: 'functions', url: request.url(), error, status }) });
+            await route.abort('failed').catch(() => {});
+          } finally { attempt.done = true; }
           return;
         }
         await route.continue();
@@ -241,24 +244,18 @@ test('trial app: two enrolled real anonymous browsers play and recover against e
       page.setDefaultTimeout(20000);
       page.setDefaultNavigationTimeout(60000);
       page.on('pageerror', (error) => pageErrors.push({ seat, message: error.message }));
-      page.on('requestfailed', (request) => {
-        for (const relay of activeRelays.values()) {
-          if (relay.request === request && isTrialRelayNavigationCancellation(relay.kind, request.failure())) relay.cancelled = true;
-        }
-      });
       page.on('console', (message) => { if (['error', 'warning'].includes(message.type())) observation.console.push(message.text()); });
       page.on('request', (request) => {
         const url = new URL(request.url());
-        const target = trialEmulatorRoute(request.url(), request.method(), fixture);
-        if (target?.kind === 'auth') observation.authRequests += 1;
-        if (target?.kind === 'firestore') observation.firestoreRequests += 1;
-        if (target?.kind === 'functions' && request.method() === 'POST') {
+        if (url.origin === `http://127.0.0.1:${EMULATOR_PORTS.auth}`) observation.authRequests += 1;
+        if (url.origin === `http://127.0.0.1:${EMULATOR_PORTS.firestore}`) observation.firestoreRequests += 1;
+        if (url.origin === `http://127.0.0.1:${EMULATOR_PORTS.functions}` && request.method() === 'POST') {
           observation.calls.push({ method: url.pathname.split('/').pop(), payload: request.postDataJSON()?.data });
         }
       });
       page.on('response', (response) => {
         const url = new URL(response.url());
-        if (url.origin !== origin || !url.pathname.endsWith('/floatingGardenGetSnapshot') || response.request().method() !== 'POST' || response.status() !== 200) return;
+        if (url.origin !== `http://127.0.0.1:${EMULATOR_PORTS.functions}` || !url.pathname.endsWith('/floatingGardenGetSnapshot') || response.request().method() !== 'POST' || response.status() !== 200) return;
         const capture = response.json().then((body) => { if (body.result) observation.snapshots.push(body.result); }).catch(() => {}).finally(() => captures.delete(capture));
         captures.add(capture);
       });
@@ -270,8 +267,7 @@ test('trial app: two enrolled real anonymous browsers play and recover against e
     const uids = await Promise.all(pages.map(authUid));
     assert.ok(uids.every((uid) => typeof uid === 'string' && uid.length > 0));
     assert.notEqual(uids[0], uids[1], 'separate browser storage produces independent anonymous Auth identities');
-    // Observe the pinned browser SDK's actual URL constructor, rather than assume
-    // it preserves custom-domain path segments as newer installed SDKs do.
+    // Observe the pinned browser SDK's actual direct emulator endpoint mapping.
     const callableNames = ['CreateRoom', 'JoinRoom', 'StartMatch', 'GetSnapshot', 'SubmitAction'].map((suffix) => `floatingGarden${suffix}`);
     for (const page of pages) {
       const endpoints = await page.evaluate(async ({ appName, region, names }) => {
@@ -282,11 +278,10 @@ test('trial app: two enrolled real anonymous browsers play and recover against e
         const functions = getFunctions(getApp(appName), region);
         return names.map((name) => functions._url(name));
       }, { appName: APP_NAME, region: fixture.config.region, names: callableNames });
-      assert.deepEqual(endpoints, callableNames.map((name) => `${origin}/${name}`));
-      endpoints.forEach((url) => assert.equal(trialEmulatorRoute(url, 'POST', fixture)?.kind, 'functions'));
+      assert.deepEqual(endpoints, callableNames.map((name) => `http://127.0.0.1:${EMULATOR_PORTS.functions}${callablePath}${name}`));
     }
     assert.deepEqual(await Promise.all(pages.map(recovery)), [null, null], 'fresh contexts have no preseeded recovery record');
-    for (const asset of [entryPath, ...['app.js', 'bootstrap.js', 'config.js', 'firebase.js'].map((name) => `/lab/floating-garden/trial/${name}`)]) {
+    for (const asset of [productionEntryPath, ...['app.js', 'bootstrap.js', 'config.js', 'firebase.js'].map((name) => `/lab/floating-garden/trial/${name}`)]) {
       assert.equal(served.get(asset), digest(await readFile(resolve(root, `.${asset}`))), `${asset} is served unchanged from the generated trial bundle`);
     }
 
@@ -575,8 +570,8 @@ test('trial app: two enrolled real anonymous browsers play and recover against e
     for (const suffix of ['CreateRoom', 'JoinRoom', 'StartMatch', 'GetSnapshot', 'SubmitAction']) assert.ok(called.has(`floatingGarden${suffix}`));
     for (const type of ['draw', 'offer', 'accept', 'decline', 'place', 'self', 'store-empty', 'store-swap', 'use-storage', 'request-invite', 'pass-invite', 'yield', 'welcome', 'meditate', 'stone', 'final-stone', 'final-pass-final']) assert.ok(covered.has(type), `missing browser branch: ${type}`);
     assert.deepEqual(blocked, [], 'no unexpected denied destination; known SDK connectivity probes also remain blocked');
-    assert.deepEqual(pageErrors, []); assert.deepEqual(routeErrors, []); assert.deepEqual(sameOriginMisses, [], 'all same-origin requests must resolve to actual assets or an allowlisted emulator route');
-    await writeFile(resolve(output, 'summary.json'), JSON.stringify({ projectId: config.projectId, status: 'passed', actions: finished.match.revision, branches: [...covered], independentAuthUsers: 2, sameIdRetry: true, offlineReconnect: true, freshAuthorizationReads: 'real browser Auth token over new Firestore REST GETs; active SDK watch cache is not treated as a fresh authorization check', revokedListenerFutureUpdatesDenied: true, gateChecks: ['unenrolled initial create', 'enrolled nonmember', 'revoked tester', 'expired tester', 'roster removed', 'expired room', 'disabled gate', 'private reads/lists/writes denied'], unchangedTrialPublicGraph: true, fixtureBoundaries: fixture.boundaries, liveAppCheckValidated: false, relayTargets: [...allowedLocalOrigins], browserNetworkOrigins: [origin, sdkOrigin], deniedConnectivityProbes }, null, 2));
+    assert.deepEqual(pageErrors, []); assert.deepEqual(routeErrors, []); assert.deepEqual(sameOriginMisses, [], 'all static fixture and generated public assets must exist');
+    await writeFile(resolve(output, 'summary.json'), JSON.stringify({ projectId: config.projectId, status: 'passed', actions: finished.match.revision, branches: [...covered], independentAuthUsers: 2, sameIdRetry: true, offlineReconnect: true, freshAuthorizationReads: 'real browser Auth token over new Firestore REST GETs; active SDK watch cache is not treated as a fresh authorization check', revokedListenerFutureUpdatesDenied: true, gateChecks: ['unenrolled initial create', 'enrolled nonmember', 'revoked tester', 'expired tester', 'roster removed', 'expired room', 'disabled gate', 'private reads/lists/writes denied'], unchangedTrialPublicGraph: true, productionEntryFailClosedAtLoopback: true, successfulBrowserEntry: 'test-only bootstrap entry with explicit location injection', fixtureBoundaries: fixture.boundaries, liveAppCheckValidated: false, browserNetworkOrigins: [...allowedLocalOrigins, sdkOrigin], deniedConnectivityProbes }, null, 2));
     console.log(`Trial-app emulator browser QA passed: ${finished.match.revision} committed actions; artifacts ${output}`);
   } catch (error) {
     // Test-only demo identities/room state only. Never record Auth tokens, headers,
@@ -588,9 +583,9 @@ test('trial app: two enrolled real anonymous browsers play and recover against e
     await writeFile(resolve(output, 'failure.json'), JSON.stringify({ stage, error: error.stack || error.message, roomId, transcript, pageErrors, blocked, deniedConnectivityProbes, routeErrors, sameOriginMisses, observations: observed.map(({ seat, authRequests, firestoreRequests, calls, console }) => ({ seat, authRequests, firestoreRequests, console, calls: calls.map(({ method, payload }) => ({ method, requestId: payload?.requestId, expectedRevision: payload?.expectedRevision, command: payload?.command })) })) }, null, 2));
     throw error;
   } finally {
-    closing = true;
     await Promise.allSettled(contexts.map((context) => context.close()));
     await browser?.close();
+    if (server) { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); }
     if (db) await db.terminate();
     if (admin) await deleteApp(admin);
   }

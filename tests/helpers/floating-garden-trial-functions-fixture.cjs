@@ -15,6 +15,7 @@ function assertEmulator() {
   // Require its own emulator marker plus the generated fixture marker instead;
   // deployment discovery has no emulator marker and must still fail closed.
   assert.equal(fixture.kind, 'floating-garden-trial-browser-emulator-only-v1');
+  assert.equal(fixture.browserOrigin, 'http://127.0.0.1:8783');
   assert.equal(process.env.FUNCTIONS_EMULATOR, 'true');
   assert.equal(projectId, 'demo-floating-garden-trial');
   assert.equal(process.env.GCLOUD_PROJECT, projectId);
@@ -32,12 +33,17 @@ const handlers = createTrialHandlers({ config, db: getFirestore(app), timestampF
   inviteSecret: () => 'emulator-only-trial-invitation-key-not-a-secret-32',
 });
 module.exports = Object.fromEntries(Object.entries(handlers).map(([name, handler]) => [name,
-  onCall({ region: config.region, cors: [config.previewOrigin], enforceAppCheck: false }, async (request) => {
+  onCall({ region: config.region, cors: [fixture.browserOrigin], enforceAppCheck: false }, async (request) => {
     assertEmulator();
     if (!request.auth || request.auth.token.firebase?.sign_in_provider !== 'anonymous') throw new HttpsError('unauthenticated', 'Real anonymous emulator authentication is required');
-    if (request.rawRequest.headers.origin !== config.previewOrigin) throw new HttpsError('permission-denied', 'Fixture origin mismatch');
+    if (request.rawRequest.headers.origin !== fixture.browserOrigin) throw new HttpsError('permission-denied', 'Fixture origin mismatch');
     try {
-      return await handler({ ...request, app: { appId: 'emulator-only-synthetic-attestation' } });
+      // Only after verifying the exact actual loopback Origin, adapt the origin
+      // inside this test entry to the validated synthetic trial configuration.
+      // Production Origin, App Check, Hosting and CORS success remain unvalidated.
+      return await handler({ ...request, app: { appId: 'emulator-only-synthetic-attestation' },
+        rawRequest: { ...request.rawRequest, ip: request.rawRequest.ip,
+          headers: { ...request.rawRequest.headers, origin: config.previewOrigin } } });
     } catch (error) {
       if (error instanceof TrialError || error?.name === 'GardenError') throw new HttpsError(error.code, error.message, error.details);
       throw error;

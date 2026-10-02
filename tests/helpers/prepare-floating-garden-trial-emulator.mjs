@@ -19,8 +19,16 @@ export async function prepareTrialEmulator(output, now = Date.now()) {
   };
   await prepareTrialBundle({ config: runtime, output: out, now });
   const config = JSON.parse(await readFile(join(out, 'functions/trial-config.json'), 'utf8'));
-  const fixture = { kind: 'floating-garden-trial-browser-emulator-only-v1', projectId, ports, runtime, config,
-    boundaries: ['generated trial public assets unchanged', 'real SDK Auth/Functions/Firestore use demo emulators through an allowlisted same-origin reverse proxy', 'test-only SDK endpoint adapters; Firestore forced 5-second long polling', 'App Check synthetic: no live attestation validation', 'HTTPS preview origin intercepted locally: no Hosting/TLS/CORS/private-network validation', 'browser security unchanged; offline relay requests and in-flight responses are aborted', 'production Functions entry, IAM and Secret Manager not exercised'] };
+  const fixture = { kind: 'floating-garden-trial-browser-emulator-only-v1', browserOrigin: 'http://127.0.0.1:8783', projectId, ports, runtime, config,
+    boundaries: ['generated production public assets unchanged; actual production entry is verified fail-closed at loopback before SDK/auth/network', 'successful UI flow uses a separate test entry calling unchanged bootstrapTrial with explicit synthetic location injection', 'real SDK Auth/Functions/Firestore connect directly to demo emulators; native browser offline/reload/listeners, no streaming proxy', 'App Check synthetic: no live attestation validation', 'successful production app.js/default-window-location/HTTPS/CORS/App Check path is not validated', 'test Functions entry verifies exact loopback Origin before explicit synthetic trial-Origin adaptation', 'production Functions entry, IAM and Secret Manager not exercised'] };
+  const productionHtml = await readFile(join(out, 'public/lab/floating-garden/trial/index.html'), 'utf8');
+  const fixtureHtml = productionHtml.replace('<script type="module" src="./app.js"></script>', '<script type="module" src="./emulator-entry.js"></script>');
+  if (fixtureHtml === productionHtml) throw new Error('The production HTML entry script was not found; fixture preparation must be reviewed');
+  // Keep BOTH fixture assets outside the deployable production public directory.
+  // The CI-only HTTP server maps two exact URLs to these files.
+  await mkdir(join(out, 'browser-fixture'));
+  await writeFile(join(out, 'browser-fixture/index.html'), '<!-- EMULATOR TEST ENTRY: production index.html remains unchanged. -->\n' + fixtureHtml);
+  await writeFile(join(out, 'browser-fixture/entry.js'), `// TEST ONLY: explicit bootstrap location seam, not the production app.js entry.\nimport runtime from './trialruntime.js';\nimport { bootstrapTrial } from './bootstrap.js';\nawait bootstrapTrial(document.querySelector('#online-app'), document.querySelector('#trial-status'), runtime, { location: new URL(${JSON.stringify(runtime.previewOrigin + '/lab/floating-garden/trial/index.html')}) });\n`);
   const source = join(out, 'emulator-functions');
   await mkdir(source);
   for (const name of ['trial-handlers.js', 'config.js', 'package.json', 'package-lock.json', 'online/handlers.js', 'online/contract.js', 'online/invite-code.js', 'online/core/engine.js', 'online/core/match-engine.js', 'online/core/package.json']) {
