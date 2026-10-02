@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { initializeApp, deleteApp } from 'firebase/app';
 import { getFunctions } from 'firebase/functions';
 import { prepareTrialEmulator } from './helpers/prepare-floating-garden-trial-emulator.mjs';
-import { trialEmulatorRoute, trialSdkFixture, isTrialRelayNavigationCancellation, sanitizeTrialRelayFailure } from './helpers/floating-garden-trial-sdk-fixture.mjs';
+import { trialEmulatorRoute, trialSdkFixture, isTrialRelayNavigationCancellation, sanitizeTrialRelayFailure, setTrialContextOffline } from './helpers/floating-garden-trial-sdk-fixture.mjs';
 
 const origin = 'https://wa-garden-ci-trial--garden-7day-ci0001.web.app';
 const fixture = { kind: 'floating-garden-trial-browser-emulator-only-v1', projectId: 'demo-floating-garden-trial',
@@ -59,6 +59,22 @@ test('relay ignores only browser-confirmed aborted Firestore navigation requests
   for (const failure of [null, {}, { errorText: 'net::ERR_FAILED' }, { errorText: 'net::ERR_CONNECTION_REFUSED' }, { errorText: 'net::ERR_TIMED_OUT' }]) assert.equal(isTrialRelayNavigationCancellation('firestore', failure), false);
 });
 
+test('offline toggle marks every affected in-flight relay before browser context changes', async () => {
+  const offlineSeats = new Set(), events = [];
+  const entries = [{ seat: 0, cancelled: false }, { seat: 0, cancelled: false }, { seat: 1, cancelled: false }];
+  const activeRelays = new Map(entries.map((entry, index) => [{ abort: async (reason) => { assert.equal(reason, 'internetdisconnected'); events.push(`abort-${index}`); } }, entry]));
+  const context = { setOffline: async (offline) => {
+    assert.equal(offline, true); assert.equal(offlineSeats.has(0), true);
+    assert.deepEqual(entries.map((entry) => entry.cancelled), [true, true, false], 'a fetch catch firing inside setOffline sees cancellation already marked');
+    events.push('context-offline');
+    await Promise.resolve();
+    assert.deepEqual(entries.map((entry) => entry.cancelled), [true, true, false]);
+  } };
+  await setTrialContextOffline({ context, seat: 0, offline: true, offlineSeats, activeRelays });
+  assert.deepEqual(events, ['context-offline', 'abort-0', 'abort-1']);
+  assert.equal(offlineSeats.has(1), false);
+});
+
 test('fresh authorization read relay permits only GETs for bounded demo document paths', () => {
   const prefix = '/v1/projects/demo-floating-garden-trial/databases/(default)/documents/';
   for (const path of ['floatingGardenRooms/room-id', 'floatingGardenRooms/room-id/members/real_uid',
@@ -88,6 +104,13 @@ test('relay diagnostics never preserve Playwright bearer headers, query tokens, 
   assert.deepEqual(sanitizeTrialRelayFailure({ kind: bearer, url: `${origin}/${token}`, error: { name: bearer, message: token }, status: 302 }),
     { kind: 'unknown', path: '[unrecognized]', errorName: 'Error', category: 'redirect-refused', status: 302 });
   assert.equal(sanitizeTrialRelayFailure({ kind: 'auth', url: 'malformed', error: { name: 'TimeoutError' } }).category, 'timeout');
+  for (const [message, category] of [['route.fetch: socket hang up', 'connection-reset'],
+    ['route.fetch: connect ECONNREFUSED 127.0.0.1', 'connection-refused'],
+    ['route.fulfill: Protocol error: Invalid InterceptionId.', 'interception-invalidated'],
+    ['route.fetch: Timeout 30000ms exceeded.', 'timeout']]) {
+    const result = sanitizeTrialRelayFailure({ kind: 'firestore', url: `${origin}/google.firestore.v1.Firestore/Listen/channel?token=${token}`, error: new Error(`${message}\nAuthorization: Bearer ${bearer}`) });
+    assert.equal(result.category, category); assert.equal(JSON.stringify(result).includes(bearer), false); assert.equal(JSON.stringify(result).includes(token), false);
+  }
 });
 
 test('trial SDK facades use supported HTTPS same-origin configuration without browser security changes', () => {

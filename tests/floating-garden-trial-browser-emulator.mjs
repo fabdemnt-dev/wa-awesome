@@ -14,7 +14,7 @@ import { createRequire } from 'node:module';
 import { chromium } from './e2e/node_modules/playwright/index.mjs';
 import { emulatorConfig } from './helpers/floating-garden-emulators.mjs';
 import { abortDeniedBrowserRequest } from './helpers/floating-garden-browser-network.mjs';
-import { trialSdkFixture, trialEmulatorRoute, isTrialRelayNavigationCancellation, sanitizeTrialRelayFailure } from './helpers/floating-garden-trial-sdk-fixture.mjs';
+import { trialSdkFixture, trialEmulatorRoute, isTrialRelayNavigationCancellation, sanitizeTrialRelayFailure, setTrialContextOffline } from './helpers/floating-garden-trial-sdk-fixture.mjs';
 import { ONLINE_SAVE_KEY } from '../lab/floating-garden/online/controller.js';
 import { legalActions, getDecision, rankMatch, applyMatchAction } from '../lab/floating-garden/match-engine.js';
 
@@ -165,13 +165,7 @@ test('trial app: two enrolled real anonymous browsers play and recover against e
   const contexts = [], pages = [], observed = [], pageErrors = [], blocked = [], deniedConnectivityProbes = [], routeErrors = [], sameOriginMisses = [];
   const interruptedSeats = new Set(), offlineSeats = new Set(), activeRelays = new Map();
   let closing = false;
-  async function setOffline(seat, offline) {
-    if (offline) offlineSeats.add(seat); else offlineSeats.delete(seat);
-    await contexts[seat].setOffline(offline);
-    if (offline) await Promise.all([...activeRelays].filter(([, entry]) => entry.seat === seat).map(async ([route, entry]) => {
-      entry.cancelled = true; await route.abort('internetdisconnected').catch(() => {});
-    }));
-  }
+  const setOffline = (seat, offline) => setTrialContextOffline({ context: contexts[seat], seat, offline, offlineSeats, activeRelays });
   const transcript = [], captures = new Set();
   let roomId = null, stage = 'initialization', drop = null;
   await mkdir(output, { recursive: true });

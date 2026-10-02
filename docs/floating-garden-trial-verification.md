@@ -37,7 +37,7 @@
 - bundle検証を4件から7件へ拡張。全出力allowlist、source hash、credential/runtime canaryの除外、backend importの閉包、危険な入力時の出力拒否を確認
 - 実SDK entry検証9件。実際のFirebase Functions 6.6.0/Admin 12.7.0で生成済みentryを読み、5関数だけ、実行上限、service account、create/joinだけのsecret bindingを確認
 - entry試験では本物のCallable middlewareへインメモリHTTP requestを渡す。App Check欠落の401、正確なCORS、無効設定/別project/期間外/Auth不足の拒否を確認。socket/http/fetchは全て試験中禁止し、ネットワーク利用0を検査
-- 同一origin試験中継とCLI discoveryの回帰8件を追加。許可経路・拒否経路、reload時の実Firestore request取消だけの分類、SDK設定と実SDKのURL構築（通信なし）、marker/demo/loopbackの拒否、生成ソース不変、限定したREST読取り経路、秘密値を含めないエラー診断を確認
+- 同一origin試験中継とCLI discoveryの回帰9件を追加。許可経路・拒否経路、reload時の実Firestore request取消だけの分類、SDK設定と実SDKのURL構築（通信なし）、marker/demo/loopbackの拒否、生成ソース不変、限定したREST読取り経路、秘密値を含めないエラー診断、offline切替前の中継取消フラグ設定順を確認
 - trial用CIはNode22/Java21で独立packageを実installし、全体回帰、entry、専用Rules/Firestore競合、生成済みtrial画面の2ブラウザー試験を実行する
 - 個々のCI結果は、[Draft PR #365](https://github.com/fabdemnt-dev/wa-awesome/pull/365)の最終headとChecksを参照。前のheadの成功を流用しない
 

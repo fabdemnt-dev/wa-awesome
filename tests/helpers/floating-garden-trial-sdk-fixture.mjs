@@ -34,6 +34,17 @@ export function trialEmulatorRoute(rawUrl, method, fixture) {
 export function isTrialRelayNavigationCancellation(kind, failure) {
   return kind === 'firestore' && failure?.errorText === 'net::ERR_ABORTED';
 }
+export async function setTrialContextOffline({ context, seat, offline, offlineSeats, activeRelays }) {
+  if (offline) offlineSeats.add(seat); else offlineSeats.delete(seat);
+  const pending = offline ? [...activeRelays].filter(([, entry]) => entry.seat === seat) : [];
+  // Mark BEFORE the first asynchronous operation. setOffline itself can reject
+  // in-flight fetches; their catches must already know this is intentional.
+  for (const [, entry] of pending) entry.cancelled = true;
+  try { await context.setOffline(offline); }
+  finally {
+    await Promise.all(pending.map(async ([route]) => { await route.abort('internetdisconnected').catch(() => {}); }));
+  }
+}
 // Playwright APIRequestContext errors can append headers and complete URLs to
 // message/stack. Never persist either, even for synthetic emulator credentials.
 export function sanitizeTrialRelayFailure({ kind, url, error, status }) {
@@ -45,8 +56,22 @@ export function sanitizeTrialRelayFailure({ kind, url, error, status }) {
   } catch { /* Omit a malformed URL entirely. */ }
   const errorName = ['Error', 'TimeoutError', 'AssertionError', 'SyntaxError'].includes(error?.name) ? error.name : 'Error';
   const httpStatus = Number.isInteger(status) && status >= 100 && status <= 599 ? status : null;
+  // Inspect only the leading error sentence to select a fixed diagnostic enum.
+  // Neither it nor the following Playwright Call log is persisted or returned.
+  const firstLine = typeof error?.message === 'string' ? error.message.split('\n', 1)[0] : '';
+  const knownShape = [
+    ['interception-invalidated', /Invalid InterceptionId/i],
+    ['route-already-handled', /Route is already handled/i],
+    ['context-closed', /Target (?:page, context or browser|closed)|browser has been closed/i],
+    ['request-context-disposed', /Request context disposed/i],
+    ['connection-reset', /ECONNRESET|socket hang up/i],
+    ['connection-refused', /ECONNREFUSED/],
+    ['request-aborted', /net::ERR_ABORTED/],
+    ['network-disconnected', /net::ERR_INTERNET_DISCONNECTED/],
+    ['timeout', /Timeout \d+ms exceeded|ETIMEDOUT|timed out/i],
+  ].find(([, pattern]) => pattern.test(firstLine))?.[0];
   return { kind: ['auth', 'firestore', 'functions'].includes(kind) ? kind : 'unknown', path, errorName,
-    category: httpStatus >= 300 && httpStatus < 400 ? 'redirect-refused' : errorName === 'TimeoutError' ? 'timeout' : errorName === 'AssertionError' ? 'assertion-failed' : 'relay-failed',
+    category: httpStatus >= 300 && httpStatus < 400 ? 'redirect-refused' : errorName === 'TimeoutError' ? 'timeout' : errorName === 'AssertionError' ? 'assertion-failed' : knownShape || 'relay-failed',
     ...(httpStatus === null ? {} : { status: httpStatus }) };
 }
 export function trialSdkFixture(file, fixture) {
