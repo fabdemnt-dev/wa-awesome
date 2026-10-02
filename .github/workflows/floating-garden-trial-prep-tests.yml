@@ -12,6 +12,7 @@ on:
       - 'scripts/deploy-floating-garden-maintenance.mjs'
       - 'scripts/bootstrap-floating-garden-apis.mjs'
       - 'scripts/bootstrap-floating-garden-runtime.mjs'
+      - 'scripts/bootstrap-floating-garden-hmac.mjs'
       - 'tests/fixtures/floating-garden-maintenance-package.json'
       - 'tests/floating-garden-trial-*'
       - 'tests/helpers/*floating-garden-trial*'
