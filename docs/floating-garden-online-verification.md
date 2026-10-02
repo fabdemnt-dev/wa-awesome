@@ -6,7 +6,15 @@
 
 専用ブランチとDraft PRによるソース共有、GitHub Actions上の隔離テスト、必要な修正・再実行が承認されています。mainへのマージ、本番デプロイ、資格情報や権限の変更は対象外です。
 
-新規 `Floating Garden Emulator Tests` workflowはNode.js 22・Java 21・Chromiumと `demo-floating-garden` のローカルemulatorを使用します。実Callable試験、実UI fixture試験に加え、差し替えなしのappとFirebase transportを2つのブラウザーcontextで接続する試験を含みます。CIの成功はこの記録の初版時点ではまだ未確認です。結果はPRの最新commitに対応するChecksを確認してください。
+新規 `Floating Garden Emulator Tests` workflowはNode.js 22・Java 21・Chromiumと `demo-floating-garden` のローカルemulatorを使用します。実Callable試験、実UI fixture試験に加え、差し替えなしのappとFirebase transportを2つのブラウザーcontextで接続する試験を含みます。最終結果は[PR #365](https://github.com/fabdemnt-dev/wa-awesome/pull/365)の最新commitに対応するChecksを確認してください。
+
+### 初回GitHub Actionsで確認できたこと
+
+[初回run](https://github.com/fabdemnt-dev/wa-awesome/actions/runs/36952219797)では全体640件、庭園Rules7件、実transaction4件、実Auth→Callable HTTP→Firestore9件、実Chromium UI fixture1件が成功しました。既存Test・Shadow Card・Deep Miningのworkflowも成功しています。
+
+差し替えなしのappを使う2ブラウザーも135操作、両者の同一採点、匿名UID保持、応答消失後の同じrequestIdでの復帰、offline/reconnect、キーボード・幅・拡大の検査まで到達しました。初回run全体は最後の外部通信assertionで失敗しています。意図的な切断後にWebChannel SDKが試みる既知の接続診断画像（通信自体は遮断済み）を、未知の宛先と区別していなかったためです。テストの分類だけを限定修正し、診断画像も引き続き遮断します。他の未知のURLとlive backendへの通信は失敗扱いのままです。
+
+390pxと1180pxの実際の画面画像を目視し、盤面・操作欄・最終結果の表示を確認しました。物理端末、タッチ、読み上げの検証とは別です。
 
 ## 基準revision
 

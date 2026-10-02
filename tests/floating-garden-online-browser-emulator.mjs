@@ -12,6 +12,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { chromium } from './e2e/node_modules/playwright/index.mjs';
 import { emulatorConfig } from './helpers/floating-garden-emulators.mjs';
+import { abortDeniedBrowserRequest } from './helpers/floating-garden-browser-network.mjs';
 import { EMULATOR_CONFIG, EMULATOR_PORTS } from '../lab/floating-garden/online/config.js';
 import { ONLINE_SAVE_KEY } from '../lab/floating-garden/online/controller.js';
 import { legalActions, getDecision, rankMatch, applyMatchAction } from '../lab/floating-garden/match-engine.js';
@@ -98,7 +99,8 @@ function publicOnly(room) {
 
 test('actual app: two isolated Chromium contexts use Firebase emulators through scoring, lost-response recovery, offline/reconnect, and keyboard/layout checks', { timeout: 600000 }, async () => {
   let server, browser, admin, db;
-  const contexts = [], pages = [], observed = [], pageErrors = [], blocked = [], routeErrors = [];
+  const contexts = [], pages = [], observed = [], pageErrors = [], blocked = [], deniedConnectivityProbes = [], routeErrors = [];
+  const interruptedSeats = new Set();
   const transcript = [], captures = new Set();
   let roomId = null, stage = 'initialization', drop = null;
   await mkdir(output, { recursive: true });
@@ -121,7 +123,13 @@ test('actual app: two isolated Chromium contexts use Firebase emulators through 
       await context.route('**/*', async (route) => {
         const request = route.request(), url = new URL(request.url());
         const allowed = allowedLocalOrigins.has(url.origin) || (url.origin === sdkOrigin && url.pathname.startsWith(sdkPrefix) && url.pathname.endsWith('.js'));
-        if (!allowed) { blocked.push({ seat, origin: url.origin, path: url.pathname }); await route.abort('blockedbyclient'); return; }
+        if (!allowed) {
+          // Even this known SDK diagnostic stays blocked. No response is mocked,
+          // and nothing beyond localhost/public Firebase SDK modules may leave.
+          const diagnostic = await abortDeniedBrowserRequest(route, { offlineExercised: interruptedSeats.has(seat) });
+          (diagnostic ? deniedConnectivityProbes : blocked).push({ seat, origin: url.origin, path: url.pathname, method: request.method(), resourceType: request.resourceType() });
+          return;
+        }
         if (drop && !drop.intercepted && drop.seat === seat && request.method() === 'POST' && url.origin === `http://127.0.0.1:${EMULATOR_PORTS.functions}` && url.pathname === `${callablePath}floatingGardenSubmitAction`) {
           const attempt = drop;
           attempt.intercepted = true;
@@ -242,6 +250,7 @@ test('actual app: two isolated Chromium contexts use Firebase emulators through 
 
     stage = 'offline active player is read-only';
     const offlineBefore = await room();
+    interruptedSeats.add(0);
     await contexts[0].setOffline(true);
     await pages[0].waitForFunction(() => !navigator.onLine && document.querySelector('.online-connection > [role="status"]')?.textContent.includes('オフライン'));
     assert.equal(await pages[0].locator('[data-action="command-draw"]').isDisabled(), true);
@@ -374,9 +383,9 @@ test('actual app: two isolated Chromium contexts use Firebase emulators through 
     const called = new Set(observed.flatMap((observation) => observation.calls.map((call) => call.method)));
     for (const suffix of ['CreateRoom', 'JoinRoom', 'StartMatch', 'GetSnapshot', 'SubmitAction']) assert.ok(called.has(`floatingGarden${suffix}`));
     for (const type of ['draw', 'offer', 'accept', 'decline', 'place', 'self', 'store-empty', 'store-swap', 'use-storage', 'request-invite', 'pass-invite', 'yield', 'welcome', 'meditate', 'stone', 'final-stone', 'final-pass-final']) assert.ok(covered.has(type), `missing browser branch: ${type}`);
-    assert.deepEqual(blocked, [], 'browser attempted no unapproved or live-backend network destination');
+    assert.deepEqual(blocked, [], 'no unexpected denied destination; known SDK connectivity probes also remain blocked');
     assert.deepEqual(pageErrors, []); assert.deepEqual(routeErrors, []);
-    await writeFile(resolve(output, 'summary.json'), JSON.stringify({ projectId: config.projectId, status: 'passed', actions: finished.match.revision, branches: [...covered], independentAuthUsers: 2, sameIdRetry: true, offlineReconnect: true, unchangedEntryAndTransport: true, networkOrigins: [...allowedLocalOrigins, sdkOrigin] }, null, 2));
+    await writeFile(resolve(output, 'summary.json'), JSON.stringify({ projectId: config.projectId, status: 'passed', actions: finished.match.revision, branches: [...covered], independentAuthUsers: 2, sameIdRetry: true, offlineReconnect: true, unchangedEntryAndTransport: true, networkOrigins: [...allowedLocalOrigins, sdkOrigin], deniedConnectivityProbes }, null, 2));
     console.log(`Actual-app emulator browser QA passed: ${finished.match.revision} committed actions; artifacts ${output}`);
   } catch (error) {
     // Test-only demo identities/room state only. Never record Auth tokens, headers,
@@ -385,7 +394,7 @@ test('actual app: two isolated Chromium contexts use Firebase emulators through 
       page.screenshot({ path: resolve(output, `failure-seat-${seat}.png`), fullPage: true, timeout: 5000 }),
       page.content().then((html) => writeFile(resolve(output, `failure-seat-${seat}.html`), html)),
     ]));
-    await writeFile(resolve(output, 'failure.json'), JSON.stringify({ stage, error: error.stack || error.message, roomId, transcript, pageErrors, blocked, routeErrors, observations: observed.map(({ seat, authRequests, firestoreRequests, calls, console }) => ({ seat, authRequests, firestoreRequests, console, calls: calls.map(({ method, payload }) => ({ method, requestId: payload?.requestId, expectedRevision: payload?.expectedRevision, command: payload?.command })) })) }, null, 2));
+    await writeFile(resolve(output, 'failure.json'), JSON.stringify({ stage, error: error.stack || error.message, roomId, transcript, pageErrors, blocked, deniedConnectivityProbes, routeErrors, observations: observed.map(({ seat, authRequests, firestoreRequests, calls, console }) => ({ seat, authRequests, firestoreRequests, console, calls: calls.map(({ method, payload }) => ({ method, requestId: payload?.requestId, expectedRevision: payload?.expectedRevision, command: payload?.command })) })) }, null, 2));
     throw error;
   } finally {
     await Promise.allSettled(contexts.map((context) => context.close()));
