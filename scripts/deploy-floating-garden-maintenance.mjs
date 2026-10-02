@@ -78,10 +78,17 @@ async function verifyPage(fetchImpl) {
     if (response.headers.get('x-content-type-options') !== 'nosniff' || response.headers.get('referrer-policy') !== 'no-referrer' || !response.headers.get('cache-control')?.includes('no-store') || response.headers.get('content-security-policy') !== "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'") stop('Hosted safety headers were not confirmed');
   }
 }
+export function canonicalVersionName(value) {
+  // Hosting can return the same version with no project prefix, the project ID,
+  // or the project number. Normalize only these exact approved resource names.
+  const match = typeof value === 'string' && value.match(new RegExp(`^(?:projects/(?:${PROJECT}|${PROJECT_NUMBER})/)?sites/${PROJECT}/versions/([A-Za-z0-9_-]+)$`));
+  if (!match || match[0] !== value) stop('Hosting version does not name the exact dedicated garden site');
+  return `sites/${PROJECT}/versions/${match[1]}`;
+}
 function releaseVersion(channel) {
   const release = channel?.release;
-  if (!plain(release) || release.message !== MESSAGE || release.type !== 'DEPLOY' || !plain(release.version) || release.version.status !== 'FINALIZED' || !new RegExp(`^sites/${PROJECT}/versions/[A-Za-z0-9_-]+$`).test(release.version.name || '')) stop('Existing live release is not recognized. Stop; do not overwrite it.');
-  return release.version.name;
+  if (!plain(release) || release.message !== MESSAGE || release.type !== 'DEPLOY' || !plain(release.version) || release.version.status !== 'FINALIZED') stop('Existing live release is not recognized. Stop; do not overwrite it.');
+  return canonicalVersionName(release.version.name);
 }
 function defaultRun(command, args, cwd, inherited = false) {
   try { return execFileSync(command, args, { cwd, encoding: 'utf8', stdio: inherited ? 'inherit' : ['ignore', 'pipe', 'pipe'], maxBuffer: 4 * 1024 * 1024, env: { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0' } }) || ''; }
@@ -146,7 +153,7 @@ export async function deployMaintenance({ approved = false, run = defaultRun, fe
   const result = cli(['deploy', '--only', `hosting:${PROJECT}`, '--message', MESSAGE]);
   if (typeof result.hosting !== 'string') stop('Deployment result was not recognized; no automatic retry');
   const after = channels();
-  if (releaseVersion(after) !== result.hosting) stop('Live release does not match this deployment; inspect before retrying');
+  if (releaseVersion(after) !== canonicalVersionName(result.hosting)) stop('Live release does not match this deployment; inspect before retrying');
   await verifyPage(fetchImpl);
   log(`Verified: ${ORIGIN} (maintenance only, no page expiry).`);
   log('Stop here. This page makes no Auth or game requests. No backend deployment was performed. Share only this URL and the Verified line; never debug logs or credentials.');

@@ -60,3 +60,9 @@ node garden-maintenance.mjs --deploy-stopped-live
 
 補助ファイルの自動テストは subprocess と HTTPS 応答を置き換えた安全な検証です。誤プロジェクト、API不足、manifest改変、未確認リリース、配信失敗、読み戻し不一致、設定のフック/rewrites混入、余分な素材、symlink を拒否します。実際のクラウド配信成功を代用するものではありません。
 実配信は利用者の Cloud Shell で承認済みの手順を実行した後、リリース情報と公開ページの両方で確認します。
+
+## 2026-10-02 の実配信後の確認修正
+
+初回の静的配信自体は成功しましたが、補助ファイルの配信後チェックが、Hosting APIの `projects/PROJECT_ID/sites/SITE_ID/versions/VERSION_ID` という正常な版名を拒否しました。公開root・404・旧ゲーム入口のHTMLとHTTPヘッダー、およびliveの識別メッセージ・DEPLOY・FINALIZEDを読取りで確認しました。この停止への対応として再配信は不要です。
+
+版名の比較は、専用project ID `wa-awesome-garden-stg` または番号 `120030709276` のprefix付きと、prefixなしの同じ専用siteだけを正規化します。別project・別site・別版・未知message・DEPLOY以外・FINALIZED以外は引き続き拒否します。

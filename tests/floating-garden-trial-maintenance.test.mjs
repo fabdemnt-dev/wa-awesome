@@ -6,7 +6,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
-import { deployMaintenance, writeBundle, checkBundle, sitePresent, liveChannel, PROJECT, PROJECT_NUMBER, ORIGIN, MESSAGE, HTML, CONFIG, CONFIG_FILE } from '../scripts/deploy-floating-garden-maintenance.mjs';
+import { deployMaintenance, writeBundle, checkBundle, sitePresent, liveChannel, canonicalVersionName, PROJECT, PROJECT_NUMBER, ORIGIN, MESSAGE, HTML, CONFIG, CONFIG_FILE } from '../scripts/deploy-floating-garden-maintenance.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const site = { name: `projects/${PROJECT_NUMBER}/sites/${PROJECT}`, defaultUrl: ORIGIN };
 const live = () => ({ name: `sites/${PROJECT}/channels/live`, url: ORIGIN });
@@ -59,14 +59,14 @@ function harness(t, options = {}) {
       if (created && postCreateReads <= (options.channelDelay || 0)) return success({ channels: [] });
       assert.equal(args[2], PROJECT);
       if (options.mutateBundle && !didDeploy) options.mutateBundle(dirname(args.at(-5)));
-      if (didDeploy) return success({ channels: [options.wrongFinalVersion ? { ...released(), release: { ...released().release, version: { name: `sites/${PROJECT}/versions/other`, status: 'FINALIZED' } } } : released()] });
+      if (didDeploy) return success({ channels: [options.wrongFinalVersion ? { ...released(), release: { ...released().release, version: { name: `sites/${PROJECT}/versions/other`, status: 'FINALIZED' } } } : (options.finalChannel || released())] });
       return success({ channels: options.existing ? [options.existing] : [live()] });
     }
     if (args[0] === 'deploy') {
       assert.deepEqual(args.slice(0, 3), ['deploy', '--only', `hosting:${PROJECT}`]);
       assert.equal(args[3], '--message'); assert.equal(args[4], MESSAGE);
       if (options.failDeploy) throw Error('deployment failed');
-      didDeploy = true; return success({ hosting: version });
+      didDeploy = true; return success({ hosting: options.deployVersion ?? version });
     }
     throw Error(`Unexpected command ${args[0]}`);
   };
@@ -203,4 +203,50 @@ test('maintenance helper stops immediately on malformed new-site read results', 
   assert.equal(h.waits.length, 0);
   assert.equal(h.mutations().length, 1);
   assert.equal(h.commands.filter((c) => c.args[0] === 'deploy').length, 0);
+});
+
+// Sanitized real API shape observed after the operator's 2026-10-02 deployment.
+// Resource identities are exact; this synthetic version ID contains no user data.
+function prefixedRelease(project = PROJECT) {
+  return { name: `projects/${project}/sites/${PROJECT}/channels/live`, url: ORIGIN,
+    release: { name: `projects/${project}/sites/${PROJECT}/channels/live/releases/fixture-release`,
+      message: MESSAGE, type: 'DEPLOY', version: { name: `projects/${project}/${version}`, status: 'FINALIZED', fileCount: '2' } } };
+}
+test('maintenance version identity normalizes only exact dedicated project ID/number forms', () => {
+  for (const input of [version, `projects/${PROJECT}/${version}`, `projects/${PROJECT_NUMBER}/${version}`]) assert.equal(canonicalVersionName(input), version);
+  for (const input of [undefined, null, {}, '', `projects/wa-awesome/${version}`, `projects/999/${version}`, `projects/-/${version}`, `projects/${PROJECT}/sites/wa-awesome/versions/safe-version-1`, `${version}/`, `${version}?x=1`, `${version}#x`, `${version}\n`, `${version}\r\n`, `${version}/../other`, `/${version}`, `https://firebasehosting.googleapis.com/v1beta1/${version}`]) assert.throws(() => canonicalVersionName(input));
+});
+test('observed project-prefixed finalized maintenance release is a verified no-write outcome', async (t) => {
+  for (const project of [PROJECT, PROJECT_NUMBER]) {
+    const h = harness(t, { existing: prefixedRelease(project) });
+    assert.deepEqual(await h.perform(), { origin: ORIGIN, deployed: false, existingReleaseInventoryVerified: false });
+    assert.equal(h.mutations().length, 0);
+    assert.equal(h.downloads.filter((d) => d.url.startsWith(ORIGIN)).length, 3);
+  }
+});
+test('post-deploy identity comparison accepts equivalent API resource forms, never a different version', async (t) => {
+  for (const deployVersion of [version, `projects/${PROJECT}/${version}`, `projects/${PROJECT_NUMBER}/${version}`]) {
+    for (const finalChannel of [released(), prefixedRelease(PROJECT), prefixedRelease(PROJECT_NUMBER)]) {
+      const h = harness(t, { deployVersion, finalChannel });
+      assert.deepEqual(await h.perform(), { origin: ORIGIN, deployed: true });
+      assert.equal(h.mutations().length, 1);
+    }
+  }
+  for (const deployVersion of [`projects/other-project/${version}`, `projects/${PROJECT}/sites/other-site/versions/safe-version-1`, `projects/${PROJECT}/sites/${PROJECT}/versions/other-version`]) {
+    const h = harness(t, { deployVersion, finalChannel: prefixedRelease() });
+    await assert.rejects(h.perform()); assert.equal(h.mutations().length, 1);
+    assert.ok(!h.logs.some((s) => s.startsWith('Verified:')));
+  }
+});
+test('project prefix support does not relax marker, release type, finalized state or project/site guards', async (t) => {
+  for (const mutate of [
+    (r) => { r.release.message = 'unrecognized'; }, (r) => { r.release.type = 'ROLLBACK'; },
+    (r) => { r.release.type = 'TYPE_UNSPECIFIED'; }, (r) => { delete r.release.type; },
+    (r) => { r.release.version.status = 'CREATED'; }, (r) => { delete r.release.version.status; },
+    (r) => { r.release.version.name = `projects/wa-awesome/${version}`; },
+    (r) => { r.release.version.name = `projects/${PROJECT}/sites/wa-awesome/versions/safe-version-1`; },
+  ]) {
+    const existing = prefixedRelease(); mutate(existing); const h = harness(t, { existing });
+    await assert.rejects(h.perform()); assert.equal(h.mutations().length, 0);
+  }
 });
