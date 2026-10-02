@@ -10,6 +10,7 @@ on:
       - 'lab/floating-garden/**'
       - 'scripts/prepare-floating-garden-trial.mjs'
       - 'scripts/deploy-floating-garden-maintenance.mjs'
+      - 'scripts/bootstrap-floating-garden-apis.mjs'
       - 'tests/fixtures/floating-garden-maintenance-package.json'
       - 'tests/floating-garden-trial-*'
       - 'tests/helpers/*floating-garden-trial*'
