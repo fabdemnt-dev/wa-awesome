@@ -19,8 +19,8 @@ export async function prepareTrialEmulator(output, now = Date.now()) {
   };
   await prepareTrialBundle({ config: runtime, output: out, now });
   const config = JSON.parse(await readFile(join(out, 'functions/trial-config.json'), 'utf8'));
-  const fixture = { projectId, ports, runtime, config,
-    boundaries: ['generated trial public assets unchanged', 'real SDK Auth/Functions/Firestore use demo emulators', 'test-only SDK endpoint adapters', 'App Check synthetic: no live attestation validation', 'HTTPS preview origin intercepted locally: no Hosting/TLS validation', 'production Functions entry, IAM and Secret Manager not exercised'] };
+  const fixture = { kind: 'floating-garden-trial-browser-emulator-only-v1', projectId, ports, runtime, config,
+    boundaries: ['generated trial public assets unchanged', 'real SDK Auth/Functions/Firestore use demo emulators through an allowlisted same-origin reverse proxy', 'test-only SDK endpoint adapters; Firestore forced 5-second long polling', 'App Check synthetic: no live attestation validation', 'HTTPS preview origin intercepted locally: no Hosting/TLS/CORS/private-network validation', 'browser security unchanged; offline relay requests and in-flight responses are aborted', 'production Functions entry, IAM and Secret Manager not exercised'] };
   const source = join(out, 'emulator-functions');
   await mkdir(source);
   for (const name of ['trial-handlers.js', 'config.js', 'package.json', 'package-lock.json', 'online/handlers.js', 'online/contract.js', 'online/invite-code.js', 'online/core/engine.js', 'online/core/match-engine.js', 'online/core/package.json']) {

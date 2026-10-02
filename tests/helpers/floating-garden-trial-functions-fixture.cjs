@@ -11,7 +11,11 @@ const { createHandlers } = require('./online/handlers');
 const fixture = require('./emulator-fixture.json');
 const { config, projectId } = fixture;
 function assertEmulator() {
-  assert.equal(process.env.FLOATING_GARDEN_TRIAL_EMULATOR_FIXTURE, '1');
+  // Firebase CLI discovery intentionally filters arbitrary parent-shell envs.
+  // Require its own emulator marker plus the generated fixture marker instead;
+  // deployment discovery has no emulator marker and must still fail closed.
+  assert.equal(fixture.kind, 'floating-garden-trial-browser-emulator-only-v1');
+  assert.equal(process.env.FUNCTIONS_EMULATOR, 'true');
   assert.equal(projectId, 'demo-floating-garden-trial');
   assert.equal(process.env.GCLOUD_PROJECT, projectId);
   for (const name of ['FIRESTORE_EMULATOR_HOST', 'FIREBASE_AUTH_EMULATOR_HOST']) {

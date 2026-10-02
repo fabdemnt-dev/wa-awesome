@@ -14,7 +14,7 @@ import { createRequire } from 'node:module';
 import { chromium } from './e2e/node_modules/playwright/index.mjs';
 import { emulatorConfig } from './helpers/floating-garden-emulators.mjs';
 import { abortDeniedBrowserRequest } from './helpers/floating-garden-browser-network.mjs';
-import { trialSdkFixture } from './helpers/floating-garden-trial-sdk-fixture.mjs';
+import { trialSdkFixture, trialEmulatorRoute, isTrialRelayNavigationCancellation } from './helpers/floating-garden-trial-sdk-fixture.mjs';
 import { ONLINE_SAVE_KEY } from '../lab/floating-garden/online/controller.js';
 import { legalActions, getDecision, rankMatch, applyMatchAction } from '../lab/floating-garden/match-engine.js';
 
@@ -25,6 +25,7 @@ assert.equal(process.env.FLOATING_GARDEN_TRIAL_EMULATOR_FIXTURE, '1');
 assert.ok(process.env.FLOATING_GARDEN_TRIAL_FIXTURE, 'Run the pure fixture preparation helper first');
 const fixtureRoot = resolve(process.env.FLOATING_GARDEN_TRIAL_FIXTURE);
 const fixture = JSON.parse(await readFile(resolve(fixtureRoot, 'emulator-fixture.json'), 'utf8'));
+assert.equal(fixture.kind, 'floating-garden-trial-browser-emulator-only-v1');
 assert.equal(fixture.projectId, config.projectId);
 const EMULATOR_PORTS = fixture.ports;
 const SAVE_KEY = `floating-garden-trial:${fixture.runtime.projectId}:${ONLINE_SAVE_KEY}`;
@@ -130,7 +131,15 @@ function publicOnly(room) {
 test('trial app: two enrolled real anonymous browsers play and recover against emulator callables/rules; authorization fails closed', { timeout: 600000 }, async () => {
   let browser, admin, db;
   const contexts = [], pages = [], observed = [], pageErrors = [], blocked = [], deniedConnectivityProbes = [], routeErrors = [];
-  const interruptedSeats = new Set();
+  const interruptedSeats = new Set(), offlineSeats = new Set(), activeRelays = new Map();
+  let closing = false;
+  async function setOffline(seat, offline) {
+    if (offline) offlineSeats.add(seat); else offlineSeats.delete(seat);
+    await contexts[seat].setOffline(offline);
+    if (offline) await Promise.all([...activeRelays].filter(([, entry]) => entry.seat === seat).map(async ([route, entry]) => {
+      entry.cancelled = true; await route.abort('internetdisconnected').catch(() => {});
+    }));
+  }
   const transcript = [], captures = new Set();
   let roomId = null, stage = 'initialization', drop = null;
   await mkdir(output, { recursive: true });
@@ -150,34 +159,45 @@ test('trial app: two enrolled real anonymous browsers play and recover against e
       observed.push(observation);
       await context.route('**/*', async (route) => {
         const request = route.request(), url = new URL(request.url());
+        const target = trialEmulatorRoute(request.url(), request.method(), fixture);
+        if (target) {
+          if (offlineSeats.has(seat)) return route.abort('internetdisconnected');
+          const relay = { seat, request, kind: target.kind, cancelled: false }; activeRelays.set(route, relay);
+          const attempt = drop && !drop.intercepted && drop.seat === seat && target.kind === 'functions'
+            && url.pathname === `${callablePath}floatingGardenSubmitAction` ? drop : null;
+          if (attempt) { attempt.intercepted = true; attempt.payload = request.postDataJSON().data; }
+          try {
+            // Same-origin reverse proxy: forward the original method, headers,
+            // Auth token and body. No browser security flags/permissions change.
+            // Responses are real emulator responses, and redirects are forbidden.
+            const response = await route.fetch({ url: target.url, maxRedirects: 0, timeout: 30000 });
+            assert.ok(response.status() < 300 || response.status() >= 400, 'emulator relay must never follow redirects');
+            if (relay.cancelled || closing) return;
+            if (offlineSeats.has(seat)) { relay.cancelled = true; await route.abort('internetdisconnected'); return; }
+            if (attempt) {
+              const body = await response.json();
+              assert.equal(response.status(), 200);
+              assert.ok(body.result?.room, 'the dropped response must be a real committed success');
+              attempt.result = body.result;
+              await route.abort('failed');
+            } else await route.fulfill({ response });
+          } catch (error) {
+            if (isTrialRelayNavigationCancellation(target.kind, request.failure())) relay.cancelled = true;
+            if (!relay.cancelled && !closing) { routeErrors.push(error.message); await route.abort('failed').catch(() => {}); }
+          } finally { activeRelays.delete(route); if (attempt) attempt.done = true; }
+          return;
+        }
         if (url.origin === origin) return serveTrialAsset(route, served);
         if (url.origin === sdkOrigin && url.pathname.startsWith(sdkPrefix) && !url.search) {
           const source = trialSdkFixture(url.pathname.slice(sdkPrefix.length), fixture);
           if (source) return route.fulfill({ status: 200, body: source, headers: { 'content-type': 'text/javascript', 'access-control-allow-origin': '*' } });
         }
-        const allowed = allowedLocalOrigins.has(url.origin) || (url.origin === sdkOrigin && url.pathname.startsWith(sdkPrefix) && url.pathname.endsWith('.js'));
+        const allowed = url.origin === sdkOrigin && url.pathname.startsWith(sdkPrefix) && url.pathname.endsWith('.js') && request.method() === 'GET';
         if (!allowed) {
-          // This known SDK diagnostic stays blocked too. No Auth/Firestore/game
-          // response is mocked; only localhost/public SDK modules may leave.
+          // Raw browser requests to loopback are blocked as well. Only the
+          // allowlisted server-side relay above reaches emulator network ports.
           const diagnostic = await abortDeniedBrowserRequest(route, { offlineExercised: interruptedSeats.has(seat) });
           (diagnostic ? deniedConnectivityProbes : blocked).push({ seat, origin: url.origin, path: url.pathname, method: request.method(), resourceType: request.resourceType() });
-          return;
-        }
-        if (drop && !drop.intercepted && drop.seat === seat && request.method() === 'POST' && url.origin === `http://127.0.0.1:${EMULATOR_PORTS.functions}` && url.pathname === `${callablePath}floatingGardenSubmitAction`) {
-          const attempt = drop;
-          attempt.intercepted = true;
-          try {
-            attempt.payload = request.postDataJSON().data;
-            // Forward the ORIGINAL authenticated SDK request. Only its response is
-            // lost, after the real callable and Firestore transaction have succeeded.
-            const response = await route.fetch({ maxRedirects: 0, timeout: 30000 });
-            const body = await response.json();
-            assert.equal(response.status(), 200);
-            assert.ok(body.result?.room, 'the dropped response must be a real committed success');
-            attempt.result = body.result;
-            await route.abort('failed');
-          } catch (error) { routeErrors.push(error.message); await route.abort('failed').catch(() => {}); }
-          finally { attempt.done = true; }
           return;
         }
         await route.continue();
@@ -186,18 +206,24 @@ test('trial app: two enrolled real anonymous browsers play and recover against e
       page.setDefaultTimeout(20000);
       page.setDefaultNavigationTimeout(60000);
       page.on('pageerror', (error) => pageErrors.push({ seat, message: error.message }));
+      page.on('requestfailed', (request) => {
+        for (const relay of activeRelays.values()) {
+          if (relay.request === request && isTrialRelayNavigationCancellation(relay.kind, request.failure())) relay.cancelled = true;
+        }
+      });
       page.on('console', (message) => { if (['error', 'warning'].includes(message.type())) observation.console.push(message.text()); });
       page.on('request', (request) => {
         const url = new URL(request.url());
-        if (url.origin === `http://127.0.0.1:${EMULATOR_PORTS.auth}`) observation.authRequests += 1;
-        if (url.origin === `http://127.0.0.1:${EMULATOR_PORTS.firestore}`) observation.firestoreRequests += 1;
-        if (url.origin === `http://127.0.0.1:${EMULATOR_PORTS.functions}` && request.method() === 'POST') {
+        const target = trialEmulatorRoute(request.url(), request.method(), fixture);
+        if (target?.kind === 'auth') observation.authRequests += 1;
+        if (target?.kind === 'firestore') observation.firestoreRequests += 1;
+        if (target?.kind === 'functions' && request.method() === 'POST') {
           observation.calls.push({ method: url.pathname.split('/').pop(), payload: request.postDataJSON()?.data });
         }
       });
       page.on('response', (response) => {
         const url = new URL(response.url());
-        if (url.origin !== `http://127.0.0.1:${EMULATOR_PORTS.functions}` || !url.pathname.endsWith('/floatingGardenGetSnapshot') || response.request().method() !== 'POST' || response.status() !== 200) return;
+        if (url.origin !== origin || !url.pathname.endsWith('/floatingGardenGetSnapshot') || response.request().method() !== 'POST' || response.status() !== 200) return;
         const capture = response.json().then((body) => { if (body.result) observation.snapshots.push(body.result); }).catch(() => {}).finally(() => captures.delete(capture));
         captures.add(capture);
       });
@@ -309,12 +335,12 @@ test('trial app: two enrolled real anonymous browsers play and recover against e
     stage = 'offline active player is read-only';
     const offlineBefore = await room();
     interruptedSeats.add(0);
-    await contexts[0].setOffline(true);
+    await setOffline(0, true);
     await pages[0].waitForFunction(() => !navigator.onLine && document.querySelector('.online-connection > [role="status"]')?.textContent.includes('オフライン'));
     assert.equal(await pages[0].locator('[data-action="command-draw"]').isDisabled(), true);
     assert.equal((await recovery(pages[0])).pending, null);
     assert.deepEqual(await room(), offlineBefore, 'disconnect never supplies a move for the player');
-    await contexts[0].setOffline(false); await ready(pages[0]);
+    await setOffline(0, false); await ready(pages[0]);
     assert.equal(await authUid(pages[0]), uids[0]);
 
     stage = 'server commits, response is lost, reload retries the exact saved request';
@@ -370,11 +396,11 @@ test('trial app: two enrolled real anonymous browsers play and recover against e
 
     stage = 'opponent makes progress while other browser is offline';
     const disconnectedRevision = (await room()).match.revision;
-    await contexts[0].setOffline(true);
+    await setOffline(0, true);
     await pages[0].waitForFunction(() => navigator.onLine === false);
     await act('draw', {}, { waitSeats: [1] });
     assert.equal(await domRevision(pages[0]), disconnectedRevision, 'offline browser does not receive the peer update');
-    await contexts[0].setOffline(false);
+    await setOffline(0, false);
     await ready(pages[0]); await waitRevision(pages[0], disconnectedRevision + 1);
     assert.equal(await authUid(pages[0]), uids[0]);
     await act('self'); await act('request-invite'); await act('yield');
@@ -486,7 +512,7 @@ test('trial app: two enrolled real anonymous browsers play and recover against e
     for (const type of ['draw', 'offer', 'accept', 'decline', 'place', 'self', 'store-empty', 'store-swap', 'use-storage', 'request-invite', 'pass-invite', 'yield', 'welcome', 'meditate', 'stone', 'final-stone', 'final-pass-final']) assert.ok(covered.has(type), `missing browser branch: ${type}`);
     assert.deepEqual(blocked, [], 'no unexpected denied destination; known SDK connectivity probes also remain blocked');
     assert.deepEqual(pageErrors, []); assert.deepEqual(routeErrors, []);
-    await writeFile(resolve(output, 'summary.json'), JSON.stringify({ projectId: config.projectId, status: 'passed', actions: finished.match.revision, branches: [...covered], independentAuthUsers: 2, sameIdRetry: true, offlineReconnect: true, gateChecks: ['unenrolled initial create', 'enrolled nonmember', 'revoked tester', 'expired tester', 'roster removed', 'expired room', 'disabled gate', 'private reads/lists/writes denied'], unchangedTrialPublicGraph: true, fixtureBoundaries: fixture.boundaries, liveAppCheckValidated: false, networkOrigins: [...allowedLocalOrigins, sdkOrigin], deniedConnectivityProbes }, null, 2));
+    await writeFile(resolve(output, 'summary.json'), JSON.stringify({ projectId: config.projectId, status: 'passed', actions: finished.match.revision, branches: [...covered], independentAuthUsers: 2, sameIdRetry: true, offlineReconnect: true, gateChecks: ['unenrolled initial create', 'enrolled nonmember', 'revoked tester', 'expired tester', 'roster removed', 'expired room', 'disabled gate', 'private reads/lists/writes denied'], unchangedTrialPublicGraph: true, fixtureBoundaries: fixture.boundaries, liveAppCheckValidated: false, relayTargets: [...allowedLocalOrigins], browserNetworkOrigins: [origin, sdkOrigin], deniedConnectivityProbes }, null, 2));
     console.log(`Trial-app emulator browser QA passed: ${finished.match.revision} committed actions; artifacts ${output}`);
   } catch (error) {
     // Test-only demo identities/room state only. Never record Auth tokens, headers,
@@ -498,6 +524,7 @@ test('trial app: two enrolled real anonymous browsers play and recover against e
     await writeFile(resolve(output, 'failure.json'), JSON.stringify({ stage, error: error.stack || error.message, roomId, transcript, pageErrors, blocked, deniedConnectivityProbes, routeErrors, observations: observed.map(({ seat, authRequests, firestoreRequests, calls, console }) => ({ seat, authRequests, firestoreRequests, console, calls: calls.map(({ method, payload }) => ({ method, requestId: payload?.requestId, expectedRevision: payload?.expectedRevision, command: payload?.command })) })) }, null, 2));
     throw error;
   } finally {
+    closing = true;
     await Promise.allSettled(contexts.map((context) => context.close()));
     await browser?.close();
     if (db) await db.terminate();
