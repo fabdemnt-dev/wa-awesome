@@ -4,10 +4,10 @@
 
 ## 方針とファイル
 
-既存 `wa-awesome` と `wa-awesome-mofumofu-stg` を使わず、庭園専用の新しいFirebase projectを作る前提です。project ID、請求先、試験日、preview hostnameは未確定です。`wa-awesome-garden-stg` 等は候補であり、利用可能性や所有権を確認していません。
+既存 `wa-awesome` と `wa-awesome-mofumofu-stg` を使わず、庭園専用の新しいFirebase projectを作る前提です。固定配信先として `wa-awesome-garden-stg` / `https://wa-awesome-garden-stg.web.app` の組だけを選択済みです。選択はproject/siteの実在・所有権や配信完了の証明ではありません。請求先、試験日、Web App/App Checkとcloud設定は別途確認します。固定URLを維持してもゲーム利用は最長7日・20部屋・正確な2UIDのままです。
 
 - `functions/floating-garden-trial/`：Node22、独立package/lock、5Callableだけのentry、trial認可、専用Rules template
-- `lab/floating-garden/trial/`：本番・旧stagingへfallbackしない、正確なpreview origin限定client。sourceのruntimeは無効な初期値
+- `lab/floating-garden/trial/`：本番・旧stagingへfallbackしない、正確な試験origin限定client。sourceのruntimeは無効な初期値
 - `scripts/prepare-floating-garden-trial.mjs`：ローカルbuildのみ。Firebase/gcloud/git/ネットワーク/資格情報APIを呼ばない
 - `config/floating-garden-trial/example.json`：未入力・無効の設定例。これをそのままbuildしようとしても拒否
 - `firebase.floating-garden-trial-emulator.json`：Rules試験だけのdemo project/TCP8183用。起動時Rulesは全拒否
@@ -43,7 +43,7 @@ PR365のengine・online画面・server handler・CPU保存・rootのFirebase/Rul
    - HMAC secret `FLOATING_GARDEN_INVITE_HMAC_KEY` をcreate/joinだけへbind。demo鍵は外部環境に流用しない
 
 5. **clientの期限・復帰**
-   - dedicated projectに属する正確なHTTPS preview origin1つだけ。queryによる上書き、未知host、localhost、production、旧stagingを拒否
+   - dedicated projectに属する正確なHTTPS origin1つだけ。固定配信を許すのは上記のproject/siteの組のみで、他projectのlive hostやfirebaseapp.com aliasへ一般化しない。従来の明示preview設定も維持。queryによる上書き、未知host、localhost、production、旧stagingを拒否
    - 元のcontroller/mountで操作・同ID再送を維持。trialの復帰記録はproject別namespace
    - App Check attestation後に匿名Authを開始。永続Authを確認し、UID変更は拒否
    - 期限終了時はlistenerとtoken refreshを止め、UIを停止。以前commitしたかもしれないrequestを消さない
@@ -62,11 +62,13 @@ npm run test:floating-garden:trial:entry
 npm run check:floating-garden:core
 ```
 
-配信先がまだ未割当の段階では、script/SDK/APIを含まない停止画面のbuildだけを準備できます。
+固定配信先の停止画面は次のコマンドでローカル準備できます。script/SDK/Auth/外部resourceを含まず、CSPで接続を禁止します。indexと同一内容の404で旧entry/deep linkも停止表示にし、redirect/rewrites/hooksは含みません。
 
 ```sh
-node scripts/prepare-floating-garden-trial.mjs --closed-preview NEW_CONFIRMED_PROJECT_ID NEW_OUTPUT_DIRECTORY
+node scripts/prepare-floating-garden-trial.mjs --closed-live wa-awesome-garden-stg NEW_OUTPUT_DIRECTORY
 ```
+
+`--closed-live` は専用project以外を拒否し、`firebase.maintenance.json`（Hostingのみ）、`public/index.html`、`public/404.html`、`REVIEW-PLAN.json`、`FILES-SHA256.json` の5ファイルだけを生成します。同じ入力の出力はbyte単位で同一です。review commandは明示project・専用config・`--only hosting:wa-awesome-garden-stg` で対象を固定します。このscriptは実行せず、backendの停止や削除も行いません。従来の `--closed-preview NEW_CONFIRMED_PROJECT_ID NEW_OUTPUT_DIRECTORY` は期限付きgarden-7day previewを必要とする場合に残します。
 
 実hostname・Web App・App Check・期間が確認できた後に、設定例のコピーを埋めてbuildします。既存の出力フォルダは上書きしません。
 
@@ -74,7 +76,7 @@ node scripts/prepare-floating-garden-trial.mjs --closed-preview NEW_CONFIRMED_PR
 node scripts/prepare-floating-garden-trial.mjs --config CONFIRMED_CONFIG.json NEW_OUTPUT_DIRECTORY
 ```
 
-出力にはdedicated Functions package、publicだけのtree、専用Rules、`firebase.trial.json`、source hashes、`REVIEW-PLAN.json`、停止状態のadmin記録案が含まれます。CLI実行はありません。レビュー用commandに常に明示projectと専用configを含め、Hostingはpreviewだけ、`--no-authorized-domains` を必須にします。preview commandの期限引数は、そのまま実行できない再計算placeholderです。承認後の実行直前に純粋helper `previewExpiryMinutes` へ現在時刻を渡して残り分数を切り捨て計算し、CLI対応の `m` 単位で指定します。保存時の数値を後日そのまま再利用しません。Firebaseの期限は配信時からの相対値なので、返されたexpireTimeも確認します。固定backend/client期限はHostingの遅延や延長に依存しません。
+出力にはdedicated Functions package、publicだけのtree、専用Rules、`firebase.trial.json`、source hashes、`REVIEW-PLAN.json`、停止状態のadmin記録案が含まれます。CLI実行はありません。レビュー用commandに常に明示projectと専用configを含め、固定URLの場合は別のHostingのみの `firebase.hosting-only.json` を使い、`--only hosting:wa-awesome-garden-stg` のreview commandだけを生成します。互換性のため設定名 `previewOrigin` は維持しますが、固定URLの場合もこの1つのoriginがclient/CORS/Rules/admin gateで一致する必要があります。従来のpreviewはgarden-7day channelだけ、`--no-authorized-domains` を必須にします。preview commandの期限引数は、そのまま実行できない再計算placeholderです。承認後の実行直前に純粋helper `previewExpiryMinutes` へ現在時刻を渡して残り分数を切り捨て計算し、CLI対応の `m` 単位で指定します。保存時の数値を後日そのまま再利用しません。Firebaseの期限は配信時からの相対値なので、返されたexpireTimeも確認します。固定backend/client期限はHostingの遅延や延長に依存しません。
 
 `ADMIN-RECORDS-REVIEW.json` はimporterではありません。enabled:false、testerUids:[]、tester.active:falseなので、そのままでは誰も遊べません。
 
@@ -93,14 +95,14 @@ node scripts/prepare-floating-garden-trial.mjs --config CONFIRMED_CONFIG.json NE
 - 新projectの正確なID/名称/所有先。既存請求先の識別情報とBlaze紐付けの対象
 - 新しいdefault Firestoreの東京 `asia-northeast1`。locationは後から気軽に変更できないため開始前に確認
 - 7日の開始/終了、2人、最大20部屋、正常利用の目安0〜200円・余裕300円。**300円は厳密上限ではない**
-- 新projectだけの必要APIs、Web App、Auth匿名provider、専用Hosting previewの対象。SMS/Analytics、別ゲーム資源は追加しない
+- 新projectだけの必要APIs、Web App、Auth匿名provider、専用Hosting siteと固定URL（従来previewを使う場合はその対象）。SMS/Analytics、別ゲーム資源は追加しない
 - 予算通知や対応サービスのspend capを設定するなら正確な金額/通知先/対象を別途確認。既存予算が設定済みとは主張しない
 
 ### C. セキュリティ・資格情報の実行時確認
 
 - 新HMAC secret、専用runtime service account、必要なFirestore操作権限と当該secretだけのaccess権限。新規鍵・IAM付与は具体的な対象でその場の承認が必要
 - project所有者/Editorの継承や、本番サービスアカウントの流用を求めない。必要最小権限を検証し、不足なら停止して示す
-- App Check provider/keyの正確なpreview domain、新projectのenforcement設定。保護を弱めて通さない
+- App Check provider/keyの正確な配信domain、新projectのenforcement設定。保護を弱めて通さない
 - `ReCaptchaEnterpriseProvider` はSDK名であり、年間最低利用契約プランを選ぶ指示ではない。既存組織の無料枠・現在の料金tierを確認
 - credential値の入力・送信は安全なhandoff。chatにsecret/token/passwordを求めず、手順書やartifactにも含めない
 - preview deployの既定のAuth domain自動同期を禁止。domain追加が実際に必要ならその対象を確認
@@ -108,20 +110,21 @@ node scripts/prepare-floating-garden-trial.mjs --config CONFIRMED_CONFIG.json NE
 
 ### D. 対象限定の配信確認
 
-新projectと設定が検証できた後に、5関数、専用Rules全文、正確なpreview channel/期限、試験データ、rollback/停止方法を一括提示して配信の承認を得ます。CallableのHTTP endpointはネットワークから到達可能で、利用はAuth/App Check/2UIDで制限します。必要なCloud Run invoker公開設定も、対象5endpointの具体的なIAM変更として確認します。root all-Functions deploy、live Hosting deploy、`--force`、main mergeは使用しません。Firebase CLIが予期せぬAPI有効化、IAM追加、削除、資格情報/権限promptを出した場合は停止します。実行元の既存Console/CLI等の認証ルートも確認し、新しいdeploy token、CI secret、Workload Identityの権限付与が必要なら別途具体的に確認します。本番用CI資格情報は流用しません。
+新projectと設定が検証できた後に、5関数、専用Rules全文、正確な固定site（またはpreview channel/期限）、試験データ、rollback/停止方法を一括提示して配信の承認を得ます。CallableのHTTP endpointはネットワークから到達可能で、利用はAuth/App Check/2UIDで制限します。必要なCloud Run invoker公開設定も、対象5endpointの具体的なIAM変更として確認します。root all-Functions deploy、専用site以外のlive Hosting deploy、`--force`、main mergeは使用しません。Firebase CLIが予期せぬAPI有効化、IAM追加、削除、資格情報/権限promptを出した場合は停止します。実行元の既存Console/CLI等の認証ルートも確認し、新しいdeploy token、CI secret、Workload Identityの権限付与が必要なら別途具体的に確認します。本番用CI資格情報は流用しません。
 
-最初は停止画面のpreviewだけを配信して返された正確なhostnameを確定し、その後App Check/CORS/clientを同じoriginで検証します。backend/Rulesが稼働してもgateは停止状態を保ち、2UIDとusageを確認してから参加を有効化します。
+固定URLでは最初に停止画面のHostingだけを配信し、正確なsite/URLと停止内容を検証します。従来previewを選ぶ場合は停止画面previewの返されたhostnameを確定します。その後App Check/CORS/clientを同じoriginで検証します。backend/Rulesが稼働してもgateは停止状態を保ち、2UIDとusageを確認してから参加を有効化します。
 
 ## 7日後の停止と後始末
 
-- コード上の期限は再配信なしで全ゲーム利用を拒否し、clientも停止する。previewの失効だけに頼らない
+- コード上の期限は再配信なしで全ゲーム利用を拒否し、clientも停止する。固定URL自体に有効期限はない。previewを選んだ場合もHosting失効だけに頼らない
+- 固定URLを停止画面へ戻すにはレビュー済み `--closed-live` bundleを専用siteだけへ配信する。これはbackendのgate変更・削除の代わりにはならない
 - 管理者がgateをdisabledにし、両testerを無効にして、実際の拒否を確認。終了時刻と停止状態を記録する
 - 呼び出し拒否でも不正リクエストの処理・保存物・ログ等の費用はゼロ保証でない。承認した停止/削除対象を実行して残存資源も確認する
 - room/member/serverGame、receipt、invite、rate、tester、gate、usageの棚卸しと保存要否を確認。subcollectionは親doc削除だけで消えるとは扱わない
 - usage/gateを利用中に削除・resetしない。利用停止を先に確認する
 - Functions、Hosting preview/release、build source bucket、Artifact Registry images、secret versions、ログ、Auth users、App Check keyも別資源として確認。Functions削除だけで全保存物は消えない
 - 永続削除やcredential/IAM変更には具体的な対象の実行時確認が必要。この準備は破壊的cleanup script、TTL、scheduler、project削除を自動実行しない
-- preview URLは秘密の場所ではない。期限、停止、テスター認可は別の条件
+- 固定URLもpreview URLも秘密の場所ではない。期限、停止、テスター認可は別の条件
 
 ## 未検証
 

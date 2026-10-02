@@ -9,6 +9,8 @@ on:
       - 'functions/floating-garden-online/**'
       - 'lab/floating-garden/**'
       - 'scripts/prepare-floating-garden-trial.mjs'
+      - 'scripts/deploy-floating-garden-maintenance.mjs'
+      - 'tests/fixtures/floating-garden-maintenance-package.json'
       - 'tests/floating-garden-trial-*'
       - 'tests/helpers/*floating-garden-trial*'
       - 'tests/e2e/package*.json'

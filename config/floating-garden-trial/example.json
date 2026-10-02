@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "enabled": false,
-  "projectId": "REPLACE_WITH_NEW_GARDEN_PROJECT",
-  "previewOrigin": "https://REPLACE_WITH_EXACT_PREVIEW_HOST",
+  "projectId": "wa-awesome-garden-stg",
+  "previewOrigin": "https://wa-awesome-garden-stg.web.app",
   "startsAtMillis": 0,
   "endsAtMillis": 0,
   "region": "asia-northeast1",
@@ -10,8 +10,8 @@
   "maxRooms": 20,
   "firebase": {
     "apiKey": "REPLACE_WITH_PUBLIC_WEB_APP_CONFIG",
-    "authDomain": "REPLACE_WITH_PROJECT.firebaseapp.com",
-    "projectId": "REPLACE_WITH_NEW_GARDEN_PROJECT",
+    "authDomain": "wa-awesome-garden-stg.firebaseapp.com",
+    "projectId": "wa-awesome-garden-stg",
     "appId": "REPLACE_WITH_PUBLIC_WEB_APP_ID"
   },
   "appCheck": {

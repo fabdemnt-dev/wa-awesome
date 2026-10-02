@@ -6,7 +6,7 @@ import { resolve, dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { validateTrialConfig as validateClient } from '../lab/floating-garden/trial/config.js';
+import { validateTrialConfig as validateClient, FIXED_TRIAL_PROJECT, FIXED_TRIAL_ORIGIN } from '../lab/floating-garden/trial/config.js';
 const require = createRequire(import.meta.url);
 const { validateTrialConfig: validateBackend, renderTrialRules } = require('../functions/floating-garden-trial/config.js');
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
@@ -42,30 +42,33 @@ export function previewExpiryMinutes(config, executionNow) {
 export function reviewPlan(config, now) {
   const remaining = config.endsAtMillis - now;
   if (!Number.isSafeInteger(now) || remaining <= 0 || config.startsAtMillis - now > 7 * DAY) throw new Error('Build must be within 7 days before trial start and before expiry');
+  validateClient(config);
+  const fixed = config.projectId === FIXED_TRIAL_PROJECT && config.previewOrigin === FIXED_TRIAL_ORIGIN;
   const channel = 'garden-7day';
-  const maxMinutesAtPreparation = previewExpiryMinutes(config, now);
+  const maxMinutesAtPreparation = fixed ? null : previewExpiryMinutes(config, now);
   const common = ['firebase', '--config', 'firebase.trial.json', '--project', config.projectId];
   return { schemaVersion: 1, mode: 'review-only-not-executed', projectId: config.projectId, region: 'asia-northeast1',
     requiredNewDefaultDatabase: { id: '(default)', location: 'asia-northeast1' },
     runtimeServiceAccount: `garden-trial-runtime@${config.projectId}.iam.gserviceaccount.com`,
     previewOrigin: config.previewOrigin, trialEndsAtMillis: config.endsAtMillis, maxRooms: 20, maxTesters: 2,
-    previewExpiry: { preparedAtMillis: now, maxMinutesAtPreparation, mustRecalculateAtApprovedExecution: true, unit: 'm', warning: 'Firebase expiry is relative to deployment time; verify returned expireTime against the trial deadline. This file is not an executable deploy script.' },
+    hosting: { mode: fixed ? 'fixed-dedicated-live' : 'expiring-preview', site: config.projectId, origin: config.previewOrigin },
+    ...(fixed ? { hostingExpiry: null, hostingWarning: 'The fixed URL does not expire. Client/backend trial gates still stop access at the fixed deadline; replace Hosting with the reviewed closed-live maintenance bundle when stopping.' } : { previewExpiry: { preparedAtMillis: now, maxMinutesAtPreparation, mustRecalculateAtApprovedExecution: true, unit: 'm', warning: 'Firebase expiry is relative to deployment time; verify returned expireTime against the trial deadline. This file is not an executable deploy script.' } }),
     functionNames: FUNCTION_NAMES, perFunctionLimits: { minInstances: 0, maxInstances: 1, timeoutSeconds: 30, memory: '256MiB', cpu: 1, concurrency: 1 },
     secret: { name: 'FLOATING_GARDEN_INVITE_HMAC_KEY', bindings: FUNCTION_NAMES.slice(0, 2), valueIncluded: false },
-    approvalsStillRequired: ['publish-preparation-branch-and-CI', 'new-project-and-exact-billing-association', 'APIs-and-default-database-creation', 'Anonymous-Auth-and-App-Check-configuration', 'new-secret-and-exact-runtime-IAM-grants', 'exact-tester-enrollment-and-trial-activation', 'named-preview-five-functions-and-rules-deployment', 'data-and-resource-cleanup'],
+    approvalsStillRequired: ['publish-preparation-branch-and-CI', 'new-project-and-exact-billing-association', 'APIs-and-default-database-creation', 'Anonymous-Auth-and-App-Check-configuration', 'new-secret-and-exact-runtime-IAM-grants', 'exact-tester-enrollment-and-trial-activation', fixed ? 'dedicated-fixed-hosting-five-functions-and-rules-deployment' : 'named-preview-five-functions-and-rules-deployment', 'data-and-resource-cleanup'],
     commandsNotExecuted: {
       functions: [...common, 'deploy', '--only', 'functions:floating-garden-trial'],
       rules: [...common, 'deploy', '--only', 'firestore:rules'],
-      preview: [...common, 'hosting:channel:deploy', channel, '--expires', '<RECALCULATE_AT_APPROVED_EXECUTION>m', '--no-authorized-domains'],
+      ...(fixed ? { hosting: ['firebase', '--config', 'firebase.hosting-only.json', '--project', FIXED_TRIAL_PROJECT, 'deploy', '--only', `hosting:${FIXED_TRIAL_PROJECT}`] } : { preview: [...common, 'hosting:channel:deploy', channel, '--expires', '<RECALCULATE_AT_APPROVED_EXECUTION>m', '--no-authorized-domains'] }),
     },
-    forbidden: ['production or mofumofu project', 'main merge', 'live Hosting deploy', 'all-Functions deploy', '--force', 'automatic Auth-domain synchronization', 'App Check debug tokens', 'default Editor service account reuse', 'unapproved irreversible cleanup'],
+    forbidden: ['production or mofumofu project', 'main merge', fixed ? 'live Hosting outside the exact dedicated site' : 'live Hosting deploy', 'all-Functions deploy', '--force', 'automatic Auth-domain synchronization', 'App Check debug tokens', 'default Editor service account reuse', 'unapproved irreversible cleanup'],
     costWarning: '20 rooms, instance limits, trial expiry and spend notifications are not a monetary hard cap. Static hosting expiry does not delete backend resources.',
   };
 }
 export async function prepareTrialBundle({ config, output, now = Date.now(), repositoryRoot = ROOT }) {
   const client = validateClient(config);
   projectId(client.projectId);
-  if (!new RegExp(`^https://${client.projectId}--garden-7day-[a-z0-9]{4,20}\\.web\\.app$`).test(client.previewOrigin)) throw new Error('Bundle channel is fixed to garden-7day; origin must be that exact verified channel');
+  if (client.previewOrigin !== FIXED_TRIAL_ORIGIN && !new RegExp(`^https://${client.projectId}--garden-7day-[a-z0-9]{4,20}\\.web\\.app$`).test(client.previewOrigin)) throw new Error('Bundle origin must be the exact dedicated fixed host or verified garden-7day preview channel');
   const backend = validateBackend(Object.fromEntries(['enabled', 'projectId', 'region', 'previewOrigin', 'startsAtMillis', 'endsAtMillis', 'maxRooms'].map((key) => [key, client[key]])));
   const plan = reviewPlan(client, now);
   const source = resolve(repositoryRoot), out = resolve(output);
@@ -97,11 +100,13 @@ export async function prepareTrialBundle({ config, output, now = Date.now(), rep
   await put('firestore.rules', rules);
   await put('firestore.indexes.json', JSON.stringify({ indexes: [], fieldOverrides: [] }, null, 2) + '\n');
   await put('firebase.trial.json', JSON.stringify({ functions: { source: 'functions', codebase: 'floating-garden-trial', ignore: ['node_modules', '**/.*', '*-debug.log'] }, firestore: { rules: 'firestore.rules', indexes: 'firestore.indexes.json' }, hosting: hosting(client.projectId, 'public') }, null, 2) + '\n');
+  const fixed = client.projectId === FIXED_TRIAL_PROJECT && client.previewOrigin === FIXED_TRIAL_ORIGIN;
+  if (fixed) await put('firebase.hosting-only.json', JSON.stringify({ hosting: hosting(FIXED_TRIAL_PROJECT, 'public') }, null, 2) + '\n');
   // Initial admin records are deliberately locked. This is review data, not an importer.
   await put('ADMIN-RECORDS-REVIEW.json', JSON.stringify({ 'floatingGardenTrial/config': { ...backend, enabled: false, testerUids: [] }, 'floatingGardenTrial/usage': { projectId: backend.projectId, startsAtMillis: backend.startsAtMillis, endsAtMillis: backend.endsAtMillis, maxRooms: 20, createdRoomCount: 0 }, testerDocumentTemplate: { active: false, expiresAtMillis: backend.endsAtMillis } }, null, 2) + '\n');
   await put('REVIEW-PLAN.json', JSON.stringify(plan, null, 2) + '\n');
   await put('SOURCE-SHA256.json', JSON.stringify(manifest, null, 2) + '\n');
-  return { output: out, fileCount: prepared.length + 8, plan };
+  return { output: out, fileCount: prepared.length + 8 + Number(fixed), plan };
 }
 export async function prepareClosedPreview({ project, output }) {
   const id = projectId(project), out = resolve(output);
@@ -112,9 +117,40 @@ export async function prepareClosedPreview({ project, output }) {
   await writeFile(join(out, 'REVIEW-PLAN.json'), JSON.stringify({ mode: 'closed-preview-review-only', projectId: id, commandNotExecuted: ['firebase', '--config', 'firebase.preview-only.json', '--project', id, 'hosting:channel:deploy', 'garden-7day', '--expires', '7d', '--no-authorized-domains'], warning: 'Explicit hosting deployment approval and verified new project are still required; no command was executed.' }, null, 2) + '\n');
   return { output: out, enabled: false };
 }
+export const CLOSED_LIVE_HTML = '<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>庭園の試験は停止中です</title></head><body><main><h1>庭園の試験は停止中です</h1><p>現在は準備中、または試験期間が終了しています。</p><p>この画面では認証やゲームデータの送信を行いません。</p></main></body></html>\n';
+export const CLOSED_LIVE_CONFIG_JSON = (() => {
+  const host = hosting(FIXED_TRIAL_PROJECT, 'public'); delete host.redirects;
+  host.headers[0].headers.push({ key: 'Content-Security-Policy', value: "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" });
+  return JSON.stringify({ hosting: host }, null, 2) + '\n';
+})();
+export async function prepareClosedLive({ project, output }) {
+  if (project !== FIXED_TRIAL_PROJECT) throw new Error('Closed live Hosting is restricted to the exact approved garden-only project/site');
+  const out = resolve(output);
+  // The same inert 404 page covers old entry/deep links without a rewrite.
+  const files = {
+    'public/index.html': CLOSED_LIVE_HTML,
+    'public/404.html': CLOSED_LIVE_HTML,
+    'firebase.maintenance.json': CLOSED_LIVE_CONFIG_JSON,
+  };
+  const plan = {
+    schemaVersion: 1, mode: 'closed-live-review-only', projectId: FIXED_TRIAL_PROJECT,
+    site: FIXED_TRIAL_PROJECT, origin: FIXED_TRIAL_ORIGIN, enabled: false,
+    commandNotExecuted: ['firebase', '--config', 'firebase.maintenance.json', '--project', FIXED_TRIAL_PROJECT, 'deploy', '--only', `hosting:${FIXED_TRIAL_PROJECT}`],
+    files: Object.keys(files).sort(),
+    warning: 'Local preparation only. Verify the exact dedicated project/site and review these files before an authorized Hosting-only deployment. This static page does not disable or delete backend resources; keep the separate trial gate disabled or expired.',
+  };
+  files['REVIEW-PLAN.json'] = JSON.stringify(plan, null, 2) + '\n';
+  files['FILES-SHA256.json'] = JSON.stringify(Object.fromEntries(Object.keys(files).sort().map((path) => [path, digest(files[path])])), null, 2) + '\n';
+  await newDirectory(out);
+  for (const [path, bytes] of Object.entries(files)) {
+    await mkdir(dirname(join(out, path)), { recursive: true });
+    await writeFile(join(out, path), bytes);
+  }
+  return { output: out, enabled: false, fileCount: Object.keys(files).length, plan };
+}
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [mode, input, output] = process.argv.slice(2);
-  if (!['--config', '--closed-preview'].includes(mode) || !input || !output || process.argv.length !== 5) throw new Error('Usage: node scripts/prepare-floating-garden-trial.mjs --config CONFIG.json NEW_OUTPUT | --closed-preview NEW_PROJECT_ID NEW_OUTPUT');
-  const result = mode === '--config' ? await prepareTrialBundle({ config: JSON.parse(await readFile(input, 'utf8')), output }) : await prepareClosedPreview({ project: input, output });
+  if (!['--config', '--closed-preview', '--closed-live'].includes(mode) || !input || !output || process.argv.length !== 5) throw new Error('Usage: node scripts/prepare-floating-garden-trial.mjs --config CONFIG.json NEW_OUTPUT | --closed-preview NEW_PROJECT_ID NEW_OUTPUT | --closed-live wa-awesome-garden-stg NEW_OUTPUT');
+  const result = mode === '--config' ? await prepareTrialBundle({ config: JSON.parse(await readFile(input, 'utf8')), output }) : mode === '--closed-live' ? await prepareClosedLive({ project: input, output }) : await prepareClosedPreview({ project: input, output });
   console.log(JSON.stringify({ ...result, notice: 'Local files only. No cloud action executed.' }, null, 2));
 }

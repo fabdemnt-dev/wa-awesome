@@ -12,14 +12,14 @@ const START = 1700000000000;
 const CONFIG = Object.freeze({ enabled: true, projectId: 'wa-garden-trial-unit', region: 'asia-northeast1',
   previewOrigin: 'https://wa-garden-trial-unit--trial-abc123.web.app', startsAtMillis: START, endsAtMillis: START + MAX_TRIAL_MILLIS, maxRooms: 20 });
 const rates = Object.fromEntries(Object.entries(RATE_LIMITS).map(([name, value]) => [name, { ...value, limit: 10000, ...(value.ipLimit ? { ipLimit: 10000 } : {}) }]));
-function fixture({ config = CONFIG, env = { GCLOUD_PROJECT: CONFIG.projectId }, database, ...options } = {}) {
+function fixture({ config = CONFIG, env = { GCLOUD_PROJECT: config.projectId }, database, ...options } = {}) {
   const db = database || createMemoryStore(); let now = START + 1000; let counter = 0;
-  db.set(GATE_PATH, { ...CONFIG, testerUids: ['host', 'guest'] });
-  db.set(USAGE_PATH, { projectId: CONFIG.projectId, startsAtMillis: START, endsAtMillis: CONFIG.endsAtMillis, maxRooms: 20, createdRoomCount: 0 });
-  for (const uid of ['host', 'guest']) db.set(`floatingGardenTrialTesters/${uid}`, { active: true, expiresAtMillis: CONFIG.endsAtMillis });
+  db.set(GATE_PATH, { ...config, testerUids: ['host', 'guest'] });
+  db.set(USAGE_PATH, { projectId: config.projectId, startsAtMillis: START, endsAtMillis: config.endsAtMillis, maxRooms: 20, createdRoomCount: 0 });
+  for (const uid of ['host', 'guest']) db.set(`floatingGardenTrialTesters/${uid}`, { active: true, expiresAtMillis: config.endsAtMillis });
   const handlers = createTrialHandlers({ config, db, env, now: () => now, trustedHandlersFactory: createHandlers,
     inviteSecret: () => 'local-only-fixture-32-character-hmac-secret', rateLimits: rates, ...options });
-  const request = (uid = 'host', data = {}) => ({ auth: { uid }, app: { appId: 'fixture-app' }, rawRequest: { headers: { origin: CONFIG.previewOrigin }, ip: '127.0.0.1' }, data });
+  const request = (uid = 'host', data = {}) => ({ auth: { uid }, app: { appId: 'fixture-app' }, rawRequest: { headers: { origin: config.previewOrigin }, ip: '127.0.0.1' }, data });
   const id = () => `trial-request-${++counter}`;
   const create = (requestId = id(), displayName = 'Garden') => handlers.floatingGardenCreateRoom(request('host', { displayName, requestId }));
   const snapshot = (room) => handlers.floatingGardenGetSnapshot(request('host', { roomId: room.roomId }));
@@ -258,4 +258,37 @@ test('room expiry reached during unchanged trusted engine work rolls back the ac
   assert.deepEqual(f.db.peek(`floatingGardenRooms/${created.roomId}`), roomBefore);
   assert.deepEqual(f.db.peek(`floatingGardenRooms/${created.roomId}/serverGames/${started.room.gameId}`), gameBefore);
   assert.equal(f.db.paths().filter((path) => path.startsWith('floatingGardenActionRequests/')).length, receiptsBefore);
+});
+
+
+test('dedicated fixed origin preserves server project, origin, time, two-tester and 20-room gates', async () => {
+  const config = { ...CONFIG, projectId: 'wa-awesome-garden-stg', previewOrigin: 'https://wa-awesome-garden-stg.web.app' };
+  assert.equal(validateTrialConfig(config).previewOrigin, config.previewOrigin);
+  for (const previewOrigin of ['https://wa-awesome-garden-stg.firebaseapp.com', config.previewOrigin + '/', config.previewOrigin + ':443', config.previewOrigin + '?x=1', config.previewOrigin + '#x', config.previewOrigin + '.evil.example', 'http://wa-awesome-garden-stg.web.app', 'https://wa-awesome-garden-stg-other.web.app', 'https://wa-awesome.web.app', 'https://wa-awesome-mofumofu-stg.web.app']) assert.throws(() => validateTrialConfig({ ...config, previewOrigin }));
+  assert.throws(() => validateTrialConfig({ ...CONFIG, previewOrigin: config.previewOrigin }));
+  for (const name of CALLABLE_NAMES) {
+    const f = fixture({ config });
+    for (const [reason, modify] of [
+      ['trial-auth-required', (r) => { delete r.auth; }],
+      ['trial-app-check-required', (r) => { delete r.app; }],
+      ['trial-origin-mismatch', (r) => { r.rawRequest.headers.origin = 'https://wa-awesome-garden-stg--garden-7day-abcdef.web.app'; }],
+    ]) {
+      const request = f.request(); modify(request); const before = f.db.entries();
+      await rejects(f.handlers[name](request), reason); assert.deepEqual(f.db.entries(), before);
+    }
+    f.patchGate({ testerUids: ['host', 'guest', 'third'] });
+    await rejects(f.handlers[name](f.request()), 'trial-tester-not-enrolled');
+    f.patchGate({ testerUids: ['host', 'guest'], enabled: false });
+    await rejects(f.handlers[name](f.request()), 'trial-disabled');
+    f.patchGate({ enabled: true }); f.setNow(config.endsAtMillis);
+    await rejects(f.handlers[name](f.request()), 'trial-outside-window');
+  }
+  const wrongProject = fixture({ config, env: { GCLOUD_PROJECT: CONFIG.projectId } });
+  await rejects(wrongProject.create(), 'trial-project-mismatch');
+  const f = fixture({ config });
+  for (let i = 0; i < 20; i++) await f.create(`fixed-host-room-${i}`);
+  await rejects(f.create('fixed-host-room-over-limit'), 'trial-room-limit');
+  assert.equal(f.db.peek(USAGE_PATH).createdRoomCount, 20);
+  const template = await readFile(new URL('../functions/floating-garden-trial/firestore.rules.template', import.meta.url), 'utf8');
+  assert.ok(renderTrialRules(template, config).includes(JSON.stringify(config.previewOrigin)));
 });

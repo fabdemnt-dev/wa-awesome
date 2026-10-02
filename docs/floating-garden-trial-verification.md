@@ -78,3 +78,15 @@
 - build/レビューplan：`scripts/prepare-floating-garden-trial.mjs`
 
 Draft PR #365への追加保存と隔離CI・必要な修正は承認済み。次は新project ID/請求先/期間を読み取り確認で具体化し、実際の作成・配信を行う前に対象を明示する。具体的な鍵・権限・セキュリティ設定が判明してから必要な実行時確認を行う。現在の承認はcloud作成・課金・資格情報・IAM・deployを含まない。
+
+
+## 固定庭園URLへの対応（2026-10-02）
+
+- `wa-awesome-garden-stg` / `https://wa-awesome-garden-stg.web.app` の組だけを追加し、他projectのlive host、alias、suffix、port、query、production/旧stagingを拒否
+- 従来のgarden-7day previewを維持。互換性のため `previewOrigin` 名を維持し、実際の配信originをclient/backend/Rules/admin gateで一致させる
+- 固定URLでも7日・2UID・20部屋・App Check・Auth・gate停止・期限での拒否を維持。URLの永続性とゲーム権限の期限を区別
+- 固定URLのreview commandは専用Hosting-only configとexact-site selectorを使用。既存root Firebase設定・Rules・ゲームengineは変更しない
+- closed-live停止画面はindex/404のみのstatic tree、Hosting-only config、review plan、SHA256 manifestの決定的5ファイル。SDK/Auth/外部resource/script/event handler/rewrites/hooksを含まず、CSP default-src noneを付与
+- ローカル生成はcloudへの操作を一切しない。実Hosting/App Check/Android2台の動作確認の代替ではない
+
+今回のローカル検証: aggregate 729/729、trial unit/package/fixture/helper 87/87（helper 18件を含む）、実SDK entry/CORS 10/10、専用Firestore Rules/実transaction 10/10、canonical core byte一致。固定URLの新規ケースは既存previewケースと併せて検査しています。helperは親Firebase設定/aliasの分離、作成後の限定した読取り再試行、root/404/旧ゲーム入口の照合も検査。cloud配信はこの変更で実行していません。最終headのCI結果はPR365で別途確認します。

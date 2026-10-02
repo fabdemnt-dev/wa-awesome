@@ -30,7 +30,7 @@ async function installedPackage(entry, name) {
   }
   throw new Error(`Cannot locate installed package ${name}`);
 }
-async function fixture(t, { configText } = {}) {
+async function fixture(t, { configText, config = configuration() } = {}) {
   const dependencies = (await json(new URL('../functions/floating-garden-trial/package.json', import.meta.url))).dependencies;
   const sdk = await installedPackage('firebase-functions/v2/https', 'firebase-functions');
   const admin = await installedPackage('firebase-admin/app', 'firebase-admin');
@@ -51,7 +51,7 @@ async function fixture(t, { configText } = {}) {
     for (const path of Object.keys(trialRequire.cache)) if (path.startsWith(dir + '/')) delete trialRequire.cache[path];
     await rm(dir, { recursive: true, force: true });
   });
-  await prepareTrialBundle({ config: configuration(), output, now: START });
+  await prepareTrialBundle({ config, output, now: START });
   if (configText === null) await rm(join(functions, 'trial-config.json'));
   else if (configText !== undefined) await writeFile(join(functions, 'trial-config.json'), configText);
   // Dependencies are supplied only after verifying the generated bundle. Symlinks
@@ -193,4 +193,23 @@ test('a valid explicitly disabled deployment configuration still rejects every g
   t.mock.method(Date, 'now', () => START + 1000);
   for (const callable of Object.values(f.exported)) await rejectsReason(callable.run(request()), 'failed-precondition', 'trial-disabled');
   assert.equal(f.require.cache[join(f.functions, 'online/handlers.js')], undefined);
+});
+
+
+test('fixed dedicated origin uses exact real SDK CORS and retains early-denial gates without Admin or network', async (t) => {
+  const config = configuration(); config.projectId = config.firebase.projectId = 'wa-awesome-garden-stg';
+  config.firebase.authDomain = 'wa-awesome-garden-stg.firebaseapp.com'; config.previewOrigin = 'https://wa-awesome-garden-stg.web.app';
+  runtimeEnvironment(t, { GCLOUD_PROJECT: config.projectId });
+  const f = await fixture(t, { config });
+  t.mock.method(Date, 'now', () => START + 1000);
+  for (const callable of Object.values(f.exported)) {
+    for (const origin of [config.previewOrigin, 'https://wa-awesome.web.app', config.previewOrigin + '.evil.example', 'https://wa-awesome-garden-stg--garden-7day-abcdef.web.app', null]) {
+      const res = await callHttp(callable, { method: 'OPTIONS', origin, headers: { 'access-control-request-method': 'POST', 'access-control-request-headers': 'content-type,x-firebase-appcheck' } });
+      assert.equal(res.getHeader('access-control-allow-origin'), config.previewOrigin);
+    }
+    const denied = { ...request(), rawRequest: { headers: { origin: config.previewOrigin } } };
+    await rejectsReason(callable.run({ ...denied, auth: null }), 'unauthenticated', 'trial-auth-required');
+    await rejectsReason(callable.run({ ...denied, app: undefined }), 'unauthenticated', 'trial-app-check-required');
+    await rejectsReason(callable.run({ ...denied, rawRequest: { headers: { origin: configuration().previewOrigin } } }), 'permission-denied', 'trial-origin-mismatch');
+  }
 });

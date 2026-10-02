@@ -287,3 +287,24 @@ function trialDom() {
   await dom.click('create'); assert.equal(fake.requests.length, 1);
   application.unmount(); assert.equal(dom.root.listeners.size, 0); assert.equal(dom.page.listeners.size, 0); assert.equal(dom.document.listeners.size, 0);
  });
+
+ test('dedicated fixed garden host is exact and retains every client gate before SDK import', async () => {
+  const fixed = config(); fixed.projectId = fixed.firebase.projectId = 'wa-awesome-garden-stg';
+  fixed.firebase.authDomain = 'wa-awesome-garden-stg.firebaseapp.com';
+  fixed.previewOrigin = 'https://wa-awesome-garden-stg.web.app';
+  assert.equal(resolveTrialEnvironment(fixed, page(fixed), NOW).previewOrigin, fixed.previewOrigin);
+  assert.doesNotThrow(() => resolveTrialEnvironment(fixed, `${page(fixed)}#online-controls`, NOW));
+  for (const origin of [fixed.previewOrigin + '/', fixed.previewOrigin + ':443', fixed.previewOrigin + '?enabled=1', fixed.previewOrigin + '#x', 'http://wa-awesome-garden-stg.web.app', 'https://wa-awesome-garden-stg.firebaseapp.com', 'https://wa-awesome-garden-stg.web.app.evil.example', 'https://wa-awesome-garden-stg-extra.web.app', 'https://wa-awesome.web.app', 'https://wa-awesome-mofumofu-stg.web.app', 'https://*.web.app']) assert.throws(() => validateTrialConfig({ ...fixed, previewOrigin: origin }), origin);
+  assert.throws(() => validateTrialConfig({ ...config(), previewOrigin: fixed.previewOrigin }));
+  const disallowed = [
+    [fixed, page(fixed), fixed.startsAtMillis - 1], [fixed, page(fixed), fixed.endsAtMillis],
+    [{ ...fixed, enabled: false }, page(fixed), NOW], [{ ...fixed, maxRooms: 21 }, page(fixed), NOW],
+    [{ ...fixed, maxTesters: 3 }, page(fixed), NOW], [{ ...fixed, endsAtMillis: fixed.startsAtMillis + TRIAL_MAX_DURATION_MILLIS + 1 }, page(fixed), NOW],
+    [fixed, `${page(fixed)}?enabled=true`, NOW], [fixed, 'https://wa-awesome-garden-stg--garden-7day-abcdef.web.app/', NOW],
+  ];
+  for (const [input, url, now] of disallowed) {
+    let imports = 0;
+    await assert.rejects(createTrialFirebaseTransport(input, url, { now: () => now, loadSdk: async () => { imports++; throw new Error('imported'); } }));
+    assert.equal(imports, 0);
+  }
+ });

@@ -7,7 +7,7 @@ const { calculateChannelExpireTTL } = createRequire(import.meta.url)('firebase-t
 import { join, resolve, dirname, relative } from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { prepareTrialBundle, prepareClosedPreview, reviewPlan, previewExpiryMinutes, FUNCTION_NAMES } from '../scripts/prepare-floating-garden-trial.mjs';
+import { prepareTrialBundle, prepareClosedPreview, prepareClosedLive, CLOSED_LIVE_HTML, CLOSED_LIVE_CONFIG_JSON, reviewPlan, previewExpiryMinutes, FUNCTION_NAMES } from '../scripts/prepare-floating-garden-trial.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const start = Date.parse('2026-10-02T00:00:00Z');
 const configuration = () => ({ schemaVersion: 1, enabled: true, projectId: 'garden-trial-check', previewOrigin: 'https://garden-trial-check--garden-7day-a1b2c3.web.app', startsAtMillis: start, endsAtMillis: start + 7 * 86400000, region: 'asia-northeast1', maxTesters: 2, maxRooms: 20, firebase: { apiKey: 'AIza' + 'a'.repeat(35), authDomain: 'garden-trial-check.firebaseapp.com', projectId: 'garden-trial-check', appId: '1:123456789:web:abcdef0123456789' }, appCheck: { provider: 'recaptcha-enterprise', siteKey: '6L' + 'a'.repeat(38), verified: true } });
@@ -199,6 +199,77 @@ test('unsafe copied sources, missing files and changed trusted core fail before 
     }
     if (fault === 'changed-core') await writeFile(join(source, 'functions/floating-garden-online/core/engine.js'), '// altered staged core');
     await assert.rejects(prepareTrialBundle({ config: configuration(), repositoryRoot: source, output, now: start }), fault === 'missing-entry' ? { code: 'ENOENT' } : fault === 'symlink-entry' ? /Unsafe source file/ : /Trusted staged core mismatch/);
+    await assert.rejects(stat(output), { code: 'ENOENT' });
+  }
+});
+
+
+test('fixed dedicated trial emits only exact-site Hosting commands and preserves stopped backend review gates', async (t) => {
+  const dir = await temporary(t), output = join(dir, 'fixed');
+  const config = configuration(); config.projectId = config.firebase.projectId = 'wa-awesome-garden-stg';
+  config.firebase.authDomain = 'wa-awesome-garden-stg.firebaseapp.com'; config.previewOrigin = 'https://wa-awesome-garden-stg.web.app';
+  const result = await prepareTrialBundle({ config, output, now: start });
+  assert.equal((await list(output)).length, result.fileCount);
+  assert.deepEqual((await list(output)), [...sourceFiles.map(outputPath), ...generatedFiles, 'firebase.hosting-only.json'].sort());
+  const hostOnly = await json(join(output, 'firebase.hosting-only.json'));
+  assert.deepEqual(Object.keys(hostOnly), ['hosting']);
+  assert.equal(hostOnly.hosting.site, config.projectId);
+  assert.equal(hostOnly.hosting.public, 'public');
+  assert.equal(Object.hasOwn(hostOnly.hosting, 'rewrites'), false);
+  assert.equal(Object.hasOwn(hostOnly.hosting, 'predeploy'), false);
+  assert.equal(Object.hasOwn(hostOnly.hosting, 'postdeploy'), false);
+  assert.deepEqual(result.plan.commandsNotExecuted.hosting, ['firebase', '--config', 'firebase.hosting-only.json', '--project', 'wa-awesome-garden-stg', 'deploy', '--only', 'hosting:wa-awesome-garden-stg']);
+  assert.equal(Object.hasOwn(result.plan.commandsNotExecuted, 'preview'), false);
+  assert.equal(Object.hasOwn(result.plan, 'previewExpiry'), false);
+  assert.equal(result.plan.hostingExpiry, null);
+  assert.equal(result.plan.hosting.mode, 'fixed-dedicated-live');
+  assert.equal(result.plan.maxRooms, 20); assert.equal(result.plan.maxTesters, 2);
+  assert.equal(result.plan.trialEndsAtMillis, config.endsAtMillis);
+  const backend = await json(join(output, 'functions/trial-config.json'));
+  assert.equal(backend.previewOrigin, config.previewOrigin); assert.equal(backend.endsAtMillis - backend.startsAtMillis, 7 * 86400000);
+  const admin = await json(join(output, 'ADMIN-RECORDS-REVIEW.json'));
+  assert.equal(admin['floatingGardenTrial/config'].enabled, false); assert.deepEqual(admin['floatingGardenTrial/config'].testerUids, []);
+  assert.ok((await readFile(join(output, 'firestore.rules'), 'utf8')).includes(JSON.stringify(config.previewOrigin)));
+});
+
+test('closed-live bundle is deterministic exact-site Hosting-only maintenance, including inert deep-link fallback', async (t) => {
+  const dir = await temporary(t), first = join(dir, 'first'), second = join(dir, 'second');
+  const project = 'wa-awesome-garden-stg';
+  const result = await prepareClosedLive({ project, output: first });
+  await prepareClosedLive({ project, output: second });
+  const expected = ['FILES-SHA256.json', 'REVIEW-PLAN.json', 'firebase.maintenance.json', 'public/404.html', 'public/index.html'];
+  assert.deepEqual(await list(first), expected); assert.equal(result.fileCount, expected.length);
+  for (const path of expected) assert.deepEqual(await readFile(join(first, path)), await readFile(join(second, path)), path);
+  const config = await json(join(first, 'firebase.maintenance.json'));
+  assert.deepEqual(Object.keys(config), ['hosting']);
+  assert.deepEqual(Object.keys(config.hosting).sort(), ['headers', 'ignore', 'public', 'site']);
+  assert.equal(config.hosting.site, project); assert.equal(config.hosting.public, 'public');
+  assert.equal(await readFile(join(first, 'firebase.maintenance.json'), 'utf8'), CLOSED_LIVE_CONFIG_JSON);
+  const headers = Object.fromEntries(config.hosting.headers[0].headers.map(({ key, value }) => [key, value]));
+  assert.equal(headers['Content-Security-Policy'], "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
+  assert.equal(headers['Cache-Control'], 'no-store, max-age=0');
+  for (const name of ['public/index.html', 'public/404.html']) {
+    const html = await readFile(join(first, name), 'utf8');
+    assert.equal(html, CLOSED_LIVE_HTML);
+    assert.doesNotMatch(html, /<script|<link|<img|<iframe|<form|<object|<embed|\bon[a-z]+\s*=|\b(?:src|href|action)\s*=|firebase|https?:\/\//i);
+    assert.match(html, /name="viewport"/);
+  }
+  const plan = await json(join(first, 'REVIEW-PLAN.json'));
+  assert.equal(plan.enabled, false); assert.equal(plan.origin, 'https://wa-awesome-garden-stg.web.app');
+  assert.deepEqual(plan.commandNotExecuted, ['firebase', '--config', 'firebase.maintenance.json', '--project', project, 'deploy', '--only', 'hosting:wa-awesome-garden-stg']);
+  const { filterOnly } = createRequire(import.meta.url)('firebase-tools/lib/hosting/config.js');
+  assert.deepEqual(filterOnly([config.hosting], plan.commandNotExecuted.at(-1)), [config.hosting]);
+  const manifest = await json(join(first, 'FILES-SHA256.json'));
+  assert.deepEqual(Object.keys(manifest).sort(), expected.filter((path) => path !== 'FILES-SHA256.json'));
+  for (const [path, sha] of Object.entries(manifest)) assert.equal(sha, createHash('sha256').update(await readFile(join(first, path))).digest('hex'));
+  await assert.rejects(prepareClosedLive({ project, output: first }), /already exists/);
+});
+
+test('closed-live refuses every unapproved project before creating output', async (t) => {
+  const dir = await temporary(t);
+  for (const [i, project] of ['wa-awesome', 'wa-awesome-mofumofu-stg', 'garden-trial-check', 'wa-awesome-garden-stg-other', 'WA-AWESOME-GARDEN-STG', 'https://wa-awesome-garden-stg.web.app', '../wa-awesome-garden-stg', '', undefined].entries()) {
+    const output = join(dir, String(i));
+    await assert.rejects(prepareClosedLive({ project, output }), /exact approved/);
     await assert.rejects(stat(output), { code: 'ENOENT' });
   }
 });

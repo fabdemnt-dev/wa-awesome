@@ -41,7 +41,7 @@ Premium側で10,001〜100,000 assessmentsの段階へ入る場合、公式表示
 - 2UID許可、App Check、20部屋、rate limit、期限は乱用を減らすが、無効リクエストの処理費や保存をゼロにはしない
 - 通常budget alertは通知。サービス別spend cap（Preview）は現在存在するが、反映遅延の超過分も請求され、project全サービスの一括hard capではない。月初の再開にも注意
 - projectを分けても同じ請求先のCloud Run/Build/Secret等の無料枠・支払先は共有される
-- preview終了、利用期限、Functions停止、データ/Artifact/secret/source cleanupは別。後始末の承認と実行が必要
+- 固定URL `wa-awesome-garden-stg.web.app` 自体は失効しない。7日のゲーム利用期限、停止画面への差替え、Functions停止、データ/Artifact/secret/source cleanupは別。previewを選ぶ場合の失効とも区別し、後始末の承認と実行が必要
 
 [spend capsの公式制限](https://firebase.google.com/docs/projects/billing/spend-caps)、[最大インスタンス設定](https://docs.cloud.google.com/run/docs/configuring/max-instances)、[Functionsのbuildと保存](https://docs.cloud.google.com/functions/docs/building)
 
