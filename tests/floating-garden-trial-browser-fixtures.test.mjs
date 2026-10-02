@@ -1,10 +1,13 @@
-// Pure regression tests: no emulator process, Chromium, real SDK or network.
+// Pure regression tests: no emulator process, Chromium or network. The installed
+// client SDK is used only to observe real callable URL construction.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { initializeApp, deleteApp } from 'firebase/app';
+import { getFunctions } from 'firebase/functions';
 import { prepareTrialEmulator } from './helpers/prepare-floating-garden-trial-emulator.mjs';
 import { trialEmulatorRoute, trialSdkFixture, isTrialRelayNavigationCancellation } from './helpers/floating-garden-trial-sdk-fixture.mjs';
 
@@ -20,17 +23,23 @@ test('trial browser relay permits only exact same-origin SDK routes to pinned de
     ['/identitytoolkit.googleapis.com/v1/accounts:signUp?key=inert', 'POST', 'auth', 9099],
     ['/identitytoolkit.googleapis.com/v1/accounts:lookup?key=inert', 'POST', 'auth', 9099],
     ['/securetoken.googleapis.com/v1/token?key=inert', 'POST', 'auth', 9099],
-    ['/demo-floating-garden-trial/asia-northeast1/floatingGardenCreateRoom', 'POST', 'functions', 5103],
     ['/google.firestore.v1.Firestore/Listen/channel?database=projects%2Fdemo-floating-garden-trial%2Fdatabases%2F(default)', 'POST', 'firestore', 8183],
     ['/google.firestore.v1.Firestore/Listen/channel?SID=inert&RID=rpc', 'GET', 'firestore', 8183],
     ['/google.firestore.v1.Firestore/Write/channel', 'POST', 'firestore', 8183],
   ]) assert.deepEqual(trialEmulatorRoute(origin + path, method, fixture), { kind, url: `http://127.0.0.1:${port}${path}` });
+  for (const suffix of ['CreateRoom', 'JoinRoom', 'StartMatch', 'GetSnapshot', 'SubmitAction']) {
+    assert.deepEqual(trialEmulatorRoute(`${origin}/floatingGarden${suffix}`, 'POST', fixture),
+      { kind: 'functions', url: `http://127.0.0.1:5103/demo-floating-garden-trial/asia-northeast1/floatingGarden${suffix}` });
+  }
   for (const [url, method] of [
     [origin + '/lab/floating-garden/trial/index.html', 'GET'],
     [origin + '/identitytoolkit.googleapis.com/v1/accounts:signUp', 'GET'],
     [origin + '/identitytoolkit.googleapis.com/v1/accounts:delete', 'POST'],
     [origin + '/demo-floating-garden-trial/asia-northeast1/arbitraryFunction', 'POST'],
-    [origin + '/demo-floating-garden-trial/asia-northeast1/floatingGardenCreateRoom?extra=true', 'POST'],
+    [origin + '/demo-floating-garden-trial/asia-northeast1/floatingGardenCreateRoom', 'POST'],
+    [origin + '/floatingGardenCreateRoom?extra=true', 'POST'],
+    [origin + '/floatingGardenCreateRoom', 'GET'],
+    [origin + '/arbitraryFunction', 'POST'],
     [origin + '/wa-awesome/asia-northeast1/floatingGardenCreateRoom', 'POST'],
     [origin + '/google.firestore.v1.Firestore/Listen/channel?database=projects/wa-awesome/databases/(default)', 'GET'],
     [origin + '/google.firestore.v1.Firestore/Listen/channel', 'DELETE'],
@@ -56,8 +65,22 @@ test('trial SDK facades use supported HTTPS same-origin configuration without br
   const firestore = trialSdkFixture('firebase-firestore.js', fixture);
   assert.match(firestore, /ssl: true/); assert.match(firestore, /experimentalForceLongPolling: true/);
   assert.match(firestore, /timeoutSeconds: 5/); assert.doesNotMatch(firestore, /mockUserToken/);
-  assert.ok(trialSdkFixture('firebase-functions.js', fixture).includes(`${origin}/demo-floating-garden-trial/asia-northeast1`));
+  assert.ok(trialSdkFixture('firebase-functions.js', fixture).includes(`real.getFunctions(app, ${JSON.stringify(origin)})`));
   assert.equal(trialSdkFixture('unknown.js', fixture), null);
+});
+
+test('actual installed Firebase SDK origin-only callable URLs map to exact demo/region endpoints', async () => {
+  const app = initializeApp({ projectId: fixture.projectId, apiKey: 'demo-floating-garden-trial-key', appId: 'demo-inert-url-check' }, 'trial-fixture-url-regression');
+  try {
+    const functions = getFunctions(app, origin);
+    for (const suffix of ['CreateRoom', 'JoinRoom', 'StartMatch', 'GetSnapshot', 'SubmitAction']) {
+      // This is SDK URL construction only: do not invoke a callable or fetch.
+      const actual = functions._url(`floatingGarden${suffix}`);
+      assert.equal(actual, `${origin}/floatingGarden${suffix}`);
+      assert.deepEqual(trialEmulatorRoute(actual, 'POST', fixture),
+        { kind: 'functions', url: `http://127.0.0.1:5103/demo-floating-garden-trial/asia-northeast1/floatingGarden${suffix}` });
+    }
+  } finally { await deleteApp(app); }
 });
 
 test('fixture discovery accepts CLI-filtered emulator env and fails closed before any SDK initialization otherwise', async () => {

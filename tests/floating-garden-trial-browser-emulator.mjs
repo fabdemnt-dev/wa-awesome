@@ -39,7 +39,7 @@ const { getFirestore } = require('firebase-admin/firestore');
 const sdkOrigin = 'https://www.gstatic.com';
 const sdkPrefix = '/firebasejs/10.8.0/';
 const entryPath = '/lab/floating-garden/trial/index.html';
-const callablePath = `/demo-floating-garden-trial/asia-northeast1/`;
+const callablePath = '/';
 const output = resolve(process.env.FLOATING_GARDEN_BROWSER_ARTIFACTS || '/tmp/floating-garden-trial-browser-emulator-qa');
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
 
@@ -50,14 +50,16 @@ async function serveTrialAsset(route, served) {
   const publicRoot = resolve(fixtureRoot, 'public');
   const path = resolve(publicRoot, `.${decodeURIComponent(url.pathname)}`);
   if (!['GET', 'HEAD'].includes(request.method()) || !path.startsWith(publicRoot + '/') || !['.html', '.js', '.css'].includes(extname(path))) {
-    await route.fulfill({ status: 404, body: '' }); return;
+    await route.fulfill({ status: 404, body: '' }); return 404;
   }
   try {
     const bytes = await readFile(path); served.set(url.pathname, digest(bytes));
     await route.fulfill({ status: 200, body: bytes, headers: { 'content-type': { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' }[extname(path)], 'cache-control': 'no-store' } });
+    return 200;
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
     await route.fulfill({ status: 404, body: '' });
+    return 404;
   }
 }
 
@@ -130,7 +132,7 @@ function publicOnly(room) {
 
 test('trial app: two enrolled real anonymous browsers play and recover against emulator callables/rules; authorization fails closed', { timeout: 600000 }, async () => {
   let browser, admin, db;
-  const contexts = [], pages = [], observed = [], pageErrors = [], blocked = [], deniedConnectivityProbes = [], routeErrors = [];
+  const contexts = [], pages = [], observed = [], pageErrors = [], blocked = [], deniedConnectivityProbes = [], routeErrors = [], sameOriginMisses = [];
   const interruptedSeats = new Set(), offlineSeats = new Set(), activeRelays = new Map();
   let closing = false;
   async function setOffline(seat, offline) {
@@ -187,7 +189,11 @@ test('trial app: two enrolled real anonymous browsers play and recover against e
           } finally { activeRelays.delete(route); if (attempt) attempt.done = true; }
           return;
         }
-        if (url.origin === origin) return serveTrialAsset(route, served);
+        if (url.origin === origin) {
+          const status = await serveTrialAsset(route, served);
+          if (status === 404) sameOriginMisses.push({ seat, path: url.pathname, method: request.method(), status });
+          return;
+        }
         if (url.origin === sdkOrigin && url.pathname.startsWith(sdkPrefix) && !url.search) {
           const source = trialSdkFixture(url.pathname.slice(sdkPrefix.length), fixture);
           if (source) return route.fulfill({ status: 200, body: source, headers: { 'content-type': 'text/javascript', 'access-control-allow-origin': '*' } });
@@ -235,6 +241,21 @@ test('trial app: two enrolled real anonymous browsers play and recover against e
     const uids = await Promise.all(pages.map(authUid));
     assert.ok(uids.every((uid) => typeof uid === 'string' && uid.length > 0));
     assert.notEqual(uids[0], uids[1], 'separate browser storage produces independent anonymous Auth identities');
+    // Observe the pinned browser SDK's actual URL constructor, rather than assume
+    // it preserves custom-domain path segments as newer installed SDKs do.
+    const callableNames = ['CreateRoom', 'JoinRoom', 'StartMatch', 'GetSnapshot', 'SubmitAction'].map((suffix) => `floatingGarden${suffix}`);
+    for (const page of pages) {
+      const endpoints = await page.evaluate(async ({ appName, region, names }) => {
+        const [{ getApp }, { getFunctions }] = await Promise.all([
+          import('https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js'),
+          import('https://www.gstatic.com/firebasejs/10.8.0/firebase-functions.js'),
+        ]);
+        const functions = getFunctions(getApp(appName), region);
+        return names.map((name) => functions._url(name));
+      }, { appName: APP_NAME, region: fixture.config.region, names: callableNames });
+      assert.deepEqual(endpoints, callableNames.map((name) => `${origin}/${name}`));
+      endpoints.forEach((url) => assert.equal(trialEmulatorRoute(url, 'POST', fixture)?.kind, 'functions'));
+    }
     assert.deepEqual(await Promise.all(pages.map(recovery)), [null, null], 'fresh contexts have no preseeded recovery record');
     for (const asset of [entryPath, ...['app.js', 'bootstrap.js', 'config.js', 'firebase.js'].map((name) => `/lab/floating-garden/trial/${name}`)]) {
       assert.equal(served.get(asset), digest(await readFile(resolve(root, `.${asset}`))), `${asset} is served unchanged from the generated trial bundle`);
@@ -511,7 +532,7 @@ test('trial app: two enrolled real anonymous browsers play and recover against e
     for (const suffix of ['CreateRoom', 'JoinRoom', 'StartMatch', 'GetSnapshot', 'SubmitAction']) assert.ok(called.has(`floatingGarden${suffix}`));
     for (const type of ['draw', 'offer', 'accept', 'decline', 'place', 'self', 'store-empty', 'store-swap', 'use-storage', 'request-invite', 'pass-invite', 'yield', 'welcome', 'meditate', 'stone', 'final-stone', 'final-pass-final']) assert.ok(covered.has(type), `missing browser branch: ${type}`);
     assert.deepEqual(blocked, [], 'no unexpected denied destination; known SDK connectivity probes also remain blocked');
-    assert.deepEqual(pageErrors, []); assert.deepEqual(routeErrors, []);
+    assert.deepEqual(pageErrors, []); assert.deepEqual(routeErrors, []); assert.deepEqual(sameOriginMisses, [], 'all same-origin requests must resolve to actual assets or an allowlisted emulator route');
     await writeFile(resolve(output, 'summary.json'), JSON.stringify({ projectId: config.projectId, status: 'passed', actions: finished.match.revision, branches: [...covered], independentAuthUsers: 2, sameIdRetry: true, offlineReconnect: true, gateChecks: ['unenrolled initial create', 'enrolled nonmember', 'revoked tester', 'expired tester', 'roster removed', 'expired room', 'disabled gate', 'private reads/lists/writes denied'], unchangedTrialPublicGraph: true, fixtureBoundaries: fixture.boundaries, liveAppCheckValidated: false, relayTargets: [...allowedLocalOrigins], browserNetworkOrigins: [origin, sdkOrigin], deniedConnectivityProbes }, null, 2));
     console.log(`Trial-app emulator browser QA passed: ${finished.match.revision} committed actions; artifacts ${output}`);
   } catch (error) {
@@ -521,7 +542,7 @@ test('trial app: two enrolled real anonymous browsers play and recover against e
       page.screenshot({ path: resolve(output, `failure-seat-${seat}.png`), fullPage: true, timeout: 5000 }),
       page.content().then((html) => writeFile(resolve(output, `failure-seat-${seat}.html`), html)),
     ]));
-    await writeFile(resolve(output, 'failure.json'), JSON.stringify({ stage, error: error.stack || error.message, roomId, transcript, pageErrors, blocked, deniedConnectivityProbes, routeErrors, observations: observed.map(({ seat, authRequests, firestoreRequests, calls, console }) => ({ seat, authRequests, firestoreRequests, console, calls: calls.map(({ method, payload }) => ({ method, requestId: payload?.requestId, expectedRevision: payload?.expectedRevision, command: payload?.command })) })) }, null, 2));
+    await writeFile(resolve(output, 'failure.json'), JSON.stringify({ stage, error: error.stack || error.message, roomId, transcript, pageErrors, blocked, deniedConnectivityProbes, routeErrors, sameOriginMisses, observations: observed.map(({ seat, authRequests, firestoreRequests, calls, console }) => ({ seat, authRequests, firestoreRequests, console, calls: calls.map(({ method, payload }) => ({ method, requestId: payload?.requestId, expectedRevision: payload?.expectedRevision, command: payload?.command })) })) }, null, 2));
     throw error;
   } finally {
     closing = true;

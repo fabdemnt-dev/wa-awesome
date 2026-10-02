@@ -15,14 +15,15 @@ export function trialEmulatorRoute(rawUrl, method, fixture) {
   if (url.origin !== fixture.runtime.previewOrigin || url.username || url.password || url.hash) return null;
   let kind;
   if (method === 'POST' && /^\/(?:identitytoolkit\.googleapis\.com\/v1\/accounts:(?:signUp|lookup)|securetoken\.googleapis\.com\/v1\/token)$/.test(url.pathname)) kind = 'auth';
-  if (method === 'POST' && !url.search && /^\/demo-floating-garden-trial\/asia-northeast1\/floatingGarden(?:CreateRoom|JoinRoom|StartMatch|GetSnapshot|SubmitAction)$/.test(url.pathname)) kind = 'functions';
+  if (method === 'POST' && !url.search && /^\/floatingGarden(?:CreateRoom|JoinRoom|StartMatch|GetSnapshot|SubmitAction)$/.test(url.pathname)) kind = 'functions';
   if (['GET', 'POST'].includes(method) && /^\/google\.firestore\.v1\.Firestore\/(?:Listen|Write)\/channel$/.test(url.pathname)) {
     if (url.searchParams.getAll('database').length > 1) return null;
     const database = url.searchParams.get('database');
     if (database && database !== 'projects/demo-floating-garden-trial/databases/(default)') return null;
     kind = 'firestore';
   }
-  return kind ? { kind, url: `http://127.0.0.1:${fixture.ports[kind]}${url.pathname}${url.search}` } : null;
+  const path = kind === 'functions' ? `/demo-floating-garden-trial/asia-northeast1${url.pathname}` : url.pathname;
+  return kind ? { kind, url: `http://127.0.0.1:${fixture.ports[kind]}${path}${url.search}` } : null;
 }
 // Only a browser-confirmed cancellation of a Firestore long poll is expected
 // during native reload. Never classify a callable/Auth/backend failure this way.
@@ -55,7 +56,9 @@ export function trialSdkFixture(file, fixture) {
   if (file === 'firebase-functions.js') return prelude + `
     export function getFunctions(app, region) {
       if (region !== 'asia-northeast1') throw new Error('Unexpected trial Functions region');
-      return real.getFunctions(app, ${JSON.stringify(`${origin}/${projectId}/asia-northeast1`)});
+      // Use an origin-only custom domain, avoiding version-specific path handling.
+      // The strict relay adds the fixed demo project/region on the server side.
+      return real.getFunctions(app, ${JSON.stringify(origin)});
     }`;
   if (file === 'firebase-app-check.js') return `
     // This is a synthetic fixture, not successful Enterprise attestation.
