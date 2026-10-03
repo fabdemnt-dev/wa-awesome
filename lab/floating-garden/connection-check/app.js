@@ -6,8 +6,10 @@ const start = document.getElementById('connection-start');
 const status = document.getElementById('connection-status');
 const uid = document.getElementById('connection-uid');
 const expiry = document.getElementById('connection-expiry');
+const diagnostic = document.getElementById('connection-diagnostic');
 function render(state) {
   status.textContent = state.label;
+  diagnostic.textContent = state.diagnosticStage === null ? 'なし' : `${state.diagnosticStage} / ${state.diagnosticCode}`;
   uid.textContent = state.uid ?? '未確認';
   expiry.textContent = state.expiresAtMillis === null ? '開始時に確認します' :
     new Intl.DateTimeFormat('ja-JP', { dateStyle: 'long', timeStyle: 'long', timeZone: 'Asia/Tokyo' }).format(state.expiresAtMillis);

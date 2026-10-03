@@ -77,12 +77,17 @@ test('connection page mobile layout, no pre-start SDK, one-shot Auth, reload per
 // Unlike the preceding intentionally synthetic SDK/UI test, these scenarios
 // evaluate the official CDN modules byte-for-byte. Only reCAPTCHA/platform and
 // endpoint responses are fake. Chromium enforces the actual response CSP.
-test('exact Firebase 10.8.0 SDK regression: old CSP fails before Auth; publisher CSP succeeds without duplicate identities or token DOM', { timeout: 90000 }, async (t) => {
+test('exact Firebase 10.8.0 SDK regression: old CSP fails before Auth; publisher CSP succeeds without duplicate identities or token DOM', { timeout: 150000 }, async (t) => {
   const officialModules = await loadOfficialSdk();
   const options = process.env.GARDEN_CHROMIUM_EXECUTABLE ? { executablePath: process.env.GARDEN_CHROMIUM_EXECUTABLE } : {};
   const browser = await chromium.launch({ headless: true, ...options });
   t.after(() => browser.close());
-  for (const [mode, csp] of [['old-csp', legacyCsp(CONNECTION_CSP)], ['publisher-csp', CONNECTION_CSP]]) {
+  for (const [mode, csp, fault] of [
+    ['old-csp', legacyCsp(CONNECTION_CSP), null], ['publisher-csp', CONNECTION_CSP, null],
+    ['app-check-403', CONNECTION_CSP, { stage: 'app-check-request', code: 'appCheck/throttled', signup: 0, lookup: 0 }],
+    ['signup-disabled', CONNECTION_CSP, { stage: 'anonymous-signup', code: 'auth/operation-not-allowed', signup: 1, lookup: 0 }],
+    ['lookup-invalid', CONNECTION_CSP, { stage: 'anonymous-signup', code: 'auth/invalid-user-token', signup: 1, lookup: 1 }],
+  ]) {
     await t.test(mode, async () => {
       const context = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block' });
       try {
@@ -135,7 +140,11 @@ test('exact Firebase 10.8.0 SDK regression: old CSP fails before Auth; publisher
             const body = request.postDataJSON();
             if (address.origin === APP_CHECK_ORIGIN) assert.equal(body.recaptcha_enterprise_token, RECAPTCHA_PROOF);
             if (address.pathname === '/v1/accounts:signUp') assert.equal(body.returnSecureToken, true);
-            return route.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': ORIGIN }, body: JSON.stringify(response) });
+            const rejection = mode === 'app-check-403' && address.origin === APP_CHECK_ORIGIN ? { status: 403, message: 'PERMISSION_DENIED' } :
+              mode === 'signup-disabled' && address.pathname === '/v1/accounts:signUp' ? { status: 400, message: 'OPERATION_NOT_ALLOWED' } :
+              mode === 'lookup-invalid' && address.pathname === '/v1/accounts:lookup' ? { status: 400, message: 'INVALID_ID_TOKEN' } : null;
+            const data = rejection ? { error: { message: rejection.message, code: rejection.status, details: 'synthetic-private-error-detail-not-for-display' } } : response;
+            return route.fulfill({ status: rejection?.status ?? 200, contentType: 'application/json', headers: { 'access-control-allow-origin': ORIGIN }, body: JSON.stringify(data) });
           }
           unexpected.push(endpoint);
           await route.abort('blockedbyclient');
@@ -153,11 +162,12 @@ test('exact Firebase 10.8.0 SDK regression: old CSP fails before Auth; publisher
           button.click();
           button.dispatchEvent(new MouseEvent('click', { bubbles: true }));
         });
-        const expected = mode === 'old-csp' ? '接続を確認できませんでした' : '接続確認が完了しました';
+        const expected = mode === 'old-csp' || fault ? '接続を確認できませんでした' : '接続確認が完了しました';
         await page.getByText(expected, { exact: true }).waitFor({ timeout: 20000 });
         const inspect = () => page.evaluate((key) => ({
           status: document.getElementById('connection-status').textContent,
           uid: document.getElementById('connection-uid').textContent,
+          diagnostic: document.getElementById('connection-diagnostic').textContent,
           guard: localStorage.getItem(key),
           violations: window.__connectionCspViolations,
           states: window.__connectionStatusHistory,
@@ -165,7 +175,7 @@ test('exact Firebase 10.8.0 SDK regression: old CSP fails before Auth; publisher
         }), IDENTITY_ATTEMPT_KEY);
         const initial = await inspect();
         assert.equal(await startButton.isDisabled(), true);
-        for (const token of TOKENS) assert.equal(initial.html.includes(token), false, 'tokens must never appear in visible or hidden DOM');
+        for (const token of [...TOKENS, 'synthetic-private-error-detail-not-for-display']) assert.equal(initial.html.includes(token), false, 'tokens and raw errors must never appear in visible or hidden DOM');
         assert.deepEqual(requests.filter((request) => request.endpoint.startsWith(SDK_BASE)).map((request) => request.endpoint).sort(), [...officialModules.keys()].sort());
         if (mode === 'old-csp') {
           assert.equal(initial.uid, '未確認');
@@ -178,6 +188,25 @@ test('exact Firebase 10.8.0 SDK regression: old CSP fails before Auth; publisher
           await startButton.dispatchEvent('click');
           assert.equal(await page.locator('#connection-status').innerText(), expected);
           assert.equal(requests.length, beforeDuplicate, 'terminal failed click cannot retry the exchange');
+        } else if (fault) {
+          assert.equal(initial.uid, '未確認');
+          assert.ok(initial.diagnostic.includes(fault.stage));
+          assert.ok(initial.diagnostic.includes(fault.code));
+          assert.equal(initial.guard, fault.signup ? 'attempted' : null);
+          assert.deepEqual(initial.violations, []);
+          const count = (path) => requests.filter((request) => request.method === 'POST' && request.endpoint === `${AUTH_ORIGIN}/v1/accounts:${path}`).length;
+          assert.equal(count('signUp'), fault.signup);
+          assert.equal(count('lookup'), fault.lookup);
+          const beforeRepeat = requests.length;
+          await startButton.dispatchEvent('click');
+          assert.deepEqual(await inspect(), initial, 'failure and diagnostic stay terminal after another click');
+          assert.equal(requests.length, beforeRepeat, 'diagnostic display must not retry a failed operation');
+          assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
+          const output = process.env.GARDEN_CONNECTION_SCREENSHOTS;
+          if (output) {
+            await mkdir(output, { recursive: true });
+            await page.screenshot({ path: `${output}/connection-mobile-diagnostic-${mode}.png`, fullPage: true });
+          }
         } else {
           assert.equal(initial.uid, UID);
           assert.equal(initial.guard, 'attempted');

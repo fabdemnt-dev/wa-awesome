@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { buildPayload, renderHelper, prepareConnection } from '../scripts/prepare-floating-garden-connection.mjs';
-import { operate, prepareDependencies, writeBundle, checkBundle, validatePayload, validateEnvironment, validateConfiguration, validateWindow, canonicalVersionName, connectionMessage, payloadDigest, hostingConfig, runtimeConfig, PROJECT, PROJECT_NUMBER, ORIGIN, STARTS_AT, EXPIRES_AT, MAINTENANCE_MESSAGE, MAINTENANCE_CSP, CONNECTION_CSP, PREVIOUS_CONNECTION_CSP, PREVIOUS_CONNECTION_DIGEST, PREVIOUS_CONNECTION_MESSAGE, CONFIG_FILE, CONNECTION_NAMES } from '../scripts/deploy-floating-garden-connection-template.mjs';
+import { operate, prepareDependencies, writeBundle, checkBundle, validatePayload, validateEnvironment, validateConfiguration, validateWindow, canonicalVersionName, connectionMessage, payloadDigest, hostingConfig, runtimeConfig, PROJECT, PROJECT_NUMBER, ORIGIN, STARTS_AT, EXPIRES_AT, MAINTENANCE_MESSAGE, MAINTENANCE_CSP, CONNECTION_CSP, CONNECTION_DIGEST, CONNECTION_FILE_HASHES, ORIGINAL_CONNECTION_CSP, ORIGINAL_CONNECTION_DIGEST, ORIGINAL_CONNECTION_MESSAGE, PREVIOUS_CONNECTION_CSP, PREVIOUS_CONNECTION_DIGEST, PREVIOUS_CONNECTION_MESSAGE, PREVIOUS_CONNECTION_PAYLOAD, hash, CONFIG_FILE, CONNECTION_NAMES } from '../scripts/deploy-floating-garden-connection-template.mjs';
 import { HTML, CONFIG } from '../scripts/deploy-floating-garden-maintenance.mjs';
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const payload = buildPayload();
@@ -23,9 +23,9 @@ function fakeTooling(root) {
 }
 function harness(t, options = {}) {
   const root = temp(t), toolingDir = fakeTooling(root), commands = [], reads = [], logs = [];
-  let kind = options.kind ?? 'maintenance', currentVersion = version(1), channelReads = 0, writes = 0;
+  let kind = options.kind ?? 'maintenance', currentVersion = version(1), channelReads = 0, writes = 0, timeReads = 0;
   const metadata = () => ({ channels: [{ name: `sites/${PROJECT}/channels/live`, url: options.wrongOrigin ? 'https://wrong.example' : ORIGIN,
-    release: { type: 'DEPLOY', message: options.unknown ? 'unknown' : (!writes && options.releaseMessage) || (kind === 'maintenance' ? MAINTENANCE_MESSAGE : kind === 'previous-connection' ? PREVIOUS_CONNECTION_MESSAGE : connectionMessage(payload)), version: { name: currentVersion, status: 'FINALIZED' } } }] });
+    release: { type: options.releaseType ?? 'DEPLOY', message: options.unknown ? 'unknown' : (!writes && options.releaseMessage) || (kind === 'maintenance' ? MAINTENANCE_MESSAGE : kind === 'original-connection' ? ORIGINAL_CONNECTION_MESSAGE : kind === 'previous-connection' ? PREVIOUS_CONNECTION_MESSAGE : connectionMessage(payload)), version: { name: options.releaseVersion ?? currentVersion, status: options.versionStatus ?? 'FINALIZED' } } }] });
   const run = (command, args, cwd) => {
     commands.push({ command, args, cwd });
     if (command === 'gcloud') {
@@ -64,16 +64,20 @@ function harness(t, options = {}) {
     const path = new URL(url).pathname;
     const connection = path.startsWith('/connection-check/');
     let status = 200, body = HTML, csp = MAINTENANCE_CSP;
-    if (connection && ['connection', 'previous-connection'].includes(kind)) { body = payload.connectionFiles[path.split('/').at(-1) || 'index.html']; csp = kind === 'previous-connection' ? PREVIOUS_CONNECTION_CSP : CONNECTION_CSP; }
+    if (connection && ['connection', 'previous-connection', 'original-connection'].includes(kind)) {
+      const files = (kind === 'connection' || options.candidateAsPrevious) ? payload.connectionFiles : PREVIOUS_CONNECTION_PAYLOAD.connectionFiles;
+      body = files[path.split('/').at(-1) || 'index.html']; csp = kind === 'original-connection' ? ORIGINAL_CONNECTION_CSP : CONNECTION_CSP;
+    }
     else if (connection || path.startsWith('/lab/')) status = 404;
     if (options.badBytes || options.badPathBytes === path || (options.badPostBytes && writes)) body = 'wrong';
+    if (options.driftPath === path) body += ' ';
     if (connection && options.connectionCsp !== undefined && !writes) csp = options.connectionCsp;
     const headers = publicHeaders(csp); if (options.badHeaders) headers['content-security-policy'] += '; script-src *';
     if (!writes) Object.assign(headers, options.headerOverrides);
-    if (writes && options.badPostHeaders) headers['content-security-policy'] = PREVIOUS_CONNECTION_CSP;
+    if (writes && options.badPostHeaders) headers['content-security-policy'] = ORIGINAL_CONNECTION_CSP;
     return new Response(body, { status, headers });
   };
-  const perform = (mode = 'deploy') => operate({ mode, payload: options.payload ?? payload, toolingDir, run, fetchImpl, log: (s) => logs.push(s), tempRoot: root, env: options.env ?? {}, execArgv: [], now: () => options.time ?? STARTS_AT + 60000 });
+  const perform = (mode = 'deploy') => operate({ mode, payload: options.payload ?? payload, toolingDir, run, fetchImpl, log: (s) => logs.push(s), tempRoot: root, env: options.env ?? {}, execArgv: [], now: () => options.times?.[timeReads++] ?? options.time ?? STARTS_AT + 60000 });
   return { root, toolingDir, commands, reads, logs, perform, writes: () => writes };
 }
 test('generator preserves exact maintenance, seven public files and standalone embedded runtime', (t) => {
@@ -106,13 +110,26 @@ test('configs are Hosting-only with disjoint CSP rules and no hooks/redirects/re
   assert.ok(!cfg.hosting.headers[0].headers.some((h) => h.key === 'Content-Security-Policy'));
   assert.doesNotMatch(CONNECTION_CSP, /unsafe-|\*|firestore|cloudfunctions/);
 });
-test('the only payload change from the fixed prior release is the App Check CSP origin', () => {
-  const previousConfig = payload.connectionConfig.replace(CONNECTION_CSP, PREVIOUS_CONNECTION_CSP);
-  assert.equal(PREVIOUS_CONNECTION_DIGEST, 'd73fa35889621062065889b52242b37b052a81c375f78c208f80c5e4ddff3e2d');
-  assert.equal(payloadDigest({ ...payload, connectionConfig: previousConfig }), PREVIOUS_CONNECTION_DIGEST);
-  assert.equal(payload.connectionConfig, previousConfig.replace('https://firebaseappcheck.googleapis.com', 'https://content-firebaseappcheck.googleapis.com'));
+test('original, fixed-CSP and diagnostic payload identities are distinct and independently pinned', () => {
+  assert.equal(ORIGINAL_CONNECTION_DIGEST, 'd73fa35889621062065889b52242b37b052a81c375f78c208f80c5e4ddff3e2d');
+  assert.equal(PREVIOUS_CONNECTION_DIGEST, '2303007a968a8e063f49275d120631a5fa08f91cf1a28ae771dda6ad8055123d');
+  assert.equal(payloadDigest(PREVIOUS_CONNECTION_PAYLOAD), PREVIOUS_CONNECTION_DIGEST);
+  const original = { ...PREVIOUS_CONNECTION_PAYLOAD, connectionConfig: PREVIOUS_CONNECTION_PAYLOAD.connectionConfig.replace(CONNECTION_CSP, ORIGINAL_CONNECTION_CSP) };
+  assert.equal(payloadDigest(original), ORIGINAL_CONNECTION_DIGEST);
+  assert.equal(PREVIOUS_CONNECTION_PAYLOAD.connectionConfig, original.connectionConfig.replace('https://firebaseappcheck.googleapis.com', 'https://content-firebaseappcheck.googleapis.com'));
+  assert.equal(PREVIOUS_CONNECTION_PAYLOAD.connectionConfig, payload.connectionConfig);
+  assert.equal(PREVIOUS_CONNECTION_PAYLOAD.connectionFiles['connection-runtime.js'], payload.connectionFiles['connection-runtime.js']);
+  assert.equal(payloadDigest(payload), CONNECTION_DIGEST);
+  assert.equal(new Set([CONNECTION_DIGEST, ORIGINAL_CONNECTION_DIGEST, PREVIOUS_CONNECTION_DIGEST]).size, 3);
+  assert.equal(ORIGINAL_CONNECTION_MESSAGE, `garden-connection-static-v1:${ORIGINAL_CONNECTION_DIGEST}`);
   assert.equal(PREVIOUS_CONNECTION_MESSAGE, `garden-connection-static-v1:${PREVIOUS_CONNECTION_DIGEST}`);
-  assert.notEqual(connectionMessage(payload), PREVIOUS_CONNECTION_MESSAGE);
+  assert.equal(connectionMessage(payload), `garden-connection-static-v1:${CONNECTION_DIGEST}`);
+  assert.deepEqual(Object.keys(CONNECTION_FILE_HASHES).sort(), CONNECTION_NAMES);
+  for (const name of CONNECTION_NAMES) assert.equal(hash(payload.connectionFiles[name]), CONNECTION_FILE_HASHES[name]);
+  assert.ok(Object.isFrozen(PREVIOUS_CONNECTION_PAYLOAD)); assert.ok(Object.isFrozen(PREVIOUS_CONNECTION_PAYLOAD.connectionFiles));
+  assert.throws(() => { PREVIOUS_CONNECTION_PAYLOAD.connectionFiles['app.js'] = 'changed'; }, TypeError);
+  assert.throws(() => validatePayload(PREVIOUS_CONNECTION_PAYLOAD), /reviewed/);
+  assert.equal(PREVIOUS_CONNECTION_CSP, CONNECTION_CSP);
   const connect = CONNECTION_CSP.split('; ').find((part) => part.startsWith('connect-src '));
   assert.ok(connect.split(' ').includes('https://content-firebaseappcheck.googleapis.com'));
   assert.ok(!connect.split(' ').includes('https://firebaseappcheck.googleapis.com'));
@@ -172,9 +189,15 @@ test('prior-release mismatched markers, all public bytes, CSP and remaining safe
     { releaseMessage: 'garden-connection-static-v1:unknown' },
     { releaseMessage: connectionMessage(payload) },
     { releaseMessage: MAINTENANCE_MESSAGE },
-    { connectionCsp: CONNECTION_CSP },
+    { connectionCsp: ORIGINAL_CONNECTION_CSP },
     { connectionCsp: `${PREVIOUS_CONNECTION_CSP}; connect-src *` },
+    { releaseMessage: ORIGINAL_CONNECTION_MESSAGE },
+    { candidateAsPrevious: true },
+    { releaseType: 'ROLLBACK' },
+    { versionStatus: 'CREATED' },
+    { releaseVersion: 'sites/wa-awesome/versions/unrelated' },
     ...paths.map((path) => ({ badPathBytes: path })),
+    ...paths.map((path) => ({ driftPath: path })),
     ...['cache-control', 'x-content-type-options', 'referrer-policy', 'x-robots-tag'].map((key) => ({ headerOverrides: { [key]: 'wrong' } })),
   ];
   for (const options of mismatches) {
@@ -186,6 +209,33 @@ test('a modified candidate cannot redefine the known prior public bytes', async 
     const changed = structuredClone(payload); changed.connectionFiles[name] += '\n// unreviewed';
     const h = harness(t, { kind: 'previous-connection', payload: changed });
     await assert.rejects(h.perform()); assert.equal(h.writes(), 0); assert.equal(h.commands.length, 0);
+  }
+});
+test('original pre-fix release is inspectable/stoppable but never silently migrates to diagnostics', async (t) => {
+  const inspected = harness(t, { kind: 'original-connection' });
+  assert.equal((await inspected.perform('inspect')).kind, 'original-connection'); assert.equal(inspected.writes(), 0);
+  const blocked = harness(t, { kind: 'original-connection' });
+  await assert.rejects(blocked.perform(), /cannot migrate directly/); assert.equal(blocked.writes(), 0);
+  const stopped = harness(t, { kind: 'original-connection', time: EXPIRES_AT + 100000 });
+  assert.equal((await stopped.perform('stop')).kind, 'maintenance'); assert.equal(stopped.writes(), 1);
+  for (const options of [{ connectionCsp: CONNECTION_CSP }, { candidateAsPrevious: true }, { releaseMessage: PREVIOUS_CONNECTION_MESSAGE }, { releaseMessage: connectionMessage(payload) }]) {
+    const invalid = harness(t, { kind: 'original-connection', ...options });
+    await assert.rejects(invalid.perform('stop')); assert.equal(invalid.writes(), 0);
+  }
+});
+test('recognized diagnostic release is never redeployed, but every byte/header and final identity are required', async (t) => {
+  const exact = harness(t, { kind: 'connection' });
+  assert.equal((await exact.perform()).deployed, false); assert.equal(exact.writes(), 0);
+  for (const options of [{ race: true }, { badHeaders: true }, { connectionCsp: ORIGINAL_CONNECTION_CSP }, ...CONNECTION_NAMES.map((name) => ({ badPathBytes: `/connection-check/${name}` }))]) {
+    const invalid = harness(t, { kind: 'connection', ...options });
+    await assert.rejects(invalid.perform()); assert.equal(invalid.writes(), 0);
+    assert.ok(!invalid.logs.some((s) => s.startsWith('ALREADY_VERIFIED:')));
+  }
+});
+test('unknown and malformed release identities stop even when every public byte would match', async (t) => {
+  for (const options of [{ releaseMessage: `garden-connection-static-v1:${'0'.repeat(64)}` }, { releaseMessage: `${PREVIOUS_CONNECTION_MESSAGE} ` }, { releaseMessage: `${connectionMessage(payload)}\n` }, { releaseType: 'ROLLBACK' }, { versionStatus: 'DELETED' }, { releaseVersion: 'sites/wa-awesome/versions/wrong' }]) {
+    const invalid = harness(t, { kind: 'connection', ...options });
+    await assert.rejects(invalid.perform()); assert.equal(invalid.writes(), 0); assert.equal(invalid.reads.length, 0);
   }
 });
 test('a raced prior release blocks migration, and a post-write race never reports completion', async (t) => {
@@ -213,6 +263,8 @@ test('migration completion requires current public bytes, current headers and th
 test('fixed window never advances and requires ten minutes remaining before deploy', async (t) => {
   assert.doesNotThrow(() => validateWindow(EXPIRES_AT - 600000));
   for (const time of [STARTS_AT - 1, EXPIRES_AT - 599999, EXPIRES_AT, NaN]) { const h = harness(t, { time }); await assert.rejects(h.perform(), /window/); assert.equal(h.commands.length, 0); }
+  const elapsed = harness(t, { kind: 'previous-connection', times: [STARTS_AT + 60000, EXPIRES_AT - 599999] });
+  await assert.rejects(elapsed.perform(), /window/); assert.equal(elapsed.writes(), 0); assert.ok(elapsed.reads.length > 0);
 });
 test('race, extra upload, changed config and symlinks block the one write', async (t) => {
   const race = harness(t, { race: true }); await assert.rejects(race.perform(), /changed/); assert.equal(race.writes(), 0);

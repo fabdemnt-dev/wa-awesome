@@ -16,7 +16,7 @@ import {
 const connectionSource = await readFile(new URL('../lab/floating-garden/connection-check/connection.js', import.meta.url), 'utf8');
 const sdkSources = await loadOfficialSdk();
 
-async function runClient(csp, persistedStorage = []) {
+async function runClient(csp, persistedStorage = [], fault = null) {
   assert.equal(typeof vm.SourceTextModule, 'function', 'run npm run test:floating-garden:connection:sdk');
   const connectSources = csp.split(';').map((directive) => directive.trim()).find((directive) => directive.startsWith('connect-src ')).split(/\s+/).slice(1);
   const allowedOrigins = connectSources.map((source) => new URL(source).origin);
@@ -47,7 +47,11 @@ async function runClient(csp, persistedStorage = []) {
         unexpected.push(endpoint);
         throw new Error('Unexpected synthetic endpoint');
       }
-      return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+      const rejection = fault === 'app-check-403' && url.origin === APP_CHECK_ORIGIN ? { status: 403, error: 'PERMISSION_DENIED' } :
+        fault === 'signup-disabled' && url.pathname === '/v1/accounts:signUp' ? { status: 400, error: 'OPERATION_NOT_ALLOWED' } :
+        fault === 'lookup-invalid' && url.pathname === '/v1/accounts:lookup' ? { status: 400, error: 'INVALID_ID_TOKEN' } : null;
+      const response = rejection ? { error: { message: rejection.error, code: rejection.status, details: 'synthetic-private-error-detail-not-for-display' } } : body;
+      return new Response(JSON.stringify(response), { status: rejection?.status ?? 200, headers: { 'content-type': 'application/json' } });
     },
   });
   vm.runInContext(`
@@ -98,11 +102,11 @@ async function runClient(csp, persistedStorage = []) {
     const report = JSON.parse(JSON.stringify(entry.namespace.report));
     assert.deepEqual(unexpected, [], 'all transport must match explicit synthetic endpoints');
     assert.deepEqual([...sdkLoads].sort(), [...sdkSources.keys()].sort(), 'exercise unchanged dynamic SDK loader exactly once');
-    for (const token of TOKENS) assert.equal(JSON.stringify(states).includes(token), false, 'observer never receives token material');
+    for (const token of [...TOKENS, 'synthetic-private-error-detail-not-for-display']) assert.equal(JSON.stringify(states).includes(token), false, 'observer never receives token or raw error material');
     assert.equal(report.beforeStart.state.status, 'idle');
     assert.equal(report.sameFlight, true, 'duplicate starts share the one-shot operation');
     assert.deepEqual(report.repeated, report.result);
-    return { ...report, requests, denials, states: states.map((state) => state.status) };
+    return { ...report, requests, denials, states: states.map((state) => state.status), observableStates: states };
   } finally { for (const timer of timers) clear(timer); }
 }
 
@@ -155,3 +159,24 @@ test('exact SDK regression stays in both aggregate and trial scripts, with a ded
   assert.equal(scripts['test:floating-garden:connection:sdk'], 'node --experimental-vm-modules --test tests/floating-garden-connection-sdk.test.mjs');
   for (const name of ['test', 'test:floating-garden:trial']) assert.ok(scripts[name].endsWith(' && npm run test:floating-garden:connection:sdk'));
 });
+
+// The official SDK can wrap multiple server causes in the same public code.
+// These cases assert only the observed stage/code, never a claimed root cause.
+for (const scenario of [
+  { fault: 'app-check-403', stage: 'app-check-request', code: 'appCheck/throttled', signup: 0, lookup: 0, guard: null },
+  { fault: 'signup-disabled', stage: 'anonymous-signup', code: 'auth/operation-not-allowed', signup: 1, lookup: 0, guard: 'attempted' },
+  { fault: 'lookup-invalid', stage: 'anonymous-signup', code: 'auth/invalid-user-token', signup: 1, lookup: 1, guard: 'attempted' },
+]) {
+  test(`official SDK diagnostic preserves safe stage/code for ${scenario.fault} without retry`, { timeout: 15000 }, async () => {
+    const result = await runClient(CONNECTION_CSP, [], scenario.fault);
+    assert.equal(result.result.status, 'failed');
+    assert.equal(result.result.uid, null);
+    assert.equal(result.result.diagnosticStage, scenario.stage);
+    assert.equal(result.result.diagnosticCode, scenario.code);
+    assert.equal(result.guard, scenario.guard);
+    assert.equal(result.requests.filter((request) => request.endpoint.endsWith('/accounts:signUp')).length, scenario.signup);
+    assert.equal(result.requests.filter((request) => request.endpoint.endsWith('/accounts:lookup')).length, scenario.lookup);
+    assert.deepEqual(result.denials, []);
+    assert.deepEqual(result.observableStates.at(-1), result.result, 'stop after failure cannot replace its diagnostic');
+  });
+}

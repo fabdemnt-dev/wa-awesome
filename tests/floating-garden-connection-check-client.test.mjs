@@ -23,9 +23,9 @@ function deferred() { let resolve, reject; const promise = new Promise((a, b) =>
 async function flush() { for (let i = 0; i < 20; i++) await Promise.resolve(); }
 function clock() {
   let time = NOW, sequence = 0;
-  const timers = new Map();
-  return { now: () => time, setTimer(fn, delay) { const id = ++sequence; timers.set(id, { fn, at: time + delay }); return id; }, clearTimer(id) { timers.delete(id); },
-    set(value) { time = value; }, fire() { for (const [id, item] of [...timers]) if (item.at <= time) { timers.delete(id); item.fn(); } }, timers };
+  const timers = new Map(), scheduled = [];
+  return { now: () => time, setTimer(fn, delay) { const id = ++sequence; scheduled.push({ delay, at: time }); timers.set(id, { fn, at: time + delay }); return id; }, clearTimer(id) { timers.delete(id); },
+    set(value) { time = value; }, fire() { for (const [id, item] of [...timers]) if (item.at <= time) { timers.delete(id); item.fn(); } }, timers, scheduled };
 }
 function store() {
   const values = new Map(), writes = [];
@@ -54,12 +54,13 @@ function fixture(options = {}) {
       async signInAnonymously(value) { events.push('sign-in'); assert.equal(value, auth); assert.equal(storage.getItem(IDENTITY_ATTEMPT_KEY), 'attempted'); if (options.signInError) throw new Error(PRIVATE); const result = options.signIn ? await options.signIn.promise : { user: identity('new-anonymous-uid') }; auth.currentUser = result.user; return result; },
     },
   };
+  options.configure?.({ sdk, auth, storage, events });
   const location = { href: options.href || PAGE }, environment = options.environment || {};
   const client = createConnectionCheck(options.runtime === undefined ? runtime() : options.runtime, {
     location, environment, now: time.now, setTimer: time.setTimer, clearTimer: time.clearTimer,
     getAttemptStorage: () => options.storageThrows ? (() => { throw new Error(PRIVATE); })() : storage,
-    withIdentityLock: async (callback) => { events.push('identity-lock'); if (options.lockBlocked) throw new Error(PRIVATE); return callback(); },
-    loadSdk: async () => { events.push('load-sdk'); if (options.sdkFlight) await options.sdkFlight.promise; return sdk; },
+    withIdentityLock: options.withIdentityLock || (async (callback) => { events.push('identity-lock'); if (options.lockBlocked) throw new Error(PRIVATE); return callback(); }),
+    loadSdk: options.loadSdk || (async () => { events.push('load-sdk'); if (options.sdkFlight) await options.sdkFlight.promise; return sdk; }),
     onState(state) { states.push(state); },
   });
   return { client, sdk, auth, storage, events, states, time, location, environment, apps };
@@ -68,7 +69,7 @@ const source = (name) => readFile(new URL(`../lab/floating-garden/connection-che
 
 test('constructor is inert until explicit start and state contains only safe fields', () => {
   const f = fixture(); assert.deepEqual(f.events, []); assert.equal(f.time.timers.size, 0); assert.deepEqual(f.storage.writes, []);
-  assert.deepEqual(f.client.getState(), { status: 'idle', label: CONNECTION_LABELS.idle, uid: null, expiresAtMillis: runtime().expiresAtMillis, canStart: true });
+  assert.deepEqual(f.client.getState(), { status: 'idle', label: CONNECTION_LABELS.idle, uid: null, expiresAtMillis: runtime().expiresAtMillis, canStart: true, diagnosticStage: null, diagnosticCode: null });
 });
 test('exact dedicated config is cloned/frozen, with independent finite <=48h window', () => {
   const input = runtime(), validated = validateConnectionRuntime(input);
@@ -100,7 +101,7 @@ test('Enterprise success precedes Auth, uses exact app and local persistence, ex
   assert.equal(f.apps[0].name, CONNECTION_APP_NAME); assert.deepEqual(f.apps[0].options, runtime().firebase);
   assert.ok(f.events.indexOf('get-token') < f.events.indexOf('initialize-auth')); assert.ok(f.events.indexOf('persistence') < f.events.indexOf('sign-in'));
   assert.equal(f.events.filter((e) => e === 'sign-in').length, 1); assert.deepEqual(f.storage.writes, [{ key: IDENTITY_ATTEMPT_KEY, value: 'attempted' }]);
-  for (const state of f.states) { assert.deepEqual(Object.keys(state).sort(), ['canStart', 'expiresAtMillis', 'label', 'status', 'uid']); assert.ok(Object.isFrozen(state)); }
+  for (const state of f.states) { assert.deepEqual(Object.keys(state).sort(), ['canStart', 'diagnosticCode', 'diagnosticStage', 'expiresAtMillis', 'label', 'status', 'uid']); assert.ok(Object.isFrozen(state)); }
   assert.ok(!JSON.stringify(f.states).includes(PRIVATE)); f.client.stop();
 });
 test('duplicate clicks share one flight and completed start cannot create another UID', async () => {
@@ -198,7 +199,7 @@ test('static isolation: exactly three pinned remote SDK imports, no game/network
 
 test('fake-browser UI shows expiry before Start; repeated click, pagehide, BFCache and visibility never restart', async () => {
   const appSource = (await source('app.js')).replace(/^import[^\n]+\n/gm, '');
-  const nodes = new Map(['connection-start', 'connection-status', 'connection-uid', 'connection-expiry'].map((id) => [id, { textContent: '', disabled: true, handlers: new Map(), addEventListener(event, callback) { this.handlers.set(event, callback); } }]));
+  const nodes = new Map(['connection-start', 'connection-status', 'connection-uid', 'connection-expiry', 'connection-diagnostic'].map((id) => [id, { textContent: '', disabled: true, handlers: new Map(), addEventListener(event, callback) { this.handlers.set(event, callback); } }]));
   const documentHandlers = new Map(), windowHandlers = new Map(), time = clock(), storage = store(), f = fixture({ storage, user: null });
   let controller;
   vm.runInNewContext(appSource, {
@@ -239,4 +240,252 @@ test('actual default lock path refuses a browser lacking Web Locks before anonym
       setTimer: f.time.setTimer, clearTimer: f.time.clearTimer, loadSdk: async () => f.sdk, getAttemptStorage: () => f.storage });
     assert.equal((await client.start()).status, 'failed'); assert.equal(f.events.includes('sign-in'), false); assert.deepEqual(f.storage.writes, []);
   } finally { if (saved) Object.defineProperty(globalThis, 'navigator', saved); else delete globalThis.navigator; }
+});
+
+const SDK_CODES = [
+  'appCheck/recaptcha-error', 'appCheck/fetch-network-error', 'appCheck/fetch-parse-error',
+  'appCheck/fetch-status-error', 'appCheck/throttled', 'appCheck/already-initialized',
+  'appCheck/use-before-activation', 'appCheck/storage-open', 'appCheck/storage-get', 'appCheck/storage-set',
+  'auth/network-request-failed', 'auth/operation-not-allowed', 'auth/admin-restricted-operation',
+  'auth/invalid-api-key', 'auth/app-not-authorized', 'auth/too-many-requests', 'auth/quota-exceeded',
+  'auth/internal-error', 'auth/web-storage-unsupported', 'auth/invalid-user-token',
+  'auth/user-token-expired', 'auth/user-disabled', 'auth/already-initialized',
+];
+const LOCAL_CODES = [
+  'connection/unknown', 'connection/invalid-access', 'connection/timeout', 'connection/expired',
+  'connection/stopped', 'connection/duplicate-app', 'connection/lock-unavailable', 'connection/lock-busy',
+  'connection/storage-unavailable', 'connection/previous-attempt', 'connection/storage-unconfirmed',
+  'connection/invalid-proof', 'connection/invalid-identity', 'connection/identity-mismatch',
+];
+function expectDiagnostic(state, stage, code, status = 'failed') {
+  assert.equal(state.status, status);
+  assert.equal(state.diagnosticStage, stage);
+  assert.equal(state.diagnosticCode, code);
+  assert.equal(state.uid, null);
+  assert.equal(state.canStart, false);
+  assert.ok(Object.isFrozen(state));
+}
+function rejectionFixture(operation, error, async = false) {
+  const fail = async ? () => Promise.reject(error) : () => { throw error; };
+  const options = { user: null };
+  if (operation === 'sdk-load') options.loadSdk = fail;
+  else if (operation === 'identity-lock') options.withIdentityLock = fail;
+  else options.configure = ({ sdk, auth }) => {
+    const methods = {
+      'app-init': [sdk.appSdk, 'initializeApp'],
+      'app-check-init': [sdk.appCheckSdk, 'initializeAppCheck'],
+      'app-check-request': [sdk.appCheckSdk, 'getToken'],
+      'auth-init': [sdk.authSdk, 'initializeAuth'],
+      'auth-persistence-restore': [sdk.authSdk, 'setPersistence'],
+      'identity-ready': [auth, 'authStateReady'],
+      'anonymous-signup': [sdk.authSdk, 'signInAnonymously'],
+    };
+    const [target, method] = methods[operation]; target[method] = fail;
+  };
+  return fixture(options);
+}
+
+test('every synchronous SDK operation is attributed before invocation; asynchronous rejections retain its phase', async () => {
+  const cases = [
+    ['sdk-load', 'initialize-app', true], ['app-init', 'enterprise-provider', false],
+    ['app-check-init', 'get-token', false], ['app-check-request', 'initialize-auth', true],
+    ['auth-init', 'persistence', false], ['auth-persistence-restore', 'identity-lock', true],
+    ['identity-lock', 'auth-ready', true], ['identity-ready', 'sign-in', true],
+    ['anonymous-signup', null, true],
+  ];
+  for (const [stage, blocked, supportsAsync] of cases) {
+    for (const async of supportsAsync ? [false, true] : [false]) {
+      const error = Object.assign(new Error(PRIVATE), { code: 'auth/network-request-failed', customData: { token: PRIVATE } });
+      const f = rejectionFixture(stage, error, async);
+      expectDiagnostic(await f.client.start(), stage, 'auth/network-request-failed');
+      if (blocked) assert.equal(f.events.includes(blocked), false, stage);
+      assert.equal(f.states.some((state) => state.status === 'connected'), false);
+      assert.ok(!JSON.stringify(f.states).includes(PRIVATE)); assert.equal(f.time.timers.size, 0);
+    }
+  }
+});
+
+test('preflight, app lookup, provider construction, guard and validation identify synchronous failure sites', async () => {
+  const invalid = fixture({ runtime: {} });
+  expectDiagnostic(await invalid.client.start(), 'preflight', 'connection/invalid-access', 'invalid');
+  assert.deepEqual(invalid.events, []);
+  for (const [stage, configure] of [
+    ['app-init', ({ sdk }) => { sdk.appSdk.getApps = () => { throw { code: 'auth/internal-error', message: PRIVATE }; }; }],
+    ['app-check-init', ({ sdk }) => { sdk.appCheckSdk.ReCaptchaEnterpriseProvider = class { constructor() { throw { code: 'appCheck/recaptcha-error', message: PRIVATE }; } }; }],
+  ]) {
+    const f = fixture({ configure }); const result = await f.client.start();
+    expectDiagnostic(result, stage, stage === 'app-init' ? 'auth/internal-error' : 'appCheck/recaptcha-error');
+    assert.equal(f.events.includes('get-token'), false);
+  }
+  const guard = fixture({ user: null, storageThrows: true });
+  expectDiagnostic(await guard.client.start(), 'identity-guard', 'connection/storage-unavailable');
+  assert.equal(guard.events.includes('sign-in'), false);
+  const user = { uid: 'safe-uid', get isAnonymous() { throw { code: 'auth/internal-error', message: PRIVATE }; } };
+  const validation = fixture({ user });
+  expectDiagnostic(await validation.client.start(), 'final-validation', 'auth/internal-error');
+});
+
+test('diagnostic allowlist is exact and permits only primitive own data values', async () => {
+  for (const code of [...SDK_CODES, ...LOCAL_CODES]) {
+    const error = Object.assign(Object.create(null), { code, message: PRIVATE, stack: PRIVATE, cause: PRIVATE, customData: { token: PRIVATE }, accessToken: PRIVATE });
+    for (const async of [false, true]) {
+      const f = rejectionFixture('app-check-request', error, async);
+      expectDiagnostic(await f.client.start(), 'app-check-request', code);
+      assert.ok(!JSON.stringify(f.states).includes(PRIVATE));
+    }
+  }
+  for (const code of ['auth/not-allowlisted', 'appCheck/not-allowlisted', `auth/${PRIVATE}`, `connection/${PRIVATE}`,
+    ' auth/network-request-failed', 'auth/network-request-failed ', 'AUTH/network-request-failed',
+    `auth/network-request-failed\n${PRIVATE}`, '', 42, null, new String('auth/network-request-failed'), Symbol(PRIVATE),
+    { toString() { throw new Error(PRIVATE); } }]) {
+    const f = rejectionFixture('anonymous-signup', { code, message: PRIVATE }, true);
+    expectDiagnostic(await f.client.start(), 'anonymous-signup', 'connection/unknown');
+    assert.ok(!JSON.stringify(f.states).includes(PRIVATE));
+  }
+});
+
+test('error boundary never invokes code/accessor inheritance, formatting, or secret field getters', async () => {
+  let accesses = 0;
+  const trap = () => { accesses++; throw new Error(PRIVATE); };
+  const ownGetter = Object.defineProperty({}, 'code', { get: trap });
+  const inheritedGetter = Object.create(Object.defineProperty({}, 'code', { get: trap }));
+  const inheritedData = Object.create({ code: 'auth/network-request-failed' });
+  const secretGetters = { code: 'appCheck/throttled' };
+  for (const key of ['message', 'stack', 'cause', 'customData', 'accessToken', 'name', 'toString', 'toJSON']) {
+    Object.defineProperty(secretGetters, key, { get: trap });
+  }
+  for (const error of [ownGetter, inheritedGetter, inheritedData, secretGetters, null, undefined, PRIVATE, 7, true, Symbol(PRIVATE)]) {
+    for (const async of [false, true]) {
+      const f = rejectionFixture('app-check-request', error, async);
+      expectDiagnostic(await f.client.start(), 'app-check-request', error === secretGetters ? 'appCheck/throttled' : 'connection/unknown');
+      assert.ok(!JSON.stringify(f.states).includes(PRIVATE));
+    }
+  }
+  assert.equal(accesses, 0);
+});
+
+test('throwing/revoked Proxy errors cannot escape or reflect arbitrary fields', async () => {
+  let descriptors = 0, properties = 0;
+  const revoked = Proxy.revocable({}, {}); revoked.revoke();
+  const throwing = new Proxy({}, {
+    getOwnPropertyDescriptor(_target, key) { descriptors++; assert.equal(key, 'code'); throw new Error(PRIVATE); },
+    get() { properties++; throw new Error(PRIVATE); },
+  });
+  const allowed = new Proxy({ code: 'appCheck/fetch-network-error' }, {
+    get() { properties++; throw new Error(PRIVATE); },
+  });
+  for (const error of [revoked.proxy, throwing, allowed]) {
+    for (const async of [false, true]) {
+      const f = rejectionFixture('app-check-request', error, async);
+      expectDiagnostic(await f.client.start(), 'app-check-request', error === allowed ? 'appCheck/fetch-network-error' : 'connection/unknown');
+      assert.ok(!JSON.stringify(f.states).includes(PRIVATE));
+    }
+  }
+  assert.equal(descriptors, 2); assert.equal(properties, 0);
+});
+
+test('application-owned checks have fixed local codes and keep attempt/write behavior', async () => {
+  const previous = store(); previous.values.set(IDENTITY_ATTEMPT_KEY, 'attempted');
+  const unreadable = { getItem() { throw { code: 'auth/internal-error', message: PRIVATE }; }, setItem() { assert.fail('must not write'); } };
+  const unwritable = { getItem() { return null; }, setItem() { throw new Error(PRIVATE); } };
+  const unconfirmed = { getItem() { return null; }, setItem() {} };
+  for (const [options, stage, code] of [
+    [{ duplicate: true }, 'app-init', 'connection/duplicate-app'],
+    [{ invalidProof: null }, 'app-check-request', 'connection/invalid-proof'],
+    [{ user: null, storage: previous }, 'identity-guard', 'connection/previous-attempt'],
+    [{ user: null, storage: unreadable }, 'identity-guard', 'connection/storage-unavailable'],
+    [{ user: null, storage: unwritable }, 'identity-guard', 'connection/storage-unavailable'],
+    [{ user: null, storage: unconfirmed }, 'identity-guard', 'connection/storage-unconfirmed'],
+    [{ user: { uid: 'nonanonymous', isAnonymous: false } }, 'final-validation', 'connection/invalid-identity'],
+  ]) {
+    const f = fixture(options); expectDiagnostic(await f.client.start(), stage, code);
+    assert.equal(f.events.includes('sign-in'), false);
+  }
+  const mismatch = fixture({ user: null, configure({ sdk }) { sdk.authSdk.signInAnonymously = async () => ({ user: identity('different-user') }); } });
+  expectDiagnostic(await mismatch.client.start(), 'final-validation', 'connection/identity-mismatch');
+  assert.equal(mismatch.storage.getItem(IDENTITY_ATTEMPT_KEY), 'attempted');
+  assert.deepEqual(previous.writes, []);
+});
+
+test('actual missing/busy browser lock failures use fixed local diagnostics', async () => {
+  const saved = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  try {
+    for (const [navigator, code] of [[{}, 'connection/lock-unavailable'], [{ locks: { request: async (_name, _options, callback) => callback(null) } }, 'connection/lock-busy']]) {
+      Object.defineProperty(globalThis, 'navigator', { value: navigator, configurable: true });
+      const f = fixture({ user: null }), client = createConnectionCheck(runtime(), { location: PAGE, environment: {}, now: f.time.now,
+        setTimer: f.time.setTimer, clearTimer: f.time.clearTimer, loadSdk: async () => f.sdk, getAttemptStorage: () => f.storage });
+      expectDiagnostic(await client.start(), 'identity-lock', code);
+      assert.equal(f.events.includes('sign-in'), false); assert.deepEqual(f.storage.writes, []);
+    }
+  } finally { if (saved) Object.defineProperty(globalThis, 'navigator', saved); else delete globalThis.navigator; }
+});
+
+test('each existing timeout reports the active phase and late rejections are not inspected', async () => {
+  for (const [field, stage] of [['sdkFlight', 'sdk-load'], ['proof', 'app-check-request'], ['persistence', 'auth-persistence-restore'], ['ready', 'identity-ready'], ['signIn', 'anonymous-signup']]) {
+    const latch = deferred(), f = fixture({ user: null, [field]: latch }), pending = f.client.start(); await flush();
+    f.time.set(NOW + CONNECTION_STAGE_TIMEOUT_MILLIS); f.time.fire();
+    const first = await pending; expectDiagnostic(first, stage, 'connection/timeout', 'timeout');
+    let inspected = 0;
+    latch.reject(new Proxy({}, { getOwnPropertyDescriptor() { inspected++; throw new Error(PRIVATE); } }));
+    await flush(); f.client.stop(); f.time.set(runtime().expiresAtMillis); f.client.checkAccess(); await f.client.start();
+    assert.equal(f.client.getState(), first); assert.equal(inspected, 0); assert.equal(f.time.timers.size, 0);
+    assert.equal(f.states.filter((state) => state.status === 'timeout').length, 1);
+    assert.equal(f.states.some((state) => state.status === 'connected'), false);
+  }
+});
+
+test('lock, readiness and signup share one timeout budget without reset or added timers', async () => {
+  const lock = deferred(), ready = deferred(), signIn = deferred();
+  const f = fixture({ user: null, ready, signIn, withIdentityLock: async (callback) => { await lock.promise; return callback(); } });
+  const pending = f.client.start(); await flush();
+  const budgets = () => f.time.scheduled.filter(({ delay }) => delay === CONNECTION_STAGE_TIMEOUT_MILLIS);
+  assert.equal(budgets().length, 4);
+  f.time.set(NOW + 5000); lock.resolve(); await flush(); assert.ok(f.events.includes('auth-ready'));
+  f.time.set(NOW + 10000); ready.resolve(); await flush(); assert.ok(f.events.includes('sign-in'));
+  assert.equal(budgets().length, 4); assert.equal(f.time.timers.size, 2);
+  f.time.set(NOW + 15000); f.time.fire();
+  expectDiagnostic(await pending, 'anonymous-signup', 'connection/timeout', 'timeout');
+  signIn.resolve({ user: identity('late-shared-budget-uid') }); await flush();
+  expectDiagnostic(f.client.getState(), 'anonymous-signup', 'connection/timeout', 'timeout');
+  assert.equal(f.storage.getItem(IDENTITY_ATTEMPT_KEY), 'attempted');
+  const waitingLock = deferred();
+  const blocked = fixture({ user: null, withIdentityLock: async (callback) => { await waitingLock.promise; return callback(); } });
+  const blockedFlight = blocked.client.start(); await flush(); blocked.time.set(NOW + 15000); blocked.time.fire();
+  expectDiagnostic(await blockedFlight, 'identity-lock', 'connection/timeout', 'timeout');
+  waitingLock.resolve(); await flush(); assert.equal(blocked.events.includes('auth-ready'), false); assert.deepEqual(blocked.storage.writes, []);
+});
+
+test('first expiry/pagehide/access failure freezes diagnostics despite late results and cleanup errors', async () => {
+  for (const action of ['stop', 'expiry', 'origin', 'debug']) {
+    const proof = deferred(), f = fixture({ proof, deleteThrows: true, refreshThrows: true }), pending = f.client.start(); await flush();
+    if (action === 'stop') f.client.stop();
+    if (action === 'expiry') { f.time.set(runtime().expiresAtMillis); f.time.fire(); }
+    if (action === 'origin') { f.location.href = 'https://wa-awesome.web.app/'; f.client.checkAccess(); }
+    if (action === 'debug') { f.environment.FIREBASE_APPCHECK_DEBUG_TOKEN = true; f.client.checkAccess(); }
+    const first = await pending;
+    const status = action === 'stop' ? 'stopped' : action === 'expiry' ? 'expired' : 'invalid';
+    expectDiagnostic(first, 'app-check-request', `connection/${status === 'invalid' ? 'invalid-access' : status}`, status);
+    proof.resolve({ token: PRIVATE }); await flush(); f.client.stop(); await f.client.start();
+    assert.equal(f.client.getState(), first); assert.equal(f.events.includes('initialize-auth'), false);
+    assert.equal(f.states.filter((state) => state.status === status).length, 1);
+  }
+  const failed = rejectionFixture('anonymous-signup', { code: 'auth/operation-not-allowed', message: PRIVATE }, true);
+  const first = await failed.client.start(); failed.client.stop(); failed.time.set(runtime().expiresAtMillis); failed.client.checkAccess();
+  assert.equal(failed.client.getState(), first); expectDiagnostic(first, 'anonymous-signup', 'auth/operation-not-allowed');
+});
+
+test('diagnostic UI uses textContent for fixed stage/code, and never raw rejected values', async () => {
+  const appSource = (await source('app.js')).replace(/^import[^\n]+\n/gm, '');
+  const nodes = new Map(['connection-start', 'connection-status', 'connection-uid', 'connection-expiry', 'connection-diagnostic'].map((id) => [id, {
+    textContent: '', disabled: true, addEventListener() {}, set innerHTML(_value) { assert.fail('HTML sink'); },
+  }]));
+  for (const error of [{ code: 'auth/operation-not-allowed', message: PRIVATE }, { code: `<img src=x onerror=${PRIVATE}>`, message: PRIVATE }]) {
+    const f = rejectionFixture('anonymous-signup', error, true); const result = await f.client.start();
+    vm.runInNewContext(appSource, {
+      runtime: {}, Intl, document: { getElementById: (id) => nodes.get(id), addEventListener() {} }, window: { addEventListener() {} },
+      createConnectionCheck() { return { getState: () => result }; },
+    });
+    assert.equal(nodes.get('connection-diagnostic').textContent, `anonymous-signup / ${error.code.startsWith('auth/') ? 'auth/operation-not-allowed' : 'connection/unknown'}`);
+    assert.ok(!JSON.stringify([...nodes.values()].map((node) => node.textContent)).includes(PRIVATE));
+  }
 });

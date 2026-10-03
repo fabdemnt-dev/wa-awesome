@@ -7,7 +7,7 @@
 - 接続確認の有効期間：2026-10-03 **11:15 JST** 〜 **2026-10-04 12:00 JST**（UTC 2026-10-03 02:15 〜 2026-10-04 03:00）
 - この期限はゲームの7日間とは別です。ゲームの期間・設定・参加者・部屋は作成しません
 - 「接続確認を開始」を押したときだけ、reCAPTCHA Enterprise / App Checkの検証後に匿名Authを確認します
-- 表示するものは成功／失敗、期限、そのブラウザー自身の匿名UIDだけです。認証token、秘密値、SDKの生エラーは表示しません
+- 表示するものは成功／失敗、期限、そのブラウザー自身の匿名UID、および失敗時の固定された段階名・許可済みコードです。認証token、秘密値、SDKの生エラーは表示しません
 - Firestore、Functions、ゲームのSDK・処理・通信は含みません。IAM、Rules、Auth設定、API、App Check設定も変更しません
 
 期限はこのページのclientによる接続停止です。Firebase project、公開識別子、作成済み匿名アカウントを削除したり、他のclientからの認証をサーバー側で一律禁止したりする期限ではありません。固定URLも消えません。期間終了後にこのページで再認証を始めず、SDKの自動更新を止めます。7日試験の制限をこのclient時計だけに依存させません。
@@ -26,7 +26,7 @@ Web Appは `1:120030709276:web:015f4e996b7c42a4e801d9`。同じFirebase app名 `
 
 初回公開のroot・旧ゲーム404・接続ページと全アセットは、公開後の読取りで承認済みのバイトとヘッダーに一致しました。その後、本人のChromeで開始を1回押すと接続失敗になり、Firebase Consoleでは匿名ユーザーの作成成功を確認できませんでした。
 
-固定の[公式Firebase 10.8.0 App Check SDK](https://www.gstatic.com/firebasejs/10.8.0/firebase-app-check.js)が使う交換先は `https://content-firebaseappcheck.googleapis.com/v1` です。初回CSPが許可した `https://firebaseappcheck.googleapis.com` とは別のホストであり、SDKの交換要求が遮断される不具合を確認しました。ネットワークを隔離した実SDKの合成検証でも、現CSPではAuth前に失敗し、ホスト1個の置換で合成認証まで進みます。これは確実な遮断要因の検証であり、本人端末の最初の失敗箇所を端末ログで特定したという意味ではありません。
+固定の[公式Firebase 10.8.0 App Check SDK](https://www.gstatic.com/firebasejs/10.8.0/firebase-app-check.js)が使う交換先は `https://content-firebaseappcheck.googleapis.com/v1` です。初回CSPが許可した `https://firebaseappcheck.googleapis.com` とは別のホストであり、SDKの交換要求が遮断される不具合を確認しました。ネットワークを隔離した実SDKの合成検証でも、初回CSPではAuth前に失敗し、ホスト1個の置換で合成認証まで進みます。これは確実な遮断要因の検証であり、本人端末の最初の失敗箇所を端末ログで特定したという意味ではありません。
 
 承認された修正は `/connection-check/**` の `connect-src` 内で上記ホストを**追加ではなく置換**することだけです。公開する7ファイル、他のヘッダー、期限、しきい値0.5、TTL1時間、domain検証、Firestore適用、ゲームの期間は変えません。API有効化で使うサービス名 `firebaseappcheck.googleapis.com` は正しいため、その設定は変更しません。
 
@@ -43,6 +43,39 @@ node garden-connection-check-csp-fix.mjs --inspect --tooling-dir "$HOME/garden-c
 成功確認後、案内された同じ新helperとSHAで `--deploy-connection-check` を1回実行します。結果不明なら再送せず、その新helperの `--inspect` で確認します。旧helperは修正版releaseを識別しないため、以後の読取り・停止にも修正版を使います。
 
 公開後の照合が成功してから、本人が**同じChrome**でページを再読込みし、開始を1回だけ押します。試行済み状態で認証を復元できない場合は停止します。試行済み印やブラウザーデータを消したり、別ブラウザーで試したりしません。修正・合成テスト・再公開だけでは実機App Check成功とは扱いません。
+
+## 2026-10-03：安全な失敗段階表示
+
+CSP修正版の本人公開後、root・旧ゲーム404・全接続アセットのバイトと安全ヘッダーは独立した読取りで一致しました。それでも本人の同じChromeで接続確認が失敗しました。本人の許可を得た04:49 UTCのFirebaseユーザー一覧読取りでは「まだユーザーがいません」と表示されました。これだけではSDK読込み、App Check、匿名認証のどこで失敗したかを特定できません。
+
+本人承認の診断版は、失敗した**段階名**と、固定allowlistに一致する**短いコード**だけを1行で表示します。任意の例外文、HTTP応答本文、stack、cause、customData、認証tokenは表示・記録・送信しません。コードを安全に確認できない場合は `connection/unknown` と表示します。診断のための追加通信、ログ送信、保存領域は作りません。失敗後の表示は後着の応答や別の失敗で上書きしません。
+
+段階にはSDK読込み、App Check初期化・要求、Auth初期化・復元、同時実行の確認、試行済み印の確認、匿名ログイン、最終検証があります。表示は失敗の位置を絞るためのものです。例えば公式SDKの `appCheck/throttled` は複数のサーバー拒否を同じコードにまとめるため、コードだけで評価点不足・設定不一致・回数制限などの根本原因を断定しません。`anonymous-signup` 中にはSDK内のユーザー照合も含まれます。
+
+App Check→匿名Authの順序、1回制限、4つの既存15秒待機枠、試行済み印、同じブラウザーの認証保存、有効期限 **2026-10-04 12:00 JST** は維持します。CSP・他の安全ヘッダー・App Check設定・Firestore適用・ゲーム期間は変更しません。UID未確認でも試行済み印を消しません。
+
+この版のhelperは、現行CSP修正版release `garden-connection-static-v1:2303007a968a8e063f49275d120631a5fa08f91cf1a28ae771dda6ad8055123d` の固定された旧公開バイトと全安全ヘッダーを照合してから置き換えます。新しいファイルを古いreleaseの正解とみなすことはありません。未知のreleaseや不一致、途中のversion変更は停止します。同じ診断版の公開済み状態は再公開しません。
+
+全テスト・独立レビュー・固定headのCIが通った後、案内された値を使います。まず読取りだけを行い、結果を確認します。
+
+```sh
+curl --fail --silent --show-error --proto '=https' 'https://raw.githubusercontent.com/fabdemnt-dev/wa-awesome/REVIEWED_DIAGNOSTIC_COMMIT/scripts/deploy-floating-garden-connection-check.mjs' -o garden-connection-check-diagnostic.mjs &&
+printf '%s  garden-connection-check-diagnostic.mjs\n' 'REVIEWED_DIAGNOSTIC_SHA256' | sha256sum --check &&
+node garden-connection-check-diagnostic.mjs --inspect --tooling-dir "$HOME/garden-connection-tools-20261003-1a3912"
+```
+
+Cloud Shellの再作成でtoolingフォルダがなくなった場合は、同じinspectを繰り返しません。フォルダ不在を確認した後だけ、同じSHAのhelperで公式依存を再準備し、inspectします。既存フォルダを削除・上書きしません。
+
+読取り成功の確認後だけ、同じ固定helperで1回公開します。
+
+```sh
+printf '%s  garden-connection-check-diagnostic.mjs\n' 'REVIEWED_DIAGNOSTIC_SHA256' | sha256sum --check &&
+node garden-connection-check-diagnostic.mjs --deploy-connection-check --tooling-dir "$HOME/garden-connection-tools-20261003-1a3912"
+```
+
+公開後の照合成功を待ち、案内があってから本人の**同じChrome**で再読込みします。開始ボタンが有効なら1回だけ押し、結果と短い診断行の画像を伝えます。試行済みで止まった場合やボタンが無効な場合は、そのまま停止します。ブラウザーデータや試行済み印を消さず、別ブラウザーへ変えず、代理で実認証を試しません。以前の失敗のコードを後から復元する機能ではありません。
+
+診断版へ移行後のinspect・停止にも、診断版helperを使います。CSPだけの旧helperには戻りません。
 
 ## 公開担当者の手順
 
@@ -72,7 +105,7 @@ printf '%s  garden-connection-check.mjs\n' 'REVIEWED_SHA256' | sha256sum --check
 node garden-connection-check.mjs --deploy-connection-check --tooling-dir "$HOME/garden-connection-tools-20261003"
 ```
 
-このhelperは専用siteの存在を要求し、サイトを新規作成しません。既存の準備中release、同じ接続確認release、または上記の固定された旧接続確認release以外は上書きしません。ゲーム・他project・rootのFirebase設定・preview channelへ切り替えません。配信はexact siteだけ、1回です。
+このhelperは専用siteの存在を要求し、サイトを新規作成しません。既存の準備中release、同じ接続確認release、または上記の固定された旧接続確認release以外は上書きしません。各旧releaseはその版自身の固定バイトとヘッダーで検証します。診断版への移行はCSP修正版または準備中からに限定し、初回の旧CSP版から直接移行しません。旧CSP版のinspect・停止は可能です。ゲーム・他project・rootのFirebase設定・preview channelへ切り替えません。配信はexact siteだけ、1回です。
 
 配信前に既存releaseを再読取りし、途中の変更を検出します。ただしHosting deployにatomicなcompare-and-swapはなく、並行公開との完全な排他性は保証しません。同時に別端末から公開しないでください。配信後は返されたversionとlive release、および公開ファイル・HTTP応答を照合します。
 
@@ -94,11 +127,11 @@ node garden-connection-check.mjs --deploy-connection-check --tooling-dir "$HOME/
 
 有効期限にこのclientは停止します。接続確認の公開自体を取り下げる場合は、対象を確認して承認された担当者が、同じ固定helperの次のモードを使います。既存の準備中HTML・HTTPヘッダーに戻すHostingのみの操作です。
 
-CSP修正版へ移行済みの場合は、修正版を取得したファイル名と既存toolingを使います。初回公開時の旧helperへ戻りません。
+診断版へ移行済みの場合は、診断版を取得したファイル名と既存toolingを使います。以前のhelperへ戻りません。
 
 ```sh
-printf '%s  garden-connection-check-csp-fix.mjs\n' 'REVIEWED_FIX_SHA256' | sha256sum --check &&
-node garden-connection-check-csp-fix.mjs --stop-connection-check --tooling-dir "$HOME/garden-connection-tools-20261003-1a3912"
+printf '%s  garden-connection-check-diagnostic.mjs\n' 'REVIEWED_DIAGNOSTIC_SHA256' | sha256sum --check &&
+node garden-connection-check-diagnostic.mjs --stop-connection-check --tooling-dir "$HOME/garden-connection-tools-20261003-1a3912"
 ```
 
 現行helperを最初から一般手順の `garden-connection-check.mjs` という名前で取得した場合に限り、次の対応するファイル名・toolingを使います。

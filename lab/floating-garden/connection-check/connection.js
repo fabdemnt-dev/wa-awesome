@@ -23,7 +23,35 @@ export const CONNECTION_LABELS = Object.freeze({
   expired: '接続確認の有効期間が終了しました',
   stopped: '接続確認を停止しました',
 });
-const failure = () => new Error('接続確認を継続できません');
+// Only these literal SDK codes may cross the diagnostic boundary. In particular,
+// never reflect a prefix match, raw exception, or property accessor into state.
+const DIAGNOSTIC_CODES = new Set([
+  'appCheck/recaptcha-error', 'appCheck/fetch-network-error', 'appCheck/fetch-parse-error',
+  'appCheck/fetch-status-error', 'appCheck/throttled', 'appCheck/already-initialized',
+  'appCheck/use-before-activation', 'appCheck/storage-open', 'appCheck/storage-get', 'appCheck/storage-set',
+  'auth/network-request-failed', 'auth/operation-not-allowed', 'auth/admin-restricted-operation',
+  'auth/invalid-api-key', 'auth/app-not-authorized', 'auth/too-many-requests', 'auth/quota-exceeded',
+  'auth/internal-error', 'auth/web-storage-unsupported', 'auth/invalid-user-token',
+  'auth/user-token-expired', 'auth/user-disabled', 'auth/already-initialized',
+  'connection/unknown', 'connection/invalid-access', 'connection/timeout', 'connection/expired',
+  'connection/stopped', 'connection/duplicate-app', 'connection/lock-unavailable', 'connection/lock-busy',
+  'connection/storage-unavailable', 'connection/previous-attempt', 'connection/storage-unconfirmed',
+  'connection/invalid-proof', 'connection/invalid-identity', 'connection/identity-mismatch',
+]);
+function diagnosticCode(error) {
+  try {
+    // A Proxy descriptor trap may run or throw; nothing it returns is trusted.
+    const descriptor = Object.getOwnPropertyDescriptor(error, 'code');
+    if (descriptor && Object.hasOwn(descriptor, 'value') && typeof descriptor.value === 'string' &&
+      DIAGNOSTIC_CODES.has(descriptor.value)) return descriptor.value;
+  } catch { /* Unknown, revoked Proxy, or primitive: fixed fallback only. */ }
+  return 'connection/unknown';
+}
+function failure(code = 'connection/unknown') {
+  const error = new Error('接続確認を継続できません');
+  Object.defineProperty(error, 'code', { value: code });
+  return error;
+}
 function exactKeys(value, keys) {
   if (!value || typeof value !== 'object' || Array.isArray(value) ||
     ![Object.prototype, null].includes(Object.getPrototypeOf(value)) ||
@@ -60,9 +88,9 @@ export async function loadConnectionSdk() {
   return { appSdk, appCheckSdk, authSdk };
 }
 function browserIdentityLock(callback) {
-  if (!globalThis.navigator?.locks?.request) return Promise.reject(failure());
+  if (!globalThis.navigator?.locks?.request) return Promise.reject(failure('connection/lock-unavailable'));
   return globalThis.navigator.locks.request(IDENTITY_LOCK, { ifAvailable: true }, (lock) => {
-    if (!lock) throw failure();
+    if (!lock) throw failure('connection/lock-busy');
     return callback();
   });
 }
@@ -75,16 +103,23 @@ export function createConnectionCheck(runtime, {
 } = {}) {
   let config = null, sdk = null, app = null, appCheck = null;
   let started = false, terminal = false, generation = 0, startFlight = null;
-  let state = Object.freeze({ status: 'idle', label: CONNECTION_LABELS.idle, uid: null, expiresAtMillis: null, canStart: true });
+  let activeStage = 'preflight', diagnosticStage = null, safeCode = null;
+  let state = Object.freeze({ status: 'idle', label: CONNECTION_LABELS.idle, uid: null, expiresAtMillis: null, canStart: true, diagnosticStage: null, diagnosticCode: null });
   const timers = new Set(), aborts = new Set();
   function publish(status, uid = null) {
-    state = Object.freeze({ status, label: CONNECTION_LABELS[status], uid, expiresAtMillis: config?.expiresAtMillis ?? null, canStart: !started && !terminal });
+    state = Object.freeze({ status, label: CONNECTION_LABELS[status], uid, expiresAtMillis: config?.expiresAtMillis ?? null, canStart: !started && !terminal, diagnosticStage, diagnosticCode: safeCode });
     // The observer receives only this allowlisted shape, never SDK results/errors.
     try { onState(state); } catch { /* An observer cannot alter the lifecycle. */ }
   }
-  function stop(status = 'stopped') {
+  function stop(status = 'stopped', error = null) {
     if (terminal) return state;
     terminal = true; generation++;
+    // Freeze the first terminal outcome before inspecting even a hostile Proxy.
+    diagnosticStage = activeStage;
+    safeCode = status === 'failed' ? diagnosticCode(error) : ({
+      invalid: 'connection/invalid-access', timeout: 'connection/timeout',
+      expired: 'connection/expired', stopped: 'connection/stopped',
+    })[status] || 'connection/stopped';
     for (const timer of timers) clearTimer(timer);
     timers.clear();
     for (const abort of [...aborts]) abort();
@@ -115,7 +150,11 @@ export function createConnectionCheck(runtime, {
       const abort = () => finish(reject, failure());
       const timer = setTimer(() => stop('timeout'), CONNECTION_STAGE_TIMEOUT_MILLIS);
       timers.add(timer); aborts.add(abort);
-      Promise.resolve(promise).then((value) => finish(resolve, value), () => finish(reject, failure()));
+      Promise.resolve(promise).then((value) => finish(resolve, value), (error) => {
+        if (settled || terminal) return;
+        // Do not retain SDK exceptions beyond this boundary or inspect late errors.
+        finish(reject, failure(diagnosticCode(error)));
+      });
       if (terminal) abort();
     });
   }
@@ -135,50 +174,72 @@ export function createConnectionCheck(runtime, {
     } catch { stop('invalid'); return state; }
     try {
       publish('checking'); assertActive(expected); armExpiry(expected);
+      activeStage = 'sdk-load';
       sdk = await stage(loadSdk()); assertActive(expected);
-      if (sdk.appSdk.getApps().some((item) => item.name === CONNECTION_APP_NAME)) throw failure();
+      activeStage = 'app-init';
+      if (sdk.appSdk.getApps().some((item) => item.name === CONNECTION_APP_NAME)) throw failure('connection/duplicate-app');
       app = sdk.appSdk.initializeApp(config.firebase, CONNECTION_APP_NAME);
       assertActive(expected);
+      activeStage = 'app-check-init';
       appCheck = sdk.appCheckSdk.initializeAppCheck(app, {
         provider: new sdk.appCheckSdk.ReCaptchaEnterpriseProvider(config.appCheck.siteKey),
         // A one-shot check has no reason to schedule repeated attestations.
         isTokenAutoRefreshEnabled: false,
       });
+      activeStage = 'app-check-request';
       const proof = await stage(sdk.appCheckSdk.getToken(appCheck, false));
       assertActive(expected);
-      if (!proof || typeof proof.token !== 'string' || proof.token.length === 0) throw failure();
+      if (!proof || typeof proof.token !== 'string' || proof.token.length === 0) throw failure('connection/invalid-proof');
       publish('authenticating'); assertActive(expected);
       // Match the game's named app and persistence namespace without loading game code.
+      activeStage = 'auth-init';
       const auth = sdk.authSdk.initializeAuth(app, { persistence: sdk.authSdk.browserLocalPersistence });
+      activeStage = 'auth-persistence-restore';
       await stage(sdk.authSdk.setPersistence(auth, sdk.authSdk.browserLocalPersistence)); assertActive(expected);
+      activeStage = 'identity-lock';
       await stage(withIdentityLock(async () => {
         assertActive(expected);
+        activeStage = 'identity-ready';
         await auth.authStateReady(); assertActive(expected);
         let user = auth.currentUser;
         if (!user) {
           // An unknown earlier sign-in must never be retried, even after reload.
           // This durable boolean contains no UID, token, credential, or expiry.
-          const storage = getAttemptStorage();
-          if (storage.getItem(IDENTITY_ATTEMPT_KEY) !== null) throw failure();
-          storage.setItem(IDENTITY_ATTEMPT_KEY, 'attempted');
-          if (storage.getItem(IDENTITY_ATTEMPT_KEY) !== 'attempted') throw failure();
+          activeStage = 'identity-guard';
+          const storage = attemptStorage();
+          if (readAttempt(storage) !== null) throw failure('connection/previous-attempt');
+          writeAttempt(storage);
+          if (readAttempt(storage) !== 'attempted') throw failure('connection/storage-unconfirmed');
           assertActive(expected);
+          activeStage = 'anonymous-signup';
           user = (await sdk.authSdk.signInAnonymously(auth))?.user;
           assertActive(expected);
         }
-        if (!user || user.isAnonymous !== true || typeof user.uid !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(user.uid) ||
-          auth.currentUser?.uid !== user.uid || auth.currentUser?.isAnonymous !== true) throw failure();
+        activeStage = 'final-validation';
+        if (!user || user.isAnonymous !== true || typeof user.uid !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(user.uid)) throw failure('connection/invalid-identity');
+        if (auth.currentUser?.uid !== user.uid || auth.currentUser?.isAnonymous !== true) throw failure('connection/identity-mismatch');
         // Also remember that a reused identity existed, without storing the UID.
         // Losing that persisted identity must not silently create a replacement.
-        const storage = getAttemptStorage();
-        if (storage.getItem(IDENTITY_ATTEMPT_KEY) === null) storage.setItem(IDENTITY_ATTEMPT_KEY, 'attempted');
-        if (storage.getItem(IDENTITY_ATTEMPT_KEY) !== 'attempted') throw failure();
+        activeStage = 'identity-guard';
+        const storage = attemptStorage();
+        if (readAttempt(storage) === null) writeAttempt(storage);
+        if (readAttempt(storage) !== 'attempted') throw failure('connection/storage-unconfirmed');
+        activeStage = 'final-validation';
         assertActive(expected);
         publish('connected', user.uid);
       }));
       assertActive(expected);
-    } catch { if (!terminal) stop('failed'); }
+    } catch (error) { if (!terminal) stop('failed', error); }
     return state;
+  }
+  function attemptStorage() {
+    try { return getAttemptStorage(); } catch { throw failure('connection/storage-unavailable'); }
+  }
+  function readAttempt(storage) {
+    try { return storage.getItem(IDENTITY_ATTEMPT_KEY); } catch { throw failure('connection/storage-unavailable'); }
+  }
+  function writeAttempt(storage) {
+    try { storage.setItem(IDENTITY_ATTEMPT_KEY, 'attempted'); } catch { throw failure('connection/storage-unavailable'); }
   }
   // This local-only preflight lets the user see the fixed expiry before Start.
   // It performs no SDK import, browser storage access, or network operation.
@@ -187,8 +248,8 @@ export function createConnectionCheck(runtime, {
     assertConnectionAccess(config, location, now(), environment);
     state = Object.freeze({ ...state, expiresAtMillis: config.expiresAtMillis });
   } catch {
-    terminal = true;
-    state = Object.freeze({ status: 'invalid', label: CONNECTION_LABELS.invalid, uid: null, expiresAtMillis: config?.expiresAtMillis ?? null, canStart: false });
+    terminal = true; diagnosticStage = 'preflight'; safeCode = 'connection/invalid-access';
+    state = Object.freeze({ status: 'invalid', label: CONNECTION_LABELS.invalid, uid: null, expiresAtMillis: config?.expiresAtMillis ?? null, canStart: false, diagnosticStage, diagnosticCode: safeCode });
   }
   return Object.freeze({
     start() {
