@@ -1,4 +1,6 @@
+// Build: build-id-366 · PR #366
 import {
+  cloneState,
   createSession,
   DIRECTIONS,
   performMove,
@@ -6,6 +8,7 @@ import {
   STAGES,
   undoMove,
 } from "./engine.js";
+import { createGesture, isTapGesture, moveGesture } from "./controls.js?v=build-id-366";
 
 const board = document.querySelector("#board");
 const stageNumber = document.querySelector("#stage-number");
@@ -18,19 +21,17 @@ const message = document.querySelector("#message");
 const undoButton = document.querySelector("#undo");
 const resetButton = document.querySelector("#reset");
 const nextButton = document.querySelector("#next-stage");
+const directionButtons = document.querySelectorAll("[data-direction]");
 
 let stageIndex = 0;
 let session = createSession(stageIndex);
-let pointerStart = null;
-let suppressClick = false;
-let dragHistoryStart = null;
-let dragMoved = false;
-let latestPointer = null;
-let dragFrame = 0;
-let dragAxis = null;
+let gesture = null;
+let gestureStart = null;
+let gestureHistory = null;
+let tapCell = null;
 
 const eventMessages = {
-  start: "盤面をスワイプして穴を動かそう",
+  start: "なぞって移動。1マスずつなら矢印ボタン",
   "hole-moved": "穴が1マス動いた",
   "cat-fled": "ネコが反対方向へ逃げた！",
   "cat-blocked": "逃げ道がない。でも素面では落とせない",
@@ -92,6 +93,7 @@ function render() {
   hint.textContent = stage.hint;
   message.textContent = eventMessages[state.event] ?? eventMessages.start;
   undoButton.disabled = history.length === 0;
+  directionButtons.forEach((button) => { button.disabled = state.cleared; });
   nextButton.hidden = !state.cleared;
   nextButton.textContent = stageIndex === STAGES.length - 1 ? "最初のステージへ ↺" : "次のステージへ →";
 }
@@ -99,148 +101,113 @@ function render() {
 function act(direction, { groupDrag = false } = {}) {
   if (!DIRECTIONS[direction] || session.state.cleared) return false;
   const previousMoves = session.state.moves;
-  const before = {
-    ...session.state,
-    walls: session.state.walls.map((wall) => ({ ...wall })),
-    hole: session.state.hole ? { ...session.state.hole } : null,
-    cat: session.state.cat ? { ...session.state.cat } : null,
-    alcohol: session.state.alcohol ? { ...session.state.alcohol } : null,
-  };
   session = performMove(session, direction);
   const moved = session.state.moves !== previousMoves;
   if (moved && groupDrag) {
-    if (!dragHistoryStart) dragHistoryStart = before;
-    session.history = [dragHistoryStart];
+    session.history = [...gestureHistory, gestureStart];
   }
   render();
   if (!moved) message.textContent = "その方向へは動かせない";
   return moved;
 }
 
-function directionFromDelta(dx, dy) {
-  if (Math.max(Math.abs(dx), Math.abs(dy)) < 28) return null;
-  if (Math.abs(dx) > Math.abs(dy)) return dx > 0 ? "right" : "left";
-  return dy > 0 ? "down" : "up";
-}
-
-function dragStep() {
-  dragFrame = 0;
-  if (!pointerStart || !latestPointer || session.state.cleared) return;
-
-  const boardWidth = board.getBoundingClientRect().width;
-  const stageOneCellSize = boardWidth / 6;
-  const threshold = Math.max(30, stageOneCellSize * 0.82);
-  const dx = latestPointer.x - pointerStart.x;
-  const dy = latestPointer.y - pointerStart.y;
-
-  if (!dragAxis && Math.max(Math.abs(dx), Math.abs(dy)) >= threshold * 0.45) {
-    dragAxis = Math.abs(dx) >= Math.abs(dy) ? "x" : "y";
-  }
-
-  const axisDelta = dragAxis === "x" ? dx : dragAxis === "y" ? dy : 0;
-  if (Math.abs(axisDelta) >= threshold) {
-    const direction = dragAxis === "x"
-      ? (axisDelta > 0 ? "right" : "left")
-      : (axisDelta > 0 ? "down" : "up");
-    const moved = act(direction, { groupDrag: true });
-    dragMoved ||= moved;
-
-    if (moved) {
-      if (direction === "right") pointerStart.x += threshold;
-      if (direction === "left") pointerStart.x -= threshold;
-      if (direction === "down") pointerStart.y += threshold;
-      if (direction === "up") pointerStart.y -= threshold;
-    } else {
-      pointerStart.x = latestPointer.x;
-      pointerStart.y = latestPointer.y;
-    }
-  }
-
-  if (pointerStart) dragFrame = requestAnimationFrame(dragStep);
-}
-
-function startDragLoop() {
-  if (!dragFrame) dragFrame = requestAnimationFrame(dragStep);
-}
-
-function stopDragLoop() {
-  if (dragFrame) cancelAnimationFrame(dragFrame);
-  dragFrame = 0;
-}
-
-board.addEventListener("pointerdown", (event) => {
-  pointerStart = { id: event.pointerId, x: event.clientX, y: event.clientY };
-  latestPointer = { x: event.clientX, y: event.clientY };
-  dragHistoryStart = null;
-  dragMoved = false;
-  board.setPointerCapture?.(event.pointerId);
-  startDragLoop();
-});
-
-board.addEventListener("pointermove", (event) => {
-  if (!pointerStart || pointerStart.id !== event.pointerId) return;
-  latestPointer = { x: event.clientX, y: event.clientY };
-  startDragLoop();
-});
-
-board.addEventListener("pointerup", (event) => {
-  if (!pointerStart || pointerStart.id !== event.pointerId) return;
-  latestPointer = { x: event.clientX, y: event.clientY };
-  if (!dragMoved) {
-    const direction = directionFromDelta(event.clientX - pointerStart.x, event.clientY - pointerStart.y);
-    if (direction) dragMoved = act(direction, { groupDrag: true });
-  }
-  suppressClick = dragMoved;
-  stopDragLoop();
-  pointerStart = null;
-  latestPointer = null;
-  dragHistoryStart = null;
-});
-
-board.addEventListener("pointercancel", () => {
-  stopDragLoop();
-  pointerStart = null;
-  latestPointer = null;
-  dragHistoryStart = null;
-  dragMoved = false;
-});
-
-board.addEventListener("click", (event) => {
-  if (suppressClick) {
-    suppressClick = false;
-    return;
-  }
-  if (event.detail === 0) return;
-  const cell = event.target.closest(".cell");
-  if (!cell || pointerStart) return;
+function tapAdjacentCell(cell) {
+  if (!cell || session.state.cleared) return;
   const dx = Number(cell.dataset.x) - session.state.hole.x;
   const dy = Number(cell.dataset.y) - session.state.hole.y;
   if (Math.abs(dx) + Math.abs(dy) !== 1) return;
-  if (dx === 1) act("right");
-  if (dx === -1) act("left");
-  if (dy === 1) act("down");
-  if (dy === -1) act("up");
+  act(dx === 1 ? "right" : dx === -1 ? "left" : dy === 1 ? "down" : "up");
+}
+
+function finishGesture() {
+  const pointerId = gesture?.pointerId;
+  gesture = null;
+  gestureStart = null;
+  gestureHistory = null;
+  tapCell = null;
+  if (pointerId !== undefined && board.hasPointerCapture?.(pointerId)) {
+    board.releasePointerCapture(pointerId);
+  }
+}
+
+function updateGesture(event) {
+  moveGesture(gesture, { x: event.clientX, y: event.clientY },
+    (direction) => act(direction, { groupDrag: true }));
+}
+
+board.addEventListener("pointerdown", (event) => {
+  if (gesture || event.isPrimary === false || event.button !== 0 || session.state.cleared) return;
+  gesture = createGesture({
+    pointerId: event.pointerId,
+    x: event.clientX,
+    y: event.clientY,
+    boardWidth: board.getBoundingClientRect().width,
+  });
+  gestureStart = cloneState(session.state);
+  gestureHistory = [...session.history];
+  tapCell = event.target.closest(".cell");
+  board.setPointerCapture?.(event.pointerId);
 });
+
+board.addEventListener("pointermove", (event) => {
+  if (!gesture || gesture.pointerId !== event.pointerId) return;
+  updateGesture(event);
+});
+
+board.addEventListener("pointerup", (event) => {
+  if (!gesture || gesture.pointerId !== event.pointerId) return;
+  updateGesture(event);
+  const cell = isTapGesture(gesture) ? tapCell : null;
+  finishGesture();
+  tapAdjacentCell(cell);
+});
+
+for (const type of ["pointercancel", "lostpointercapture"]) {
+  board.addEventListener(type, (event) => {
+    if (gesture?.pointerId === event.pointerId) finishGesture();
+  });
+}
+window.addEventListener("blur", finishGesture);
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) finishGesture();
+});
+
+// Physical taps are handled at pointerup before capture retargets the click.
+// Keep detail=0 clicks for keyboard and assistive-technology activation.
+board.addEventListener("click", (event) => {
+  if (event.detail !== 0 || gesture) return;
+  tapAdjacentCell(event.target.closest(".cell"));
+});
+
+directionButtons.forEach((button) => button.addEventListener("click", () => {
+  finishGesture();
+  act(button.dataset.direction);
+}));
 
 window.addEventListener("keydown", (event) => {
   const direction = { ArrowUp: "up", ArrowRight: "right", ArrowDown: "down", ArrowLeft: "left" }[event.key];
   if (!direction) return;
   event.preventDefault();
+  if (event.repeat) return;
+  finishGesture();
   act(direction);
 });
 
 undoButton.addEventListener("click", () => {
+  finishGesture();
   session = undoMove(session);
   session.state.event = "start";
   render();
 });
 
 resetButton.addEventListener("click", () => {
+  finishGesture();
   session = resetSession(session);
   render();
 });
 
 nextButton.addEventListener("click", () => {
+  finishGesture();
   stageIndex = (stageIndex + 1) % STAGES.length;
   session = createSession(stageIndex);
   render();
