@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#33264a">
   <meta name="robots" content="noindex, nofollow">
   <title>ほろよいネコと動く穴｜最小試作</title>
-  <link rel="stylesheet" href="./style.css">
+  <link rel="stylesheet" href="./style.css?v=controls-preview-1">
 </head>
 <body>
   <main class="game-shell">
@@ -41,10 +41,18 @@
       </div>
 
       <p id="hint" class="hint"></p>
-      <p id="message" class="message" aria-live="polite">盤面をスワイプして穴を動かそう</p>
+      <p id="message" class="message" aria-live="polite">なぞって移動。1マスずつなら矢印ボタン</p>
 
       <div class="board-frame">
         <div id="board" class="board" role="grid" aria-label="パズル盤面"></div>
+      </div>
+
+      <div class="direction-pad" role="group" aria-label="穴を1マスずつ動かす">
+        <button class="direction-button up" type="button" data-direction="up" aria-label="穴を上へ1マス">↑</button>
+        <button class="direction-button left" type="button" data-direction="left" aria-label="穴を左へ1マス">←</button>
+        <span class="direction-label" aria-hidden="true">1マス</span>
+        <button class="direction-button right" type="button" data-direction="right" aria-label="穴を右へ1マス">→</button>
+        <button class="direction-button down" type="button" data-direction="down" aria-label="穴を下へ1マス">↓</button>
       </div>
 
       <div class="legend" aria-label="盤面の記号">
@@ -63,15 +71,15 @@
     <details class="how-to">
       <summary>遊び方</summary>
       <ol>
-        <li>盤面を上下左右へスワイプすると、穴が1マス動きます。</li>
+        <li>盤面を上下左右になぞると、指を動かした距離に合わせて穴が進みます。指を止めると穴も止まります。</li>
         <li>素面のネコは、近づいた穴と反対方向へ1マス逃げます。</li>
         <li>ネコをお酒へ追い込むと酔っぱらい、もう逃げません。</li>
         <li>酔ったネコのマスへ穴を動かせばクリアです。</li>
       </ol>
-      <p>盤面の隣接マスのタップ、またはキーボードの矢印キーでも操作できます。</p>
+      <p>1マスずつ動かすなら矢印ボタン、穴の隣のマスのタップ、キーボードの矢印キー。連続ドラッグは「一手戻す」で操作開始前に戻せます。</p>
     </details>
   </main>
-  <p class="build-id" aria-label="ビルド識別番号">Build: build-id-267 · PR #267</p>
-  <script type="module" src="./app.js?v=build-id-267"></script>
+  <p class="build-id" aria-label="ビルド識別番号">Build: controls-preview-1（未公開検証版）</p>
+  <script type="module" src="./app.js?v=controls-preview-1"></script>
 </body>
 </html>
