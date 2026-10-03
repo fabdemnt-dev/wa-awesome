@@ -15,6 +15,9 @@ on:
       - 'scripts/bootstrap-floating-garden-hmac.mjs'
       - 'scripts/bootstrap-floating-garden-appcheck.mjs'
       - 'docs/floating-garden-phone-appcheck.md'
+      - 'docs/floating-garden-phone-connection-check.md'
+      - 'scripts/*floating-garden-connection*.mjs'
+      - 'tests/floating-garden-connection*'
       - 'tests/fixtures/floating-garden-maintenance-package.json'
       - 'tests/floating-garden-trial-*'
       - 'tests/helpers/*floating-garden-trial*'
@@ -55,6 +58,10 @@ jobs:
         run: npm ci --prefix tests/e2e --ignore-scripts --no-audit --no-fund
       - name: Prepare Chromium
         run: tests/e2e/node_modules/.bin/playwright install --with-deps chromium
+      - name: Test connection-only page with fully synthetic network in Chromium
+        env:
+          GARDEN_CONNECTION_SCREENSHOTS: /tmp/floating-garden-connection-browser-qa
+        run: node --test tests/floating-garden-connection-browser.mjs
       - name: Test the generated trial app with two real emulator identities
         env:
           FLOATING_GARDEN_BROWSER_ARTIFACTS: /tmp/floating-garden-trial-browser-qa
@@ -71,5 +78,6 @@ jobs:
           path: |
             *-debug.log
             /tmp/floating-garden-trial-browser-qa/
+            /tmp/floating-garden-connection-browser-qa/
           retention-days: 7
           if-no-files-found: warn
