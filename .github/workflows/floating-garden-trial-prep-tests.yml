@@ -13,6 +13,8 @@ on:
       - 'scripts/bootstrap-floating-garden-apis.mjs'
       - 'scripts/bootstrap-floating-garden-runtime.mjs'
       - 'scripts/bootstrap-floating-garden-hmac.mjs'
+      - 'scripts/bootstrap-floating-garden-appcheck.mjs'
+      - 'docs/floating-garden-phone-appcheck.md'
       - 'tests/fixtures/floating-garden-maintenance-package.json'
       - 'tests/floating-garden-trial-*'
       - 'tests/helpers/*floating-garden-trial*'
