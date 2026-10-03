@@ -17,7 +17,7 @@ function runtime() {
   return { schemaVersion: 1, projectId: CONNECTION_PROJECT, origin: CONNECTION_ORIGIN,
     startsAtMillis: NOW - 1000, expiresAtMillis: NOW + 86400000,
     firebase: { apiKey: 'AIzaSyCfa04hxQzY0T6gsVLsvTxIhB2zAB0v874', authDomain: 'wa-awesome-garden-stg.firebaseapp.com', projectId: CONNECTION_PROJECT, appId: '1:120030709276:web:015f4e996b7c42a4e801d9' },
-    appCheck: { provider: 'recaptcha-enterprise', siteKey: '6Lc_LNwtAAAAADRAHvq10FwxirR3c5jZlxS9QpYw' } };
+    appCheck: { provider: 'recaptcha-enterprise', siteKey: '6Lc_LNwtAAAAADRAHvql0FwxirR3c5jZlxS9QpYw' } };
 }
 function deferred() { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; }
 async function flush() { for (let i = 0; i < 20; i++) await Promise.resolve(); }
@@ -87,6 +87,14 @@ test('schema rejects unknown fields, getters and every unpinned Firebase/Enterpr
   for (const patch of [{ provider: 'recaptcha-v3' }, { siteKey: '6Lc_LNwtAAAAADRAHvq1OFwxirR3c5jZlxs9QpYw' }, { debug: true }, { verified: true }]) { const value = runtime(); Object.assign(value.appCheck, patch); bad.push(value); }
   const getter = runtime(); Object.defineProperty(getter, 'origin', { get() { throw new Error(PRIVATE); }, enumerable: true }); bad.push(getter);
   for (const input of bad) { const f = fixture({ runtime: input }); assert.equal((await f.client.start()).status, 'invalid'); assert.deepEqual(f.events, []); assert.equal(f.time.timers.size, 0); assert.deepEqual(f.storage.writes, []); }
+});
+test('the previously published digit-one site key is rejected before SDK or identity storage', async () => {
+  const old = runtime(); old.appCheck.siteKey = '6Lc_LNwtAAAAADRAHvq10FwxirR3c5jZlxS9QpYw';
+  const f = fixture({ runtime: old, user: null });
+  const result = await f.client.start();
+  assert.equal(result.status, 'invalid'); assert.equal(result.uid, null);
+  assert.deepEqual(f.events, []); assert.deepEqual(f.storage.writes, []);
+  assert.equal(f.time.timers.size, 0);
 });
 test('exact origin, no query overrides, active window and no inherited/own debug global are enforced before imports', async () => {
   const origins = ['http://wa-awesome-garden-stg.web.app/', 'https://wa-awesome.web.app/', 'https://wa-awesome-garden-stg.firebaseapp.com/', 'https://wa-awesome-garden-stg.web.app.evil.example/', 'https://wa-awesome-garden-stg.web.app:8443/', 'https://someone:password@wa-awesome-garden-stg.web.app/', 'http://localhost:8080/', `${PAGE}?debug=true`];

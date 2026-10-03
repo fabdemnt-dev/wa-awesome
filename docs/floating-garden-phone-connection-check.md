@@ -77,6 +77,31 @@ node garden-connection-check-diagnostic.mjs --deploy-connection-check --tooling-
 
 診断版へ移行後のinspect・停止にも、診断版helperを使います。CSPだけの旧helperには戻りません。
 
+## 2026-10-04：公開サイトキーの転記訂正
+
+診断版の本人確認は `app-check-request / appCheck/recaptcha-error` で停止しました。庭園の既存reCAPTCHAキー一覧をJSONで読み取り、公開設定と文字列比較した結果、双方40文字で、**20文字目だけ**が数字の `1`（文字コード49）と小文字の `l`（文字コード108）で異なることを確認しました。画像の目視やOCRによる判定ではありません。
+
+- 誤った公開値：`6Lc_LNwtAAAAADRAHvq10FwxirR3c5jZlxS9QpYw`
+- 実在する既存キー：`6Lc_LNwtAAAAADRAHvql0FwxirR3c5jZlxS9QpYw`
+
+本人承認の訂正は、対象Web AppのApp Check登録と接続ページを、この既存キーに合わせる1文字だけです。21文字目は数字の `0` のままです。キーの新規作成、domain検証、しきい値0.5、TTL1時間、Firestore適用、CSP、試行済み印、有効期限、ゲーム期間は変更しません。キー一覧ではSCORE、庭園ドメインのみ、allowAllDomains/allowAmpTrafficはfalse、testingOptionsなしを確認しています。
+
+2026-10-04 01:59 JST、Firebase ConsoleでApp Checkの訂正を保存し、ページ再読込み後の値をDOMで読み戻しました。40文字の完全一致と、20文字目108・21文字目48、TTL1時間・しきい値0.5を確認しました。接続ページの公開と実機成功は、この設定保存とは別に確認します。
+
+訂正版helperは、現在公開されている診断版 `garden-connection-static-v1:9bcca9cdf43f3b17e3afbf64f84ea0dcb9737d882688ce92c364cb035aea3ca9` の**誤記を含む旧バイトそのもの**と安全ヘッダーを固定して照合します。正しいキーに書き換えた候補を旧公開の正解には使いません。移行元はこの診断版または元の準備中だけです。それ以前のCSP修正版・初回版はinspectと停止だけを許可し、直接移行しません。
+
+全検証・独立レビュー・固定headのCI成功後、案内された訂正版helperを別名で取得し、同じ既存toolingでまず読取り確認します。
+
+```sh
+curl --fail --silent --show-error --proto '=https' 'https://raw.githubusercontent.com/fabdemnt-dev/wa-awesome/REVIEWED_KEY_FIX_COMMIT/scripts/deploy-floating-garden-connection-check.mjs' -o garden-connection-check-key-fix.mjs &&
+printf '%s  garden-connection-check-key-fix.mjs\n' 'REVIEWED_KEY_FIX_SHA256' | sha256sum --check &&
+node garden-connection-check-key-fix.mjs --inspect --tooling-dir "$HOME/garden-connection-tools-20261003-1a3912"
+```
+
+旧診断版の読取り照合が成功し、案内された後だけ、同じSHAで `--deploy-connection-check` を1回実行します。不確実な結果では再送せず、同じ訂正版のinspectを使います。移行後のinspect・`--stop-connection-check`にもこの訂正版を使います。
+
+設定訂正・合成検証・公開照合だけでは実機の成功を意味しません。公開確認後、本人の同じChromeで再読込みし、開始が有効なら1回だけ確認します。試行済み状態なら停止し、印やブラウザーデータを消しません。診断版は今回の失敗時点で匿名Authより前に停止していますが、以前の端末状態まで推測してリセットしません。
+
 ## 公開担当者の手順
 
 補助ファイルは既存認証のあるCloud Shell用です。新しいログイン・OAuth・鍵・tokenを作成しません。必要API・権限が不足、認証の差替え、未知の既存release、予期しない設定があれば止めます。
@@ -105,7 +130,7 @@ printf '%s  garden-connection-check.mjs\n' 'REVIEWED_SHA256' | sha256sum --check
 node garden-connection-check.mjs --deploy-connection-check --tooling-dir "$HOME/garden-connection-tools-20261003"
 ```
 
-このhelperは専用siteの存在を要求し、サイトを新規作成しません。既存の準備中release、同じ接続確認release、または上記の固定された旧接続確認release以外は上書きしません。各旧releaseはその版自身の固定バイトとヘッダーで検証します。診断版への移行はCSP修正版または準備中からに限定し、初回の旧CSP版から直接移行しません。旧CSP版のinspect・停止は可能です。ゲーム・他project・rootのFirebase設定・preview channelへ切り替えません。配信はexact siteだけ、1回です。
+このhelperは専用siteの存在を要求し、サイトを新規作成しません。各旧releaseはその版自身の固定バイトとヘッダーで検証します。キー訂正版への移行は誤記を含む診断版（`9bcca9cd…`）または準備中からに限定します。同じキー訂正版なら再公開しません。それ以前のCSP修正版・初回版はinspectと停止だけが可能です。ゲーム・他project・rootのFirebase設定・preview channelへ切り替えません。配信はexact siteだけ、1回です。
 
 配信前に既存releaseを再読取りし、途中の変更を検出します。ただしHosting deployにatomicなcompare-and-swapはなく、並行公開との完全な排他性は保証しません。同時に別端末から公開しないでください。配信後は返されたversionとlive release、および公開ファイル・HTTP応答を照合します。
 
@@ -127,7 +152,14 @@ node garden-connection-check.mjs --deploy-connection-check --tooling-dir "$HOME/
 
 有効期限にこのclientは停止します。接続確認の公開自体を取り下げる場合は、対象を確認して承認された担当者が、同じ固定helperの次のモードを使います。既存の準備中HTML・HTTPヘッダーに戻すHostingのみの操作です。
 
-診断版へ移行済みの場合は、診断版を取得したファイル名と既存toolingを使います。以前のhelperへ戻りません。
+キー訂正版へ移行済みの場合は、訂正版を取得したファイル名と既存toolingを使います。旧診断版helperは新releaseを識別できないため使いません。
+
+```sh
+printf '%s  garden-connection-check-key-fix.mjs\n' 'REVIEWED_KEY_FIX_SHA256' | sha256sum --check &&
+node garden-connection-check-key-fix.mjs --stop-connection-check --tooling-dir "$HOME/garden-connection-tools-20261003-1a3912"
+```
+
+以下はキー訂正前の診断版がまだ公開されている場合だけの旧手順です。
 
 ```sh
 printf '%s  garden-connection-check-diagnostic.mjs\n' 'REVIEWED_DIAGNOSTIC_SHA256' | sha256sum --check &&

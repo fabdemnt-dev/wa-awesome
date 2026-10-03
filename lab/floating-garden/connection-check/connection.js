@@ -68,7 +68,7 @@ export function validateConnectionRuntime(input) {
     input.startsAtMillis <= 0 || input.expiresAtMillis <= input.startsAtMillis ||
     input.expiresAtMillis - input.startsAtMillis > CONNECTION_MAX_DURATION_MILLIS) throw failure();
   if (input.appCheck.provider !== 'recaptcha-enterprise' ||
-    input.appCheck.siteKey !== '6Lc_LNwtAAAAADRAHvq10FwxirR3c5jZlxS9QpYw') throw failure();
+    input.appCheck.siteKey !== '6Lc_LNwtAAAAADRAHvql0FwxirR3c5jZlxS9QpYw') throw failure();
   return Object.freeze({ ...input, firebase: Object.freeze({ ...input.firebase }), appCheck: Object.freeze({ ...input.appCheck }) });
 }
 export function assertConnectionAccess(config, location, now, environment = globalThis) {

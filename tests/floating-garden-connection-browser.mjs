@@ -14,7 +14,7 @@ const NOW = Date.parse('2026-10-03T03:00:00Z');
 const runtime = { schemaVersion: 1, projectId: 'wa-awesome-garden-stg', origin: ORIGIN,
   startsAtMillis: NOW - 1000, expiresAtMillis: NOW + 86400000,
   firebase: { apiKey: 'AIzaSyCfa04hxQzY0T6gsVLsvTxIhB2zAB0v874', appId: '1:120030709276:web:015f4e996b7c42a4e801d9', authDomain: 'wa-awesome-garden-stg.firebaseapp.com', projectId: 'wa-awesome-garden-stg' },
-  appCheck: { provider: 'recaptcha-enterprise', siteKey: '6Lc_LNwtAAAAADRAHvq10FwxirR3c5jZlxS9QpYw' } };
+    appCheck: { provider: 'recaptcha-enterprise', siteKey: '6Lc_LNwtAAAAADRAHvql0FwxirR3c5jZlxS9QpYw' } };
 const modules = {
   'firebase-app.js': `const apps=[]; export function getApps(){return apps;} export function initializeApp(options,name){ const a={options,name}; apps.push(a); return a;} export async function deleteApp(a){const i=apps.indexOf(a);if(i>=0)apps.splice(i,1);}`,
   'firebase-app-check.js': `export class ReCaptchaEnterpriseProvider {constructor(k){this.key=k;}} export function initializeAppCheck(a,o){return {a,o};} export function setTokenAutoRefreshEnabled(){} export async function getToken(){return {token:'synthetic-proof-not-for-display'};}`,
