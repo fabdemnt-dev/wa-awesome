@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { buildPayload, renderHelper, prepareConnection } from '../scripts/prepare-floating-garden-connection.mjs';
-import { operate, prepareDependencies, writeBundle, checkBundle, validatePayload, validateEnvironment, validateConfiguration, validateWindow, canonicalVersionName, connectionMessage, hostingConfig, runtimeConfig, PROJECT, PROJECT_NUMBER, ORIGIN, STARTS_AT, EXPIRES_AT, MAINTENANCE_MESSAGE, MAINTENANCE_CSP, CONNECTION_CSP, CONFIG_FILE, CONNECTION_NAMES } from '../scripts/deploy-floating-garden-connection-template.mjs';
+import { operate, prepareDependencies, writeBundle, checkBundle, validatePayload, validateEnvironment, validateConfiguration, validateWindow, canonicalVersionName, connectionMessage, payloadDigest, hostingConfig, runtimeConfig, PROJECT, PROJECT_NUMBER, ORIGIN, STARTS_AT, EXPIRES_AT, MAINTENANCE_MESSAGE, MAINTENANCE_CSP, CONNECTION_CSP, PREVIOUS_CONNECTION_CSP, PREVIOUS_CONNECTION_DIGEST, PREVIOUS_CONNECTION_MESSAGE, CONFIG_FILE, CONNECTION_NAMES } from '../scripts/deploy-floating-garden-connection-template.mjs';
 import { HTML, CONFIG } from '../scripts/deploy-floating-garden-maintenance.mjs';
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const payload = buildPayload();
@@ -25,7 +25,7 @@ function harness(t, options = {}) {
   const root = temp(t), toolingDir = fakeTooling(root), commands = [], reads = [], logs = [];
   let kind = options.kind ?? 'maintenance', currentVersion = version(1), channelReads = 0, writes = 0;
   const metadata = () => ({ channels: [{ name: `sites/${PROJECT}/channels/live`, url: options.wrongOrigin ? 'https://wrong.example' : ORIGIN,
-    release: { type: 'DEPLOY', message: options.unknown ? 'unknown' : (kind === 'maintenance' ? MAINTENANCE_MESSAGE : connectionMessage(payload)), version: { name: currentVersion, status: 'FINALIZED' } } }] });
+    release: { type: 'DEPLOY', message: options.unknown ? 'unknown' : (!writes && options.releaseMessage) || (kind === 'maintenance' ? MAINTENANCE_MESSAGE : kind === 'previous-connection' ? PREVIOUS_CONNECTION_MESSAGE : connectionMessage(payload)), version: { name: currentVersion, status: 'FINALIZED' } } }] });
   const run = (command, args, cwd) => {
     commands.push({ command, args, cwd });
     if (command === 'gcloud') {
@@ -44,7 +44,7 @@ function harness(t, options = {}) {
     if (cmd === 'hosting:sites:list') return success({ sites: options.missingSite ? [] : [{ name: `projects/${PROJECT_NUMBER}/sites/${PROJECT}`, defaultUrl: ORIGIN }] });
     if (cmd === 'hosting:channel:list') {
       channelReads++;
-      if (options.race && channelReads === 2) currentVersion = version(2);
+      if ((options.race && channelReads === 2) || (options.postRace && channelReads === 4)) currentVersion = version(2);
       if (options.mutateBundle && channelReads === 2) options.mutateBundle(dirname(args.at(-5)));
       return success(metadata());
     }
@@ -60,17 +60,20 @@ function harness(t, options = {}) {
     assert.fail(`unexpected CLI command ${cmd}`);
   };
   const fetchImpl = async (url, request) => {
-    reads.push({ url, request }); assert.ok(url.startsWith(`${ORIGIN}/`));
+    reads.push({ url, request, kind, writes }); assert.ok(url.startsWith(`${ORIGIN}/`));
     const path = new URL(url).pathname;
     const connection = path.startsWith('/connection-check/');
     let status = 200, body = HTML, csp = MAINTENANCE_CSP;
-    if (connection && kind === 'connection') { body = payload.connectionFiles[path.split('/').at(-1) || 'index.html']; csp = CONNECTION_CSP; }
+    if (connection && ['connection', 'previous-connection'].includes(kind)) { body = payload.connectionFiles[path.split('/').at(-1) || 'index.html']; csp = kind === 'previous-connection' ? PREVIOUS_CONNECTION_CSP : CONNECTION_CSP; }
     else if (connection || path.startsWith('/lab/')) status = 404;
-    if (options.badBytes || (options.badPostBytes && writes)) body = 'wrong';
+    if (options.badBytes || options.badPathBytes === path || (options.badPostBytes && writes)) body = 'wrong';
+    if (connection && options.connectionCsp !== undefined && !writes) csp = options.connectionCsp;
     const headers = publicHeaders(csp); if (options.badHeaders) headers['content-security-policy'] += '; script-src *';
+    if (!writes) Object.assign(headers, options.headerOverrides);
+    if (writes && options.badPostHeaders) headers['content-security-policy'] = PREVIOUS_CONNECTION_CSP;
     return new Response(body, { status, headers });
   };
-  const perform = (mode = 'deploy') => operate({ mode, payload, toolingDir, run, fetchImpl, log: (s) => logs.push(s), tempRoot: root, env: options.env ?? {}, execArgv: [], now: () => options.time ?? STARTS_AT + 60000 });
+  const perform = (mode = 'deploy') => operate({ mode, payload: options.payload ?? payload, toolingDir, run, fetchImpl, log: (s) => logs.push(s), tempRoot: root, env: options.env ?? {}, execArgv: [], now: () => options.time ?? STARTS_AT + 60000 });
   return { root, toolingDir, commands, reads, logs, perform, writes: () => writes };
 }
 test('generator preserves exact maintenance, seven public files and standalone embedded runtime', (t) => {
@@ -103,6 +106,19 @@ test('configs are Hosting-only with disjoint CSP rules and no hooks/redirects/re
   assert.ok(!cfg.hosting.headers[0].headers.some((h) => h.key === 'Content-Security-Policy'));
   assert.doesNotMatch(CONNECTION_CSP, /unsafe-|\*|firestore|cloudfunctions/);
 });
+test('the only payload change from the fixed prior release is the App Check CSP origin', () => {
+  const previousConfig = payload.connectionConfig.replace(CONNECTION_CSP, PREVIOUS_CONNECTION_CSP);
+  assert.equal(PREVIOUS_CONNECTION_DIGEST, 'd73fa35889621062065889b52242b37b052a81c375f78c208f80c5e4ddff3e2d');
+  assert.equal(payloadDigest({ ...payload, connectionConfig: previousConfig }), PREVIOUS_CONNECTION_DIGEST);
+  assert.equal(payload.connectionConfig, previousConfig.replace('https://firebaseappcheck.googleapis.com', 'https://content-firebaseappcheck.googleapis.com'));
+  assert.equal(PREVIOUS_CONNECTION_MESSAGE, `garden-connection-static-v1:${PREVIOUS_CONNECTION_DIGEST}`);
+  assert.notEqual(connectionMessage(payload), PREVIOUS_CONNECTION_MESSAGE);
+  const connect = CONNECTION_CSP.split('; ').find((part) => part.startsWith('connect-src '));
+  assert.ok(connect.split(' ').includes('https://content-firebaseappcheck.googleapis.com'));
+  assert.ok(!connect.split(' ').includes('https://firebaseappcheck.googleapis.com'));
+  assert.equal(STARTS_AT, Date.parse('2026-10-03T02:15:00Z'));
+  assert.equal(EXPIRES_AT, Date.parse('2026-10-04T03:00:00Z'));
+});
 test('explicit modes, project, existing site, API, gcloud routing and CLI version fail closed', async (t) => {
   for (const options of [{ wrongProject: true }, { missingApi: true }, { missingSite: true }, { wrongCli: true }, { denied: true }, { config: { auth: { impersonate_service_account: 'other' } } }, { unknown: true }, { wrongOrigin: true }]) {
     const h = harness(t, options); await assert.rejects(h.perform()); assert.equal(h.writes(), 0);
@@ -129,6 +145,70 @@ test('same recognized connection release is reverified without redeploy and stop
   const same = harness(t, { kind: 'connection' }); assert.equal((await same.perform()).deployed, false); assert.equal(same.writes(), 0);
   const stopped = harness(t, { kind: 'connection', time: EXPIRES_AT + 100000 }); assert.equal((await stopped.perform('stop')).kind, 'maintenance'); assert.equal(stopped.writes(), 1);
   const already = harness(t, { time: EXPIRES_AT + 100000 }); assert.equal((await already.perform('stop')).deployed, false); assert.equal(already.writes(), 0);
+});
+test('the exact prior release migrates with one write, verifying old and current bytes and headers', async (t) => {
+  const h = harness(t, { kind: 'previous-connection' }), result = await h.perform();
+  assert.equal(result.deployed, true); assert.equal(result.kind, 'connection'); assert.equal(result.version, version(3)); assert.equal(h.writes(), 1);
+  const paths = ['/', '/index.html', '/404.html', '/lab/floating-garden/trial/index.html', ...CONNECTION_NAMES.map((name) => `/connection-check/${name}`), '/connection-check/'];
+  for (const path of paths) {
+    assert.equal(h.reads.filter((r) => r.url === `${ORIGIN}${path}` && r.kind === 'previous-connection' && r.writes === 0).length, 1);
+    assert.equal(h.reads.filter((r) => r.url === `${ORIGIN}${path}` && r.kind === 'connection' && r.writes === 1).length, 1);
+  }
+  const deployIndex = h.commands.findIndex((c) => c.args[1] === 'deploy');
+  assert.equal(h.commands[deployIndex - 1].args[1], 'hosting:channel:list');
+  assert.equal(h.commands[deployIndex].args[5], connectionMessage(payload));
+  assert.ok(h.logs.some((s) => s.startsWith('VERIFIED:')));
+});
+test('prior-release inspect remains read-only and stop can restore maintenance after the unchanged expiry', async (t) => {
+  const inspected = harness(t, { kind: 'previous-connection' });
+  assert.equal((await inspected.perform('inspect')).kind, 'previous-connection'); assert.equal(inspected.writes(), 0);
+  const stopped = harness(t, { kind: 'previous-connection', time: EXPIRES_AT + 100000 });
+  assert.equal((await stopped.perform('stop')).kind, 'maintenance'); assert.equal(stopped.writes(), 1);
+  assert.ok(stopped.reads.filter((r) => r.writes).every((r) => r.kind === 'maintenance'));
+});
+test('prior-release mismatched markers, all public bytes, CSP and remaining safety headers stop without a write', async (t) => {
+  const paths = ['/', '/index.html', '/404.html', '/lab/floating-garden/trial/index.html', ...CONNECTION_NAMES.map((name) => `/connection-check/${name}`), '/connection-check/'];
+  const mismatches = [
+    { releaseMessage: 'garden-connection-static-v1:unknown' },
+    { releaseMessage: connectionMessage(payload) },
+    { releaseMessage: MAINTENANCE_MESSAGE },
+    { connectionCsp: CONNECTION_CSP },
+    { connectionCsp: `${PREVIOUS_CONNECTION_CSP}; connect-src *` },
+    ...paths.map((path) => ({ badPathBytes: path })),
+    ...['cache-control', 'x-content-type-options', 'referrer-policy', 'x-robots-tag'].map((key) => ({ headerOverrides: { [key]: 'wrong' } })),
+  ];
+  for (const options of mismatches) {
+    const h = harness(t, { kind: 'previous-connection', ...options }); await assert.rejects(h.perform()); assert.equal(h.writes(), 0);
+  }
+});
+test('a modified candidate cannot redefine the known prior public bytes', async (t) => {
+  for (const name of CONNECTION_NAMES) {
+    const changed = structuredClone(payload); changed.connectionFiles[name] += '\n// unreviewed';
+    const h = harness(t, { kind: 'previous-connection', payload: changed });
+    await assert.rejects(h.perform()); assert.equal(h.writes(), 0); assert.equal(h.commands.length, 0);
+  }
+});
+test('a raced prior release blocks migration, and a post-write race never reports completion', async (t) => {
+  const raced = harness(t, { kind: 'previous-connection', race: true });
+  await assert.rejects(raced.perform(), /changed before publication/); assert.equal(raced.writes(), 0);
+  const postRaced = harness(t, { kind: 'previous-connection', postRace: true });
+  await assert.rejects(postRaced.perform(), /changed during post-publication/); assert.equal(postRaced.writes(), 1);
+  assert.ok(!postRaced.logs.some((s) => s.startsWith('VERIFIED:')));
+});
+test('uncertain prior-release migration is never retried and only metadata is read after the attempt', async (t) => {
+  const h = harness(t, { kind: 'previous-connection', uncertain: true });
+  await assert.rejects(h.perform()); assert.equal(h.writes(), 1);
+  assert.equal(h.commands.at(-1).args[1], 'hosting:channel:list');
+  assert.ok(h.reads.every((r) => r.writes === 0));
+  assert.ok(h.logs.some((s) => s.startsWith('PARTIAL_STATE:')));
+  assert.ok(h.logs.some((s) => s.startsWith('READBACK_ONLY:')));
+  assert.ok(!h.logs.some((s) => s.startsWith('VERIFIED:')));
+});
+test('migration completion requires current public bytes, current headers and the acknowledged version', async (t) => {
+  for (const options of [{ badPostBytes: true }, { badPostHeaders: true }, { wrongReturnedVersion: true }]) {
+    const h = harness(t, { kind: 'previous-connection', ...options });
+    await assert.rejects(h.perform()); assert.equal(h.writes(), 1); assert.ok(!h.logs.some((s) => s.startsWith('VERIFIED:')));
+  }
 });
 test('fixed window never advances and requires ten minutes remaining before deploy', async (t) => {
   assert.doesNotThrow(() => validateWindow(EXPIRES_AT - 600000));

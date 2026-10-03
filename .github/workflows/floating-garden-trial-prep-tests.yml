@@ -18,6 +18,7 @@ on:
       - 'docs/floating-garden-phone-connection-check.md'
       - 'scripts/*floating-garden-connection*.mjs'
       - 'tests/floating-garden-connection*'
+      - 'tests/fixtures/firebase-10.8.0/**'
       - 'tests/fixtures/floating-garden-maintenance-package.json'
       - 'tests/floating-garden-trial-*'
       - 'tests/helpers/*floating-garden-trial*'
@@ -58,7 +59,7 @@ jobs:
         run: npm ci --prefix tests/e2e --ignore-scripts --no-audit --no-fund
       - name: Prepare Chromium
         run: tests/e2e/node_modules/.bin/playwright install --with-deps chromium
-      - name: Test connection-only page with fully synthetic network in Chromium
+      - name: Test connection page and exact Firebase 10.8.0 CSP regression with synthetic network in Chromium
         env:
           GARDEN_CONNECTION_SCREENSHOTS: /tmp/floating-garden-connection-browser-qa
         run: node --test tests/floating-garden-connection-browser.mjs

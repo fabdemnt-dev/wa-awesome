@@ -22,6 +22,28 @@ Web Appは `1:120030709276:web:015f4e996b7c42a4e801d9`。同じFirebase app名 `
 
 合成テストは実端末のattestation成功を証明しません。2台の本人端末、実reCAPTCHA評価、実認証、実配信のCSP/HTTPS動作は、公開後の本人の確認を待ちます。
 
+## 2026-10-03：接続先CSPの限定修正
+
+初回公開のroot・旧ゲーム404・接続ページと全アセットは、公開後の読取りで承認済みのバイトとヘッダーに一致しました。その後、本人のChromeで開始を1回押すと接続失敗になり、Firebase Consoleでは匿名ユーザーの作成成功を確認できませんでした。
+
+固定の[公式Firebase 10.8.0 App Check SDK](https://www.gstatic.com/firebasejs/10.8.0/firebase-app-check.js)が使う交換先は `https://content-firebaseappcheck.googleapis.com/v1` です。初回CSPが許可した `https://firebaseappcheck.googleapis.com` とは別のホストであり、SDKの交換要求が遮断される不具合を確認しました。ネットワークを隔離した実SDKの合成検証でも、現CSPではAuth前に失敗し、ホスト1個の置換で合成認証まで進みます。これは確実な遮断要因の検証であり、本人端末の最初の失敗箇所を端末ログで特定したという意味ではありません。
+
+承認された修正は `/connection-check/**` の `connect-src` 内で上記ホストを**追加ではなく置換**することだけです。公開する7ファイル、他のヘッダー、期限、しきい値0.5、TTL1時間、domain検証、Firestore適用、ゲームの期間は変えません。API有効化で使うサービス名 `firebaseappcheck.googleapis.com` は正しいため、その設定は変更しません。
+
+修正版helperは、固定の旧release `garden-connection-static-v1:d73fa35889621062065889b52242b37b052a81c375f78c208f80c5e4ddff3e2d` も識別します。旧releaseからの移行前には、旧ファイルの全バイトと旧CSPを含む安全ヘッダーを厳密に照合します。未知のrelease、ファイルやヘッダーの不一致、途中のversion変更は停止します。同じ修正版が既に公開済みなら再公開しません。
+
+初回の依存準備が成功した本人は、CLIを再インストールしません。レビュー・全CI・固定commitの読戻し確認後に案内された新helperを別名で保存し、同じ既存toolingディレクトリで読取り確認します。
+
+```sh
+curl --fail --silent --show-error --proto '=https' 'https://raw.githubusercontent.com/fabdemnt-dev/wa-awesome/REVIEWED_FIX_COMMIT/scripts/deploy-floating-garden-connection-check.mjs' -o garden-connection-check-csp-fix.mjs &&
+printf '%s  garden-connection-check-csp-fix.mjs\n' 'REVIEWED_FIX_SHA256' | sha256sum --check &&
+node garden-connection-check-csp-fix.mjs --inspect --tooling-dir "$HOME/garden-connection-tools-20261003-1a3912"
+```
+
+成功確認後、案内された同じ新helperとSHAで `--deploy-connection-check` を1回実行します。結果不明なら再送せず、その新helperの `--inspect` で確認します。旧helperは修正版releaseを識別しないため、以後の読取り・停止にも修正版を使います。
+
+公開後の照合が成功してから、本人が**同じChrome**でページを再読込みし、開始を1回だけ押します。試行済み状態で認証を復元できない場合は停止します。試行済み印やブラウザーデータを消したり、別ブラウザーで試したりしません。修正・合成テスト・再公開だけでは実機App Check成功とは扱いません。
+
 ## 公開担当者の手順
 
 補助ファイルは既存認証のあるCloud Shell用です。新しいログイン・OAuth・鍵・tokenを作成しません。必要API・権限が不足、認証の差替え、未知の既存release、予期しない設定があれば止めます。
@@ -50,7 +72,7 @@ printf '%s  garden-connection-check.mjs\n' 'REVIEWED_SHA256' | sha256sum --check
 node garden-connection-check.mjs --deploy-connection-check --tooling-dir "$HOME/garden-connection-tools-20261003"
 ```
 
-このhelperは専用siteの存在を要求し、サイトを新規作成しません。既存の準備中releaseまたは同じ接続確認release以外は上書きしません。ゲーム・他project・rootのFirebase設定・preview channelへ切り替えません。配信はexact siteだけ、1回です。
+このhelperは専用siteの存在を要求し、サイトを新規作成しません。既存の準備中release、同じ接続確認release、または上記の固定された旧接続確認release以外は上書きしません。ゲーム・他project・rootのFirebase設定・preview channelへ切り替えません。配信はexact siteだけ、1回です。
 
 配信前に既存releaseを再読取りし、途中の変更を検出します。ただしHosting deployにatomicなcompare-and-swapはなく、並行公開との完全な排他性は保証しません。同時に別端末から公開しないでください。配信後は返されたversionとlive release、および公開ファイル・HTTP応答を照合します。
 
@@ -71,6 +93,15 @@ node garden-connection-check.mjs --deploy-connection-check --tooling-dir "$HOME/
 ## 停止
 
 有効期限にこのclientは停止します。接続確認の公開自体を取り下げる場合は、対象を確認して承認された担当者が、同じ固定helperの次のモードを使います。既存の準備中HTML・HTTPヘッダーに戻すHostingのみの操作です。
+
+CSP修正版へ移行済みの場合は、修正版を取得したファイル名と既存toolingを使います。初回公開時の旧helperへ戻りません。
+
+```sh
+printf '%s  garden-connection-check-csp-fix.mjs\n' 'REVIEWED_FIX_SHA256' | sha256sum --check &&
+node garden-connection-check-csp-fix.mjs --stop-connection-check --tooling-dir "$HOME/garden-connection-tools-20261003-1a3912"
+```
+
+現行helperを最初から一般手順の `garden-connection-check.mjs` という名前で取得した場合に限り、次の対応するファイル名・toolingを使います。
 
 ```sh
 printf '%s  garden-connection-check.mjs\n' 'REVIEWED_SHA256' | sha256sum --check &&

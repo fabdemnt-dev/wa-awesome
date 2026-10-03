@@ -26,7 +26,11 @@ export const DEPENDENCIES = Object.freeze({
   'package-lock.json': 'd42c28f7b71969648ae4ec97799460e13210edd55fede3a5f4a97170cbb027c6',
 });
 export const MAINTENANCE_CSP = "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
-export const CONNECTION_CSP = "default-src 'none'; script-src 'self' https://www.gstatic.com/firebasejs/ https://www.google.com/recaptcha/ https://www.gstatic.com/recaptcha/ https://recaptcha.google.com/recaptcha/; style-src 'self'; img-src 'self' data: https://www.google.com/recaptcha/ https://www.gstatic.com/recaptcha/; connect-src https://firebaseappcheck.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.google.com/recaptcha/ https://recaptcha.google.com/recaptcha/; frame-src https://www.google.com/recaptcha/ https://recaptcha.google.com/recaptcha/; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+export const CONNECTION_CSP = "default-src 'none'; script-src 'self' https://www.gstatic.com/firebasejs/ https://www.google.com/recaptcha/ https://www.gstatic.com/recaptcha/ https://recaptcha.google.com/recaptcha/; style-src 'self'; img-src 'self' data: https://www.google.com/recaptcha/ https://www.gstatic.com/recaptcha/; connect-src https://content-firebaseappcheck.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.google.com/recaptcha/ https://recaptcha.google.com/recaptcha/; frame-src https://www.google.com/recaptcha/ https://recaptcha.google.com/recaptcha/; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+export const PREVIOUS_CONNECTION_CSP = CONNECTION_CSP.replace('https://content-firebaseappcheck.googleapis.com', 'https://firebaseappcheck.googleapis.com');
+// The only migratable previous payload, reviewed at 1a3912316c60d4ef7780fbb2017cfe429177f1ae.
+export const PREVIOUS_CONNECTION_DIGEST = 'd73fa35889621062065889b52242b37b052a81c375f78c208f80c5e4ddff3e2d';
+export const PREVIOUS_CONNECTION_MESSAGE = `garden-connection-static-v1:${PREVIOUS_CONNECTION_DIGEST}`;
 export const CONNECTION_NAMES = ['app.js', 'connection-runtime.js', 'connection.js', 'index.html', 'style.css'];
 const plain = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const present = (v) => v !== undefined && v !== null && v !== '';
@@ -69,6 +73,11 @@ export function validatePayload(payload) {
   if (!plain(payload.connectionFiles) || !same(Object.keys(payload.connectionFiles).sort(), CONNECTION_NAMES)) stop('Unexpected public connection assets.');
   for (const value of Object.values(payload.connectionFiles)) if (typeof value !== 'string' || !value.length || Buffer.byteLength(value) > 256 * 1024 || value.includes('\u0000')) stop('Invalid public asset bytes.');
   if (payload.connectionFiles['connection-runtime.js'] !== runtimeSource()) stop('Runtime config differs from the fixed public config/window.');
+  // Reversing the single approved CSP-origin edit must reproduce the exact
+  // known payload digest. This pins all seven public files, config and expiry;
+  // a new arbitrary payload must not become its own trusted migration source.
+  const previous = { ...payload, connectionConfig: payload.connectionConfig.replace(CONNECTION_CSP, PREVIOUS_CONNECTION_CSP) };
+  if (payloadDigest(previous) !== PREVIOUS_CONNECTION_DIGEST) stop('Payload differs from the exact reviewed previous release and one-origin CSP fix.');
   return payload;
 }
 export function connectionMessage(payload) { validatePayload(payload); return `garden-connection-static-v1:${payloadDigest(payload)}`; }
@@ -187,15 +196,17 @@ export function liveChannel(result) {
 }
 export function releaseIdentity(channel, payload) {
   const r = channel?.release;
-  if (!plain(r) || r.type !== 'DEPLOY' || !plain(r.version) || r.version.status !== 'FINALIZED' || ![MAINTENANCE_MESSAGE, connectionMessage(payload)].includes(r.message)) stop('Existing live release is not recognized. Stop; do not overwrite it.');
-  return { version: canonicalVersionName(r.version.name), message: r.message, kind: r.message === MAINTENANCE_MESSAGE ? 'maintenance' : 'connection' };
+  if (!plain(r) || r.type !== 'DEPLOY' || !plain(r.version) || r.version.status !== 'FINALIZED' || ![MAINTENANCE_MESSAGE, PREVIOUS_CONNECTION_MESSAGE, connectionMessage(payload)].includes(r.message)) stop('Existing live release is not recognized. Stop; do not overwrite it.');
+  return { version: canonicalVersionName(r.version.name), message: r.message, kind: r.message === MAINTENANCE_MESSAGE ? 'maintenance' : r.message === PREVIOUS_CONNECTION_MESSAGE ? 'previous-connection' : 'connection' };
 }
 export async function verifyPublic(payload, kind, fetchImpl = fetch) {
   validatePayload(payload);
+  if (!['maintenance', 'previous-connection', 'connection'].includes(kind)) stop('Unrecognized public release kind.');
   const reads = [['/', 200, payload.maintenanceHtml, MAINTENANCE_CSP], ['/index.html', 200, payload.maintenanceHtml, MAINTENANCE_CSP], ['/404.html', 200, payload.maintenanceHtml, MAINTENANCE_CSP], ['/lab/floating-garden/trial/index.html', 404, payload.maintenanceHtml, MAINTENANCE_CSP]];
-  if (kind === 'connection') {
-    for (const [name, value] of Object.entries(payload.connectionFiles)) reads.push([`/connection-check/${name}`, 200, value, CONNECTION_CSP]);
-    reads.push(['/connection-check/', 200, payload.connectionFiles['index.html'], CONNECTION_CSP]);
+  if (kind === 'connection' || kind === 'previous-connection') {
+    const csp = kind === 'previous-connection' ? PREVIOUS_CONNECTION_CSP : CONNECTION_CSP;
+    for (const [name, value] of Object.entries(payload.connectionFiles)) reads.push([`/connection-check/${name}`, 200, value, csp]);
+    reads.push(['/connection-check/', 200, payload.connectionFiles['index.html'], csp]);
   } else {
     // A restored maintenance release must make every formerly published file inert.
     for (const name of CONNECTION_NAMES) reads.push([`/connection-check/${name}`, 404, payload.maintenanceHtml, MAINTENANCE_CSP]);

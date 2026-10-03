@@ -4,8 +4,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, mkdir } from 'node:fs/promises';
 import { extname } from 'node:path';
-import { CONNECTION_CSP } from '../scripts/deploy-floating-garden-connection-template.mjs';
+import { CONNECTION_CSP, runtimeConfig } from '../scripts/deploy-floating-garden-connection-template.mjs';
 import { chromium } from './e2e/node_modules/playwright/index.mjs';
+import { IDENTITY_ATTEMPT_KEY } from '../lab/floating-garden/connection-check/connection.js';
+import { SDK_BASE, APP_CHECK_ORIGIN, AUTH_ORIGIN, UID, TOKENS, RECAPTCHA_PROOF, RECAPTCHA_SCRIPT, loadOfficialSdk, syntheticResponse, legacyCsp } from './fixtures/firebase-10.8.0/fixture.mjs';
 const ORIGIN = 'https://wa-awesome-garden-stg.web.app';
 const URL = `${ORIGIN}/connection-check/`;
 const NOW = Date.parse('2026-10-03T03:00:00Z');
@@ -70,4 +72,147 @@ test('connection page mobile layout, no pre-start SDK, one-shot Auth, reload per
   await expired.goto(URL); await expired.getByText('配信元・設定・有効期間を確認できません', { exact: true }).waitFor();
   assert.equal(sdkRequests.length, count);
   assert.deepEqual(blocked, []);
+});
+
+// Unlike the preceding intentionally synthetic SDK/UI test, these scenarios
+// evaluate the official CDN modules byte-for-byte. Only reCAPTCHA/platform and
+// endpoint responses are fake. Chromium enforces the actual response CSP.
+test('exact Firebase 10.8.0 SDK regression: old CSP fails before Auth; publisher CSP succeeds without duplicate identities or token DOM', { timeout: 90000 }, async (t) => {
+  const officialModules = await loadOfficialSdk();
+  const options = process.env.GARDEN_CHROMIUM_EXECUTABLE ? { executablePath: process.env.GARDEN_CHROMIUM_EXECUTABLE } : {};
+  const browser = await chromium.launch({ headless: true, ...options });
+  t.after(() => browser.close());
+  for (const [mode, csp] of [['old-csp', legacyCsp(CONNECTION_CSP)], ['publisher-csp', CONNECTION_CSP]]) {
+    await t.test(mode, async () => {
+      const context = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block' });
+      try {
+        const requests = [], unexpected = [], pageErrors = [];
+        await context.addInitScript((time) => {
+          Date.now = () => time;
+          window.__connectionCspViolations = [];
+          window.__connectionStatusHistory = [];
+          document.addEventListener('securitypolicyviolation', (event) => {
+            window.__connectionCspViolations.push({ directive: event.effectiveDirective, blocked: event.blockedURI });
+          });
+          document.addEventListener('DOMContentLoaded', () => {
+            const status = document.getElementById('connection-status');
+            window.__connectionStatusHistory.push(status.textContent);
+            new MutationObserver((mutations) => {
+              for (const mutation of mutations) {
+                for (const node of mutation.addedNodes) window.__connectionStatusHistory.push(node.textContent);
+              }
+            }).observe(status, { childList: true });
+          });
+        }, NOW);
+        const headers = { 'content-security-policy': csp, 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' };
+        await context.route('**/*', async (route) => {
+          const request = route.request();
+          const address = new globalThis.URL(request.url());
+          const endpoint = address.origin + address.pathname;
+          const method = request.method();
+          requests.push({ endpoint, method });
+          // Every request is explicitly fulfilled or aborted. No live transport,
+          // fallback route, service worker, route.fetch, or route.continue exists.
+          if (address.origin === ORIGIN && method === 'GET') {
+            const name = address.pathname === '/connection-check/' ? 'index.html' : address.pathname.startsWith('/connection-check/') ? address.pathname.slice('/connection-check/'.length) : '';
+            if (name === 'connection-runtime.js') return route.fulfill({ status: 200, contentType: 'text/javascript', headers, body: `export default ${JSON.stringify(runtimeConfig())};` });
+            if (['index.html', 'app.js', 'connection.js', 'style.css'].includes(name)) {
+              return route.fulfill({ status: 200, contentType: mimes[extname(name)], headers, body: await readFile(new globalThis.URL(`../lab/floating-garden/connection-check/${name}`, import.meta.url)) });
+            }
+            if (address.pathname === '/favicon.ico') return route.fulfill({ status: 204, body: '' });
+          }
+          if (method === 'GET' && officialModules.has(request.url())) {
+            return route.fulfill({ status: 200, contentType: 'text/javascript', headers: { 'access-control-allow-origin': '*' }, body: officialModules.get(request.url()) });
+          }
+          if (method === 'GET' && address.origin === 'https://www.google.com' && address.pathname === '/recaptcha/enterprise.js') {
+            return route.fulfill({ status: 200, contentType: 'text/javascript', body: RECAPTCHA_SCRIPT });
+          }
+          const response = syntheticResponse(request.url());
+          if (response && method === 'OPTIONS') {
+            return route.fulfill({ status: 204, headers: { 'access-control-allow-origin': ORIGIN, 'access-control-allow-methods': 'POST, OPTIONS', 'access-control-allow-headers': request.headers()['access-control-request-headers'] || '*' }, body: '' });
+          }
+          if (response && method === 'POST') {
+            const body = request.postDataJSON();
+            if (address.origin === APP_CHECK_ORIGIN) assert.equal(body.recaptcha_enterprise_token, RECAPTCHA_PROOF);
+            if (address.pathname === '/v1/accounts:signUp') assert.equal(body.returnSecureToken, true);
+            return route.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': ORIGIN }, body: JSON.stringify(response) });
+          }
+          unexpected.push(endpoint);
+          await route.abort('blockedbyclient');
+        });
+        const page = await context.newPage();
+        page.on('pageerror', (error) => pageErrors.push(error.name));
+        const startButton = page.getByRole('button', { name: '接続確認を開始' });
+        await page.goto(URL);
+        await startButton.waitFor({ state: 'visible' });
+        assert.equal(requests.some((request) => !request.endpoint.startsWith(ORIGIN + '/')), false, 'no SDK, attestation or Auth before Start');
+        assert.equal(await page.evaluate((key) => localStorage.getItem(key), IDENTITY_ATTEMPT_KEY), null);
+        // Deliver duplicate events in the same turn, including a programmatic
+        // event despite the disabled button, to exercise the client one-shot guard.
+        await startButton.evaluate((button) => {
+          button.click();
+          button.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        });
+        const expected = mode === 'old-csp' ? '接続を確認できませんでした' : '接続確認が完了しました';
+        await page.getByText(expected, { exact: true }).waitFor({ timeout: 20000 });
+        const inspect = () => page.evaluate((key) => ({
+          status: document.getElementById('connection-status').textContent,
+          uid: document.getElementById('connection-uid').textContent,
+          guard: localStorage.getItem(key),
+          violations: window.__connectionCspViolations,
+          states: window.__connectionStatusHistory,
+          html: document.documentElement.outerHTML,
+        }), IDENTITY_ATTEMPT_KEY);
+        const initial = await inspect();
+        assert.equal(await startButton.isDisabled(), true);
+        for (const token of TOKENS) assert.equal(initial.html.includes(token), false, 'tokens must never appear in visible or hidden DOM');
+        assert.deepEqual(requests.filter((request) => request.endpoint.startsWith(SDK_BASE)).map((request) => request.endpoint).sort(), [...officialModules.keys()].sort());
+        if (mode === 'old-csp') {
+          assert.equal(initial.uid, '未確認');
+          assert.equal(initial.guard, null);
+          assert.equal(initial.states.includes('匿名認証を確認しています'), false);
+          assert.ok(initial.violations.some((violation) => violation.directive === 'connect-src' && new globalThis.URL(violation.blocked).origin === APP_CHECK_ORIGIN), 'Chromium must report the actual SDK App Check host blocked by connect-src');
+          assert.equal(requests.some((request) => request.endpoint.startsWith(AUTH_ORIGIN)), false);
+          assert.equal(requests.some((request) => request.endpoint.startsWith(APP_CHECK_ORIGIN)), false, 'CSP blocks exchange before routing/transport');
+          const beforeDuplicate = requests.length;
+          await startButton.dispatchEvent('click');
+          assert.equal(await page.locator('#connection-status').innerText(), expected);
+          assert.equal(requests.length, beforeDuplicate, 'terminal failed click cannot retry the exchange');
+        } else {
+          assert.equal(initial.uid, UID);
+          assert.equal(initial.guard, 'attempted');
+          assert.deepEqual(initial.violations, []);
+          assert.ok(initial.states.includes('接続を確認しています'));
+          assert.ok(initial.states.includes('匿名認証を確認しています'));
+          assert.ok(initial.states.includes('接続確認が完了しました'));
+          const signups = () => requests.filter((request) => request.method === 'POST' && request.endpoint === `${AUTH_ORIGIN}/v1/accounts:signUp`).length;
+          assert.equal(signups(), 1);
+          await startButton.dispatchEvent('click');
+          assert.equal(await page.locator('#connection-uid').innerText(), UID);
+          assert.equal(signups(), 1);
+          const output = process.env.GARDEN_CONNECTION_SCREENSHOTS;
+          if (output) {
+            await mkdir(output, { recursive: true });
+            await page.screenshot({ path: `${output}/connection-mobile-official-sdk-synthetic-success.png`, fullPage: true });
+          }
+          const lookups = () => requests.filter((request) => request.method === 'POST' && request.endpoint === `${AUTH_ORIGIN}/v1/accounts:lookup`).length;
+          const beforeReloadLookups = lookups();
+          await page.reload();
+          await startButton.waitFor({ state: 'visible' });
+          assert.equal(signups(), 1, 'reload alone cannot create an identity');
+          await startButton.click();
+          await page.getByText(expected, { exact: true }).waitFor({ timeout: 20000 });
+          const reloaded = await inspect();
+          assert.equal(reloaded.uid, UID);
+          assert.equal(reloaded.guard, 'attempted');
+          assert.equal(signups(), 1, 'official browserLocalPersistence must reuse the same identity after reload');
+          assert.equal(lookups(), beforeReloadLookups + 1, 'reload validates the persisted SDK user rather than signing up again');
+          assert.deepEqual(reloaded.violations, []);
+          for (const token of TOKENS) assert.equal(reloaded.html.includes(token), false);
+        }
+        assert.deepEqual(unexpected, [], 'unexpected requests are blocked and fail this regression');
+        assert.deepEqual(pageErrors, []);
+      } finally { await context.close(); }
+    });
+  }
 });
