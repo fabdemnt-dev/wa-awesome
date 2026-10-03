@@ -36,6 +36,68 @@ export function sanitizeTrialRelayFailure({ kind, url, error, status }) {
     category: httpStatus >= 300 && httpStatus < 400 ? 'redirect-refused' : errorName === 'TimeoutError' ? 'timeout' : errorName === 'AssertionError' ? 'assertion-failed' : knownShape || 'relay-failed',
     ...(httpStatus === null ? {} : { status: httpStatus }) };
 }
+// This self-contained function is also embedded into the browser SDK facade.
+// Observe only an allowlisted, bounded summary; callbacks and unsubscribe still
+// go to the real SDK exactly once, with their original values and receivers.
+export function createTrialListenerDiagnostics(real, history, now = Date.now) {
+  const codes = new Set(['ok', 'cancelled', 'unknown', 'invalid-argument', 'deadline-exceeded', 'not-found', 'already-exists', 'permission-denied', 'resource-exhausted', 'failed-precondition', 'aborted', 'out-of-range', 'unimplemented', 'internal', 'unavailable', 'data-loss', 'unauthenticated']);
+  const integer = (value) => Number.isSafeInteger(value) && value >= 0 ? value : null;
+  let sequence = 0;
+  function record(id, event, value) {
+    try {
+      const entry = { id, event, time: integer(now()) };
+      if (event === 'next') {
+        const data = value?.data?.();
+        entry.revision = integer(data?.revision);
+        entry.matchRevision = integer(data?.match?.revision);
+        entry.fromCache = typeof value?.metadata?.fromCache === 'boolean' ? value.metadata.fromCache : null;
+        entry.hasPendingWrites = typeof value?.metadata?.hasPendingWrites === 'boolean' ? value.metadata.hasPendingWrites : null;
+      }
+      if (event === 'error') entry.code = codes.has(value?.code) ? value.code : 'unknown';
+      history.push(entry);
+      if (history.length > 256) history.splice(0, history.length - 256);
+    } catch { /* Diagnostics must not suppress, synthesize or change SDK events. */ }
+  }
+  const isObserver = (value) => value && typeof value === 'object' && ['next', 'error', 'complete'].some((key) => typeof value[key] === 'function');
+  return function onSnapshot(...args) {
+    sequence = sequence < Number.MAX_SAFE_INTEGER ? sequence + 1 : 1;
+    const id = sequence;
+    record(id, 'start');
+    const offset = typeof args[1] === 'function' || isObserver(args[1]) ? 1 : 2;
+    if (isObserver(args[offset])) {
+      const observer = args[offset], wrapped = Object.create(observer);
+      for (const event of ['next', 'error', 'complete']) {
+        const callback = observer[event];
+        if (typeof callback === 'function') Object.defineProperty(wrapped, event, { value: function (...values) {
+          if (event !== 'complete') record(id, event, values[0]);
+          return Reflect.apply(callback, observer, values);
+        } });
+      }
+      args[offset] = wrapped;
+    } else {
+      for (const [index, event] of [[offset, 'next'], [offset + 1, 'error']]) {
+        const callback = args[index];
+        if (typeof callback === 'function') args[index] = function (...values) {
+          record(id, event, values[0]);
+          return Reflect.apply(callback, this, values);
+        };
+      }
+    }
+    let unsubscribe;
+    try { unsubscribe = real.onSnapshot(...args); }
+    catch (error) { record(id, 'error', error); throw error; }
+    return function (...values) {
+      record(id, 'stop');
+      return Reflect.apply(unsubscribe, this, values);
+    };
+  };
+}
+
+export function sanitizeTrialSnapshotRevisions(snapshot) {
+  const integer = (value) => Number.isSafeInteger(value) && value >= 0 ? value : null;
+  return { revision: integer(snapshot?.room?.revision), matchRevision: integer(snapshot?.room?.match?.revision) };
+}
+
 export function trialSdkFixture(file, fixture) {
   validateFixture(fixture);
   const { projectId, ports } = fixture;
@@ -54,6 +116,9 @@ export function trialSdkFixture(file, fixture) {
       return auth;
     }`;
   if (file === 'firebase-firestore.js') return prelude + `
+    const listenerHistory = [];
+    globalThis.__trialListenerDiagnostics = listenerHistory;
+    export const onSnapshot = (${createTrialListenerDiagnostics.toString()})(real, listenerHistory);
     export function initializeFirestore(app, settings) {
       const db = real.initializeFirestore(app, settings);
       real.connectFirestoreEmulator(db, '127.0.0.1', ${ports.firestore}); return db;

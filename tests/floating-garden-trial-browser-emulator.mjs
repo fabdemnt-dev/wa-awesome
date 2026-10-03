@@ -16,7 +16,7 @@ import { createRequire } from 'node:module';
 import { chromium } from './e2e/node_modules/playwright/index.mjs';
 import { emulatorConfig } from './helpers/floating-garden-emulators.mjs';
 import { abortDeniedBrowserRequest } from './helpers/floating-garden-browser-network.mjs';
-import { trialSdkFixture, sanitizeTrialRelayFailure } from './helpers/floating-garden-trial-sdk-fixture.mjs';
+import { trialSdkFixture, sanitizeTrialRelayFailure, sanitizeTrialSnapshotRevisions } from './helpers/floating-garden-trial-sdk-fixture.mjs';
 import { ONLINE_SAVE_KEY } from '../lab/floating-garden/online/controller.js';
 import { legalActions, getDecision, rankMatch, applyMatchAction } from '../lab/floating-garden/match-engine.js';
 
@@ -85,6 +85,7 @@ const ready = (page) => page.waitForFunction((key) => {
   return (status?.textContent === 'サーバーと同期済み' || status?.textContent.startsWith('匿名認証済み')) && !saved?.pending;
 }, SAVE_KEY);
 const domRevision = (page) => page.evaluate(() => Number(document.querySelector('.shared-table > .demo-note')?.textContent.match(/確定操作 (\d+)回/)?.[1] ?? -1));
+const listenerHistory = (page) => page.evaluate(() => globalThis.__trialListenerDiagnostics || []).catch(() => []);
 const waitRevision = (page, revision) => page.waitForFunction((expected) => {
   const text = document.querySelector('.shared-table > .demo-note')?.textContent || '';
   return Number(text.match(/確定操作 (\d+)回/)?.[1] ?? -1) === expected;
@@ -571,16 +572,18 @@ test('trial bootstrap UI: two enrolled real anonymous browsers play and recover 
     for (const type of ['draw', 'offer', 'accept', 'decline', 'place', 'self', 'store-empty', 'store-swap', 'use-storage', 'request-invite', 'pass-invite', 'yield', 'welcome', 'meditate', 'stone', 'final-stone', 'final-pass-final']) assert.ok(covered.has(type), `missing browser branch: ${type}`);
     assert.deepEqual(blocked, [], 'no unexpected denied destination; known SDK connectivity probes also remain blocked');
     assert.deepEqual(pageErrors, []); assert.deepEqual(routeErrors, []); assert.deepEqual(sameOriginMisses, [], 'all static fixture and generated public assets must exist');
-    await writeFile(resolve(output, 'summary.json'), JSON.stringify({ projectId: config.projectId, status: 'passed', actions: finished.match.revision, branches: [...covered], independentAuthUsers: 2, sameIdRetry: true, offlineReconnect: true, freshAuthorizationReads: 'real browser Auth token over new Firestore REST GETs; active SDK watch cache is not treated as a fresh authorization check', revokedListenerFutureUpdatesDenied: true, gateChecks: ['unenrolled initial create', 'enrolled nonmember', 'revoked tester', 'expired tester', 'roster removed', 'expired room', 'disabled gate', 'private reads/lists/writes denied'], unchangedTrialPublicGraph: true, productionEntryFailClosedAtLoopback: true, successfulBrowserEntry: 'test-only bootstrap entry with explicit location injection', fixtureBoundaries: fixture.boundaries, liveAppCheckValidated: false, browserNetworkOrigins: [...allowedLocalOrigins, sdkOrigin], deniedConnectivityProbes }, null, 2));
+    const listenerObservations = await Promise.all(pages.map(async (page, seat) => ({ seat, listenerDiagnostics: await listenerHistory(page), snapshotRevisions: observed[seat].snapshots.slice(-256).map(sanitizeTrialSnapshotRevisions) })));
+    await writeFile(resolve(output, 'summary.json'), JSON.stringify({ projectId: config.projectId, status: 'passed', actions: finished.match.revision, branches: [...covered], independentAuthUsers: 2, sameIdRetry: true, offlineReconnect: true, freshAuthorizationReads: 'real browser Auth token over new Firestore REST GETs; active SDK watch cache is not treated as a fresh authorization check', revokedListenerFutureUpdatesDenied: true, gateChecks: ['unenrolled initial create', 'enrolled nonmember', 'revoked tester', 'expired tester', 'roster removed', 'expired room', 'disabled gate', 'private reads/lists/writes denied'], unchangedTrialPublicGraph: true, productionEntryFailClosedAtLoopback: true, successfulBrowserEntry: 'test-only bootstrap entry with explicit location injection', fixtureBoundaries: fixture.boundaries, liveAppCheckValidated: false, browserNetworkOrigins: [...allowedLocalOrigins, sdkOrigin], deniedConnectivityProbes, listenerObservations }, null, 2));
     console.log(`Trial-app emulator browser QA passed: ${finished.match.revision} committed actions; artifacts ${output}`);
   } catch (error) {
     // Test-only demo identities/room state only. Never record Auth tokens, headers,
     // browser storage dumps, or traces containing authentication responses.
+    const listenerDiagnostics = await Promise.all(pages.map(listenerHistory));
     await Promise.allSettled(pages.flatMap((page, seat) => [
       page.screenshot({ path: resolve(output, `failure-seat-${seat}.png`), fullPage: true, timeout: 5000 }),
       page.content().then((html) => writeFile(resolve(output, `failure-seat-${seat}.html`), html)),
     ]));
-    await writeFile(resolve(output, 'failure.json'), JSON.stringify({ stage, error: error.stack || error.message, roomId, transcript, pageErrors, blocked, deniedConnectivityProbes, routeErrors, sameOriginMisses, observations: observed.map(({ seat, authRequests, firestoreRequests, calls, console }) => ({ seat, authRequests, firestoreRequests, console, calls: calls.map(({ method, payload }) => ({ method, requestId: payload?.requestId, expectedRevision: payload?.expectedRevision, command: payload?.command })) })) }, null, 2));
+    await writeFile(resolve(output, 'failure.json'), JSON.stringify({ stage, error: error.stack || error.message, roomId, transcript, pageErrors, blocked, deniedConnectivityProbes, routeErrors, sameOriginMisses, observations: observed.map(({ seat, authRequests, firestoreRequests, calls, snapshots, console }) => ({ seat, authRequests, firestoreRequests, console, listenerDiagnostics: listenerDiagnostics[seat] || [], snapshotRevisions: snapshots.slice(-256).map(sanitizeTrialSnapshotRevisions), calls: calls.map(({ method, payload }) => ({ method, requestId: payload?.requestId, expectedRevision: payload?.expectedRevision, command: payload?.command })) })) }, null, 2));
     throw error;
   } finally {
     await Promise.allSettled(contexts.map((context) => context.close()));
