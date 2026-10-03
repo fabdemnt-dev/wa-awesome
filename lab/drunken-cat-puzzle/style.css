@@ -1,3 +1,4 @@
+/* Build: build-id-366 · PR #366 */
 :root {
   color-scheme: light;
   font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", system-ui, sans-serif;
@@ -163,3 +164,35 @@ button { font: inherit; }
   font-size: .7rem;
   text-align: center;
 }
+
+
+.direction-pad {
+  display: grid;
+  grid-template-columns: repeat(3, 52px);
+  grid-template-areas: ". up ." "left label right" ". down .";
+  gap: 6px;
+  justify-content: center;
+  align-items: center;
+  margin: 18px auto 8px;
+}
+.direction-button {
+  min-width: 52px;
+  min-height: 48px;
+  padding: 4px;
+  color: var(--plum);
+  font-size: 1.35rem;
+  font-weight: 900;
+  background: #eee8f6;
+  border: 1px solid #d9cce4;
+  border-radius: 12px;
+  touch-action: manipulation;
+  cursor: pointer;
+}
+.direction-button.up { grid-area: up; }
+.direction-button.left { grid-area: left; }
+.direction-button.right { grid-area: right; }
+.direction-button.down { grid-area: down; }
+.direction-label { grid-area: label; text-align: center; font-size: .72rem; color: #675a70; }
+.direction-button:active { background: #d9cce4; }
+.direction-button:disabled { opacity: .45; cursor: default; }
+button:focus-visible { outline: 3px solid var(--plum); outline-offset: 3px; }

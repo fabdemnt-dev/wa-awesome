@@ -99,29 +99,36 @@ test("一手戻すは穴・ネコ状態・お酒・手数を復元し、リセ�
   assert.deepEqual(session.history, []);
 });
 
-test("試作ページは必要な操作UIとスマホ向けスワイプ設定を持つ", async () => {
-  const [html, script, css] = await Promise.all([
-    readFile(new URL("../lab/drunken-cat-puzzle/index.html", import.meta.url), "utf8"),
-    readFile(new URL("../lab/drunken-cat-puzzle/app.js", import.meta.url), "utf8"),
-    readFile(new URL("../lab/drunken-cat-puzzle/style.css", import.meta.url), "utf8"),
-  ]);
+test("試作ページは必要な操作UIとスマホ向け設定を持ち、認証には依存しない", async () => {
+  const folder = new URL("../lab/drunken-cat-puzzle/", import.meta.url);
+  const [html, script, css, controls, engine] = await Promise.all(
+    ["index.html", "app.js", "style.css", "controls.js", "engine.js"].map((name) => readFile(new URL(name, folder), "utf8")),
+  );
   for (const id of ["stage-number", "move-count", "board", "reset", "undo", "next-stage"]) {
     assert.match(html, new RegExp(`id=["']${id}["']`));
   }
+  for (const direction of ["up", "right", "down", "left"]) {
+    assert.match(html, new RegExp(`data-direction="${direction}"`));
+  }
   assert.match(html, /遊び方/);
-  assert.match(html, /noindex, nofollow/);\n  assert.doesNotMatch(html, /\\\\n/);\n  assert.doesNotMatch(script, /\\\\n/);\n  assert.doesNotMatch(css, /\\\\n/);
-  assert.doesNotMatch(script, /\\nlet latestPointer/);
-  assert.match(script, /let dragMoved = false;\s+let latestPointer = null;\s+let dragFrame = 0;\s+let dragAxis = null;/);
+  assert.match(html, /noindex, nofollow/);
+  for (const source of [html, script, css, controls, engine]) {
+    assert.ok(!source.includes(String.fromCharCode(92) + "n"), "公開ファイルに文字列の改行記号を混入させない");
+    assert.doesNotMatch(source, /firebase|google.*auth|signInWith/i);
+  }
   assert.match(script, /pointerdown/);
   assert.match(script, /pointerup/);
   assert.match(script, /pointermove/);
-  assert.match(script, /groupDrag/);\n  assert.doesNotMatch(script, /structuredClone/);
-  assert.match(script, /requestAnimationFrame\(dragStep\)/);
-  assert.match(script, /latestPointer/);
-  assert.match(script, /stageOneCellSize = boardWidth \/ 6/);
-  assert.match(script, /stageOneCellSize \* 0\.82/);
-  assert.doesNotMatch(script, /cellSize \* 0\.82/);
-  assert.match(script, /dragAxis/);
-  assert.match(script, /session\.history = \[dragHistoryStart\]/);
+  assert.match(script, /pointercancel/);
+  assert.match(script, /lostpointercapture/);
+  assert.doesNotMatch(script + controls, /requestAnimationFrame|setInterval|setTimeout/);
   assert.match(css, /touch-action:\s*none/);
+  assert.match(css, /min-height:\s*48px/);
+  for (const source of [html, script, css, controls]) {
+    assert.match(source, /Build: build-id-366 · PR #366/);
+    assert.doesNotMatch(source, /controls-preview|未公開検証版/);
+  }
+  assert.match(html, /style\.css\?v=build-id-366/);
+  assert.match(html, /app\.js\?v=build-id-366/);
+  assert.match(script, /controls\.js\?v=build-id-366/);
 });

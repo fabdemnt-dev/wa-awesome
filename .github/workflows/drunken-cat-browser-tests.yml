@@ -1,0 +1,54 @@
+name: Drunken Cat Browser Tests
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "lab/drunken-cat-puzzle/**"
+      - "tests/drunken-cat*.test.mjs"
+      - "tests/e2e/drunken-cat*"
+      - "tests/e2e/package*.json"
+      - ".github/workflows/drunken-cat-browser-tests.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: drunken-cat-browser-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser:
+    name: Isolated Chromium and WebKit checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: tests/e2e/package-lock.json
+      - name: Run unit and event tests
+        run: npm run test:drunken-cat
+      - name: Install pinned browser test dependencies
+        working-directory: tests/e2e
+        run: npm ci --no-audit --no-fund
+      - name: Install test browsers
+        working-directory: tests/e2e
+        run: npx playwright install --with-deps chromium webkit
+      - name: Test this checkout on loopback only
+        working-directory: tests/e2e
+        run: npx playwright test --config=drunken-cat.config.js
+      - name: Save screenshots and browser report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: drunken-cat-browser-${{ github.run_id }}
+          path: |
+            tests/e2e/drunken-cat-results/
+            tests/e2e/drunken-cat-report/
+          retention-days: 7
+          if-no-files-found: warn
