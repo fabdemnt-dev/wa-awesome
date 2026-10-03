@@ -124,5 +124,11 @@ test("試作ページは必要な操作UIとスマホ向け設定を持ち、認
   assert.doesNotMatch(script + controls, /requestAnimationFrame|setInterval|setTimeout/);
   assert.match(css, /touch-action:\s*none/);
   assert.match(css, /min-height:\s*48px/);
-  assert.match(html, /controls-preview-1/);
+  for (const source of [html, script, css, controls]) {
+    assert.match(source, /Build: build-id-366 · PR #366/);
+    assert.doesNotMatch(source, /controls-preview|未公開検証版/);
+  }
+  assert.match(html, /style\.css\?v=build-id-366/);
+  assert.match(html, /app\.js\?v=build-id-366/);
+  assert.match(script, /controls\.js\?v=build-id-366/);
 });

@@ -1,3 +1,4 @@
+// Build: build-id-366 · PR #366
 import {
   cloneState,
   createSession,
@@ -7,7 +8,7 @@ import {
   STAGES,
   undoMove,
 } from "./engine.js";
-import { createGesture, isTapGesture, moveGesture } from "./controls.js?v=controls-preview-1";
+import { createGesture, isTapGesture, moveGesture } from "./controls.js?v=build-id-366";
 
 const board = document.querySelector("#board");
 const stageNumber = document.querySelector("#stage-number");

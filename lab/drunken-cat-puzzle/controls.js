@@ -1,3 +1,4 @@
+// Build: build-id-366 · PR #366
 // Keep Build 267's stage-one distance on every board, independent of column count.
 export function dragThreshold(boardWidth) {
   const stageOneCellSize = boardWidth / 6;
