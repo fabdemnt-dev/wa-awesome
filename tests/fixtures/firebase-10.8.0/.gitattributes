@@ -1,0 +1,2 @@
+# These official CDN responses are integrity-pinned, including line endings.
+firebase-*.js -text

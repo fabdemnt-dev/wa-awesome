@@ -54,6 +54,32 @@ service cloud.firestore {
     match /deepMiningAgreementRoomLocators/{docId} { allow read, write: if false; }
     match /deepMiningAgreementActionRequests/{docId} { allow read, write: if false; }
 
+    // 星詠みの浮遊庭園: UIDと席・秘密の山札はサーバー所有。
+    // 期限内の有効な本人membershipだけが単一の公開roomを取得できる。
+    function isFloatingGardenMember(roomId) {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/floatingGardenRooms/$(roomId))
+        && exists(/databases/$(database)/documents/floatingGardenRooms/$(roomId)/members/$(request.auth.uid))
+        && get(/databases/$(database)/documents/floatingGardenRooms/$(roomId)).data.status in ['waiting', 'playing', 'finished']
+        && get(/databases/$(database)/documents/floatingGardenRooms/$(roomId)).data.expiresAtMillis is number
+        && get(/databases/$(database)/documents/floatingGardenRooms/$(roomId)).data.expiresAtMillis > request.time.toMillis()
+        && get(/databases/$(database)/documents/floatingGardenRooms/$(roomId)/members/$(request.auth.uid)).data.active == true
+        && get(/databases/$(database)/documents/floatingGardenRooms/$(roomId)/members/$(request.auth.uid)).data.expiresAtMillis is number
+        && get(/databases/$(database)/documents/floatingGardenRooms/$(roomId)/members/$(request.auth.uid)).data.expiresAtMillis > request.time.toMillis();
+    }
+    match /floatingGardenRooms/{roomId} {
+      allow get: if isFloatingGardenMember(roomId);
+      allow list, write: if false;
+    }
+    match /floatingGardenRooms/{roomId}/members/{uid} {
+      allow get: if request.auth != null && request.auth.uid == uid && isFloatingGardenMember(roomId);
+      allow list, write: if false;
+    }
+    match /floatingGardenRooms/{roomId}/{document=**} { allow read, write: if false; }
+    match /floatingGardenActionRequests/{document=**} { allow read, write: if false; }
+    match /floatingGardenInvites/{document=**} { allow read, write: if false; }
+    match /floatingGardenRateLimits/{document=**} { allow read, write: if false; }
+
     // もふもふ大集合！オンライン版。公開roomとmembersは参加者だけが読み、
     // ゲーム確定書込みはすべてCallable Functions (Admin SDK) に限定する。
     function mofumofuSignedIn() { return request.auth != null; }
