@@ -63,6 +63,8 @@ jobs:
         env:
           GARDEN_CONNECTION_SCREENSHOTS: /tmp/floating-garden-connection-browser-qa
         run: node --test tests/floating-garden-connection-browser.mjs
+      - name: Test fixed game Hosting CSP enforcement with synthetic network in Chromium
+        run: node --test tests/floating-garden-trial-csp-browser.mjs
       - name: Test the generated trial app with two real emulator identities
         env:
           FLOATING_GARDEN_BROWSER_ARTIFACTS: /tmp/floating-garden-trial-browser-qa

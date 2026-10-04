@@ -232,6 +232,101 @@ test('fixed dedicated trial emits only exact-site Hosting commands and preserves
   assert.ok((await readFile(join(output, 'firestore.rules'), 'utf8')).includes(JSON.stringify(config.previewOrigin)));
 });
 
+test('fixed game bundle preserves a deny-by-default CSP with only reviewed SDK and network routes', async (t) => {
+  const dir = await temporary(t), output = join(dir, 'fixed-csp'), config = configuration();
+  config.projectId = config.firebase.projectId = 'wa-awesome-garden-stg';
+  config.firebase.authDomain = 'wa-awesome-garden-stg.firebaseapp.com'; config.previewOrigin = 'https://wa-awesome-garden-stg.web.app';
+  await prepareTrialBundle({ config, output, now: start });
+  const full = (await json(join(output, 'firebase.trial.json'))).hosting;
+  const only = (await json(join(output, 'firebase.hosting-only.json'))).hosting;
+  assert.deepEqual(full, only, 'both deployment configurations must deliver the same policy');
+  assert.equal(full.headers.length, 1, 'no overlapping second policy can silently disable the game');
+  assert.equal(full.headers[0].source, '**');
+  const cspHeaders = full.headers[0].headers.filter(({ key }) => key.toLowerCase() === 'content-security-policy');
+  assert.equal(cspHeaders.length, 1);
+  const csp = cspHeaders[0].value;
+  const entries = csp.split(';').map((part) => part.trim().split(/\s+/));
+  const directives = Object.fromEntries(entries.map(([name, ...sources]) => [name, sources]));
+  assert.equal(Object.keys(directives).length, entries.length, 'no duplicate directives');
+  for (const name of ['default-src', 'base-uri', 'form-action', 'frame-ancestors', 'worker-src']) assert.deepEqual(directives[name], ["'none'"]);
+  assert.deepEqual(directives['style-src'], ["'self'"]);
+  assert.deepEqual(directives['script-src'], ["'self'",
+    'https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js',
+    'https://www.gstatic.com/firebasejs/10.8.0/firebase-app-check.js',
+    'https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js',
+    'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js',
+    'https://www.gstatic.com/firebasejs/10.8.0/firebase-functions.js',
+    'https://www.google.com/recaptcha/', 'https://www.gstatic.com/recaptcha/',
+  ]);
+  assert.deepEqual(directives['connect-src'], [
+    `https://content-firebaseappcheck.googleapis.com/v1/projects/wa-awesome-garden-stg/apps/${config.firebase.appId}:exchangeRecaptchaEnterpriseToken`,
+    'https://identitytoolkit.googleapis.com/v1/accounts:signUp',
+    'https://identitytoolkit.googleapis.com/v1/accounts:lookup',
+    'https://securetoken.googleapis.com/v1/token',
+    'https://firestore.googleapis.com/google.firestore.v1.Firestore/Listen/channel',
+    'https://asia-northeast1-wa-awesome-garden-stg.cloudfunctions.net/floatingGardenCreateRoom',
+    'https://asia-northeast1-wa-awesome-garden-stg.cloudfunctions.net/floatingGardenJoinRoom',
+    'https://asia-northeast1-wa-awesome-garden-stg.cloudfunctions.net/floatingGardenStartMatch',
+    'https://asia-northeast1-wa-awesome-garden-stg.cloudfunctions.net/floatingGardenGetSnapshot',
+    'https://asia-northeast1-wa-awesome-garden-stg.cloudfunctions.net/floatingGardenSubmitAction',
+    'https://www.google.com/recaptcha/',
+  ]);
+  assert.deepEqual(directives['frame-src'], ['https://www.google.com/recaptcha/', 'https://recaptcha.google.com/recaptcha/']);
+  assert.doesNotMatch(csp, /\*|'unsafe-inline'|'unsafe-eval'|(?:^|\s)(?:data:|blob:|http:|https:)(?:\s|;|$)/);
+
+  // Contract checks for our simple HTTPS path sources, not a replacement for
+  // real browser CSP conformance or successful live App Check/game requests.
+  const permits = (directive, address) => {
+    const target = new URL(address);
+    return (directives[directive] || directives['default-src']).some((source) => {
+      if (source === "'self'") return target.origin === config.previewOrigin;
+      if (!source.startsWith('https://')) return false;
+      const allowed = new URL(source);
+      return target.origin === allowed.origin && (allowed.pathname.endsWith('/') ? target.pathname.startsWith(allowed.pathname) : target.pathname === allowed.pathname);
+    });
+  };
+  const loader = await readFile(join(output, 'public/lab/floating-garden/trial/firebase.js'), 'utf8');
+  for (const [, address] of loader.matchAll(/import\('([^']+)'\)/g)) assert.ok(permits('script-src', address), address);
+  for (const name of (await list(output)).filter((name) => name.startsWith('public/') && /\.(js|css)$/.test(name))) assert.ok(permits(name.endsWith('.js') ? 'script-src' : 'style-src', new URL(name.slice(7), config.previewOrigin + '/').href), name);
+  for (const address of [
+    'https://firebaseappcheck.googleapis.com/v1/projects/wa-awesome-garden-stg/apps/other:exchangeRecaptchaEnterpriseToken',
+    'https://content-firebaseappcheck.googleapis.com/v1/projects/wa-awesome/apps/other:exchangeRecaptchaEnterpriseToken',
+    `https://content-firebaseappcheck.googleapis.com/v1/projects/wa-awesome-garden-stg/apps/${config.firebase.appId}:exchangeDebugToken`,
+    'https://identitytoolkit.googleapis.com/v1/accounts:delete',
+    'https://firestore.googleapis.com/google.firestore.v1.Firestore/Write/channel',
+    'https://asia-northeast1-wa-awesome-garden-stg.cloudfunctions.net/otherFunction',
+    'https://asia-northeast1-wa-awesome-garden-stg.cloudfunctions.net/floatingGardenCreateRoomExtra',
+    'https://asia-northeast1-wa-awesome.cloudfunctions.net/floatingGardenCreateRoom',
+    'https://us-central1-wa-awesome-garden-stg.cloudfunctions.net/floatingGardenCreateRoom',
+    'https://example.invalid/collect',
+  ]) assert.equal(permits('connect-src', address), false, address);
+  for (const address of ['https://www.gstatic.com/firebasejs/10.9.0/firebase-app.js', 'https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js', 'https://www.google.com/unrelated.js']) assert.equal(permits('script-src', address), false, address);
+
+  const inlineStyles = new Set();
+  for (const name of (await list(output)).filter((name) => name.startsWith('public/') && /\.(js|html)$/.test(name))) {
+    const content = await readFile(join(output, name), 'utf8');
+    assert.doesNotMatch(content, /<style\b/i, name);
+    for (const [, value] of content.matchAll(/\bstyle="([^"]*)"/g)) inlineStyles.add(value);
+  }
+  assert.deepEqual([...inlineStyles], ['--opponent-count:1'], 'review a changed or new inline style instead of allowing every style');
+  assert.deepEqual(directives['style-src-attr'], ["'unsafe-hashes'", ...[...inlineStyles].map((value) => `'sha256-${createHash('sha256').update(value).digest('base64')}'`)]);
+});
+
+test('game CSP does not change legacy preview headers, including previews on the fixed project', async (t) => {
+  const dir = await temporary(t);
+  for (const [index, project] of ['garden-trial-check', 'wa-awesome-garden-stg'].entries()) {
+    const config = configuration(), output = join(dir, String(index));
+    config.projectId = config.firebase.projectId = project; config.firebase.authDomain = `${project}.firebaseapp.com`;
+    config.previewOrigin = `https://${project}--garden-7day-a1b2c3.web.app`;
+    await prepareTrialBundle({ config, output, now: start });
+    assert.deepEqual((await json(join(output, 'firebase.trial.json'))).hosting.headers, [{ source: '**', headers: [
+      { key: 'Cache-Control', value: 'no-store, max-age=0' }, { key: 'X-Content-Type-Options', value: 'nosniff' },
+      { key: 'Referrer-Policy', value: 'no-referrer' }, { key: 'X-Robots-Tag', value: 'noindex, nofollow' },
+    ] }]);
+    await assert.rejects(stat(join(output, 'firebase.hosting-only.json')), { code: 'ENOENT' });
+  }
+});
+
 test('closed-live bundle is deterministic exact-site Hosting-only maintenance, including inert deep-link fallback', async (t) => {
   const dir = await temporary(t), first = join(dir, 'first'), second = join(dir, 'second');
   const project = 'wa-awesome-garden-stg';

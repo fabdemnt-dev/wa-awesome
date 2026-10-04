@@ -27,10 +27,37 @@ async function newDirectory(output) {
   catch (error) { if (error.code !== 'ENOENT') throw error; }
   await mkdir(output, { recursive: true });
 }
-function hosting(site, publicDirectory) {
+function fixedTrialCsp(config) {
+  // The fixed-site game uses only these pinned SDK modules and SDK 10.8.0
+  // transports: Enterprise exchange, anonymous Auth/refresh, and Listen (no
+  // browser Firestore writes). Callable paths do not authorize other functions.
+  const scripts = ['app', 'app-check', 'auth', 'firestore', 'functions'].map((name) => `https://www.gstatic.com/firebasejs/10.8.0/firebase-${name}.js`);
+  const connections = [
+    `https://content-firebaseappcheck.googleapis.com/v1/projects/${FIXED_TRIAL_PROJECT}/apps/${config.firebase.appId}:exchangeRecaptchaEnterpriseToken`,
+    'https://identitytoolkit.googleapis.com/v1/accounts:signUp',
+    'https://identitytoolkit.googleapis.com/v1/accounts:lookup',
+    'https://securetoken.googleapis.com/v1/token',
+    'https://firestore.googleapis.com/google.firestore.v1.Firestore/Listen/channel',
+    ...FUNCTION_NAMES.map((name) => `https://asia-northeast1-${FIXED_TRIAL_PROJECT}.cloudfunctions.net/${name}`),
+    'https://www.google.com/recaptcha/',
+  ];
+  return [
+    "default-src 'none'",
+    `script-src 'self' ${scripts.join(' ')} https://www.google.com/recaptcha/ https://www.gstatic.com/recaptcha/`,
+    "style-src 'self'",
+    // online/view.js emits this one literal style attribute. Do not permit
+    // arbitrary inline styles; DOM style properties need no inline exception.
+    "style-src-attr 'unsafe-hashes' 'sha256-B/IIVW4l3ftMSU48N0ClttKC1O2UQW2APFMSKYmzs64='",
+    `connect-src ${connections.join(' ')}`,
+    'frame-src https://www.google.com/recaptcha/ https://recaptcha.google.com/recaptcha/',
+    "worker-src 'none'", "base-uri 'none'", "form-action 'none'", "frame-ancestors 'none'",
+  ].join('; ');
+}
+function hosting(site, publicDirectory, csp) {
   return { site, public: publicDirectory, ignore: ['**/.*', '**/node_modules/**'], headers: [{ source: '**', headers: [
     { key: 'Cache-Control', value: 'no-store, max-age=0' }, { key: 'X-Content-Type-Options', value: 'nosniff' },
     { key: 'Referrer-Policy', value: 'no-referrer' }, { key: 'X-Robots-Tag', value: 'noindex, nofollow' },
+    ...(csp ? [{ key: 'Content-Security-Policy', value: csp }] : []),
   ] }], redirects: [{ source: '/', destination: '/lab/floating-garden/trial/index.html', type: 302 }] };
 }
 export function previewExpiryMinutes(config, executionNow) {
@@ -99,9 +126,10 @@ export async function prepareTrialBundle({ config, output, now = Date.now(), rep
   await put('public/lab/floating-garden/trial/trialruntime.js', `// Public Web App configuration only; generated locally. No server credentials or HMAC secret.\nexport default Object.freeze(${JSON.stringify(client, null, 2)});\n`);
   await put('firestore.rules', rules);
   await put('firestore.indexes.json', JSON.stringify({ indexes: [], fieldOverrides: [] }, null, 2) + '\n');
-  await put('firebase.trial.json', JSON.stringify({ functions: { source: 'functions', codebase: 'floating-garden-trial', ignore: ['node_modules', '**/.*', '*-debug.log'] }, firestore: { rules: 'firestore.rules', indexes: 'firestore.indexes.json' }, hosting: hosting(client.projectId, 'public') }, null, 2) + '\n');
   const fixed = client.projectId === FIXED_TRIAL_PROJECT && client.previewOrigin === FIXED_TRIAL_ORIGIN;
-  if (fixed) await put('firebase.hosting-only.json', JSON.stringify({ hosting: hosting(FIXED_TRIAL_PROJECT, 'public') }, null, 2) + '\n');
+  const csp = fixed ? fixedTrialCsp(client) : undefined;
+  await put('firebase.trial.json', JSON.stringify({ functions: { source: 'functions', codebase: 'floating-garden-trial', ignore: ['node_modules', '**/.*', '*-debug.log'] }, firestore: { rules: 'firestore.rules', indexes: 'firestore.indexes.json' }, hosting: hosting(client.projectId, 'public', csp) }, null, 2) + '\n');
+  if (fixed) await put('firebase.hosting-only.json', JSON.stringify({ hosting: hosting(FIXED_TRIAL_PROJECT, 'public', csp) }, null, 2) + '\n');
   // Initial admin records are deliberately locked. This is review data, not an importer.
   await put('ADMIN-RECORDS-REVIEW.json', JSON.stringify({ 'floatingGardenTrial/config': { ...backend, enabled: false, testerUids: [] }, 'floatingGardenTrial/usage': { projectId: backend.projectId, startsAtMillis: backend.startsAtMillis, endsAtMillis: backend.endsAtMillis, maxRooms: 20, createdRoomCount: 0 }, testerDocumentTemplate: { active: false, expiresAtMillis: backend.endsAtMillis } }, null, 2) + '\n');
   await put('REVIEW-PLAN.json', JSON.stringify(plan, null, 2) + '\n');

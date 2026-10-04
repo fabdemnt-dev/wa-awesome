@@ -1,5 +1,29 @@
 # 庭園専用プロジェクト：配信設定・安全対策の準備
 
+## 2026-10-04：現在の残条件
+
+以下の古い準備記録は、その時点の検証範囲を残したものです。現在は専用projectと接続確認ページの準備が進み、本人のAndroid ChromeでApp Check→匿名Auth→UID表示が成功しました。ゲーム・Functions・専用Rulesの配信、参加登録、7日間の開始を完了した意味ではありません。[接続確認の記録](floating-garden-phone-connection-check.md)を参照してください。
+
+PR365の `24a9304c92df83909d37d6b5ef891d72dd0ac544` は5CI成功、直近の試験で135操作・397件のSDK通知到着・観測した破棄0を確認しました。古いcache通知で操作可能表示が残る別の不具合は修正済みです。以前2回起きた相手の通知停滞は原因未確定で、CI専用の到着・破棄診断は実ゲームへ配信されません。一般利用の準備完了とは扱わず、残条件を揃えた後の監督付き限定試行を提案します。
+
+- 必須なのは異なる正確な**2UID**です。別人であるかはコードでは検査しません。本人のChromeとFirefoxのような別ブラウザーの保存領域で2席を試すことはできますが、2台同時前景・異なる回線の試験を代替しません。Chromeの成功済み認証を消して別UIDを作りません。
+- 接続確認ページは **2026-10-04 12:00 JST / 03:00 UTC** までです。ゲームの開始期限ではなく、既存UIDもその時刻に自動削除されません。別UIDの確認が間に合わなければ、期間を黙って延長せず、必要な接続確認期間を具体的に決めます。
+- 先に配信bundle・ヘッダー・停止方法と既存cloud権限を確認し、その後に正確な開始S・終了Eを決めます。E−Sは最長604800000ms。client/Functions/Rules/gate/usageに同じ日時を使い、最初の実ゲームQAも7日・20部屋に含めます。試行後にusageを初期化しません。
+- game clientは開始前にSDK起動を拒否します。開始後にadmin gateを停止したままUIDを表示することもできますが、その取得時間も固定期間を消費します。先に接続確認で2UIDを揃える手順を優先します。
+- 既存の実行アカウントと、既知のビルド用 `120030709276-compute@developer.gserviceaccount.com`（既存Editor）を混同しません。既存権限の読取りだけで新ロールを追加せず、不足が確認された場合にprincipal/resource/permissionの差分を示します。以前のCloud Shell成功を、現在の認証やtoolingの確認として流用しません。
+
+固定siteのgame用Hosting生成設定にはCSPを追加し、準備中/接続確認からの切替時にCSPが欠落するのを防ぎます。Firebase10.8.0の5module、reCAPTCHA、対象AppのEnterprise交換、匿名Auth/refresh、Firestore Listen、Tokyoの5Callableの必要なURLに限定します。`default-src`、`base-uri`、`form-action`、`frame-ancestors`はnoneを維持し、既存のstyle属性1種類だけをhashで許可します。previewと停止画面は変えません。生成設定の検査と隔離Chromiumの許可/拒否試験は、実reCAPTCHAの動的資源や実ゲーム成功の証明ではありません。正確な公開ヘッダー差分もゲーム公開前の確認に含めます。
+
+実行承認は、対象5Callable、対応する5 Cloud Runサービスだけの `allUsers` → `roles/run.invoker`、専用default DBのRules全文、正確なsiteのゲーム公開、2UIDの期間限定登録、gate有効化、停止手順を具体化してまとめます。endpointの到達可能性とApp Check/Auth/2UIDによる利用認可は別です。月300円は通知基準で、拒否要求や残存資源も含めた請求上限ではありません。新しいIAM、期間延長、自動削除、main mergeを準備の返事から推測して実行しません。
+
+gameのHosting公開より前に、対象Functions/Rulesの読戻しに加え、admin gateが `enabled:false`、参加配列が空、testerが未登録または停止状態であることを読み戻します。その停止状態を維持して公開バイト・ヘッダーを照合し、同じ具体的な承認に含めた2UIDの登録とgate有効化は別の最後の手順として実行します。停止中の公開を、参加可能になったことと混同しません。
+
+固定Firebase CLI14.27.0は、新Callableの公開invokerを設定し、Functions配信後にArtifact Registry cleanupを確認します。未設定のcleanupとnon-interactiveの組合せでは、Functionsが配信済みでも失敗exitになり得ます。結果不明時は再送せず、5関数・対応Cloud Runサービス・build・Rules・Hostingを段階ごとに読み戻します。`--dry-run`や`--non-interactive`を、API/IAMを含む包括的な読取り専用保証と考えません。`--force`や `functions:artifacts:setpolicy --none` を無断で使わず、未知の変更要求で止めます。[公式cleanupの説明](https://firebase.google.com/docs/functions/manage-functions)
+
+限定試行では最初の1部屋で相互反映と完走を確認し、同UIDの再読込み・背景/切断復帰を順に試します。前景・接続正常なのに30秒反映されない場合を運用上の調査開始目安とし、両席の次操作を止めます。この目安はコードの保証値やCI待機条件の変更ではありません。時刻と安全な画面表示を記録し、同じブラウザーで既存の「再接続」を1回使ってpendingの同じrequestIdを維持します。復帰不能・再発・二重適用・UID不一致ならgateと両testerを停止し、停止画面へ戻します。ブラウザーデータ消去や別部屋への逃避はしません。
+
+## 当初の準備記録
+
 2026-10-02 UTC。基準は Draft PR #365 の `65ea361ca9dc002f3d31a15a7069d3ee28fe1eb0`。この追加は**配信準備と隔離CIの範囲**です。2026-10-02に追加分のDraft PR保存・隔離CI・必要な修正が承認され、既存Draft PR #365へ追加します。新しいFirebase project、課金、Auth、IAM、秘密鍵、App Check、Hosting channelは作成・変更していません。
 
 ## 方針とファイル
