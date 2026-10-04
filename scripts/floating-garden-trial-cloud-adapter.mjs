@@ -201,8 +201,15 @@ export function validateRunService(service, expectedName, expectedRevision) {
   requireThat(Array.isArray(containers) && containers.length === 1 && containers[0].resources?.limits?.memory === '256Mi' &&
     String(containers[0].resources?.limits?.cpu) === '1', 'run-resource-limits');
   const traffic = service.trafficStatuses;
-  requireThat(Array.isArray(traffic) && traffic.length === 1 && traffic[0].percent === 100 &&
-    traffic[0].revision === service.latestReadyRevision, 'run-latest-traffic');
+  const target = Array.isArray(traffic) && traffic.length === 1 ? traffic[0] : null;
+  const latestType = 'TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST', revisionType = 'TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION';
+  // Run v2 may omit the revision for a LATEST target. The exact Ready/latest
+  // function revision was verified above; an explicit conflicting revision,
+  // unknown type or split must still fail rather than be normalized away.
+  requireThat(plain(target) && target.percent === 100 && (
+    target.revision === service.latestReadyRevision && [undefined, latestType, revisionType].includes(target.type) ||
+    target.type === latestType && (target.revision === undefined || target.revision === '')
+  ), 'run-latest-traffic');
   return true;
 }
 export function validateInvokerPolicy(policy) {

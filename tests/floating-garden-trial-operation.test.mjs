@@ -436,6 +436,74 @@ test('Run proof requires Ready/current generation, latest function revision and 
   assert.throws(() => validateInvokerPolicy({ bindings: [{ role: 'roles/run.invoker', members: ['allAuthenticatedUsers'] }] }));
 });
 
+test('Run traffic accepts observed single 100-percent LATEST with absent or empty revision for all five functions', () => {
+  for (let i = 0; i < FUNCTION_NAMES.length; i++) {
+    const run = runService(metadata(i)), revision = run.latestReadyRevision;
+    for (const target of [
+      { type: 'TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST', percent: 100 },
+      { type: 'TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST', percent: 100, revision: '' },
+    ]) assert.equal(validateRunService({ ...run, trafficStatuses: [target] }, run.name, revision), true);
+  }
+});
+
+test('Run traffic preserves exact explicit-revision acceptance without short/full normalization', () => {
+  const run = runService(metadata()), revision = run.latestReadyRevision;
+  for (const type of [undefined, 'TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION', 'TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST']) {
+    assert.equal(validateRunService({ ...run, trafficStatuses: [{ ...(type === undefined ? {} : { type }), percent: 100, revision }] }, run.name, revision), true);
+    assert.throws(() => validateRunService({ ...run, trafficStatuses: [{ ...(type === undefined ? {} : { type }), percent: 100, revision: revision.split('/').at(-1) }] }, run.name, revision), (error) => error.code === 'run-latest-traffic');
+  }
+});
+
+test('Run traffic rejects conflicts, splits, malformed percentages and unknown allocation types', () => {
+  const run = runService(metadata()), revision = run.latestReadyRevision;
+  const latest = { type: 'TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST', percent: 100 };
+  const rejected = [
+    undefined, null, {}, [], [null], [100],
+    [{ ...latest, revision: revision + '-other' }], [{ ...latest, revision: null }], [{ ...latest, revision: 0 }],
+    [{ ...latest, revision: false }], [{ ...latest, revision: ' ' }],
+    [{ ...latest, percent: 99 }], [{ ...latest, percent: 0 }], [{ ...latest, percent: 101 }],
+    [{ ...latest, percent: '100' }], [{ type: latest.type }],
+    [latest, { type: 'TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION', revision, percent: 0 }],
+    [{ ...latest, percent: 50 }, { type: 'TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION', revision, percent: 50 }],
+    [{ percent: 100 }], [{ percent: 100, revision: '' }],
+    [{ type: 'TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION', percent: 100 }],
+    [{ type: 'TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION', percent: 100, revision: '' }],
+  ];
+  for (const type of ['TRAFFIC_TARGET_ALLOCATION_TYPE_UNSPECIFIED', 'UNKNOWN', '', null, 1, 2]) {
+    rejected.push([{ type, percent: 100 }], [{ type, percent: 100, revision }]);
+  }
+  for (const trafficStatuses of rejected) assert.throws(() => validateRunService({ ...run, trafficStatuses }, run.name, revision), (error) => error.code === 'run-latest-traffic');
+});
+
+test('Run LATEST traffic does not bypass exact function revision, readiness, generation or resource checks', () => {
+  const run = runService(metadata()), revision = run.latestReadyRevision;
+  run.trafficStatuses = [{ type: 'TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST', percent: 100 }];
+  assert.throws(() => validateRunService(run, run.name, revision + '-other'), (error) => error.code === 'run-ready-latest');
+  const mutations = [
+    (value) => { value.reconciling = true; },
+    (value) => { value.terminalCondition.state = 'CONDITION_PENDING'; },
+    (value) => { value.latestCreatedRevision = revision + '-other'; },
+    (value) => { value.latestReadyRevision = revision.split('/').at(-1); value.latestCreatedRevision = value.latestReadyRevision; },
+    (value) => { value.generation = '2'; },
+    (value) => { value.template.serviceAccount = 'synthetic-other@example.invalid'; },
+    (value) => { value.template.scaling.minInstanceCount = 1; },
+    (value) => { value.template.scaling.maxInstanceCount = 2; },
+    (value) => { value.template.maxInstanceRequestConcurrency = 80; },
+    (value) => { value.template.timeout = '60s'; },
+    (value) => { value.template.containers[0].resources.limits.memory = '512Mi'; },
+    (value) => { value.template.containers[0].resources.limits.cpu = '2'; },
+  ];
+  for (const mutate of mutations) { const changed = structuredClone(run); mutate(changed); assert.throws(() => validateRunService(changed, run.name, revision)); }
+});
+
+test('full injected Functions proof accepts the observed LATEST representation on all five Run services', async (t) => {
+  const h = await providerHarness(t, { response: (url, data) => url.startsWith('https://run.googleapis.com/') && !url.includes(':getIamPolicy') ?
+    { ...data, trafficStatuses: [{ type: 'TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST', percent: 100 }] } : data });
+  assert.deepEqual(await h.cloud.verifyFunctions(), { verified: true });
+  assert.equal(h.requests.filter(({ url }) => url.startsWith('https://run.googleapis.com/') && !url.includes(':getIamPolicy')).length, 5);
+  assert(h.cli.every(({ args }) => !args.includes('deploy')));
+});
+
 test('genuine pinned archiver ZIP matches exact source bytes', async () => {
   const files = { 'index.js': Buffer.from('module.exports = {}\n'), 'folder/a.json': Buffer.from('{}\n') };
   assert.deepEqual(validateSourceArchive(await zip(Object.entries(files)), files), { verified: true, fileCount: 2 });
@@ -709,8 +777,26 @@ test('initial Rules token comparison remains narrow on comments, unexpected type
 const diagnosticSource = execFileSync('python3', ['-I', '-c',
   "import ast,json,pathlib,sys; t=ast.parse(pathlib.Path(sys.argv[1]).read_text()); v=[n for n in t.body if isinstance(n,ast.Assign) and any(isinstance(k,ast.Name) and k.id=='DIAGNOSE' for k in n.targets)]; assert len(v)==1; print(json.dumps(ast.literal_eval(v[0].value)))",
   join(ROOT,'scripts/start-floating-garden-trial-owner.py')], {encoding:'utf8',stdio:['ignore','pipe','pipe'],timeout:10000,maxBuffer:65536});
-const { classifyLog, summarizeFunctions, summarizeJournal, validateTokyoInventory, inspect } =
+const { classifyLog, summarizeFunctions, summarizeJournal, validateTokyoInventory, inspect, patchLegacyTrafficAdapter, prepareReadOnlyAdapter } =
   await import('data:text/javascript;base64,'+Buffer.from(JSON.parse(diagnosticSource)).toString('base64'));
+test('read-only compatibility predicate is byte-identical to the ordinary validator',async()=>{
+ const diag=JSON.parse(diagnosticSource),adapter=await readFile(join(ROOT,'scripts/floating-garden-trial-cloud-adapter.mjs'),'utf8');
+ const line=diag.split('\n').find(x=>x.startsWith('const CORRECT_TRAFFIC_CHECK = '));
+ const embedded=JSON.parse(line.slice('const CORRECT_TRAFFIC_CHECK = '.length,-1));
+ const from=adapter.indexOf('  const traffic = service.trafficStatuses;');
+ assert.equal(embedded,adapter.slice(from,adapter.indexOf('  return true;\n}',from)));
+ assert.equal(diag.split("const corrected=source.replace(LEGACY_TRAFFIC_CHECK,CORRECT_TRAFFIC_CHECK);").length,2);
+});
+test('read-only compatibility patch rejects unpinned source rather than broad replacement',()=>{
+ for(const value of ['',null,{},'  const traffic = service.trafficStatuses;','DO_NOT_PRINT_TOKEN'])assert.throws(()=>patchLegacyTrafficAdapter(value));
+});
+test('unverified compatibility source creates no temporary directory or subprocess',async t=>{
+ const base=await temp(t);await mkdir(join(base,'source/scripts'),{recursive:true});
+ await writeFile(join(base,'source/scripts/floating-garden-trial-cloud-adapter.mjs'),'untrusted source');
+ const before=await files(base);let invoked=false;
+ await assert.rejects(prepareReadOnlyAdapter(base,{extract:()=>{invoked=true;},load:()=>{invoked=true;}}));
+ assert.equal(invoked,false);assert.deepEqual(await files(base),before);
+});
 const names=['floatingGardenCreateRoom','floatingGardenJoinRoom','floatingGardenStartMatch','floatingGardenGetSnapshot','floatingGardenSubmitAction'];
 const inventory=names.map(n=>({name:'projects/wa-awesome-garden-stg/locations/asia-northeast1/functions/'+n,state:'ACTIVE',environment:'GEN_2',secret:'DO_NOT_PRINT_TOKEN',serviceConfig:{uri:'https://SECRET'}}));
 const packet={manifestDigest:'a',reviewDigest:'b',gameDir:'/mock/operation/game'};
