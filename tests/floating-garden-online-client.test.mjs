@@ -11,7 +11,7 @@ const error = (code, reason) => Object.assign(new Error(code), { code: `function
 function memoryStorage(initial = null) { const map = new Map(initial ? [[ONLINE_SAVE_KEY, initial]] : []); return { getItem: (key) => map.get(key) ?? null, setItem: (key, value) => map.set(key, value), map }; }
 function server() {
   let room = null, match = null, members = new Map(), receipts = new Map();
-  const listeners = new Set(), listenersByUid = new Map(), calls = [];
+  const listeners = new Set(), listenersByUid = new Map(), subscriptions = [], calls = [];
   const publish = () => { for (const fn of listeners) fn({ room: clone(room), fromCache: false }); };
   const publicState = () => { const value = publicMatch(match); for (const p of value.players) { delete p.isHuman; delete p.tileIds; } return value; };
   const snapshot = (uid) => { if (!room) throw error('not-found'); if (!members.has(uid)) throw error('permission-denied'); return { room: clone(room), self: { seat: members.get(uid), isHost: members.get(uid) === 0 } }; };
@@ -38,10 +38,14 @@ function server() {
       receipts.set(key, clone(result)); return result;
     }]));
     api.getSnapshot = async () => { calls.push({uid,kind:'getSnapshot'}); return snapshot(uid); };
-    const controller = createOnlineController({api,ensureUser:async()=>({uid}),subscribe:(_id,next) => { listeners.add(next); listenersByUid.set(uid,next); return () => listeners.delete(next); },storage,requestId:()=>`${uid}-request-${++counter}`,isOnline:options.isOnline || (()=>true),...options});
+    const controller = createOnlineController({api,ensureUser:async()=>({uid}),subscribe:(roomId,next,fail) => {
+      const watch = { uid, roomId, next, fail, stops: 0 }; subscriptions.push(watch);
+      listeners.add(next); listenersByUid.set(uid,next);
+      return () => { watch.stops += 1; listeners.delete(next); };
+    },storage,requestId:()=>`${uid}-request-${++counter}`,isOnline:options.isOnline || (()=>true),...options});
     return { controller, storage, api };
   }
-  return { client, calls, snapshot, publish, update, listeners, listenersByUid, get room(){return room;}, get match(){return match;}, set match(value){match=value; update();} };
+  return { client, calls, snapshot, publish, update, listeners, listenersByUid, subscriptions, get room(){return room;}, get match(){return match;}, set match(value){match=value; update();} };
 }
 async function playing() { const service = server(), a = service.client('a'), b = service.client('b'); await a.controller.resume(); await a.controller.create('Host'); await b.controller.resume(); await b.controller.join('GARDEN-test','Guest'); await a.controller.start(); return {service,a,b}; }
 
@@ -53,6 +57,160 @@ async function playing() { const service = server(), a = service.client('a'), b 
   const html=renderOnline(b.controller.getState()); assert.match(html,/あなたの庭 <small>P2 Guest/); assert.match(html,/data-seat="0"/); assert.doesNotMatch(html,/CPU|残数アシスト|deckCursor/);
   assert.equal(a.storage.map.has('floating-garden-match-save-v1'),false);
   assert.deepEqual(Object.keys(service.calls.find(call=>call.kind==='start').payload).sort(),['expectedRevision','requestId','roomId']);
+ });
+ test('ordinary successes and definitive command refusals retain the same healthy room watches', async () => {
+  const {service,a,b}=await playing(),watches=[...service.subscriptions];
+  assert.equal(watches.length,2,'start retains the lobby watch');
+  const snapshots=service.calls.filter(call=>call.kind==='getSnapshot').length;
+  await a.controller.submit('draw');await a.controller.submit('self');await b.controller.submit('pass-invite');
+  const original=a.api.submit;
+  for(const code of ['failed-precondition','invalid-argument']) {
+    a.api.submit=async()=>{throw error(code);};
+    assert.equal(await a.controller.submit('place',{index:0,rotation:0}),false);
+    assert.equal(a.controller.getState().pending,null);assert.equal(a.controller.getState().canConfirm,true);
+  }
+  a.api.submit=original;
+  assert.equal(await a.controller.submit('place',{index:0,rotation:0}),true);
+  assert.equal(service.calls.filter(call=>call.kind==='getSnapshot').length,snapshots+6,'every outcome still refreshes authoritative data');
+  assert.deepEqual(service.subscriptions,watches);assert.ok(watches.every(watch=>watch.stops===0));
+  assert.deepEqual(a.controller.getState().room,b.controller.getState().room);
+  a.controller.dispose();b.controller.dispose();assert.ok(watches.every(watch=>watch.stops===1));
+ });
+ test('newer live progress overtaking an older refresh keeps the authoritative state ready without restarting', async () => {
+  const {service,a,b}=await playing();await a.controller.submit('draw');
+  const fetching=deferred(),release=deferred(),original=a.api.getSnapshot,snapshots=service.calls.filter(call=>call.kind==='getSnapshot').length;
+  a.api.getSnapshot=async payload=>{const captured=await original(payload);fetching.resolve();await release.promise;return captured;};
+  const sending=a.controller.submit('self');await fetching.promise;await b.controller.submit('pass-invite');
+  const newer=a.controller.getState().room;assert.equal(newer.match.revision,3);assert.equal(a.controller.getState().connection,'ready');
+  release.resolve();assert.equal(await sending,true);assert.deepEqual(a.controller.getState().room,newer);assert.equal(a.controller.getState().canConfirm,true);
+  assert.equal(service.subscriptions.length,2);assert.ok(service.subscriptions.every(watch=>watch.stops===0));
+  assert.equal(service.calls.filter(call=>call.kind==='getSnapshot').length,snapshots+2);
+  a.controller.dispose();b.controller.dispose();
+ });
+ test('superseded refresh never accepts malformed, mismatched, or inconsistent replies over newer live data', async () => {
+  const cases={
+    'negative room':snapshot=>{snapshot.room.revision=-1;},
+    'negative match':snapshot=>{snapshot.room.match.revision=-1;},
+    'missing match':snapshot=>{snapshot.room.match=null;},
+    'wrong room':snapshot=>{snapshot.room.id='another-room';},
+    'wrong game':snapshot=>{snapshot.room.gameId='another-game';},
+    'wrong seat':snapshot=>{snapshot.self.seat=1;},
+    'wrong rules':snapshot=>{snapshot.room.rulesVersion='another-version';},
+    'wrong match version':snapshot=>{snapshot.room.match.version='another-version';},
+    'invalid players':snapshot=>{snapshot.room.players={};},
+    'invalid revision':snapshot=>{snapshot.room.match.revision=NaN;},
+    'newer match in older room':snapshot=>{snapshot.room.match.revision+=100;},
+    'newer room with older match':snapshot=>{snapshot.room.revision+=100;},
+  };
+  for(const [name,change] of Object.entries(cases)) {
+    const {service,a,b}=await playing();await a.controller.submit('draw');
+    const fetching=deferred(),release=deferred(),original=a.api.getSnapshot;
+    a.api.getSnapshot=async payload=>{const captured=await original(payload);change(captured);fetching.resolve();await release.promise;return captured;};
+    const sending=a.controller.submit('self');await fetching.promise;await b.controller.submit('pass-invite');const newer=a.controller.getState().room;
+    release.resolve();await sending;assert.deepEqual(a.controller.getState().room,newer,name);assert.equal(a.controller.getState().connection,'syncing',name);assert.equal(a.controller.getState().canConfirm,false,name);
+    assert.equal(service.subscriptions.length,2);a.controller.dispose();b.controller.dispose();
+  }
+ });
+ test('an older refresh cannot restore readiness from cache or stronger blockers', async () => {
+  for(const mode of ['cache','offline','conflict']) {
+    const {service,a,b}=await playing();await a.controller.submit('draw');
+    const fetching=deferred(),release=deferred(),original=a.api.getSnapshot;
+    a.api.getSnapshot=async payload=>{const captured=await original(payload);fetching.resolve();await release.promise;return captured;};
+    const sending=a.controller.submit('self');await fetching.promise;await b.controller.submit('pass-invite');
+    if(mode==='cache')service.listenersByUid.get('a')({room:clone(service.room),fromCache:true});
+    if(mode==='offline')a.controller.offline();
+    if(mode==='conflict')a.controller.storageChanged();
+    assert.equal(a.controller.getState().connection,mode);
+    release.resolve();await sending;assert.equal(a.controller.getState().connection,'syncing');assert.equal(a.controller.getState().canConfirm,false);
+    assert.equal(service.subscriptions.length,2);a.controller.dispose();b.controller.dispose();
+  }
+ });
+ test('a failed watch is retired and its callbacks cannot affect a replacement in the same generation', async () => {
+  const {service,a,b}=await playing(),old=service.subscriptions.find(watch=>watch.uid==='a');
+  const fetching=deferred(),release=deferred(),original=a.api.getSnapshot;
+  a.api.getSnapshot=async payload=>{fetching.resolve();await release.promise;return original(payload);};
+  const sending=a.controller.submit('draw');await fetching.promise;
+  old.fail(error('unavailable'));assert.equal(old.stops,1);assert.equal(a.controller.getState().connection,'error');
+  release.resolve();assert.equal(await sending,true);
+  const replacement=service.subscriptions.at(-1);assert.notEqual(replacement,old);assert.equal(replacement.uid,'a');
+  assert.equal(service.subscriptions.length,3);assert.equal(a.controller.getState().canConfirm,true);
+  const before=a.controller.getState(),newer=clone(service.room);newer.revision+=100;newer.match.revision+=100;
+  old.next({room:newer,fromCache:false});old.next({room:null});old.fail(error('permission-denied'));
+  assert.deepEqual(a.controller.getState(),before);assert.equal(replacement.stops,0);
+  a.controller.dispose();a.controller.dispose();b.controller.dispose();assert.equal(old.stops,1);assert.equal(replacement.stops,1);
+ });
+ test('resume, suspend, and dispose replace watches once and ignore retired next and error callbacks', async () => {
+  const {service,a,b}=await playing(),first=service.subscriptions.find(watch=>watch.uid==='a');
+  await a.controller.resume();const second=service.subscriptions.at(-1);
+  assert.equal(first.stops,1);assert.equal(second.stops,0);assert.notEqual(first,second);
+  const resumed=a.controller.getState();first.next({room:null});first.fail(error('unavailable'));assert.deepEqual(a.controller.getState(),resumed);
+  a.controller.suspend();a.controller.suspend();assert.equal(second.stops,1);
+  const suspended=a.controller.getState();second.next({room:clone(service.room)});second.fail(error('unavailable'));assert.deepEqual(a.controller.getState(),suspended);
+  await a.controller.resume();const third=service.subscriptions.at(-1);assert.equal(service.subscriptions.length,4);
+  a.controller.dispose();b.controller.dispose();const disposed=a.controller.getState();third.next({room:null});third.fail(error('unavailable'));
+  assert.deepEqual(a.controller.getState(),disposed);assert.ok(service.subscriptions.every(watch=>watch.stops===1));
+ });
+ test('interrupted definitive-error refresh cannot reinstall an obsolete watcher or overwrite suspension', async () => {
+  for(const rejected of [false,true]) {
+    const {service,a,b}=await playing(),old=service.subscriptions.find(watch=>watch.uid==='a'),fetching=deferred(),release=deferred(),original=a.api.getSnapshot;
+    let first=true;
+    a.api.submit=async()=>{throw error('failed-precondition');};
+    a.api.getSnapshot=async payload=>{if(first){first=false;fetching.resolve();await release.promise;if(rejected)throw error('unavailable');}return original(payload);};
+    const sending=a.controller.submit('draw');await fetching.promise;a.controller.suspend();
+    const suspended=a.controller.getState();release.resolve();await sending;
+    assert.deepEqual(a.controller.getState(),suspended);assert.equal(service.subscriptions.length,2);assert.equal(old.stops,1);
+    await a.controller.resume();assert.equal(service.subscriptions.length,3);assert.equal(a.controller.getState().canConfirm,true);
+    a.controller.dispose();b.controller.dispose();assert.ok(service.subscriptions.every(watch=>watch.stops===1));
+  }
+ });
+ test('synchronous subscribe failures stay visible, reject late callbacks, and allow a fresh watch', async () => {
+  for(const mode of ['throw','error']) {
+    const service=server(),watches=[];
+    const a=service.client('a',{subscribe(roomId,next,fail){
+      const watch={roomId,next,fail,stops:0};watches.push(watch);
+      if(watches.length===1){if(mode==='throw')throw error('unavailable');fail(error('unavailable'));}
+      return()=>{watch.stops+=1;next({room:null});fail(error('permission-denied'));};
+    }});
+    await a.controller.resume();await a.controller.create('Host');
+    const failed=a.controller.getState();assert.equal(failed.connection,'error',mode);assert.equal(failed.error,true);assert.ok(failed.notice);assert.equal(failed.pending,null);
+    const first=watches[0];assert.equal(first.stops,mode==='throw'?0:1);
+    first.next({room:{...service.room,revision:100}});first.fail(error('permission-denied'));assert.deepEqual(a.controller.getState(),failed);
+    await a.controller.resume();assert.equal(watches.length,2);assert.equal(a.controller.getState().canConfirm,true);
+    const resumed=a.controller.getState();first.next({room:null});first.fail(error('unavailable'));assert.deepEqual(a.controller.getState(),resumed);
+    a.controller.dispose();a.controller.dispose();assert.equal(watches[1].stops,1);assert.equal(first.stops,mode==='throw'?0:1);
+  }
+ });
+ test('an initially missing cached room keeps its watch for the following server document', async () => {
+  const service=server();let next,stops=0,subscriptions=0;
+  const a=service.client('a',{subscribe(_roomId,onNext){subscriptions+=1;next=onNext;next({room:null,fromCache:true});return()=>{stops+=1;};}});
+  await a.controller.resume();await a.controller.create('Host');assert.equal(a.controller.getState().connection,'error');assert.equal(stops,0);
+  next({room:clone(service.room),fromCache:false});assert.equal(a.controller.getState().canConfirm,true);assert.equal(subscriptions,1);
+  a.controller.dispose();assert.equal(stops,1);
+ });
+ test('synchronous next callback reentrancy cleans the returned subscription after suspend or dispose', async () => {
+  for(const mode of ['suspend','dispose']) {
+    const service=server(),watches=[];let insideSubscribe=false,interrupted=false;
+    const a=service.client('a',{subscribe(roomId,next,fail){
+      const watch={roomId,next,fail,stops:0};watches.push(watch);
+      insideSubscribe=true;try{next({room:clone(service.room),fromCache:false});}finally{insideSubscribe=false;}
+      return()=>{watch.stops+=1;};
+    }});
+    a.controller.observe(()=>{if(insideSubscribe&&!interrupted){interrupted=true;a.controller[mode]();}});
+    await a.controller.resume();await a.controller.create('Host');assert.equal(watches.length,1);assert.equal(watches[0].stops,1,mode);
+    const stopped=a.controller.getState();watches[0].next({room:null});watches[0].fail(error('unavailable'));assert.deepEqual(a.controller.getState(),stopped);
+    await a.controller.resume();assert.equal(watches.length,mode==='dispose'?1:2);
+    if(mode==='suspend')assert.equal(a.controller.getState().canConfirm,true);
+    a.controller.dispose();assert.ok(watches.every(watch=>watch.stops===1));
+  }
+ });
+ test('returning from a terminal room retires its watcher before a different room is created', async () => {
+  const service=server(),a=service.client('a');await a.controller.resume();await a.controller.create('Host');
+  const old=service.subscriptions[0],finished={...service.room,status:'finished',revision:1};old.next({room:finished,fromCache:false});
+  assert.equal(a.controller.requestReturn(),true);assert.equal(a.controller.returnToEntry(),true);assert.equal(old.stops,1);
+  const original=a.api.create;a.api.create=async payload=>{const result=await original(payload);service.room.id='room-2';return {...result,roomId:'room-2'};};
+  await a.controller.create('Host');assert.equal(service.subscriptions.length,2);assert.equal(service.subscriptions[1].roomId,'room-2');
+  const current=a.controller.getState();old.next({room:finished});old.fail(error('unavailable'));assert.deepEqual(a.controller.getState(),current);
+  a.controller.dispose();assert.ok(service.subscriptions.every(watch=>watch.stops===1));
  });
  test('confirmed draw is never applied optimistically and double clicks are single-flight', async () => {
   const {a}=await playing(), waiting=deferred(), api=a.api.submit;

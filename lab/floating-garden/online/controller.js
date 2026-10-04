@@ -12,7 +12,7 @@ const problem = (error) => messages[codeOf(error)] || '通信の結果を確認�
 
 /** UI-independent authoritative client. api: create/join/start/getSnapshot/submit; subscribe: roomId, next, error. */
 export function createOnlineController({ api, ensureUser, subscribe = () => () => {}, storage, requestId = () => crypto.randomUUID(), isOnline = () => true } = {}) {
-  let alive = true, generation = 0, unsubscribe = null, resuming = null, sending = null, suspended = false, queuedResume = null;
+  let alive = true, generation = 0, listener = null, resuming = null, sending = null, suspended = false, queuedResume = null;
   let saved = null, storageIssue = null;
   const observers = new Set();
   const state = { uid: null, room: null, self: null, connection: 'initial', pending: null, busy: false, notice: '', error: false, storageIssue: null, terminal: null, ui: { ...freshPreview(), comparison: null, returnConfirm: false } };
@@ -28,7 +28,7 @@ export function createOnlineController({ api, ensureUser, subscribe = () => () =
   } catch { storageIssue = '復帰情報を読み込めません。ブラウザーの保存設定を確認してください。保存を上書きせず停止しています'; }
   const publish = () => { if (alive) for (const observer of observers) observer(clone(state)); };
   const status = (notice, error = false) => { state.notice = notice; state.error = error; publish(); };
-  const stopListener = () => { unsubscribe?.(); unsubscribe = null; };
+  const stopListener = () => { const previous = listener; listener = null; previous?.unsubscribe?.(); };
   function persist() {
     try {
       if (storageIssue) throw new Error(storageIssue);
@@ -42,7 +42,7 @@ export function createOnlineController({ api, ensureUser, subscribe = () => () =
   }
   const canConfirm = () => alive && !sending && !resuming && !state.pending && !storageIssue && isOnline() && state.connection === 'ready' && Boolean(state.uid);
   function invalidatePreview() { Object.assign(state.ui, freshPreview()); }
-  function accept(snapshot, token = generation, { fromCache = false } = {}) {
+  function accept(snapshot, token = generation, { fromCache = false, allowSuperseded = false } = {}) {
     if (!alive || token !== generation || !snapshot?.room || !state.uid) return false;
     const { room, self = state.self } = snapshot;
     if (!saved?.roomId || room.id !== saved.roomId || !Number.isSafeInteger(room.revision) || room.rulesVersion !== MATCH_VERSION || !self || ![0, 1].includes(self.seat) || !Array.isArray(room.players) || !room.players.some((player) => player?.seat === self.seat)) return false;
@@ -56,7 +56,12 @@ export function createOnlineController({ api, ensureUser, subscribe = () => () =
       if (fromCache && state.connection === 'ready' && room.revision >= 0 && (!room.match || room.match.revision >= 0) && room.gameId === previous.gameId && Boolean(room.match) === Boolean(previous.match)) {
         state.connection = 'cache'; publish();
       }
-      return false;
+      // A live server event may overtake an in-flight refresh. Only a fully
+      // validated, consistently older reply can leave that confirmed state ready.
+      return allowSuperseded && !fromCache && state.connection === 'ready'
+        && room.gameId === previous.gameId && Boolean(room.match) === Boolean(previous.match)
+        && room.revision >= 0 && room.revision <= previous.revision
+        && (!room.match || (room.match.revision >= 0 && room.match.revision <= previous.match.revision));
     }
     if (!previous || previous.gameId !== room.gameId || previous.match?.revision !== room.match?.revision) invalidatePreview();
     state.room = clone(room); state.self = clone(self);
@@ -65,14 +70,33 @@ export function createOnlineController({ api, ensureUser, subscribe = () => () =
     publish(); return true;
   }
   function listen(token) {
+    const roomId = saved?.roomId, uid = state.uid;
+    const valid = () => alive && !suspended && token === generation && saved?.roomId === roomId && state.uid === uid;
+    if (!valid()) return;
+    // A mutation's authoritative refresh does not require restarting its live watch.
+    if (listener && listener.roomId === roomId && listener.token === token && listener.uid === uid) return;
     stopListener();
-    if (!saved?.roomId || !alive) return;
-    unsubscribe = subscribe(saved.roomId, (event) => {
-      if (!alive || token !== generation) return;
-      const room = event && Object.hasOwn(event, 'room') ? event.room : event;
-      if (!room) { state.connection = 'error'; status('部屋を読み込めません。保存期限を確認してください', true); return; }
-      accept({ room, self: state.self }, token, { fromCache: Boolean(event?.fromCache) });
-    }, (error) => { if (!alive || token !== generation) return; state.connection = 'error'; status(problem(error), true); });
+    if (!roomId || !valid()) return;
+    const watch = { roomId, uid, token, unsubscribe: null };
+    listener = watch;
+    const current = () => listener === watch && valid();
+    const failed = (error) => {
+      if (!current()) return;
+      stopListener();
+      if (!valid()) return;
+      state.connection = 'error'; status(problem(error), true);
+    };
+    try {
+      const unsubscribe = subscribe(roomId, (event) => {
+        if (!current()) return;
+        const room = event && Object.hasOwn(event, 'room') ? event.room : event;
+        if (!room) { state.connection = 'error'; status('部屋を読み込めません。保存期限を確認してください', true); return; }
+        accept({ room, self: state.self }, token, { fromCache: Boolean(event?.fromCache) });
+      }, failed);
+      // Synchronous callbacks can retire this watch before subscribe returns.
+      if (current()) watch.unsubscribe = unsubscribe;
+      else unsubscribe?.();
+    } catch (error) { failed(error); }
   }
   async function authenticate(token) {
     const user = await ensureUser();
@@ -94,7 +118,7 @@ export function createOnlineController({ api, ensureUser, subscribe = () => () =
       throw error;
     }
     if (!alive || token !== generation) return;
-    if (!accept(snapshot, token)) { state.connection = 'syncing'; status('新しい状態を待っています。もう一度接続を確認してください', true); }
+    if (!accept(snapshot, token, { allowSuperseded: true })) { state.connection = 'syncing'; status('新しい状態を待っています。もう一度接続を確認してください', true); }
   }
   async function sendPending(token) {
     const pending = state.pending;
@@ -112,14 +136,14 @@ export function createOnlineController({ api, ensureUser, subscribe = () => () =
       if (!persist()) return false;
       state.notice = '確定した状態を同期しています'; state.error = false;
       await refresh(token);
-      if (alive && token === generation) { listen(token); state.notice = ''; state.error = false; }
+      if (alive && token === generation) { state.notice = ''; state.error = false; listen(token); }
       return true;
     } catch (error) {
       if (!alive || token !== generation) return false;
       if (definitive(error)) {
         saved.pending = null; state.pending = null; persist();
         state.connection = 'syncing'; state.notice = problem(error); state.error = true;
-        try { await refresh(token); listen(token); } catch { state.connection = 'error'; }
+        try { await refresh(token); listen(token); } catch { if (alive && token === generation) state.connection = 'error'; }
       } else { state.connection = isOnline() ? 'uncertain' : 'offline'; state.notice = problem(error); state.error = true; }
       return false;
     }
