@@ -7,7 +7,7 @@ import { join, resolve, sep } from 'node:path';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { inflateRawSync } from 'node:zlib';
-import { isDeepStrictEqual } from 'node:util';
+import { isDeepStrictEqual, stripVTControlCharacters, types } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { FUNCTION_NAMES } from './prepare-floating-garden-trial.mjs';
 import { validateOperationReview, publicTrialConfig } from './prepare-floating-garden-trial-operation.mjs';
@@ -52,23 +52,111 @@ export function sameDenyAllRules(actual, expected) {
   const tokens = (text) => text.match(/'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|[A-Za-z_][A-Za-z_0-9]*|\*\*|[^\s]/g) ?? [];
   return same(tokens(actual), tokens(expected));
 }
-class AdapterStop extends Error { constructor(code) { super(`STOP: ${code}. Raw provider diagnostics are suppressed; inspect before any further write.`); this.code = code; } }
-const safe = (code) => new AdapterStop(code);
+// This finite vocabulary is the complete diagnostic persistence boundary. A
+// reason is a conservative category/check, never an assertion of root cause.
+const FAILURE_REASONS = new Set([
+  'unclassified', 'cli-json-unavailable', 'cli-result-unrecognized', 'invalid-filter', 'missing-sdk-binary', 'source-analysis', 'missing-dependencies',
+  'authentication', 'permission', 'billing', 'quota', 'build', 'network', 'timeout', 'process-interrupted',
+  'admin-activation', 'admin-app-collision', 'admin-concurrent-change', 'admin-create-mode', 'admin-create-precondition',
+  'admin-gate', 'admin-gate-preservation', 'admin-initial', 'admin-initial-empty', 'admin-read', 'admin-shape', 'admin-stop',
+  'admin-tester', 'admin-tester-preservation', 'admin-update-mode', 'admin-usage-untouched', 'admin-window',
+  'apis-already-enabled', 'artifact-retention', 'build-account', 'cli-effects-review', 'deployment-config', 'diagnostic-environment',
+  'function-duplicate-service', 'function-identity', 'function-inventory', 'function-resource-limits', 'function-run-revision',
+  'function-run-service', 'function-runtime-labels', 'function-secret-bindings', 'function-secret-environment', 'function-source-provenance',
+  'functions-already-present', 'functions-concurrent-change', 'functions-deploy-mode', 'functions-initial-empty', 'hmac-metadata', 'hmac-policy',
+  'hosting-bytes', 'hosting-cli-read', 'hosting-concurrent-change', 'hosting-config', 'hosting-deploy-mode', 'hosting-headers',
+  'hosting-headers-config', 'hosting-initial-release', 'hosting-kind', 'hosting-migration-release', 'hosting-private-gate', 'hosting-release',
+  'hosting-response-size', 'hosting-root-config', 'hosting-root-redirect', 'hosting-status', 'hosting-stopped-config', 'hosting-target',
+  'invalid-provider-json', 'local-file', 'local-path', 'metadata-command', 'metadata-http', 'metadata-size', 'node-version',
+  'packet-extra-file', 'packet-file-digest', 'packet-file-name', 'packet-layout', 'packet-manifest', 'preflight-mode', 'preflight-required',
+  'project-identity', 'provider-or-local-check', 'read-url', 'rules-bytes', 'rules-concurrent-change', 'rules-deploy-mode',
+  'rules-initial-deny-all', 'rules-release', 'rules-source', 'run-generation', 'run-initial-empty', 'run-invoker-policy',
+  'run-latest-traffic', 'run-public-invoker', 'run-ready-latest', 'run-resource-limits', 'runtime-metadata', 'sdk-local-resolution', 'sdk-version',
+  'source-archive-bytes', 'source-archive-compression', 'source-archive-crc', 'source-archive-descriptor', 'source-archive-directory',
+  'source-archive-entry', 'source-archive-local-entry', 'source-archive-overlap', 'source-archive-path', 'source-archive-size',
+  'source-bucket-owner', 'source-dependencies', 'source-five-exports', 'source-object-identity', 'source-runtime',
+]);
+function ownValue(value, key) {
+  if (value === null || typeof value !== 'object' || types.isProxy(value)) return undefined;
+  const descriptor = Object.getOwnPropertyDescriptor(value, key);
+  return descriptor && Object.hasOwn(descriptor, 'value') ? descriptor.value : undefined;
+}
+const numericStatus = (value, min, max) => Number.isInteger(value) && value >= min && value <= max ? value : null;
+export function normalizeFailureDiagnostic(value) {
+  const reason = ownValue(value, 'reason'), httpStatus = numericStatus(ownValue(value, 'httpStatus'), 100, 599);
+  return Object.freeze({ reason: FAILURE_REASONS.has(reason) ? reason : 'unclassified',
+    exitCode: numericStatus(ownValue(value, 'exitCode'), 0, 255), timedOut: ownValue(value, 'timedOut') === true,
+    ...(httpStatus === null ? {} : { httpStatus }) });
+}
+// WeakMap identity branding prevents forged prototypes/properties, getters or
+// provider exceptions from becoming trusted diagnostic messages.
+const adapterFailures = new WeakMap();
+class AdapterStop extends Error {
+  constructor(code, diagnostic) {
+    const reason = FAILURE_REASONS.has(code) ? code : 'unclassified';
+    super(`STOP: ${reason}. Raw provider diagnostics are suppressed; inspect before any further write.`);
+    this.code = reason;
+    adapterFailures.set(this, normalizeFailureDiagnostic(diagnostic ?? { reason }));
+  }
+}
+export function describeAdapterFailure(error) {
+  return adapterFailures.get(error) ?? normalizeFailureDiagnostic(null);
+}
+const safe = (code, diagnostic) => new AdapterStop(code, diagnostic);
 function requireThat(test, code) { if (!test) throw safe(code); }
 function parse(text) { try { return JSON.parse(text); } catch { throw safe('invalid-provider-json'); } }
 function result(kind) { return Object.freeze({ kind }); }
+
+// Reviewed literals from CLI 14.27.0 filterTargets, prepare, Node runtime
+// discovery/versioning, requireAuth/auth, checkIam/requirePermissions and
+// ensureApiEnabled. Provider status labels are categories, not inferred HTTP
+// numbers. Never extract an identifier, path, service name or error suffix.
+const CLI_FAILURE_SIGNATURES = [
+  ['invalid-filter', /No function matches given --only filters\. Aborting deployment\.|Cannot understand what targets to deploy\/serve\./],
+  ['missing-sdk-binary', /Failed to find location of Firebase Functions SDK\./],
+  ['missing-dependencies', /Couldn't find firebase-functions package in your source code\.|Cannot find module ['"]|No npm package found in functions source directory /],
+  ['source-analysis', /Functions codebase could not be analyzed successfully\.|Failed to load function definition from source:|Failed to parse build specification|User code failed to load\. Cannot determine backend specification\.|Discovery process completed but no function manifest was found|Failed to read or parse manifest file:|Discovery process failed:/],
+  ['authentication', /Failed to authenticate, have you run |Command requires authentication, please run |Authentication Error: Your credentials are no longer valid\.|\bUNAUTHENTICATED\b/],
+  ['permission', /Missing permissions required for functions deploy\.|Missing required permission on project |Authorization failed\. This account is missing the following required permissions|Permissions denied enabling |\bPERMISSION_DENIED\b/],
+  ['billing', /must be on the Blaze \(pay-as-you-go\) plan to complete this command\.|\bBILLING_DISABLED\b|\bUREQ_PROJECT_BILLING_NOT_FOUND\b/],
+  ['quota', /\bRESOURCE_EXHAUSTED\b|\bQUOTA_EXCEEDED\b|\bQuota exceeded\b/],
+  ['build', /\bBuild failed with status:|\bBuild failed:|\bCloud Build failed\b/],
+  ['network', /\bECONNRESET\b|\bECONNREFUSED\b|\bENOTFOUND\b|\bEAI_AGAIN\b/],
+];
+function diagnosticText(value) { return typeof value === 'string' && value.length <= MAX_BYTES ? stripVTControlCharacters(value) : ''; }
+function cliFailureDiagnostic(raw, parsed) {
+  const timedOut = ownValue(raw, 'timedOut') === true;
+  let reason = timedOut ? 'timeout' : ownValue(raw, 'signal') ? 'process-interrupted' : 'unclassified';
+  if (reason === 'unclassified') {
+    const error = ownValue(parsed, 'error');
+    const finalMessage = diagnosticText(typeof error === 'string' ? error : ownValue(error, 'message'));
+    // Prefer the CLI's terminal JSON message. Only if it is unclassified, look
+    // at the captured streams; neither stream crosses this function boundary.
+    for (const text of [finalMessage, diagnosticText(ownValue(raw, 'stderr')), diagnosticText(ownValue(raw, 'stdout'))]) {
+      const match = CLI_FAILURE_SIGNATURES.find(([, pattern]) => pattern.test(text));
+      if (match) { reason = match[0]; break; }
+    }
+  }
+  return normalizeFailureDiagnostic({ reason, exitCode: ownValue(raw, 'exitCode'), timedOut });
+}
+function failedResult(kind, raw, parsed, fallback = 'unclassified') {
+  const diagnostic = cliFailureDiagnostic(raw, parsed);
+  return Object.freeze({ kind, diagnostic: diagnostic.reason === 'unclassified' ? normalizeFailureDiagnostic({ ...diagnostic, reason: fallback }) : diagnostic });
+}
 
 /** A cleanup message is ONLY a classification, never proof of deployment.
  * A failed function deployment can be masked by the CLI's later cleanup error.
  */
 export function classifyDeployResult(raw, { allowCleanupWarning = false } = {}) {
-  if (!plain(raw) || raw.signal || raw.timedOut || !Number.isInteger(raw.exitCode)) return result('unknown');
+  const exitCode = numericStatus(ownValue(raw, 'exitCode'), 0, 255);
+  if (ownValue(raw, 'signal') || ownValue(raw, 'timedOut') === true || exitCode === null) return failedResult('unknown', raw);
   let value;
-  try { value = JSON.parse(String(raw.stdout ?? '')); } catch { return result(raw.exitCode === 0 ? 'unknown' : 'failed'); }
-  if (raw.exitCode === 0 && value?.status === 'success') return result('success');
+  try { value = JSON.parse(diagnosticText(ownValue(raw, 'stdout'))); } catch { return failedResult(exitCode === 0 ? 'unknown' : 'failed', raw, undefined, 'cli-json-unavailable'); }
+  if (exitCode === 0 && value?.status === 'success') return result('success');
   const error = typeof value?.error === 'string' ? value.error : value?.error?.message;
-  if (allowCleanupWarning && raw.exitCode !== 0 && value?.status === 'error' && error === CLEANUP_WARNING) return result('cleanup-warning');
-  return result(raw.exitCode === 0 ? 'unknown' : 'failed');
+  if (allowCleanupWarning && exitCode !== 0 && value?.status === 'error' && error === CLEANUP_WARNING) return result('cleanup-warning');
+  const recognizedFailure = exitCode !== 0 && value?.status === 'error';
+  return failedResult(exitCode === 0 ? 'unknown' : 'failed', raw, value, recognizedFailure ? 'unclassified' : 'cli-result-unrecognized');
 }
 
 export function validateFunctionMetadata(fn, name) {
@@ -179,8 +267,18 @@ export function makeCloudRunner({ exec = execFileSync, env = process.env } = {})
     try { return { exitCode: 0, stdout: exec(command, args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
       maxBuffer: MAX_BYTES, timeout: 15 * 60 * 1000, env: { ...env, NO_COLOR: '1', FORCE_COLOR: '0', CI: 'true',
         CLOUDSDK_CORE_DISABLE_PROMPTS: 'true', CLOUDSDK_CORE_LOG_HTTP: 'false', CLOUDSDK_CORE_DISABLE_FILE_LOGGING: 'true' } }) || '', stderr: '' }; }
-    catch (error) { return { exitCode: Number.isInteger(error?.status) ? error.status : null,
-      stdout: typeof error?.stdout === 'string' ? error.stdout : '', stderr: '', signal: error?.signal ?? null, timedOut: error?.code === 'ETIMEDOUT' }; }
+    catch (error) {
+      // Captured streams live only in process memory until classification. Do
+      // not print, persist or attach this internal runner result to the journal.
+      const stream = (key) => {
+        const value = ownValue(error, key);
+        if (typeof value === 'string') return value.length <= MAX_BYTES ? value : '';
+        if (!types.isProxy(value) && Buffer.isBuffer(value) && value.length <= MAX_BYTES) return value.toString('utf8');
+        return '';
+      };
+      return { exitCode: numericStatus(ownValue(error, 'status'), 0, 255), stdout: stream('stdout'), stderr: stream('stderr'),
+        signal: ownValue(error, 'signal') ? true : null, timedOut: ownValue(error, 'code') === 'ETIMEDOUT' };
+    }
   };
 }
 function normalizeRun(value) { return typeof value === 'string' ? { exitCode: 0, stdout: value } : value; }
@@ -205,10 +303,17 @@ export function createCloudAdapter({ packet, review, toolingDir, runner = makeCl
     try { return normalizeRun(runner(command, args, cwd)); }
     catch { return { exitCode: null, stdout: '', signal: 'runner-result-unknown' }; }
   };
-  const runText = (command, args, cwd) => { const r = rawRun(command, args, cwd); requireThat(r?.exitCode === 0 && !r.signal && !r.timedOut && typeof r.stdout === 'string', 'metadata-command'); return r.stdout; };
+  const runText = (command, args, cwd) => {
+    const r = rawRun(command, args, cwd);
+    if (r?.exitCode !== 0 || r.signal || r.timedOut || typeof r.stdout !== 'string') {
+      const diagnostic = cliFailureDiagnostic(r);
+      throw safe('metadata-command', { ...diagnostic, reason: diagnostic.reason === 'unclassified' ? 'metadata-command' : diagnostic.reason });
+    }
+    return r.stdout;
+  };
   const gcloudText = (args) => runText('gcloud', [...args, `--project=${PROJECT}`, `--billing-project=${PROJECT}`, '--verbosity=error'], packet.gameDir);
   const gcloud = (args) => parse(gcloudText([...args, '--format=json']));
-  async function boundary(fn) { try { return await fn(); } catch (e) { if (e instanceof AdapterStop) throw e; throw safe('provider-or-local-check'); } }
+  async function boundary(fn) { try { return await fn(); } catch (e) { if (adapterFailures.has(e)) throw e; throw safe('provider-or-local-check'); } }
   function localScope() {
     checkedReview(); validateEnvironment(env, execArgv);
     for (const key of ['DEBUG', 'GRPC_TRACE', 'GRPC_VERBOSITY', 'GOOGLE_SDK_NODE_LOGGING']) requireThat(!env[key], 'diagnostic-environment');
@@ -269,9 +374,18 @@ export function createCloudAdapter({ packet, review, toolingDir, runner = makeCl
     requireThat(u.protocol === 'https:' && !u.username && !u.password && ['cloudfunctions.googleapis.com', 'run.googleapis.com', 'firebaserules.googleapis.com', 'storage.googleapis.com'].includes(u.hostname), 'read-url');
     // Only GETs use this boundary; no extracted token, user-selected URL or retry.
     const c = await client();
-    const response = await c.request({ url, method: 'GET', responseType: bytes ? 'arraybuffer' : 'json', timeout: 30000,
-      retry: false, maxRedirects: 0, maxContentLength: MAX_BYTES, maxBodyLength: MAX_BYTES });
-    requireThat(response?.status === 200 && response.data !== undefined, 'metadata-http');
+    let response;
+    try {
+      response = await c.request({ url, method: 'GET', responseType: bytes ? 'arraybuffer' : 'json', timeout: 30000,
+        retry: false, maxRedirects: 0, maxContentLength: MAX_BYTES, maxBodyLength: MAX_BYTES });
+    } catch (error) {
+      const observed = ownValue(error, 'response');
+      const httpStatus = numericStatus(ownValue(observed, 'status'), 100, 599) ?? numericStatus(ownValue(observed, 'statusCode'), 100, 599);
+      // Never use FirebaseError.status (which defaults to 500), a gRPC code,
+      // or a number parsed from an error message as an HTTP response status.
+      throw safe('metadata-http', { reason: 'metadata-http', httpStatus });
+    }
+    if (response?.status !== 200 || response.data === undefined) throw safe('metadata-http', { reason: 'metadata-http', httpStatus: ownValue(response, 'status') });
     if (bytes) { const b = Buffer.from(response.data); requireThat(b.length <= MAX_BYTES, 'metadata-size'); return b; }
     return response.data;
   }
@@ -347,7 +461,14 @@ export function createCloudAdapter({ packet, review, toolingDir, runner = makeCl
     setupTooling(); const cwd = kind === 'game' ? packet.gameDir : packet.stoppedDir;
     return rawRun(process.execPath, [firebase, ...args, '--config', config ?? (kind === 'game' ? 'firebase.hosting-only.json' : 'firebase.maintenance.json'), '--project', PROJECT, '--non-interactive', '--json'], cwd);
   }
-  function cliRead(args) { const r = cli(args); requireThat(r?.exitCode === 0, 'hosting-cli-read'); const v = parse(r.stdout); requireThat(v?.status === 'success' && plain(v.result), 'hosting-cli-read'); return v.result; }
+  function cliRead(args) {
+    const r = cli(args);
+    if (r?.exitCode !== 0) {
+      const diagnostic = cliFailureDiagnostic(r);
+      throw safe('hosting-cli-read', { ...diagnostic, reason: diagnostic.reason === 'unclassified' ? 'hosting-cli-read' : diagnostic.reason });
+    }
+    const v = parse(r.stdout); requireThat(v?.status === 'success' && plain(v.result), 'hosting-cli-read'); return v.result;
+  }
   function readRelease() {
     sitePresent(cliRead(['hosting:sites:list']));
     const channel = liveChannel(cliRead(['hosting:channel:list', '--site', PROJECT])), release = channel.release;
@@ -359,7 +480,7 @@ export function createCloudAdapter({ packet, review, toolingDir, runner = makeCl
   }
   async function fetchPublic(path, status, expected, headers) {
     const response = await fetchImpl(`${ORIGIN}${path}`, { redirect: 'manual', cache: 'no-store', signal: AbortSignal.timeout(30000) });
-    requireThat(response.status === status, 'hosting-status');
+    if (response.status !== status) throw safe('hosting-status', { reason: 'hosting-status', httpStatus: response.status });
     const bytes = Buffer.from(await response.arrayBuffer()); requireThat(bytes.length <= 4 * 1024 * 1024, 'hosting-response-size');
     if (expected !== null) requireThat(bytes.equals(expected), 'hosting-bytes');
     for (const { key, value } of headers) requireThat(response.headers.get(key) === value, 'hosting-headers');

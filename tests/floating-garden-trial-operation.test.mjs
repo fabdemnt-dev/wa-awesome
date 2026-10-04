@@ -4,12 +4,15 @@ import { readFile, readdir, lstat, mkdtemp, mkdir, cp, symlink, rm, writeFile } 
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
+import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { validateOperationReview, publicTrialConfig, prepareTrialOperation } from '../scripts/prepare-floating-garden-trial-operation.mjs';
 import { runtimeConfig } from '../scripts/deploy-floating-garden-connection-template.mjs';
 import { FUNCTION_NAMES } from '../scripts/prepare-floating-garden-trial.mjs';
+import { classifyDeployResult as classifyOperationResult, normalizeFailureDiagnostic,
+  describeAdapterFailure, validateFunctionMetadata as operationMetadataCheck } from '../scripts/floating-garden-trial-cloud-adapter.mjs';
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const NOW = 1800000000000, WEEK = 604800000;
 const review = () => ({ schemaVersion: 1, startsAtMillis: NOW, endsAtMillis: NOW + WEEK, testerUids: ['SYNTHETIC_PACKAGE_TESTER_A', 'SYNTHETIC_PACKAGE_TESTER_B'], retainBuildArtifacts: false, allowInitialFunctionRecreate: false, approvePublicInvoker: false });
@@ -134,6 +137,45 @@ test('known cleanup warning does not bypass independent function verification',a
   assert.equal(op.mutations.includes('deployRules'),verified);
  }
 });
+test('failed deployment preserves only bounded reason and never retries or prints provider data',async()=>{
+ const op=fakeOperation(), raw='Missing permissions required for functions deploy. private@example.invalid SYNTHETIC_PRIVATE_TOKEN';
+ op.cloud.deployFunctions=async()=>classifyOperationResult({exitCode:1,stdout:JSON.stringify({status:'error',error:raw}),stderr:'SYNTHETIC_PRIVATE_TOKEN'});
+ let saved;
+ op.journal.fail=(stage,diagnostic)=>{saved={stage,diagnostic};};
+ const result=await op.run();
+ assert.equal(result.status,'blocked');assert.equal(result.stage,'deploy-functions');
+ assert.equal(result.diagnostic.reason,'permission');assert.equal(result.diagnostic.exitCode,1);
+ assert.deepEqual(saved,{stage:'deploy-functions',diagnostic:result.diagnostic});
+ assert.deepEqual(op.mutations,['createStoppedAdmin']);assert.ok(!op.calls.includes('verifyFunctions'));
+ for(const text of [JSON.stringify(result),JSON.stringify(saved),op.logs.join('\n')]){
+  assert.ok(!text.includes('private@example'));assert.ok(!text.includes('SYNTHETIC_PRIVATE_TOKEN'));
+ }
+ assert.match(op.logs.at(-1),/reason=permission, exit=1, timeout=false/);
+});
+test('adapter guard reason survives the operator catch; arbitrary Error codes never escape',async()=>{
+ let expected;
+ try{operationMetadataCheck(null,FUNCTION_NAMES[0]);}catch(error){expected=error;}
+ const op=fakeOperation();op.cloud.preflight=async()=>{throw expected;};
+ const result=await op.run();assert.deepEqual(result.diagnostic,describeAdapterFailure(expected));
+ assert.notEqual(result.diagnostic.reason,'unclassified');assert.deepEqual(op.mutations,[]);
+ const other=fakeOperation();other.cloud.preflight=async()=>{throw Object.assign(Error('SYNTHETIC_PRIVATE_TOKEN'),{code:'SYNTHETIC_PRIVATE_TOKEN',response:{status:403}});};
+ const unknown=await other.run();assert.equal(unknown.diagnostic.reason,'unclassified');
+ assert.ok(!JSON.stringify(unknown).includes('SYNTHETIC_PRIVATE_TOKEN'));assert.ok(!other.logs.join('').includes('SYNTHETIC_PRIVATE_TOKEN'));
+});
+test('journal retains sanitized failure details across process reload without permitting replay',async(t)=>{
+ const dir=await temp(t),out=join(dir,'operation');await prepareTrialOperation({review:approvedReview(),output:out,now:NOW-1});
+ const {packet}=await readOperationPacket(out);const journal=await createJournal(packet,{now:()=>NOW});
+ journal.begin('deploy');journal.issued('deploy-functions');await journal.flush();
+ journal.fail('deploy-functions',{reason:'permission',exitCode:1,timedOut:false,httpStatus:403,raw:'SYNTHETIC_PRIVATE_TOKEN'});await journal.flush();
+ const stored=await readFile(join(out,'OPERATION-STATE.json'),'utf8');assert.ok(!stored.includes('SYNTHETIC_PRIVATE_TOKEN'));
+ const restored=await createJournal(packet,{now:()=>NOW});assert.deepEqual(restored.snapshot().deploy.diagnostic,{reason:'permission',exitCode:1,timedOut:false,httpStatus:403});
+ assert.throws(()=>restored.begin('deploy'));assert.throws(()=>restored.begin('activate'));
+ assert.equal((await lstat(join(out,'OPERATION-STATE.json'))).mode&0o777,0o600);
+});
+test('unknown and malformed diagnostic fields are replaced rather than persisted verbatim',()=>{
+ const value=normalizeFailureDiagnostic({reason:'SYNTHETIC_PRIVATE_TOKEN',exitCode:'1',timedOut:'true',httpStatus:999,other:'SYNTHETIC_PRIVATE_TOKEN'});
+ assert.deepEqual(value,{reason:'unclassified',exitCode:null,timedOut:false});assert.ok(Object.isFrozen(value));
+});
 test('deployment crossing fixed start remains stopped and never shifts deadline',async()=>{
  const op=fakeOperation(),original=op.cloud.deployFunctions;op.cloud.deployFunctions=async()=>{const r=await original();op.time=NOW+1;return r;};
  const result=await op.run();assert.equal(result.reason,'start-passed');assert.equal(adminState(op.admin,op.value),'stopped');assert.ok(!op.mutations.includes('updateAdmin'));assert.equal(op.admin.gate.endsAtMillis,NOW+WEEK);
@@ -232,7 +274,7 @@ const load = (path) => import(pathToFileURL(join(ROOT, path)));
 const adapterModule = await load('scripts/floating-garden-trial-cloud-adapter.mjs');
 const { createCloudAdapter, classifyDeployResult, CLEANUP_WARNING, validateFunctionMetadata,
   validateRunService, validateInvokerPolicy, validateSourceArchive, FIRESTORE_CLIENT_CONFIG,
-  REGION, RUNTIME_ACCOUNT } = adapterModule;
+  REGION, RUNTIME_ACCOUNT, makeCloudRunner } = adapterModule;
 const { prepareTrialOperation } = await load('scripts/prepare-floating-garden-trial-operation.mjs');
 const { FUNCTION_NAMES } = await load('scripts/prepare-floating-garden-trial.mjs');
 const require = createRequire(join(ROOT, 'package.json'));
@@ -359,7 +401,8 @@ test('constructing the adapter does not evaluate packet/review or call capabilit
 test('CLI classification distinguishes success, exact cleanup warning, failure and unknown', () => {
   assert.deepEqual(classifyDeployResult({ exitCode: 0, stdout: '{"status":"success"}' }), { kind: 'success' });
   const warning = { exitCode: 1, stdout: JSON.stringify({ status: 'error', error: CLEANUP_WARNING }) };
-  assert.deepEqual(classifyDeployResult(warning), { kind: 'failed' });
+  assert.equal(classifyDeployResult(warning).kind, 'failed');
+  assert.equal(classifyDeployResult(warning).diagnostic.exitCode, 1);
   assert.deepEqual(classifyDeployResult(warning, { allowCleanupWarning: true }), { kind: 'cleanup-warning' });
   assert.equal(classifyDeployResult({ ...warning, stdout: JSON.stringify({ status: 'error', error: CLEANUP_WARNING + ' unrelated failure' }) }, { allowCleanupWarning: true }).kind, 'failed');
   assert.equal(classifyDeployResult({ exitCode: null, signal: 'SIGTERM', stdout: warning.stdout }, { allowCleanupWarning: true }).kind, 'unknown');
@@ -502,6 +545,144 @@ test('pinned Firestore GAPIC disables Commit RPC retries without initializing cr
   } finally { await client.close(); }
 });
 
+// Sanitized failure retention; every provider and subprocess is injected.
+const SECRET_SENTINEL = 'SYNTHETIC_PRIVATE_UID_token_owner@example.invalid';
+const emptyDiagnostic = { reason: 'unclassified', exitCode: null, timedOut: false };
+function assertNoPrivate(value) {
+  const text = JSON.stringify(value);
+  assert(!text.includes(SECRET_SENTINEL));
+  for (const field of ['stdout', 'stderr', 'message', 'token', 'uid', 'email']) assert(!Object.hasOwn(value, field));
+}
+function classifyMessage(message, extra = {}) {
+  return classifyDeployResult({ exitCode: 2, stdout: JSON.stringify({ status: 'error', error: message }), ...extra });
+}
+async function diagnosticFixture(t) {
+  const root = await mkdtemp(join(tmpdir(), 'garden-diagnostic-test-')); t.after(() => rm(root, { recursive: true, force: true }));
+  const now = 1791095800000, review = { schemaVersion: 1, startsAtMillis: now, endsAtMillis: now + 604800000,
+    testerUids: ['synthetic_alpha', 'synthetic_beta'], retainBuildArtifacts: true, allowInitialFunctionRecreate: true, approvePublicInvoker: true };
+  const packet = await prepareTrialOperation({ review, output: join(root, 'packet'), now });
+  const runner = (_command, args) => ({ exitCode: 0, stdout: JSON.stringify(args[0] === 'config' ? {} :
+    { projectId: 'wa-awesome-garden-stg', projectNumber: '120030709276', lifecycleState: 'ACTIVE' }) });
+  return { packet, review, runner, env: {}, execArgv: [], now: () => now };
+}
+
+test('diagnostic signatures map only to bounded categories without echoing provider text', () => {
+  const messages = [
+    ['invalid-filter', 'No function matches given --only filters. Aborting deployment.'],
+    ['invalid-filter', 'Cannot understand what targets to deploy/serve.'],
+    ['missing-sdk-binary', 'Failed to find location of Firebase Functions SDK.'],
+    ['missing-dependencies', "Cannot find module 'synthetic-missing-package'"],
+    ['source-analysis', 'Functions codebase could not be analyzed successfully.'],
+    ['source-analysis', 'User code failed to load. Cannot determine backend specification.'],
+    ['authentication', 'Failed to authenticate, have you run firebase login?'],
+    ['permission', 'Missing permissions required for functions deploy.'],
+    ['billing', 'Your project synthetic must be on the Blaze (pay-as-you-go) plan to complete this command.'],
+    ['quota', 'RESOURCE_EXHAUSTED'], ['build', 'Build failed with status: FAILURE'], ['network', 'ENOTFOUND'],
+  ];
+  for (const [reason, message] of messages) {
+    const result = classifyMessage(`${message} ${SECRET_SENTINEL}`);
+    assert.deepEqual(result, { kind: 'failed', diagnostic: { reason, exitCode: 2, timedOut: false } });
+    assert(Object.isFrozen(result)); assert(Object.isFrozen(result.diagnostic)); assertNoPrivate(result.diagnostic);
+  }
+  // Prefer the terminal JSON error over less specific captured stream text.
+  assert.equal(classifyMessage('Missing permissions required for functions deploy.', { stderr: 'ENOTFOUND' }).diagnostic.reason, 'permission');
+});
+
+test('diagnostic parsing observations distinguish unavailable JSON and unknown result shapes', () => {
+  assert.deepEqual(classifyDeployResult({ exitCode: 1, stdout: SECRET_SENTINEL }), {
+    kind: 'failed', diagnostic: { reason: 'cli-json-unavailable', exitCode: 1, timedOut: false } });
+  assert.deepEqual(classifyDeployResult({ exitCode: 0, stdout: '{}' }), {
+    kind: 'unknown', diagnostic: { reason: 'cli-result-unrecognized', exitCode: 0, timedOut: false } });
+  assert.deepEqual(classifyMessage(SECRET_SENTINEL), { kind: 'failed', diagnostic: { reason: 'unclassified', exitCode: 2, timedOut: false } });
+  assert.deepEqual(classifyDeployResult({ exitCode: 0, stdout: '{"status":"success"}' }), { kind: 'success' });
+  assert.deepEqual(classifyMessage(CLEANUP_WARNING, { exitCode: 1 }), { kind: 'failed', diagnostic: { reason: 'unclassified', exitCode: 1, timedOut: false } });
+  assert.deepEqual(classifyDeployResult({ exitCode: 1, stdout: JSON.stringify({ status: 'error', error: CLEANUP_WARNING }) }, { allowCleanupWarning: true }), { kind: 'cleanup-warning' });
+});
+
+test('diagnostic timeouts, signals and invalid exit statuses remain unknown outcomes', () => {
+  for (const exitCode of [null, -1, 256, '2', NaN]) {
+    const result = classifyDeployResult({ exitCode, stdout: '' });
+    assert.equal(result.kind, 'unknown'); assert.equal(result.diagnostic.exitCode, null);
+  }
+  assert.deepEqual(classifyDeployResult({ exitCode: null, signal: SECRET_SENTINEL, timedOut: true, stdout: '' }), {
+    kind: 'unknown', diagnostic: { reason: 'timeout', exitCode: null, timedOut: true } });
+  assert.deepEqual(classifyDeployResult({ exitCode: null, signal: SECRET_SENTINEL, stdout: '' }), {
+    kind: 'unknown', diagnostic: { reason: 'process-interrupted', exitCode: null, timedOut: false } });
+});
+
+test('diagnostic normalizer ignores hostile accessors/proxies, arbitrary fields and coercion', () => {
+  let reads = 0;
+  const getter = Object.defineProperty({}, 'reason', { get() { reads++; throw Error(SECRET_SENTINEL); } });
+  const proxy = new Proxy({}, { get() { reads++; throw Error(SECRET_SENTINEL); }, getOwnPropertyDescriptor() { reads++; throw Error(SECRET_SENTINEL); } });
+  const inherited = Object.create({ reason: 'permission', exitCode: 2, timedOut: true, httpStatus: 403 });
+  for (const input of [getter, proxy, inherited, null, 'permission']) assert.deepEqual(normalizeFailureDiagnostic(input), emptyDiagnostic);
+  assert.equal(reads, 0);
+  assert.deepEqual(normalizeFailureDiagnostic({ reason: SECRET_SENTINEL, exitCode: '2', timedOut: 'true', httpStatus: '403', stdout: SECRET_SENTINEL }), emptyDiagnostic);
+  assert.deepEqual(normalizeFailureDiagnostic({ reason: 'permission', exitCode: 255, timedOut: true, httpStatus: 599, message: SECRET_SENTINEL }),
+    { reason: 'permission', exitCode: 255, timedOut: true, httpStatus: 599 });
+  assert(Object.isFrozen(normalizeFailureDiagnostic({ reason: 'permission' })));
+});
+
+test('only genuinely branded AdapterStop diagnostics survive, even after property tampering', () => {
+  let branded;
+  try { validateFunctionMetadata(null, 'floatingGardenCreateRoom'); } catch (error) { branded = error; }
+  assert(branded); assert.equal(describeAdapterFailure(branded).reason, 'function-identity');
+  branded.code = SECRET_SENTINEL; branded.message = SECRET_SENTINEL;
+  assert.equal(describeAdapterFailure(branded).reason, 'function-identity');
+  for (const error of [Object.assign(Error(SECRET_SENTINEL), { code: 'permission' }), Object.create(Object.getPrototypeOf(branded)), null, SECRET_SENTINEL]) {
+    assert.deepEqual(describeAdapterFailure(error), emptyDiagnostic); assertNoPrivate(describeAdapterFailure(error));
+  }
+});
+
+test('runner captures stderr transiently for classification and never retries a failed exec', () => {
+  let calls = 0;
+  const runner = makeCloudRunner({ env: {}, exec: (_command, _args, options) => {
+    calls++; assert.deepEqual(options.stdio, ['ignore', 'pipe', 'pipe']);
+    throw Object.assign(Error(SECRET_SENTINEL), { status: 1, stdout: Buffer.from(''),
+      stderr: Buffer.from(`Error: Failed to find location of Firebase Functions SDK. ${SECRET_SENTINEL}`) });
+  } });
+  const captured = runner('synthetic-command', [], '/synthetic');
+  assert.equal(calls, 1); assert(captured.stderr.includes(SECRET_SENTINEL)); // Internal memory only.
+  const result = classifyDeployResult(captured);
+  assert.deepEqual(result, { kind: 'failed', diagnostic: { reason: 'missing-sdk-binary', exitCode: 1, timedOut: false } });
+  assertNoPrivate(result); assertNoPrivate(result.diagnostic);
+});
+
+test('CLI error text/default status/gRPC numeric codes never become an HTTP status', () => {
+  for (const raw of [
+    { exitCode: 1, stdout: JSON.stringify({ status: 'error', error: 'HTTP Error: 403, Forbidden' }) },
+    { exitCode: 1, stdout: JSON.stringify({ status: 'error', error: { message: SECRET_SENTINEL, status: 500, code: 7 } }) },
+    { exitCode: 1, stdout: JSON.stringify({ status: 'error', error: SECRET_SENTINEL }), status: 500, code: 7 },
+  ]) assert(!Object.hasOwn(classifyDeployResult(raw).diagnostic, 'httpStatus'));
+});
+
+test('HTTP adapter exports only a real numeric response status and suppresses exception payloads', async (t) => {
+  const fixture = await diagnosticFixture(t);
+  for (const [failure, status] of [
+    [Object.assign(Error(SECRET_SENTINEL), { response: { status: 403 }, status: 500, code: 7 }), 403],
+    [Object.assign(Error(SECRET_SENTINEL), { response: { statusCode: 429 } }), 429],
+    [Object.assign(Error('HTTP Error: 403 ' + SECRET_SENTINEL), { status: 500, code: 7 }), undefined],
+    [Object.assign(Error(SECRET_SENTINEL), { response: { status: '403' } }), undefined],
+  ]) {
+    let requests = 0;
+    const cloud = createCloudAdapter({ ...fixture, requestClient: { request: async () => { requests++; throw failure; } } });
+    await cloud.preflight('stop');
+    let caught; try { await cloud.verifyFunctions(); } catch (error) { caught = error; }
+    assert(caught); assert.equal(requests, 1);
+    const diagnostic = describeAdapterFailure(caught);
+    assert.deepEqual(diagnostic, { reason: 'metadata-http', exitCode: null, timedOut: false, ...(status === undefined ? {} : { httpStatus: status }) });
+    assert(!caught.message.includes(SECRET_SENTINEL)); assertNoPrivate(diagnostic);
+  }
+});
+
+test('failed read-only command propagates only categorized metadata and actual exit code', async (t) => {
+  const fixture = await diagnosticFixture(t);
+  const cloud = createCloudAdapter({ ...fixture, runner: () => ({ exitCode: 2, stdout: '', stderr: `PERMISSION_DENIED ${SECRET_SENTINEL}` }) });
+  let caught; try { await cloud.preflight('stop'); } catch (error) { caught = error; }
+  assert.deepEqual(describeAdapterFailure(caught), { reason: 'permission', exitCode: 2, timedOut: false });
+  assert(!caught.message.includes(SECRET_SENTINEL));
+});
+
 }
 
 import { sameDenyAllRules } from '../scripts/floating-garden-trial-cloud-adapter.mjs';
@@ -522,3 +703,62 @@ test('initial Rules token comparison remains narrow on comments, unexpected type
  const expected=await readFile(join(ROOT,'config/floating-garden-trial/deny-all.rules'),'utf8');
  for(const altered of ['// comment\n'+consoleClosedRules,consoleClosedRules.replace('if false','if /*comment*/ false'),consoleClosedRules+' '.repeat(16385),null,{},123])assert.equal(sameDenyAllRules(altered,expected),false);
 });
+
+// Exercise the exact generic wrapper payload, without executing Python or Node owner modes.
+{
+const diagnosticSource = execFileSync('python3', ['-I', '-c',
+  "import ast,json,pathlib,sys; t=ast.parse(pathlib.Path(sys.argv[1]).read_text()); v=[n for n in t.body if isinstance(n,ast.Assign) and any(isinstance(k,ast.Name) and k.id=='DIAGNOSE' for k in n.targets)]; assert len(v)==1; print(json.dumps(ast.literal_eval(v[0].value)))",
+  join(ROOT,'scripts/start-floating-garden-trial-owner.py')], {encoding:'utf8',stdio:['ignore','pipe','pipe'],timeout:10000,maxBuffer:65536});
+const { classifyLog, summarizeFunctions, summarizeJournal, validateTokyoInventory, inspect } =
+  await import('data:text/javascript;base64,'+Buffer.from(JSON.parse(diagnosticSource)).toString('base64'));
+const names=['floatingGardenCreateRoom','floatingGardenJoinRoom','floatingGardenStartMatch','floatingGardenGetSnapshot','floatingGardenSubmitAction'];
+const inventory=names.map(n=>({name:'projects/wa-awesome-garden-stg/locations/asia-northeast1/functions/'+n,state:'ACTIVE',environment:'GEN_2',secret:'DO_NOT_PRINT_TOKEN',serviceConfig:{uri:'https://SECRET'}}));
+const packet={manifestDigest:'a',reviewDigest:'b',gameDir:'/mock/operation/game'};
+const journal={schemaVersion:1,manifestDigest:'a',reviewDigest:'b',deploy:{status:'failed',stage:'deploy-functions',secret:'DO_NOT_PRINT_TOKEN'},stop:{status:'new'},events:[{stage:'create-stopped-admin',status:'issued'},{stage:'create-stopped-admin',status:'verified'},{stage:'deploy-functions',status:'issued'}]};
+test('logs disclose only fixed codes and HTTP status',()=>{
+ const output=classifyLog('[debug] TOKEN=DO_NOT_PRINT_TOKEN email=private@example.com\n[debug] <<< [apiv2][status] POST https://SECRET?q=TOKEN 403\nPERMISSION_DENIED\nFunctions deploy failed.\nError: private@example.com cannot use SECRET').join(',');
+ assert.equal(output,'PERMISSION_DENIED,FUNCTIONS_DEPLOY_FAILED,HTTP_403');
+ assert.deepEqual(classifyLog('DO_NOT_PRINT_TOKEN'),['NO_WHITELISTED_SIGNATURE']);
+});
+test('inventory emits only exact known names and state enums',()=>{
+ const lines=summarizeFunctions(inventory);assert.equal(lines.length,5);assert(lines.every(x=>x.endsWith(':STATE=ACTIVE:ENVIRONMENT=GEN_2')));assert(!lines.join().includes('DO_NOT_PRINT_TOKEN'));
+ assert(summarizeFunctions([{...inventory[0],state:'SECRET'}])[0].endsWith(':STATE=UNKNOWN:ENVIRONMENT=GEN_2'));
+ assert.throws(()=>summarizeFunctions({error:'SECRET'}));
+});
+test('journal validates identity, sanitizes each value',()=>{
+ assert.equal(summarizeJournal(journal,packet),'DEPLOY=failed:deploy-functions,STOP=new,create-stopped-admin:issued,create-stopped-admin:verified,deploy-functions:issued');
+ assert.throws(()=>summarizeJournal({...journal,manifestDigest:'wrong'},packet));
+ assert(summarizeJournal({...journal,events:[{stage:'SECRET',status:'TOKEN'}]},packet).endsWith('UNKNOWN:UNKNOWN'));
+});
+async function mock({functions=inventory,inventoryResponse,verifyError,preflightError,rawError}={}){
+ const calls=[],out=[];
+ await inspect({base:'/mock',requestClient:{request:async options=>{calls.push('request:tokyo');assert.equal(options.url,'https://cloudfunctions.googleapis.com/v2/projects/wa-awesome-garden-stg/locations/asia-northeast1/functions?pageSize=1000');assert.equal(options.method,'GET');assert.equal(options.retry,false);assert.equal(options.maxRedirects,0);assert.equal(options.timeout,30000);assert.equal(options.maxContentLength,16*1024*1024);assert.equal(options.maxBodyLength,16*1024*1024);if(rawError)throw Error('DO_NOT_PRINT_TOKEN');return inventoryResponse??{status:200,data:{functions}};}},emit:x=>out.push(x),verify:async()=>calls.push('source'),read:async p=>{calls.push('read:'+p);if(p.endsWith('OPERATION-STATE.json'))return JSON.stringify(journal);if(p.endsWith('/firebase-debug.log'))return 'PERMISSION_DENIED DO_NOT_PRINT_TOKEN';throw Object.assign(Error(),{code:'ENOENT'});},load:async p=>p.includes('/operate-')?{readOperationPacket:async()=>({packet,review:{}}),adminState:()=> 'stopped'}:{makeCloudRunner:()=>()=>{throw Error('UNEXPECTED_SUBPROCESS');},createCloudAdapter:()=>({preflight:async mode=>{calls.push('preflight:'+mode);assert.equal(mode,'stop');if(preflightError)throw preflightError;},readAdmin:async()=>{calls.push('readAdmin');return {};},verifyFunctions:async()=>{calls.push('verifyFunctions');if(verifyError)throw verifyError;return {verified:true};}})}});
+ return {calls,out};
+}
+test('all local logs precede preflight; only metadata list and verify follow',async()=>{const {calls,out}=await mock();assert(calls.indexOf('read:/mock/operation/game/firebase-debug.9.log')<calls.indexOf('preflight:stop'));assert(!calls.some(x=>x.startsWith('run:')));assert(calls.indexOf('readAdmin')<calls.indexOf('request:tokyo'));assert.equal(calls.filter(x=>x==='request:tokyo').length,1);assert(out.includes('FUNCTIONS_VERIFY: VERIFIED'));assert.equal(out.at(-1),'READ_ONLY_DONE');assert(!out.join().includes('DO_NOT_PRINT_TOKEN'));});
+test('safe verification code survives; unrelated errors are hidden',async()=>{assert.equal((await mock({verifyError:{code:'source-archive-size',message:'TOKEN'}})).out.at(-1),'READ_ONLY_STOP: FUNCTIONS_VERIFY:source-archive-size');assert.equal((await mock({verifyError:{code:'DO_NOT_PRINT_TOKEN',message:'TOKEN'}})).out.at(-1),'READ_ONLY_STOP: FUNCTIONS_VERIFY:UNCLASSIFIED');assert.equal((await mock({rawError:true})).out.at(-1),'READ_ONLY_STOP: TOKYO_FUNCTIONS_LIST:UNCLASSIFIED');});
+test('incomplete inventory does not call full verification',async()=>{const {calls,out}=await mock({functions:inventory.slice(0,2)});assert(!calls.includes('verifyFunctions'));assert(out.includes('FUNCTIONS_VERIFY: SKIPPED_INCOMPLETE_INVENTORY'));});
+test('failed preflight prevents functions list',async()=>{const {calls,out}=await mock({preflightError:{code:'project-identity',message:'TOKEN'}});assert(!calls.includes('request:tokyo'));assert.equal(out.at(-1),'READ_ONLY_STOP: METADATA_PREFLIGHT:project-identity');});
+
+test('exact successful empty Tokyo inventory supports scoped not-found only',async()=>{
+ assert.deepEqual(validateTokyoInventory({status:200,data:{functions:[]}}),[]);assert.deepEqual(validateTokyoInventory({status:200,data:{}}),[]);assert.deepEqual(validateTokyoInventory({status:200,data:{nextPageToken:'',unreachable:[]}}),[]);
+ const emptyObject=await mock({inventoryResponse:{status:200,data:{}}});assert(emptyObject.out.some(x=>x.includes('STATE=NOT_FOUND_IN_TOKYO_LIST')));
+ const {out}=await mock({functions:[]});const lines=out.filter(x=>x.startsWith('FUNCTION:'));
+ assert.equal(lines.length,5);assert(lines.every(x=>x.includes(':STATE=NOT_FOUND_IN_TOKYO_LIST:ENVIRONMENT=UNKNOWN')));assert(!out.join().includes('ABSENT'));
+});
+test('wrong HTTP code, absent or invalid fields, pagination and unreachable are never absence',async()=>{
+ const cases=[{status:403,data:{functions:[]}},{status:'200',data:{functions:[]}},{status:200,data:[]},{status:200,data:{error:{code:403}}},{status:200,data:{unexpected:true}},{status:200,data:{functions:null}},{status:200,data:{functions:{}}},{status:200,data:{functions:[],nextPageToken:'more'}},{status:200,data:{functions:[],nextPageToken:null}},{status:200,data:{functions:[],unreachable:['asia-northeast1']}},{status:200,data:{functions:[],unreachable:'bad'}}];
+ for(const inventoryResponse of cases){assert.throws(()=>validateTokyoInventory(inventoryResponse));const {out,calls}=await mock({inventoryResponse});assert(out.at(-1).startsWith('READ_ONLY_STOP: TOKYO_FUNCTIONS_LIST:tokyo-inventory-'));assert(!out.some(x=>x.startsWith('FUNCTION:')));assert(!out.join().includes('NOT_FOUND'));assert(!calls.includes('verifyFunctions'));}
+});
+test('wrong region, project, short or malformed names and duplicates fail closed',async()=>{
+ for(const functions of [[{...inventory[0],name:inventory[0].name.replace('asia-northeast1','us-central1')}],[{...inventory[0],name:inventory[0].name.replace('wa-awesome-garden-stg','other-project')}],[{...inventory[0],name:names[0]}],[{...inventory[0],name:inventory[0].name+'/extra'}],[null],[inventory[0],inventory[0]]]){assert.throws(()=>summarizeFunctions(functions));const {out}=await mock({functions});assert.equal(out.at(-1),'READ_ONLY_STOP: TOKYO_FUNCTIONS_LIST:tokyo-inventory-identity');assert(!out.some(x=>x.startsWith('FUNCTION:')));}
+});
+test('unknown state and environment are separate fields, never copied',()=>{
+ const rows=summarizeFunctions([{...inventory[0],state:'PRIVATE_TOKEN',environment:'PRIVATE_ENV',status:'ACTIVE'}]);assert.equal(rows[0],names[0]+':STATE=UNKNOWN:ENVIRONMENT=UNKNOWN');assert(!rows.join().includes('PRIVATE'));
+});
+test('a valid unexpected Tokyo function is not printed and prevents full inventory verification',async()=>{
+ const {calls,out}=await mock({functions:[...inventory,{name:'projects/wa-awesome-garden-stg/locations/asia-northeast1/functions/privateOtherFunction',state:'ACTIVE',environment:'GEN_2'}]});assert(!out.join().includes('privateOtherFunction'));assert(!calls.includes('verifyFunctions'));
+});
+test('oversized successful body is incomplete',()=>{assert.throws(()=>validateTokyoInventory({status:200,data:{functions:[{...inventory[0],extra:'x'.repeat(16*1024*1024)}]}}),e=>e.code==='tokyo-inventory-incomplete');});
+
+}

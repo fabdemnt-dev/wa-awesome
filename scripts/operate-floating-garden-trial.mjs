@@ -8,6 +8,7 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { prepareTrialOperation, publicTrialConfig } from './prepare-floating-garden-trial-operation.mjs';
 import { validateEnvironment as validateOperatorEnvironment } from './deploy-floating-garden-connection-template.mjs';
+import { normalizeFailureDiagnostic, describeAdapterFailure } from './floating-garden-trial-cloud-adapter.mjs';
 
 export const PROJECT = 'wa-awesome-garden-stg';
 export const ORIGIN = 'https://wa-awesome-garden-stg.web.app';
@@ -64,7 +65,6 @@ function assertState(state, review, expected, { unused = false, minimumCount = 0
   if (adminState(state, review, { forStop }) !== expected) stop();
   if (!forStop && (state.usage.createdRoomCount < minimumCount || unused && state.usage.createdRoomCount !== 0)) stop();
 }
-function mutationSucceeded(result) { if (result?.kind !== 'success') stop(); }
 function verified(result) { if (result?.verified !== true) stop(); }
 function validIdentity(value) { return plain(value) && typeof value.version === 'string' && value.version.length > 0 && ['connection', 'maintenance', 'game', 'stopped'].includes(value.kind); }
 function clock(now) { const value = now(); if (!Number.isSafeInteger(value) || value <= 0) stop(); return value; }
@@ -74,6 +74,13 @@ export async function operateTrial({ mode, review, cloud, journal, now = Date.no
   publicTrialConfig(review);
   if (!['inspect', 'deploy', 'activate', 'stop'].includes(mode)) stop();
   let stage = 'preflight';
+  let failureDiagnostic = null;
+  const mutationSucceeded = (result) => {
+    if (result?.kind !== 'success') {
+      failureDiagnostic = normalizeFailureDiagnostic(result?.diagnostic);
+      stop();
+    }
+  };
   const issue = async (name) => { journal.issued(name); if (journal.flush) await journal.flush(); };
   try {
     await checkLocal();
@@ -137,7 +144,10 @@ export async function operateTrial({ mode, review, cloud, journal, now = Date.no
       const functions = await cloud.deployFunctions();
       // A known cleanup-only error may mask function errors. Never trust its
       // wording: all five source/configuration/Run/IAM readbacks are mandatory.
-      if (!['success', 'cleanup-warning'].includes(functions?.kind)) stop();
+      if (!['success', 'cleanup-warning'].includes(functions?.kind)) {
+        failureDiagnostic = normalizeFailureDiagnostic(functions?.diagnostic);
+        stop();
+      }
       verified(await cloud.verifyFunctions()); journal.verified(stage);
       if (functions.kind === 'cleanup-warning') log('RETENTION_WARNING: CLI reported unconfigured artifact cleanup; all five functions independently verified. No retention policy changed.');
       assertState(await cloud.readAdmin(), review, 'stopped', { unused: true });
@@ -186,10 +196,12 @@ export async function operateTrial({ mode, review, cloud, journal, now = Date.no
     journal.finish('active');
     log('ACTIVE: exact two testers and fixed window verified. The first game still needs the approved owner check.');
     return { mode, status: 'active' };
-  } catch {
-    if (mode !== 'inspect') journal.fail(stage);
-    log(`STOP: ${stage}. No mutation is retried; inspect the saved operation before any further action. Raw diagnostics suppressed.`);
-    return { mode, status: 'blocked', stage };
+  } catch (error) {
+    const diagnostic = failureDiagnostic ?? describeAdapterFailure(error);
+    if (mode !== 'inspect') journal.fail(stage, diagnostic);
+    const detail = `reason=${diagnostic.reason}, exit=${diagnostic.exitCode ?? 'unknown'}, timeout=${diagnostic.timedOut}${diagnostic.httpStatus === undefined ? '' : `, http=${diagnostic.httpStatus}`}`;
+    log(`STOP: ${stage}. ${detail}. No mutation is retried; inspect the saved operation before any further action. Raw diagnostics suppressed.`);
+    return { mode, status: 'blocked', stage, diagnostic };
   }
 }
 
@@ -263,7 +275,12 @@ export async function createJournal(packet, { now = Date.now } = {}) {
     issued(stage) { state[operation].stage = stage; event(stage, 'issued'); },
     verified(stage) { event(stage, 'verified'); },
     finish(status) { state[operation] = { status }; persist(); },
-    fail(stage) { if (operation) { state[operation] = { status: 'failed', stage }; persist(); } },
+    fail(stage, diagnostic) {
+      if (operation) {
+        state[operation] = { status: 'failed', stage, diagnostic: normalizeFailureDiagnostic(diagnostic) };
+        persist();
+      }
+    },
     snapshot() { return { deploy: { ...state.deploy }, stop: { ...state.stop } }; },
     flush() { return pending; },
   };
