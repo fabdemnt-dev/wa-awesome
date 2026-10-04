@@ -1235,9 +1235,9 @@ test('unproven readiness and invalid clock fail closed',async()=>{const h=harnes
 test('existing launch record and failed operation are never retried',async()=>{const h=harness();h.options.write=async()=>{throw Error('EXISTS')};assert.equal(await h.run(),1);assert(!h.calls.includes('main'));const b=harness();b.operator.main=async()=>{b.calls.push('main');return 1};assert.equal(await b.run(),1);assert.equal(b.calls.filter(x=>x==='main').length,1);assert.equal(b.nowCalls,1);assert(!b.logs.some(x=>x.startsWith('OWNER_COMMAND_FINISHED')))});
 test('inspect and stop never create a window or expose review',async()=>{for(const mode of ['--inspect','--stop']){const h=harness();assert.equal(await inspectOrStop({...h.options,mode}),0);assert.equal(h.nowCalls,0);assert.equal(h.writes.length,0);assert.deepEqual(h.execution,[mode,'--operation','/fresh/operation','--tooling-dir','/old/tooling'])}await assert.rejects(inspectOrStop({mode:'--activate'}))});
 
-test('final recovery source baseline pins the same58 unchanged files and exactly two replacements',async()=>{
+test('final recovery source baseline pins the same57 unchanged files and exactly three replacements',async()=>{
  const baseline=finalPayload.FINAL_SOURCE_BASELINE, overrides=finalPayload.FINAL_SOURCE_FILES;
- assert.equal(Object.keys(baseline).length,60);assert.deepEqual(Object.keys(overrides).sort(),['scripts/floating-garden-trial-cloud-adapter.mjs','scripts/operate-floating-garden-trial.mjs']);
+ assert.equal(Object.keys(baseline).length,60);assert.deepEqual(Object.keys(overrides).sort(),['lab/floating-garden/online/controller.js','scripts/floating-garden-trial-cloud-adapter.mjs','scripts/operate-floating-garden-trial.mjs']);
  for(const [path,digest] of Object.entries(baseline)){assert.match(digest,/^[a-f0-9]{64}$/);if(!Object.hasOwn(overrides,path))assert.equal(sha(await readFile(join(ROOT,path))),digest,path);}
  if(finalPayload.FINAL_SOURCE_COMMIT==='PENDING_REVIEW')assert(Object.values(overrides).every(x=>x==='PENDING_REVIEW'));
  else{assert.match(finalPayload.FINAL_SOURCE_COMMIT,/^[a-f0-9]{40}$/);for(const [path,digest] of Object.entries(overrides))assert.equal(sha(await readFile(join(ROOT,path))),digest,path);}
