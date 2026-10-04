@@ -1,6 +1,6 @@
 # Exact Firebase CDN regression fixtures
 
-The three `firebase-*.js` files are unchanged official CDN ES module responses
+The three connection-regression `firebase-*.js` files are unchanged official CDN ES module responses
 for Firebase JavaScript SDK **10.8.0**, retrieved on 2026-10-03. Their canonical
 URLs, byte lengths, and SHA-256 digests are recorded in `provenance.json`.
 The original license notices and source-map comments are preserved. Source maps
@@ -34,3 +34,41 @@ there is no `route.continue`, `route.fetch`, live Auth, live App Check exchange,
 real reCAPTCHA challenge, or production attestation. Service workers are blocked.
 The VM also has no real transport. Passing these regressions does not establish
 that live attestation or the user's device works; that remains a separate check.
+
+## Test-only Firestore watch diagnostics
+
+`firebase-firestore.js` is a separate, unchanged official 10.8.0 CDN response,
+retrieved on 2026-10-04 and pinned independently in `firestore-provenance.json`.
+The connection fixtures' original provenance, pinned modules, and behavior do
+not include or depend on this additional file.
+
+`tests/helpers/floating-garden-trial-sdk-discard-fixture.mjs` verifies the exact
+434,464 bytes, SHA-256, one occurrence of each exact source anchor, and absent
+private hook names before adding two diagnostic comma expressions to the
+in-memory response. A mismatch fails closed. Only a GET for the exact original
+Firestore URL with `?trial-emulator-original=1` receives this instrumented
+response in the trial emulator browser test. No patched vendor file is saved.
+
+The first hook observes the Listen stream just before the existing log/callback
+expression. It copies incoming room/match revisions and timestamp seconds/nanos,
+or a fixed target-change type, numeric read time, target count and global flag.
+The second observes the existing LocalStore outdated-update discard branch. It
+copies incoming/current room/match revisions, timestamp seconds/nanos, comparison
+sign and found-document booleans. Equal-version duplicates, equal timestamps
+carrying newer game revisions, and older timestamps carrying newer game revisions
+have separate counters. Timestamp strings are
+validated and converted without losing nanosecond precision.
+
+Each page retains at most 256 sanitized events, fixed saturating category counts,
+an overflow count, and integer sequence/monotonic elapsed time. It never retains
+documents, keys, document/target/stream IDs, URLs, tokens, payloads, raw responses
+or messages. Recording is nonthrowing, never enables debug logging, and preserves
+the original SDK expressions, comparisons, callbacks, log levels and errors.
+Success and failure artifacts include this trace alongside listener history.
+A completed-match snapshot is also captured before the final reload, which
+otherwise resets each page's diagnostic history.
+
+This is explicitly diagnostic SDK instrumentation in a test-only response, not
+an unchanged-SDK execution claim. Game/app/transport sources remain unchanged;
+real Auth, Functions and Firestore connections remain native loopback emulator
+traffic. These observations do not establish live service or App Check behavior.

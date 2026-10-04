@@ -3,6 +3,8 @@
 // location seam. Original trial/bootstrap/transport/config/game sources remain
 // byte-for-byte unchanged. Auth/Functions/Firestore traffic goes DIRECTLY to demo
 // emulators; native browser listeners, offline and reload are not proxied.
+// The pinned original Firestore response alone receives two test-only,
+// nonthrowing watch observers; original SDK expressions/log levels stay intact.
 // Live App Check/HTTPS/CORS/default-window-location success are NOT validated.
 import test from 'node:test';
 import { createServer } from 'node:http';
@@ -17,6 +19,7 @@ import { chromium } from './e2e/node_modules/playwright/index.mjs';
 import { emulatorConfig } from './helpers/floating-garden-emulators.mjs';
 import { abortDeniedBrowserRequest } from './helpers/floating-garden-browser-network.mjs';
 import { trialSdkFixture, sanitizeTrialRelayFailure, sanitizeTrialSnapshotRevisions } from './helpers/floating-garden-trial-sdk-fixture.mjs';
+import { FIRESTORE_DIAGNOSTIC_SOURCE, isTrialDiagnosticFirestoreRequest, loadTrialDiagnosticFirestoreSdk, collectTrialSdkWatchDiagnostics } from './helpers/floating-garden-trial-sdk-discard-fixture.mjs';
 import { ONLINE_SAVE_KEY } from '../lab/floating-garden/online/controller.js';
 import { legalActions, getDecision, rankMatch, applyMatchAction } from '../lab/floating-garden/match-engine.js';
 
@@ -45,6 +48,8 @@ const entryPath = '/lab/floating-garden/trial/emulator-index.html';
 const callablePath = '/demo-floating-garden-trial/asia-northeast1/';
 const output = resolve(process.env.FLOATING_GARDEN_BROWSER_ARTIFACTS || '/tmp/floating-garden-trial-browser-emulator-qa');
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
+const sdkDiagnosticInstrumentation = { sourceSha256: FIRESTORE_DIAGNOSTIC_SOURCE.sha256, eventLimit: 256,
+  boundary: 'test-only Listen-arrival and LocalStore-discard observers; unchanged game/app sources, original SDK comparisons/logging/callbacks and native emulator networking' };
 
 // Static loopback server only. It never handles Auth, callable, Firestore or any
 // other backend request; public assets are served unchanged from the bundle.
@@ -173,9 +178,11 @@ test('trial bootstrap UI: two enrolled real anonymous browsers play and recover 
   const interruptedSeats = new Set();
   const setOffline = (seat, offline) => contexts[seat].setOffline(offline);
   const transcript = [], captures = new Set();
+  let completedMatchSdkWatchDiagnostics = [];
   let roomId = null, stage = 'initialization', drop = null;
   await mkdir(output, { recursive: true });
   try {
+    const diagnosticFirestoreSdk = await loadTrialDiagnosticFirestoreSdk();
     const origin = fixture.browserOrigin, served = new Map();
     server = await serveTrialBundle(served, sameOriginMisses);
     admin = initializeApp({ projectId: config.projectId }, `garden-trial-browser-observer-${randomUUID()}`);
@@ -210,6 +217,9 @@ test('trial bootstrap UI: two enrolled real anonymous browsers play and recover 
       observed.push(observation);
       await context.route('**/*', async (route) => {
         const request = route.request(), url = new URL(request.url());
+        if (isTrialDiagnosticFirestoreRequest(request.url(), request.method())) {
+          return route.fulfill({ status: 200, body: diagnosticFirestoreSdk, headers: { 'content-type': 'text/javascript', 'access-control-allow-origin': '*' } });
+        }
         if (url.origin === sdkOrigin && url.pathname.startsWith(sdkPrefix) && !url.search) {
           const source = trialSdkFixture(url.pathname.slice(sdkPrefix.length), fixture);
           if (source) return route.fulfill({ status: 200, body: source, headers: { 'content-type': 'text/javascript', 'access-control-allow-origin': '*' } });
@@ -529,6 +539,12 @@ test('trial bootstrap UI: two enrolled real anonymous browsers play and recover 
     }))));
     assert.equal(boards[0].own.length, 16); assert.equal(boards[1].own.length, 16);
     assert.deepEqual(boards[0].own, boards[1].other); assert.deepEqual(boards[1].own, boards[0].other);
+    completedMatchSdkWatchDiagnostics = await Promise.all(pages.map(collectTrialSdkWatchDiagnostics));
+    for (const [seat, diagnostics] of completedMatchSdkWatchDiagnostics.entries()) {
+      assert.ok(diagnostics, `seat ${seat} loaded the pinned test-only Firestore diagnostic recorder`);
+      assert.ok(Number.isSafeInteger(diagnostics.counts.listenDocumentChange) && diagnostics.counts.listenDocumentChange > 0,
+        `seat ${seat} recorded at least one real Listen document arrival during gameplay`);
+    }
     for (const [seat, page] of pages.entries()) {
       await page.screenshot({ path: resolve(output, `finished-seat-${seat}.png`), fullPage: true });
       await page.reload(); await ready(page); await waitRevision(page, finished.match.revision);
@@ -572,18 +588,19 @@ test('trial bootstrap UI: two enrolled real anonymous browsers play and recover 
     for (const type of ['draw', 'offer', 'accept', 'decline', 'place', 'self', 'store-empty', 'store-swap', 'use-storage', 'request-invite', 'pass-invite', 'yield', 'welcome', 'meditate', 'stone', 'final-stone', 'final-pass-final']) assert.ok(covered.has(type), `missing browser branch: ${type}`);
     assert.deepEqual(blocked, [], 'no unexpected denied destination; known SDK connectivity probes also remain blocked');
     assert.deepEqual(pageErrors, []); assert.deepEqual(routeErrors, []); assert.deepEqual(sameOriginMisses, [], 'all static fixture and generated public assets must exist');
-    const listenerObservations = await Promise.all(pages.map(async (page, seat) => ({ seat, listenerDiagnostics: await listenerHistory(page), snapshotRevisions: observed[seat].snapshots.slice(-256).map(sanitizeTrialSnapshotRevisions) })));
-    await writeFile(resolve(output, 'summary.json'), JSON.stringify({ projectId: config.projectId, status: 'passed', actions: finished.match.revision, branches: [...covered], independentAuthUsers: 2, sameIdRetry: true, offlineReconnect: true, freshAuthorizationReads: 'real browser Auth token over new Firestore REST GETs; active SDK watch cache is not treated as a fresh authorization check', revokedListenerFutureUpdatesDenied: true, gateChecks: ['unenrolled initial create', 'enrolled nonmember', 'revoked tester', 'expired tester', 'roster removed', 'expired room', 'disabled gate', 'private reads/lists/writes denied'], unchangedTrialPublicGraph: true, productionEntryFailClosedAtLoopback: true, successfulBrowserEntry: 'test-only bootstrap entry with explicit location injection', fixtureBoundaries: fixture.boundaries, liveAppCheckValidated: false, browserNetworkOrigins: [...allowedLocalOrigins, sdkOrigin], deniedConnectivityProbes, listenerObservations }, null, 2));
+    const listenerObservations = await Promise.all(pages.map(async (page, seat) => ({ seat, listenerDiagnostics: await listenerHistory(page), sdkWatchDiagnostics: await collectTrialSdkWatchDiagnostics(page), completedMatchSdkWatchDiagnostics: completedMatchSdkWatchDiagnostics[seat] || null, snapshotRevisions: observed[seat].snapshots.slice(-256).map(sanitizeTrialSnapshotRevisions) })));
+    await writeFile(resolve(output, 'summary.json'), JSON.stringify({ projectId: config.projectId, status: 'passed', actions: finished.match.revision, branches: [...covered], independentAuthUsers: 2, sameIdRetry: true, offlineReconnect: true, freshAuthorizationReads: 'real browser Auth token over new Firestore REST GETs; active SDK watch cache is not treated as a fresh authorization check', revokedListenerFutureUpdatesDenied: true, gateChecks: ['unenrolled initial create', 'enrolled nonmember', 'revoked tester', 'expired tester', 'roster removed', 'expired room', 'disabled gate', 'private reads/lists/writes denied'], unchangedTrialPublicGraph: true, productionEntryFailClosedAtLoopback: true, successfulBrowserEntry: 'test-only bootstrap entry with explicit location injection', fixtureBoundaries: fixture.boundaries, sdkDiagnosticInstrumentation, liveAppCheckValidated: false, browserNetworkOrigins: [...allowedLocalOrigins, sdkOrigin], deniedConnectivityProbes, listenerObservations }, null, 2));
     console.log(`Trial-app emulator browser QA passed: ${finished.match.revision} committed actions; artifacts ${output}`);
   } catch (error) {
     // Test-only demo identities/room state only. Never record Auth tokens, headers,
     // browser storage dumps, or traces containing authentication responses.
     const listenerDiagnostics = await Promise.all(pages.map(listenerHistory));
+    const sdkWatchDiagnostics = await Promise.all(pages.map(collectTrialSdkWatchDiagnostics));
     await Promise.allSettled(pages.flatMap((page, seat) => [
       page.screenshot({ path: resolve(output, `failure-seat-${seat}.png`), fullPage: true, timeout: 5000 }),
       page.content().then((html) => writeFile(resolve(output, `failure-seat-${seat}.html`), html)),
     ]));
-    await writeFile(resolve(output, 'failure.json'), JSON.stringify({ stage, error: error.stack || error.message, roomId, transcript, pageErrors, blocked, deniedConnectivityProbes, routeErrors, sameOriginMisses, observations: observed.map(({ seat, authRequests, firestoreRequests, calls, snapshots, console }) => ({ seat, authRequests, firestoreRequests, console, listenerDiagnostics: listenerDiagnostics[seat] || [], snapshotRevisions: snapshots.slice(-256).map(sanitizeTrialSnapshotRevisions), calls: calls.map(({ method, payload }) => ({ method, requestId: payload?.requestId, expectedRevision: payload?.expectedRevision, command: payload?.command })) })) }, null, 2));
+    await writeFile(resolve(output, 'failure.json'), JSON.stringify({ stage, error: error.stack || error.message, roomId, transcript, pageErrors, blocked, deniedConnectivityProbes, routeErrors, sameOriginMisses, sdkDiagnosticInstrumentation, observations: observed.map(({ seat, authRequests, firestoreRequests, calls, snapshots, console }) => ({ seat, authRequests, firestoreRequests, console, listenerDiagnostics: listenerDiagnostics[seat] || [], sdkWatchDiagnostics: sdkWatchDiagnostics[seat] || null, completedMatchSdkWatchDiagnostics: completedMatchSdkWatchDiagnostics[seat] || null, snapshotRevisions: snapshots.slice(-256).map(sanitizeTrialSnapshotRevisions), calls: calls.map(({ method, payload }) => ({ method, requestId: payload?.requestId, expectedRevision: payload?.expectedRevision, command: payload?.command })) })) }, null, 2));
     throw error;
   } finally {
     await Promise.allSettled(contexts.map((context) => context.close()));
