@@ -98,6 +98,70 @@ async function playing() { const service = server(), a = service.client('a'), b 
   a.controller.offline();assert.equal(a.controller.getState().canConfirm,false);await a.controller.resume();assert.equal(a.controller.getState().canConfirm,true);
   const b=service.client('a',{storage:a.storage,isOnline:()=>online});online=false;await b.controller.resume();assert.equal(b.controller.getState().connection,'offline');
  });
+ test('older cached room data preserves confirmed progress but blocks new commands until current server data', async () => {
+  const {a,service}=await playing(),old=service.snapshot('a').room;
+  await a.controller.submit('draw');
+  a.controller.compare(1,true);
+  const before=a.controller.getState(),listener=service.listenersByUid.get('a'),calls=service.calls.length,observed=[];
+  a.controller.observe(state=>observed.push(state.connection));
+  listener({room:old,fromCache:true});
+  const cached=a.controller.getState();
+  assert.deepEqual(cached.room,before.room);assert.deepEqual(cached.self,before.self);assert.deepEqual(cached.ui,before.ui);
+  assert.equal(cached.connection,'cache');assert.equal(cached.canConfirm,false);
+  assert.deepEqual(observed,['cache']);
+  assert.equal(await a.controller.submit('self'),false);assert.equal(service.calls.length,calls);
+  listener({room:old,fromCache:false});assert.equal(a.controller.getState().connection,'cache','older server data cannot restore readiness');
+  listener({room:before.room,fromCache:false});assert.equal(a.controller.getState().connection,'ready');assert.equal(a.controller.getState().canConfirm,true);
+  const roomOnlyOlder=clone(before.room);roomOnlyOlder.revision-=1;
+  const matchOnlyOlder=clone(before.room);matchOnlyOlder.revision+=1;matchOnlyOlder.match.revision-=1;
+  for(const room of [roomOnlyOlder,matchOnlyOlder]) {
+    listener({room,fromCache:true});assert.equal(a.controller.getState().connection,'cache');assert.deepEqual(a.controller.getState().room,before.room);
+    listener({room:before.room,fromCache:false});assert.equal(a.controller.getState().connection,'ready');
+  }
+ });
+ test('invalid or retired older cached events cannot change connection confidence', async () => {
+  const {a,service}=await playing(),old=service.snapshot('a').room;
+  await a.controller.submit('draw');
+  const listener=service.listenersByUid.get('a'),before=a.controller.getState();
+  const invalid=[{...old,id:'another-room'},{...old,gameId:'another-game'},{...old,rulesVersion:'another-version'},
+    {...old,players:[{seat:1}]},{...old,players:{}},{...old,revision:-1},{...old,match:null},{...old,match:{...old.match,version:'another-version'}},{...old,match:{...old.match,revision:NaN}},{...old,match:{...old.match,revision:-1}}];
+  for (const room of invalid) {listener({room,fromCache:true});assert.deepEqual(a.controller.getState(),before);}
+  await a.controller.resume();const resumed=a.controller.getState();
+  listener({room:old,fromCache:true});assert.deepEqual(a.controller.getState(),resumed,'obsolete listener generation is ignored');
+ });
+ test('older cached events preserve stronger blockers and uncertain recovery', async () => {
+  for (const mode of ['offline','conflict','uncertain','identity-mismatch']) {
+    let uid='a';const service=server(),a=service.client('a',{ensureUser:async()=>({uid})}),b=service.client('b');
+    await a.controller.resume();await a.controller.create('Host');await b.controller.resume();await b.controller.join('GARDEN-test','Guest');await a.controller.start();
+    const old=service.snapshot('a').room;await a.controller.submit('draw');
+    const listener=service.listenersByUid.get('a');
+    if(mode==='offline')a.controller.offline();
+    if(mode==='conflict')a.controller.storageChanged();
+    if(mode==='uncertain'){a.api.submit=async()=>{throw error('unavailable');};await a.controller.submit('self');}
+    if(mode==='identity-mismatch'){uid='changed-identity';await a.controller.submit('self');}
+    const before=a.controller.getState(),saved=a.storage.getItem(ONLINE_SAVE_KEY),calls=service.calls.length;
+    assert.equal(before.connection,mode);
+    listener({room:old,fromCache:true});
+    assert.deepEqual(a.controller.getState(),before,mode);assert.equal(a.storage.getItem(ONLINE_SAVE_KEY),saved);assert.equal(service.calls.length,calls);
+  }
+ });
+ test('older cached data cannot undo confirmed terminal state', async () => {
+  const {a,service}=await playing(),old=service.snapshot('a').room;
+  const finished=clone(old);finished.status='finished';finished.revision+=1;
+  const listener=service.listenersByUid.get('a');listener({room:finished,fromCache:false});
+  const before=a.controller.getState();assert.equal(before.terminal,'finished');
+  listener({room:old,fromCache:true});const cached=a.controller.getState();
+  assert.equal(cached.connection,'cache');assert.equal(cached.terminal,'finished');assert.deepEqual(cached.room,before.room);assert.deepEqual(cached.ui,before.ui);
+ });
+ test('older same-lobby cache preserves participants and prevents starting from stale listener state', async () => {
+  const service=server(),a=service.client('a'),b=service.client('b');await a.controller.resume();await a.controller.create('Host');
+  const old=service.snapshot('a').room;await b.controller.resume();await b.controller.join('GARDEN-test','Guest');
+  const before=a.controller.getState(),listener=service.listenersByUid.get('a'),calls=service.calls.length;
+  assert.equal(before.room.players.length,2);assert.equal(before.canConfirm,true);
+  listener({room:old,fromCache:true});assert.deepEqual(a.controller.getState().room,before.room);assert.equal(a.controller.getState().connection,'cache');
+  assert.equal(await a.controller.start(),false);assert.equal(service.calls.length,calls);
+  listener({room:before.room,fromCache:false});assert.equal(a.controller.getState().canConfirm,true);
+ });
  test('storage unavailable or corrupted is fail-closed and no network calls occur', async () => {
   for (const storage of [null,{getItem(){throw new Error('denied');}},memoryStorage('{bad')]) {
     let calls=0;const c=createOnlineController({storage,api:{},ensureUser:async()=>{calls++;return {uid:'a'};}});assert.equal(await c.resume(),false);assert.equal(c.getState().canConfirm,false);assert.equal(calls,0);assert.ok(c.getState().storageIssue);

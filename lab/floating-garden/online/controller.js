@@ -45,11 +45,19 @@ export function createOnlineController({ api, ensureUser, subscribe = () => () =
   function accept(snapshot, token = generation, { fromCache = false } = {}) {
     if (!alive || token !== generation || !snapshot?.room || !state.uid) return false;
     const { room, self = state.self } = snapshot;
-    if (!saved?.roomId || room.id !== saved.roomId || !Number.isSafeInteger(room.revision) || room.rulesVersion !== MATCH_VERSION || !self || ![0, 1].includes(self.seat) || !room.players?.some((player) => player.seat === self.seat)) return false;
+    if (!saved?.roomId || room.id !== saved.roomId || !Number.isSafeInteger(room.revision) || room.rulesVersion !== MATCH_VERSION || !self || ![0, 1].includes(self.seat) || !Array.isArray(room.players) || !room.players.some((player) => player?.seat === self.seat)) return false;
     const previous = state.room;
-    if (previous && (room.revision < previous.revision || (previous.gameId && room.gameId !== previous.gameId) || (previous.match && room.match && room.match.revision < previous.match.revision))) return false;
+    if (previous?.gameId && room.gameId !== previous.gameId) return false;
     if (room.match && (room.match.version !== MATCH_VERSION || !Number.isSafeInteger(room.match.revision))) return false;
     if (state.self && state.self.seat !== self.seat) return false;
+    if (previous && (room.revision < previous.revision || (previous.match && room.match && room.match.revision < previous.match.revision))) {
+      // A stale cache must not roll confirmed data back or leave a ready client
+      // claiming live synchronization. Preserve stronger blockers and recovery.
+      if (fromCache && state.connection === 'ready' && room.revision >= 0 && (!room.match || room.match.revision >= 0) && room.gameId === previous.gameId && Boolean(room.match) === Boolean(previous.match)) {
+        state.connection = 'cache'; publish();
+      }
+      return false;
+    }
     if (!previous || previous.gameId !== room.gameId || previous.match?.revision !== room.match?.revision) invalidatePreview();
     state.room = clone(room); state.self = clone(self);
     if (!fromCache) state.terminal = room.status === 'finished' ? 'finished' : null;
