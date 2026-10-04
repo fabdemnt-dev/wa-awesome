@@ -5,6 +5,7 @@ import { readFile, writeFile, lstat, readdir, mkdir, open, rename, unlink, realp
 import { resolve, join, dirname, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
+import { gzipSync } from 'node:zlib';
 import { execFileSync } from 'node:child_process';
 import { prepareTrialOperation, publicTrialConfig } from './prepare-floating-garden-trial-operation.mjs';
 import { validateEnvironment as validateOperatorEnvironment } from './deploy-floating-garden-connection-template.mjs';
@@ -16,6 +17,7 @@ export const REGION = 'asia-northeast1';
 export const MAX_START_WAIT_MILLIS = 30 * 60000;
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const STATE_FILE = 'OPERATION-STATE.json';
+export const ACTIVATION_RECOVERY_FILE = 'ACTIVATION-RECOVERY-STATE.json';
 const json = (value) => `${JSON.stringify(value, null, 2)}\n`;
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 const same = (a, b) => json(a) === json(b);
@@ -250,6 +252,27 @@ export async function verifyOperationPacket(packet) {
     for (const name of await readdir(path)) {
       const rel = `${prefix}${name}`, full = join(path, name), info = await lstat(full);
       if (rel === 'game/functions/node_modules') { await directory(full); continue; }
+      // Firebase CLI 14.27 writes this non-executable upload cache beside public/.
+      // Cache hashes cover gzip bytes, not the raw manifest files; they are only
+      // syntax checked. Tracked file hashes and remote Hosting proofs still apply.
+      if (rel === 'game/.firebase' || rel === 'stopped/.firebase') {
+        await directory(full);
+        const names = await readdir(full);
+        if (names.some((entry) => entry !== 'hosting.cHVibGlj.cache')) stop();
+        if (names.length) {
+          const bytes = await regular(join(full, names[0]), 64 * 1024), text = bytes.toString('utf8');
+          if (!Buffer.from(text, 'utf8').equals(bytes) || text && !text.endsWith('\n')) stop();
+          const seen = new Set();
+          for (const line of text ? text.slice(0, -1).split('\n') : []) {
+            const row = /^([^,\r\n]+),(0|[1-9][0-9]*),([a-f0-9]{64})$/.exec(line);
+            if (!row || !Number.isSafeInteger(Number(row[2])) || seen.has(row[1]) ||
+                !Object.hasOwn(expected, `${prefix}public/${row[1]}`)) stop();
+            seen.add(row[1]);
+          }
+        }
+        continue;
+      }
+
       if (/^(?:game|stopped)\/firebase-debug(?:\.[^/]*)?\.log$/.test(rel)) { await regular(full, 16 * 1024 * 1024); continue; }
       if (info.isSymbolicLink()) stop();
       if (info.isDirectory()) await inventory(full, `${rel}/`);
@@ -320,6 +343,9 @@ export async function createJournal(packet, { now = Date.now, prior } = {}) {
     state.predecessor = { ...prior.predecessor };
   }
   if (Object.hasOwn(state, 'predecessor') && (!predecessorShape(state.predecessor) || state.predecessor.output === packet.output)) stop();
+  return journalWriter(packet, path, state, now);
+}
+function journalWriter(packet, path, state, now, activationOnly = false) {
   let operation = null, pending = Promise.resolve();
   function persist() {
     const copy = json(state);
@@ -334,7 +360,7 @@ export async function createJournal(packet, { now = Date.now, prior } = {}) {
   function event(stage, status) { if (state.events.length >= 32) stop(); state.events.push({ stage, status, atMillis: clock(now) }); persist(); }
   return {
     begin(mode) {
-      if (!['deploy', 'resume', 'activate', 'stop'].includes(mode)) stop();
+      if (!['deploy', 'resume', 'activate', 'stop'].includes(mode) || activationOnly && mode !== 'activate') stop();
       const selected = mode === 'stop' ? 'stop' : 'deploy';
       const current = state[selected].status;
       if ((mode === 'deploy' || mode === 'resume') && current !== 'new' ||
@@ -353,8 +379,76 @@ export async function createJournal(packet, { now = Date.now, prior } = {}) {
     },
     snapshot() { return { deploy: { ...state.deploy }, stop: { ...state.stop } }; },
     predecessor() { return state.predecessor ? { ...state.predecessor } : null; },
+    activationVerifiedAt() { return state.events.findLast((event) => event.stage === 'activate-two-testers' && event.status === 'verified')?.atMillis ?? null; },
     flush() { return pending; },
+    async verify() { await pending; if (hash(await regular(path, 32768)) !== hash(json(state))) stop(); },
   };
+}
+// This narrow recovery consumes a separate receipt exactly once. It neither
+// resets the failed deployment journal nor authorizes a deployment or new dates.
+export async function readVerifiedHostingRecovery(packet, review) {
+  await verifyOperationPacket(packet);
+  const bytes = await regular(join(packet.output, STATE_FILE), 32768), state = JSON.parse(bytes);
+  if (!plain(state) || !same(Object.keys(state).sort(), ['deploy', 'events', 'manifestDigest', 'predecessor', 'reviewDigest', 'schemaVersion', 'stop']) ||
+      state.schemaVersion !== 1 || state.manifestDigest !== packet.manifestDigest || state.reviewDigest !== packet.reviewDigest ||
+      !dataEqual(state.deploy, { status: 'failed', stage: 'deploy-hosting', diagnostic: { reason: 'unclassified', exitCode: null, timedOut: false } }) ||
+      !dataEqual(state.stop, { status: 'new' }) || !predecessorShape(state.predecessor) || !Array.isArray(state.events) || state.events.length !== 8) stop();
+  const stages = ['replace-stopped-window', 'deploy-functions', 'deploy-rules', 'deploy-hosting'];
+  for (let i = 0; i < state.events.length; i++) {
+    const event = state.events[i];
+    if (!plain(event) || !same(Object.keys(event).sort(), ['atMillis', 'stage', 'status']) ||
+        event.stage !== stages[Math.floor(i / 2)] || event.status !== (i % 2 ? 'verified' : 'issued') ||
+        !Number.isSafeInteger(event.atMillis) || event.atMillis <= 0 || i > 0 && event.atMillis < state.events[i - 1].atMillis) stop();
+  }
+  const prior = await readPriorOperation(state.predecessor.output, state.predecessor);
+  validateResumeReview(review, prior.review);
+  const cache = await regular(join(packet.gameDir, '.firebase/hosting.cHVibGlj.cache'), 64 * 1024);
+  const publicFiles = Object.keys(packet.manifest.files).filter((path) => path.startsWith('game/public/'));
+  const rows = cache.toString('utf8').trimEnd().split('\n');
+  if (rows.length !== publicFiles.length) stop();
+  for (const row of rows) {
+    const [path, mtime, digest] = row.split(','), full = join(packet.gameDir, 'public', path);
+    // Only this activation-only recovery authenticates the complete CLI cache.
+    // The pinned CLI hashes gzip level 9 and records Date#getTime milliseconds.
+    if (!Object.hasOwn(packet.manifest.files, `game/public/${path}`) ||
+        Number(mtime) !== (await lstat(full)).mtime.getTime() || hash(gzipSync(await regular(full), { level: 9 })) !== digest) stop();
+  }
+  const logs = join(packet.output, 'recovery-logs'); await directory(logs);
+  if (((await lstat(logs)).mode & 0o777) !== 0o700) stop();
+  const streams = {};
+  for (const stream of ['stdout', 'stderr']) {
+    const path = join(logs, `hosting-game.${stream}.log`);
+    if (((await lstat(path)).mode & 0o777) !== 0o600) stop();
+    streams[stream] = await regular(path, 16 * 1024 * 1024);
+  }
+  const result = JSON.parse(streams.stdout.toString('utf8'));
+  if (!plain(result) || result.status !== 'success' || Object.hasOwn(result, 'error')) stop();
+  const receipts = Object.freeze({ originalJournalDigest: hash(bytes), cacheDigest: hash(cache),
+    hostingStdoutDigest: hash(streams.stdout), hostingStderrDigest: hash(streams.stderr) });
+  const proof = { prior, receipts };
+  await verifyVerifiedHostingRecovery(packet, proof);
+  return proof;
+}
+export async function verifyVerifiedHostingRecovery(packet, proof) {
+  await verifyOperationPacket(packet); await verifyPriorOperation(proof.prior);
+  const targets = [[STATE_FILE, 'originalJournalDigest', 32768], ['game/.firebase/hosting.cHVibGlj.cache', 'cacheDigest', 64 * 1024],
+    ['recovery-logs/hosting-game.stdout.log', 'hostingStdoutDigest', 16 * 1024 * 1024], ['recovery-logs/hosting-game.stderr.log', 'hostingStderrDigest', 16 * 1024 * 1024]];
+  const logs = join(packet.output, 'recovery-logs'); await directory(logs);
+  if (((await lstat(logs)).mode & 0o777) !== 0o700) stop();
+  for (const stream of ['stdout', 'stderr']) if (((await lstat(join(logs, `hosting-game.${stream}.log`))).mode & 0o777) !== 0o600) stop();
+  for (const [path, key, limit] of targets) if (hash(await regular(join(packet.output, path), limit)) !== proof.receipts[key]) stop();
+}
+export async function createActivationRecoveryJournal(packet, proof, { now = Date.now } = {}) {
+  await verifyVerifiedHostingRecovery(packet, proof);
+  const path = join(packet.output, ACTIVATION_RECOVERY_FILE), state = { schemaVersion: 1,
+    manifestDigest: packet.manifestDigest, reviewDigest: packet.reviewDigest, predecessor: { ...proof.prior.predecessor },
+    recovery: { ...proof.receipts }, deploy: { status: 'published-stopped' }, stop: { status: 'new' }, events: [] };
+  // wx rejects every prior receipt, including failed/uncertain/malformed ones.
+  const handle = await open(path, 'wx', 0o600);
+  try { await handle.writeFile(json(state)); await handle.sync(); } finally { await handle.close(); }
+  const directoryHandle = await open(packet.output, 'r');
+  try { await directoryHandle.sync(); } finally { await directoryHandle.close(); }
+  return journalWriter(packet, path, state, now, true);
 }
 export function parseReviewBase64(value) {
   if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,11000}$/.test(value)) stop();
@@ -383,14 +477,18 @@ export async function installRuntime(packet, prior) {
   await writeFile(userConfig, '', { flag: 'wx', mode: 0o600 }); await writeFile(globalConfig, '', { flag: 'wx', mode: 0o600 });
   execFileSync('npm', ['ci', '--ignore-scripts', '--no-audit', '--no-fund', '--registry=https://registry.npmjs.org/', `--userconfig=${userConfig}`, `--globalconfig=${globalConfig}`], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], timeout: 600000, maxBuffer: 4 * 1024 * 1024 });
 }
+export function formatTrialJst(milliseconds) {
+  if (!Number.isSafeInteger(milliseconds) || milliseconds <= 0) stop();
+  return new Date(milliseconds + 9 * 3600000).toISOString().replace('T', ' ').replace('Z', ' JST');
+}
 export const PLAN = 'PLAN_ONLY: prepare and review exact seven-day private input before any execution. Target wa-awesome-garden-stg only: five Functions, dedicated Rules/Hosting and exactly two tester records. Public invoker, managed service identity calls and bounded CLI initial recreate need explicit approval. Retain artifacts; no automatic cleanup policy. Default mode makes no network, SDK, auth, install or cloud call.';
 export async function main(args = process.argv.slice(2), { log = console.log } = {}) {
   if (!args.length || args.length === 1 && args[0] === '--plan') { log(PLAN); return 0; }
-  let lock, packet, journal, prior;
+  let lock, packet, journal, prior, recoveryProof;
   try {
     validateOperatorEnvironment(process.env, process.execArgv);
     for (const key of ['FIRESTORE_EMULATOR_HOST', 'FIREBASE_AUTH_EMULATOR_HOST', 'FIREBASE_DATABASE_EMULATOR_HOST', 'FIREBASE_STORAGE_EMULATOR_HOST', 'CLOUDSDK_AUTH_DISABLE_CREDENTIALS']) if (process.env[key]) stop();
-    const modes = ['--run-reviewed', '--resume-reviewed', '--activate', '--stop', '--inspect'];
+    const modes = ['--run-reviewed', '--resume-reviewed', '--activate', '--activate-verified-hosting', '--stop', '--inspect'];
     if (!modes.includes(args[0])) stop();
     if (args[0] === '--run-reviewed') {
       if (args.length !== 7 || args[1] !== '--review-base64' || args[3] !== '--out' || args[5] !== '--tooling-dir' || !args[4].startsWith('/') || !args[6].startsWith('/')) stop();
@@ -417,22 +515,41 @@ export async function main(args = process.argv.slice(2), { log = console.log } =
       ({ packet } = await readOperationPacket(args[2]));
     }
     const { review } = await readOperationPacket(packet.output);
-    const mode = ({ '--run-reviewed': 'deploy', '--resume-reviewed': 'resume', '--activate': 'activate', '--stop': 'stop', '--inspect': 'inspect' })[args[0]];
+    const mode = ({ '--run-reviewed': 'deploy', '--resume-reviewed': 'resume', '--activate': 'activate', '--activate-verified-hosting': 'activate', '--stop': 'stop', '--inspect': 'inspect' })[args[0]];
+    const recoveryRequested = args[0] === '--activate-verified-hosting';
+    if (recoveryRequested) log(`END: ${formatTrialJst(review.endsAtMillis)}`);
+    if (recoveryRequested && Date.now() < review.startsAtMillis) {
+      log('READY_STOPPED: the fixed start has not arrived; activation recovery made no change. Run the reviewed activation only after that start.'); return 1;
+    }
+    if (recoveryRequested && Date.now() >= review.endsAtMillis) {
+      log('STOP: the fixed trial deadline has passed; activation refused without changing the window.'); return 1;
+    }
     if (mode !== 'inspect') {
       lock = await open(join(packet.output, 'OPERATION.lock'), 'wx', 0o600);
       await lock.writeFile('This operation is in progress. Do not remove or rerun after an uncertain interruption.\n');
     }
-    journal = await createJournal(packet, { prior });
-    if (!prior) prior = await readPriorForMode(mode, journal);
+    if (recoveryRequested) {
+      recoveryProof = await readVerifiedHostingRecovery(packet, review);
+      prior = recoveryProof.prior;
+      journal = await createActivationRecoveryJournal(packet, recoveryProof);
+    } else {
+      journal = await createJournal(packet, { prior });
+      if (!prior) prior = await readPriorForMode(mode, journal);
+    }
     if (prior) validateResumeReview(review, prior.review);
     if (mode === 'deploy' || mode === 'resume') await installRuntime(packet, mode === 'resume' ? prior : undefined);
     const { createCloudAdapter } = await import('./floating-garden-trial-cloud-adapter.mjs');
     const toolingDir = args.at(-1);
     const cloud = await createCloudAdapter({ packet, review, toolingDir, ...(prior ? { prior } : {}) });
-    const checkLocal = async () => { await verifyOperationPacket(packet); if (prior) await verifyPriorOperation(prior); };
-    const result = await operateTrial({ mode, review, priorReview: prior?.review, cloud, journal, log, checkLocal });
+    const checkLocal = async () => {
+      if (recoveryProof) { await verifyVerifiedHostingRecovery(packet, recoveryProof); await journal.verify(); }
+      else { await verifyOperationPacket(packet); if (prior) await verifyPriorOperation(prior); }
+    };
+    const operatorLog = recoveryRequested ? (line) => { if (!line.startsWith('ACTIVE:')) log(line); } : log;
+    const result = await operateTrial({ mode, review, priorReview: prior?.review, cloud, journal, log: operatorLog, checkLocal });
     await checkLocal();
     await journal.flush();
+    if (recoveryRequested && result.status === 'active') log(`ACTIVE: activation verified at ${formatTrialJst(journal.activationVerifiedAt())}; existing fixed deadline retained.`);
     log(`OPERATION_DIRECTORY: ${packet.output}`);
     return result.status === 'blocked' ? 1 : 0;
   } catch {

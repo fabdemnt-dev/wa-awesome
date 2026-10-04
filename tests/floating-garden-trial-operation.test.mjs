@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, readdir, lstat, mkdtemp, mkdir, cp, symlink, rm, writeFile, chmod } from 'node:fs/promises';
+import { readFile, readdir, lstat, mkdtemp, mkdir, cp, symlink, link, rm, writeFile, chmod } from 'node:fs/promises';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
@@ -8,6 +8,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
+import { gzipSync } from 'node:zlib';
 import { validateOperationReview, publicTrialConfig, prepareTrialOperation } from '../scripts/prepare-floating-garden-trial-operation.mjs';
 import { runtimeConfig } from '../scripts/deploy-floating-garden-connection-template.mjs';
 import { FUNCTION_NAMES } from '../scripts/prepare-floating-garden-trial.mjs';
@@ -88,7 +89,7 @@ test('local preparer has no SDK, subprocess, deploy-executor or network import/c
  assert.ok(!/\b(?:fetch|execFile|spawn|execSync)\s*\(/.test(source));
 });
 
-import { approvalReady, adminRecords, adminState, operateTrial, readOperationPacket, verifyOperationPacket, createJournal, parseReviewBase64, main, MAX_START_WAIT_MILLIS } from '../scripts/operate-floating-garden-trial.mjs';
+import { approvalReady, adminRecords, adminState, operateTrial, readOperationPacket, verifyOperationPacket, createJournal, readVerifiedHostingRecovery, verifyVerifiedHostingRecovery, createActivationRecoveryJournal, ACTIVATION_RECOVERY_FILE, formatTrialJst, parseReviewBase64, main, MAX_START_WAIT_MILLIS } from '../scripts/operate-floating-garden-trial.mjs';
 const approvedReview = () => ({ ...review(), retainBuildArtifacts: true, allowInitialFunctionRecreate: true, approvePublicInvoker: true });
 const clone = (value) => structuredClone(value);
 function fakeOperation(value = approvedReview()) {
@@ -265,6 +266,149 @@ test('unhashed CLI logs must still be regular nonlinked bounded files',async(t)=
  const dir=await temp(t),out=join(dir,'operation');await prepareTrialOperation({review:approvedReview(),output:out,now:NOW-1});const {packet}=await readOperationPacket(out);
  const log=join(packet.gameDir,'firebase-debug.log');await symlink(packet.reviewPath,log);await assert.rejects(verifyOperationPacket(packet));await rm(log);
  await writeFile(log,'private harmless synthetic diagnostics');await verifyOperationPacket(packet);
+});
+
+// Official CLI upload-cache compatibility remains narrower than a .firebase ignore.
+const hostingCacheName = 'hosting.cHVibGlj.cache';
+async function cachePacket(t) {
+ const dir=await temp(t),out=join(dir,'operation');await prepareTrialOperation({review:approvedReview(),output:out,now:NOW-1});
+ return {...await readOperationPacket(out),dir};
+}
+async function officialHostingCache(packet,kind='game') {
+ const root=join(packet.output,kind),prefix=`${kind}/public/`,entries=new Map();
+ for(const key of Object.keys(packet.manifest.files).filter(key=>key.startsWith(prefix))){
+  const path=join(packet.output,key),info=await lstat(path);entries.set(key.slice(prefix.length),{mtime:info.mtime.getTime(),hash:sha(gzipSync(await readFile(path),{level:9}))});
+ }
+ const require=createRequire(join(ROOT,'package.json'));require('firebase-tools/lib/deploy/hosting/hashcache').dump(root,'cHVibGlj',entries);
+ return join(root,'.firebase',hostingCacheName);
+}
+test('official CLI public upload caches are accepted at game/stopped roots without changing packet hashes',async t=>{
+ const {packet}=await cachePacket(t),before=await readFile(packet.manifestPath);
+ for(const kind of ['game','stopped']){const path=await officialHostingCache(packet,kind);assert((await readFile(path,'utf8')).includes(','));}
+ await verifyOperationPacket(packet);assert.equal((await readOperationPacket(packet.output)).packet.manifestDigest,packet.manifestDigest);assert.deepEqual(await readFile(packet.manifestPath),before);
+});
+test('normal upload caches never bypass tracked-file or review integrity',async t=>{
+ const {packet}=await cachePacket(t);await officialHostingCache(packet);await officialHostingCache(packet,'stopped');
+ for(const path of [join(packet.gameDir,'functions/trial-config.json'),join(packet.stoppedDir,'public/index.html'),packet.reviewPath,packet.manifestPath]){
+  const before=await readFile(path);await writeFile(path,Buffer.concat([before,Buffer.from('\n')]));await assert.rejects(verifyOperationPacket(packet));await writeFile(path,before);
+ }
+ await verifyOperationPacket(packet);
+});
+test('upload cache allowance rejects other names, nested locations and unrelated extras',async t=>{
+ const {packet}=await cachePacket(t);await officialHostingCache(packet);
+ for(const rel of ['game/.firebase/hosting.other.cache','game/.firebase/private.txt','game/.firebase/nested/hosting.cHVibGlj.cache','game/subdir/.firebase/hosting.cHVibGlj.cache','game/hosting.cHVibGlj.cache','stopped/.firebase/functions.cache']){
+  const path=join(packet.output,rel);await mkdir(dirname(path),{recursive:true});await writeFile(path,'');await assert.rejects(verifyOperationPacket(packet));await rm(path);
+  if(rel.includes('/nested/'))await rm(dirname(path),{recursive:true});
+ }
+ await verifyOperationPacket(packet);
+});
+test('cache directory must be canonical and cache file regular, single-link and bounded',async t=>{
+ const {packet,dir}=await cachePacket(t),cacheDir=join(packet.gameDir,'.firebase'),cache=join(cacheDir,hostingCacheName),outside=join(dir,'external-cache');
+ await mkdir(outside);await writeFile(join(outside,hostingCacheName),'');await symlink(outside,cacheDir);await assert.rejects(verifyOperationPacket(packet));await rm(cacheDir);await mkdir(cacheDir);
+ await symlink(packet.reviewPath,cache);await assert.rejects(verifyOperationPacket(packet));await rm(cache);
+ const ordinary=join(dir,'ordinary-cache');await writeFile(ordinary,'');await link(ordinary,cache);await assert.rejects(verifyOperationPacket(packet));await rm(cache);
+ await mkdir(cache);await assert.rejects(verifyOperationPacket(packet));await rm(cache,{recursive:true});
+ execFileSync('mkfifo',[cache]);await assert.rejects(verifyOperationPacket(packet));await rm(cache);
+ await writeFile(cache,Buffer.alloc(64*1024+1));await assert.rejects(verifyOperationPacket(packet));await rm(cache);
+ await officialHostingCache(packet);await verifyOperationPacket(packet);
+});
+test('cache rows reject malformed encoding, paths, timestamps, hashes and duplicate entries',async t=>{
+ const {packet}=await cachePacket(t),cache=await officialHostingCache(packet),normal=await readFile(cache,'utf8'),first=normal.split('\n')[0],path=first.split(',')[0],hash='a'.repeat(64);
+ const malformed=['unstructured text','\0','\n',`${path},1,${hash}`,`${path},-1,${hash}\n`,`${path},1.5,${hash}\n`,`${path},01,${hash}\n`,`${path},9007199254740992,${hash}\n`,`${path},1,${'a'.repeat(63)}\n`,`${path},1,${'A'.repeat(64)}\n`,`../private-review.json,1,${hash}\n`,`/absolute,1,${hash}\n`,`unknown-file,1,${hash}\n`,`${first}\n${first}\n`,`${first}\r\n`,Buffer.from([0xff,0x0a])];
+ for(const value of malformed){await writeFile(cache,value);await assert.rejects(verifyOperationPacket(packet));}
+ // The official CLI can clear its cache on upload failure; empty is valid.
+ await writeFile(cache,'');await verifyOperationPacket(packet);await writeFile(cache,normal);await verifyOperationPacket(packet);
+});
+test('deployment continues after the CLI creates its cache during successful Hosting upload',async t=>{
+ const {packet}=await cachePacket(t),op=fakeOperation(),deploy=op.cloud.deployHosting;
+ op.cloud.deployHosting=async kind=>{const result=await deploy(kind);await officialHostingCache(packet,kind);return result;};
+ assert.equal((await op.run('deploy',{checkLocal:()=>verifyOperationPacket(packet)})).status,'active');
+ assert.deepEqual(op.mutations,['createStoppedAdmin','deployFunctions','deployRules','deployHosting','updateAdmin']);await verifyOperationPacket(packet);
+});
+test('inspect and gate-first stop remain usable after normal game/stopped CLI caches appear',async t=>{
+ const {packet}=await cachePacket(t);await officialHostingCache(packet);const op=fakeOperation();op.admin=adminRecords(op.value,true);op.hosting={kind:'game',version:'g1'};
+ const checkLocal=()=>verifyOperationPacket(packet);assert.equal((await op.run('inspect',{checkLocal})).admin,'active');assert.deepEqual(op.mutations,[]);
+ const deploy=op.cloud.deployHosting;op.cloud.deployHosting=async kind=>{const result=await deploy(kind);await officialHostingCache(packet,'stopped');return result;};
+ assert.equal((await op.run('stop',{checkLocal})).status,'stopped');assert.deepEqual(op.mutations,['updateAdmin','deployHosting']);await verifyOperationPacket(packet);
+});
+
+// A separate one-shot activation receipt recovers only the verified Hosting-cache failure.
+async function hostingRecoveryFixture(t) {
+ const dir=await temp(t),oldReview={...approvedReview(),startsAtMillis:NOW-1000000,endsAtMillis:NOW-1000000+WEEK};
+ const original=join(dir,'original');await prepareTrialOperation({review:oldReview,output:original,now:oldReview.startsAtMillis-10000});
+ const old=await readOperationPacket(original),oldJournal=await createJournal(old.packet,{now:()=>oldReview.startsAtMillis-1000});
+ oldJournal.begin('deploy');oldJournal.issued('create-stopped-admin');oldJournal.verified('create-stopped-admin');oldJournal.issued('deploy-functions');oldJournal.fail('deploy-functions');await oldJournal.flush();
+ const {readPriorOperation}=await import('../scripts/operate-floating-garden-trial.mjs'),prior=await readPriorOperation(original);
+ const out=join(dir,'operation');await prepareTrialOperation({review:approvedReview(),output:out,now:NOW-10000});
+ const {packet,review:value}=await readOperationPacket(out),journal=await createJournal(packet,{prior,now:()=>NOW-1000});
+ journal.begin('resume');for(const stage of ['replace-stopped-window','deploy-functions','deploy-rules','deploy-hosting']){journal.issued(stage);journal.verified(stage);}
+ journal.fail('deploy-hosting');await journal.flush();const cache=await officialHostingCache(packet),logs=join(out,'recovery-logs');await mkdir(logs,{mode:0o700});
+ for(const [stream,data] of [['stdout',JSON.stringify({status:'success',result:{}})],['stderr','']])await writeFile(join(logs,`hosting-game.${stream}.log`),data,{mode:0o600});
+ return{dir,packet,review:value,prior,cache,logs,state:join(out,'OPERATION-STATE.json')};
+}
+async function activationHarness(f) {
+ const proof=await readVerifiedHostingRecovery(f.packet,f.review),journal=await createActivationRecoveryJournal(f.packet,proof,{now:()=>NOW+120000}),op=fakeOperation();op.admin=adminRecords(op.value);op.hosting={kind:'game',version:'g1'};op.time=NOW+120000;
+ const checkLocal=async()=>{await verifyVerifiedHostingRecovery(f.packet,proof);await journal.verify();};
+ return{proof,journal,op,run:()=>op.run('activate',{journal,checkLocal})};
+}
+test('verified Hosting recovery activates late within unchanged window without any deployment or original-file rewrite',async t=>{
+ const f=await hostingRecoveryFixture(t),paths=[f.state,f.packet.reviewPath,f.packet.manifestPath,join(f.prior.packet.output,'OPERATION-STATE.json'),f.cache,join(f.logs,'hosting-game.stdout.log'),join(f.logs,'hosting-game.stderr.log')],before=await Promise.all(paths.map(p=>readFile(p)));
+ const h=await activationHarness(f);assert.equal((await h.run()).status,'active');await h.journal.flush();assert.deepEqual(h.op.mutations,['updateAdmin']);assert.equal(h.op.admin.gate.startsAtMillis,NOW);assert.equal(h.op.admin.gate.endsAtMillis,NOW+WEEK);assert.deepEqual(h.op.admin.gate.testerUids,f.review.testerUids);
+ for(let i=0;i<paths.length;i++)assert.deepEqual(await readFile(paths[i]),before[i]);
+ const receipt=await json(join(f.packet.output,ACTIVATION_RECOVERY_FILE));assert.equal(receipt.deploy.status,'active');assert.equal(receipt.recovery.originalJournalDigest,sha(before[0]));assert.deepEqual(receipt.predecessor,f.prior.predecessor);assert.deepEqual(receipt.events.map(e=>[e.stage,e.status]),[['activate-two-testers','issued'],['activate-two-testers','verified']]);
+ assert.equal(h.journal.activationVerifiedAt(),NOW+120000);assert.equal(formatTrialJst(h.journal.activationVerifiedAt()),new Date(NOW+120000+9*3600000).toISOString().replace('T',' ').replace('Z',' JST'));
+ assert.equal((await lstat(join(f.packet.output,ACTIVATION_RECOVERY_FILE))).mode&0o777,0o600);assert(!JSON.stringify(receipt).includes('SYNTHETIC_PACKAGE_TESTER'));
+ assert.throws(()=>h.journal.begin('activate'));assert.throws(()=>h.journal.begin('stop'));await assert.rejects(createActivationRecoveryJournal(f.packet,h.proof));
+});
+test('Hosting recovery requires exact failed stage/diagnostic/stop and eight ordered nonactivation events',async t=>{
+ const f=await hostingRecoveryFixture(t),bytes=await readFile(f.state),base=JSON.parse(bytes);
+ const changes=[s=>s.deploy.status='running',s=>s.deploy.stage='deploy-functions',s=>s.deploy.diagnostic.reason='permission',s=>s.deploy.diagnostic.exitCode=0,s=>s.deploy.diagnostic.timedOut=true,s=>s.stop.status='stopped',s=>s.events.pop(),s=>s.events.push({stage:'activate-two-testers',status:'issued',atMillis:NOW}),s=>s.events[7].status='issued',s=>s.events.reverse(),s=>s.events[2].atMillis=0,s=>s.events[2].atMillis=NOW-2000,s=>delete s.predecessor,s=>s.predecessor.journalDigest='f'.repeat(64),s=>s.reviewDigest='f'.repeat(64),s=>s.extra='unknown'];
+ for(const change of changes){const state=clone(base);change(state);await writeFile(f.state,JSON.stringify(state));await assert.rejects(readVerifiedHostingRecovery(f.packet,f.review));}
+ await writeFile(f.state,bytes);await readVerifiedHostingRecovery(f.packet,f.review);
+});
+test('Hosting recovery authenticates complete gzip cache and successful private CLI log before creating a receipt',async t=>{
+ const f=await hostingRecoveryFixture(t),cache=await readFile(f.cache,'utf8'),stdout=join(f.logs,'hosting-game.stdout.log'),log=await readFile(stdout);
+ for(const changed of ['',cache.split('\n').slice(1).join('\n'),cache.replace(/,[0-9]+,/,',1,'),cache.replace(/[a-f0-9]{64}/,'f'.repeat(64))]){await writeFile(f.cache,changed);await assert.rejects(readVerifiedHostingRecovery(f.packet,f.review));}await writeFile(f.cache,cache);
+ for(const changed of ['bad JSON',JSON.stringify({status:'error'}),JSON.stringify({status:'success',error:'failure'})]){await writeFile(stdout,changed);await assert.rejects(readVerifiedHostingRecovery(f.packet,f.review));}await writeFile(stdout,log);
+ await chmod(stdout,0o640);await assert.rejects(readVerifiedHostingRecovery(f.packet,f.review));await chmod(stdout,0o600);
+ await assert.rejects(lstat(join(f.packet.output,ACTIVATION_RECOVERY_FILE)),{code:'ENOENT'});await readVerifiedHostingRecovery(f.packet,f.review);
+});
+test('original journal, cache, logs, source and predecessor remain digest-bound after proof',async t=>{
+ const f=await hostingRecoveryFixture(t),proof=await readVerifiedHostingRecovery(f.packet,f.review);
+ for(const path of [f.state,f.cache,join(f.logs,'hosting-game.stdout.log'),join(f.logs,'hosting-game.stderr.log'),f.packet.reviewPath,f.packet.manifestPath,join(f.packet.gameDir,'public/lab/floating-garden/trial/index.html'),join(f.prior.packet.output,'OPERATION-STATE.json')]){
+  const bytes=await readFile(path);await writeFile(path,Buffer.concat([bytes,Buffer.from('\n')]));await assert.rejects(verifyVerifiedHostingRecovery(f.packet,proof));await writeFile(path,bytes);
+ }
+ await verifyVerifiedHostingRecovery(f.packet,proof);
+});
+test('every prior or uncertain activation receipt is refused without overwrite',async t=>{
+ const f=await hostingRecoveryFixture(t),proof=await readVerifiedHostingRecovery(f.packet,f.review),path=join(f.packet.output,ACTIVATION_RECOVERY_FILE);
+ for(const bytes of ['{}','uncertain',JSON.stringify({deploy:{status:'failed'}})]){await writeFile(path,bytes,{mode:0o600});await assert.rejects(createActivationRecoveryJournal(f.packet,proof));assert.equal(await readFile(path,'utf8'),bytes);await rm(path);}
+ await symlink(f.state,path);await assert.rejects(createActivationRecoveryJournal(f.packet,proof));await rm(path);
+ const journal=await createActivationRecoveryJournal(f.packet,proof);journal.begin('activate');await journal.flush();await assert.rejects(createActivationRecoveryJournal(f.packet,proof));
+});
+test('altered activation receipt prevents cloud calls, and uncertain activation is never retried',async t=>{
+ const f=await hostingRecoveryFixture(t),h=await activationHarness(f);await writeFile(join(f.packet.output,ACTIVATION_RECOVERY_FILE),'{}');assert.equal((await h.run()).status,'blocked');assert.deepEqual(h.op.mutations,[]);assert(!h.op.calls.includes('preflight:activate'));
+ const g=await hostingRecoveryFixture(t),other=await activationHarness(g);let attempts=0;other.op.cloud.updateAdmin=async()=>{attempts++;return{kind:'unknown'};};assert.equal((await other.run()).status,'blocked');await other.journal.flush();assert.equal(attempts,1);assert.equal((await json(join(g.packet.output,ACTIVATION_RECOVERY_FILE))).deploy.status,'failed');await assert.rejects(createActivationRecoveryJournal(g.packet,other.proof));
+});
+test('activation recovery requires stopped-unused admin and all fresh live proofs',async t=>{
+ for(const bad of ['used','active','functions','rules','hosting']){
+  const f=await hostingRecoveryFixture(t),h=await activationHarness(f);
+  if(bad==='used')h.op.admin.usage.createdRoomCount=1;else if(bad==='active')h.op.admin=adminRecords(h.op.value,true);else h.op.cloud['verify'+bad[0].toUpperCase()+bad.slice(1)]=async()=>({verified:false});
+  assert.equal((await h.run()).status,'blocked');await h.journal.flush();assert.deepEqual(h.op.mutations,[]);
+ }
+});
+test('early or expired recovery CLI makes no journal, provider call or new dates',async t=>{
+ const f=await hostingRecoveryFixture(t),runner=join(f.dir,'offline-timing-test.mjs'),logs=[];
+ await writeFile(runner,`import {main} from ${JSON.stringify(new URL('../scripts/operate-floating-garden-trial.mjs',import.meta.url).href)}; Date.now=()=>Number(process.argv[2]); const logs=[]; const code=await main(${JSON.stringify(['--activate-verified-hosting','--operation',f.packet.output,'--tooling-dir',join(f.dir,'unused-tooling')])},{log:s=>logs.push(s)}); console.log(JSON.stringify({code,logs}));`);
+ for(const time of [NOW-1,NOW+WEEK]){const result=JSON.parse(execFileSync(process.execPath,[runner,String(time)],{env:{},encoding:'utf8',stdio:['ignore','pipe','pipe']}));assert.equal(result.code,1);logs.push(...result.logs);await assert.rejects(lstat(join(f.packet.output,ACTIVATION_RECOVERY_FILE)),{code:'ENOENT'});}
+ assert(logs.some(s=>s.startsWith('READY_STOPPED:')));assert(logs.some(s=>s.startsWith('STOP:')));assert.equal(logs.filter(s=>s===`END: ${formatTrialJst(NOW+WEEK)}`).length,2);assert.equal((await readOperationPacket(f.packet.output)).review.endsAtMillis,NOW+WEEK);
+});
+test('expiry during live proof stops recovery before activation',async t=>{
+ const f=await hostingRecoveryFixture(t),h=await activationHarness(f);h.op.cloud.verifyRules=async()=>{h.op.time=NOW+WEEK;return{verified:true};};assert.equal((await h.run()).status,'blocked');await h.journal.flush();assert.deepEqual(h.op.mutations,[]);
+});
+test('ordinary inspect and gate-first stop remain available after activation recovery despite changed predecessor',async t=>{
+ const f=await hostingRecoveryFixture(t),h=await activationHarness(f);assert.equal((await h.run()).status,'active');await h.journal.flush();const receipt=await readFile(join(f.packet.output,ACTIVATION_RECOVERY_FILE));await writeFile(join(f.prior.packet.output,'OPERATION-STATE.json'),'changed');
+ const normal=await createJournal(f.packet),checkLocal=()=>verifyOperationPacket(f.packet);assert.equal((await h.op.run('inspect',{journal:normal,checkLocal})).admin,'active');assert.equal((await h.op.run('stop',{journal:normal,checkLocal})).status,'stopped');await normal.flush();assert.deepEqual(await readFile(join(f.packet.output,ACTIVATION_RECOVERY_FILE)),receipt);
 });
 
 // Provider boundary: entirely injected responses, no cloud calls.
@@ -1233,7 +1377,7 @@ test('readiness completes before one chosen clock; exact seven days and private 
 test('each readiness failure produces no dates, record or execution',async()=>{for(const phase of ['prior','preflight','ready','recheck']){const h=harness();const fail=async()=>{throw Error('PRIVATE_SECRET')};if(phase==='prior')h.operator.readPriorOperation=fail;if(phase==='preflight')h.cloud.preflight=fail;if(phase==='ready')h.cloud.verifyResumeSource=fail;if(phase==='recheck')h.operator.verifyPriorOperation=fail;assert.equal(await h.run(),1);assert.equal(h.nowCalls,0);assert.equal(h.writes.length,0);assert(!h.calls.includes('main'));assert(!h.logs.join().includes('PRIVATE'))}});
 test('unproven readiness and invalid clock fail closed',async()=>{const h=harness();h.cloud.verifyResumeSource=async()=>({verified:false});assert.equal(await h.run(),1);assert.equal(h.nowCalls,0);const b=harness();b.options.now=()=>NaN;assert.equal(await b.run(),1);assert.equal(b.writes.length,0);assert(!b.calls.includes('main'))});
 test('existing launch record and failed operation are never retried',async()=>{const h=harness();h.options.write=async()=>{throw Error('EXISTS')};assert.equal(await h.run(),1);assert(!h.calls.includes('main'));const b=harness();b.operator.main=async()=>{b.calls.push('main');return 1};assert.equal(await b.run(),1);assert.equal(b.calls.filter(x=>x==='main').length,1);assert.equal(b.nowCalls,1);assert(!b.logs.some(x=>x.startsWith('OWNER_COMMAND_FINISHED')))});
-test('inspect and stop never create a window or expose review',async()=>{for(const mode of ['--inspect','--stop']){const h=harness();assert.equal(await inspectOrStop({...h.options,mode}),0);assert.equal(h.nowCalls,0);assert.equal(h.writes.length,0);assert.deepEqual(h.execution,[mode,'--operation','/fresh/operation','--tooling-dir','/old/tooling'])}await assert.rejects(inspectOrStop({mode:'--activate'}))});
+test('inspect and stop never create a window or expose review',async()=>{for(const mode of ['--inspect','--stop','--activate-verified-hosting']){const h=harness();assert.equal(await inspectOrStop({...h.options,mode}),0);assert.equal(h.nowCalls,0);assert.equal(h.writes.length,0);assert.deepEqual(h.execution,[mode,'--operation','/fresh/operation','--tooling-dir','/old/tooling'])}await assert.rejects(inspectOrStop({mode:'--activate'}))});
 
 test('final recovery source baseline pins the same57 unchanged files and exactly three replacements',async()=>{
  const baseline=finalPayload.FINAL_SOURCE_BASELINE, overrides=finalPayload.FINAL_SOURCE_FILES;
