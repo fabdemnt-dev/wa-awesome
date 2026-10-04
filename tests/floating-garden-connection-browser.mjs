@@ -10,7 +10,7 @@ import { IDENTITY_ATTEMPT_KEY } from '../lab/floating-garden/connection-check/co
 import { SDK_BASE, APP_CHECK_ORIGIN, AUTH_ORIGIN, UID, TOKENS, RECAPTCHA_PROOF, RECAPTCHA_SCRIPT, loadOfficialSdk, syntheticResponse, legacyCsp } from './fixtures/firebase-10.8.0/fixture.mjs';
 const ORIGIN = 'https://wa-awesome-garden-stg.web.app';
 const URL = `${ORIGIN}/connection-check/`;
-const NOW = Date.parse('2026-10-03T03:00:00Z');
+const NOW = Date.parse('2026-10-04T03:00:00Z');
 const runtime = { schemaVersion: 1, projectId: 'wa-awesome-garden-stg', origin: ORIGIN,
   startsAtMillis: NOW - 1000, expiresAtMillis: NOW + 86400000,
   firebase: { apiKey: 'AIzaSyCfa04hxQzY0T6gsVLsvTxIhB2zAB0v874', appId: '1:120030709276:web:015f4e996b7c42a4e801d9', authDomain: 'wa-awesome-garden-stg.firebaseapp.com', projectId: 'wa-awesome-garden-stg' },
@@ -192,6 +192,13 @@ test('exact Firebase 10.8.0 SDK regression: old CSP fails before Auth; publisher
           assert.equal(initial.uid, '未確認');
           assert.ok(initial.diagnostic.includes(fault.stage));
           assert.ok(initial.diagnostic.includes(fault.code));
+          if (mode === 'app-check-403') {
+            assert.ok(initial.diagnostic.includes('HTTP 403'));
+            assert.ok(initial.diagnostic.includes('SDK待機目安 約24時間（自動再試行なし）'));
+            const output = process.env.GARDEN_CONNECTION_SCREENSHOTS;
+            if (output) { await mkdir(output, { recursive: true }); await page.screenshot({ path: `${output}/connection-mobile-synthetic-http403.png`, fullPage: true }); }
+            assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'mobile diagnostic must wrap without horizontal overflow');
+          } else { assert.ok(initial.diagnostic.includes('HTTP 不明 / SDK待機目安 不明')); }
           assert.equal(initial.guard, fault.signup ? 'attempted' : null);
           assert.deepEqual(initial.violations, []);
           const count = (path) => requests.filter((request) => request.method === 'POST' && request.endpoint === `${AUTH_ORIGIN}/v1/accounts:${path}`).length;

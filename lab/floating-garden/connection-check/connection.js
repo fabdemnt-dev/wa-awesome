@@ -47,6 +47,33 @@ function diagnosticCode(error) {
   } catch { /* Unknown, revoked Proxy, or primitive: fixed fallback only. */ }
   return 'connection/unknown';
 }
+const NO_HTTP_DIAGNOSTIC = Object.freeze({ httpStatus: null, waitSeconds: null });
+function ownData(value, key) {
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    return descriptor && Object.hasOwn(descriptor, 'value') ? descriptor.value : undefined;
+  } catch { return undefined; }
+}
+function diagnosticHttp(error, code) {
+  if (!['appCheck/throttled', 'appCheck/fetch-status-error'].includes(code)) return NO_HTTP_DIAGNOSTIC;
+  const data = ownData(error, 'customData'), httpStatus = ownData(data, 'httpStatus');
+  if (!Number.isInteger(httpStatus) || httpStatus < 100 || httpStatus > 599 || httpStatus === 200) return NO_HTTP_DIAGNOSTIC;
+  let waitSeconds = null;
+  if (code === 'appCheck/throttled') {
+    const time = ownData(data, 'time');
+    // SDK 10.8.0 formats a rounded, local backoff duration. This is neither an
+    // HTTP Retry-After value nor an exact time when a request will succeed.
+    if (typeof time === 'string' && time.length <= 15) {
+      const match = /^(?:(\d{2})d:)?(?:(\d{2})h:)?(\d{2})m:(\d{2})s$/.exec(time);
+      if (match) {
+        const [, d = '00', h = '00', m, s] = match;
+        const seconds = Number(d) * 86400 + Number(h) * 3600 + Number(m) * 60 + Number(s);
+        if (Number(h) < 24 && Number(m) < 60 && Number(s) < 60 && seconds <= 86400) waitSeconds = seconds;
+      }
+    }
+  }
+  return Object.freeze({ httpStatus, waitSeconds });
+}
 function failure(code = 'connection/unknown') {
   const error = new Error('接続確認を継続できません');
   Object.defineProperty(error, 'code', { value: code });
@@ -104,10 +131,12 @@ export function createConnectionCheck(runtime, {
   let config = null, sdk = null, app = null, appCheck = null;
   let started = false, terminal = false, generation = 0, startFlight = null;
   let activeStage = 'preflight', diagnosticStage = null, safeCode = null;
-  let state = Object.freeze({ status: 'idle', label: CONNECTION_LABELS.idle, uid: null, expiresAtMillis: null, canStart: true, diagnosticStage: null, diagnosticCode: null });
+  let httpDiagnostic = NO_HTTP_DIAGNOSTIC;
+  const wrappedDiagnostics = new WeakMap();
+  let state = Object.freeze({ status: 'idle', label: CONNECTION_LABELS.idle, uid: null, expiresAtMillis: null, canStart: true, diagnosticStage: null, diagnosticCode: null, diagnosticHttpStatus: null, diagnosticWaitSeconds: null });
   const timers = new Set(), aborts = new Set();
   function publish(status, uid = null) {
-    state = Object.freeze({ status, label: CONNECTION_LABELS[status], uid, expiresAtMillis: config?.expiresAtMillis ?? null, canStart: !started && !terminal, diagnosticStage, diagnosticCode: safeCode });
+    state = Object.freeze({ status, label: CONNECTION_LABELS[status], uid, expiresAtMillis: config?.expiresAtMillis ?? null, canStart: !started && !terminal, diagnosticStage, diagnosticCode: safeCode, diagnosticHttpStatus: httpDiagnostic.httpStatus, diagnosticWaitSeconds: httpDiagnostic.waitSeconds });
     // The observer receives only this allowlisted shape, never SDK results/errors.
     try { onState(state); } catch { /* An observer cannot alter the lifecycle. */ }
   }
@@ -120,6 +149,11 @@ export function createConnectionCheck(runtime, {
       invalid: 'connection/invalid-access', timeout: 'connection/timeout',
       expired: 'connection/expired', stopped: 'connection/stopped',
     })[status] || 'connection/stopped';
+    if (status === 'failed' && diagnosticStage === 'app-check-request') {
+      // Async errors arrive as our own wrappers; synchronous SDK throws can
+      // arrive directly. No raw SDK exception or customData is retained.
+      httpDiagnostic = wrappedDiagnostics.get(error) ?? diagnosticHttp(error, safeCode);
+    }
     for (const timer of timers) clearTimer(timer);
     timers.clear();
     for (const abort of [...aborts]) abort();
@@ -152,8 +186,15 @@ export function createConnectionCheck(runtime, {
       timers.add(timer); aborts.add(abort);
       Promise.resolve(promise).then((value) => finish(resolve, value), (error) => {
         if (settled || terminal) return;
-        // Do not retain SDK exceptions beyond this boundary or inspect late errors.
-        finish(reject, failure(diagnosticCode(error)));
+        // Keep only bounded numeric diagnostics across this boundary. A hostile
+        // descriptor trap can stop the client; check again before inspecting it.
+        const code = diagnosticCode(error);
+        if (settled || terminal) return;
+        const detail = activeStage === 'app-check-request' ? diagnosticHttp(error, code) : NO_HTTP_DIAGNOSTIC;
+        if (settled || terminal) return;
+        const safeError = failure(code);
+        wrappedDiagnostics.set(safeError, detail);
+        finish(reject, safeError);
       });
       if (terminal) abort();
     });
@@ -249,7 +290,7 @@ export function createConnectionCheck(runtime, {
     state = Object.freeze({ ...state, expiresAtMillis: config.expiresAtMillis });
   } catch {
     terminal = true; diagnosticStage = 'preflight'; safeCode = 'connection/invalid-access';
-    state = Object.freeze({ status: 'invalid', label: CONNECTION_LABELS.invalid, uid: null, expiresAtMillis: config?.expiresAtMillis ?? null, canStart: false, diagnosticStage, diagnosticCode: safeCode });
+    state = Object.freeze({ status: 'invalid', label: CONNECTION_LABELS.invalid, uid: null, expiresAtMillis: config?.expiresAtMillis ?? null, canStart: false, diagnosticStage, diagnosticCode: safeCode, diagnosticHttpStatus: null, diagnosticWaitSeconds: null });
   }
   return Object.freeze({
     start() {

@@ -69,7 +69,7 @@ const source = (name) => readFile(new URL(`../lab/floating-garden/connection-che
 
 test('constructor is inert until explicit start and state contains only safe fields', () => {
   const f = fixture(); assert.deepEqual(f.events, []); assert.equal(f.time.timers.size, 0); assert.deepEqual(f.storage.writes, []);
-  assert.deepEqual(f.client.getState(), { status: 'idle', label: CONNECTION_LABELS.idle, uid: null, expiresAtMillis: runtime().expiresAtMillis, canStart: true, diagnosticStage: null, diagnosticCode: null });
+  assert.deepEqual(f.client.getState(), { status: 'idle', label: CONNECTION_LABELS.idle, uid: null, expiresAtMillis: runtime().expiresAtMillis, canStart: true, diagnosticStage: null, diagnosticCode: null, diagnosticHttpStatus: null, diagnosticWaitSeconds: null });
 });
 test('exact dedicated config is cloned/frozen, with independent finite <=48h window', () => {
   const input = runtime(), validated = validateConnectionRuntime(input);
@@ -109,7 +109,7 @@ test('Enterprise success precedes Auth, uses exact app and local persistence, ex
   assert.equal(f.apps[0].name, CONNECTION_APP_NAME); assert.deepEqual(f.apps[0].options, runtime().firebase);
   assert.ok(f.events.indexOf('get-token') < f.events.indexOf('initialize-auth')); assert.ok(f.events.indexOf('persistence') < f.events.indexOf('sign-in'));
   assert.equal(f.events.filter((e) => e === 'sign-in').length, 1); assert.deepEqual(f.storage.writes, [{ key: IDENTITY_ATTEMPT_KEY, value: 'attempted' }]);
-  for (const state of f.states) { assert.deepEqual(Object.keys(state).sort(), ['canStart', 'diagnosticCode', 'diagnosticStage', 'expiresAtMillis', 'label', 'status', 'uid']); assert.ok(Object.isFrozen(state)); }
+  for (const state of f.states) { assert.deepEqual(Object.keys(state).sort(), ['canStart', 'diagnosticCode', 'diagnosticHttpStatus', 'diagnosticStage', 'diagnosticWaitSeconds', 'expiresAtMillis', 'label', 'status', 'uid']); assert.ok(Object.isFrozen(state)); }
   assert.ok(!JSON.stringify(f.states).includes(PRIVATE)); f.client.stop();
 });
 test('duplicate clicks share one flight and completed start cannot create another UID', async () => {
@@ -493,7 +493,89 @@ test('diagnostic UI uses textContent for fixed stage/code, and never raw rejecte
       runtime: {}, Intl, document: { getElementById: (id) => nodes.get(id), addEventListener() {} }, window: { addEventListener() {} },
       createConnectionCheck() { return { getState: () => result }; },
     });
-    assert.equal(nodes.get('connection-diagnostic').textContent, `anonymous-signup / ${error.code.startsWith('auth/') ? 'auth/operation-not-allowed' : 'connection/unknown'}`);
+    assert.equal(nodes.get('connection-diagnostic').textContent, `anonymous-signup / ${error.code.startsWith('auth/') ? 'auth/operation-not-allowed' : 'connection/unknown'} / HTTP 不明 / SDK待機目安 不明（自動再試行なし）`);
     assert.ok(!JSON.stringify([...nodes.values()].map((node) => node.textContent)).includes(PRIVATE));
   }
+});
+
+function httpError(httpStatus = 403, time = '01d:00m:00s', code = 'appCheck/throttled') {
+  return { code, customData: { httpStatus, time, token: PRIVATE, uid: PRIVATE }, message: PRIVATE, stack: PRIVATE };
+}
+test('HTTP diagnostics preserve safe own numbers across synchronous and asynchronous App Check failures only', async () => {
+  for (const async of [false, true]) for (const [text, seconds] of [['00m:00s', 0], ['00m:01s', 1], ['59m:59s', 3599], ['01h:00m:00s', 3600], ['04h:00m:00s', 14400], ['01d:00m:00s', 86400]]) {
+    const f = rejectionFixture('app-check-request', httpError(403, text), async), result = await f.client.start();
+    expectDiagnostic(result, 'app-check-request', 'appCheck/throttled');
+    assert.equal(result.diagnosticHttpStatus, 403); assert.equal(result.diagnosticWaitSeconds, seconds);
+    assert.equal(f.events.includes('initialize-auth'), false); assert.deepEqual(f.storage.writes, []);
+    assert.ok(!JSON.stringify(f.states).includes(PRIVATE));
+    f.client.stop(); await f.client.start(); assert.equal(f.client.getState(), result);
+  }
+  for (const stage of ['sdk-load', 'app-check-init', 'auth-init', 'anonymous-signup']) {
+    const f = rejectionFixture(stage, httpError()); const result = await f.client.start();
+    assert.equal(result.diagnosticHttpStatus, null); assert.equal(result.diagnosticWaitSeconds, null);
+  }
+  const result = await rejectionFixture('app-check-request', httpError(404, '01d:00m:00s', 'appCheck/fetch-status-error')).client.start();
+  assert.equal(result.diagnosticHttpStatus, 404); assert.equal(result.diagnosticWaitSeconds, null);
+});
+test('HTTP diagnostics never coerce status, parse raw messages, or expose invalid wait strings', async () => {
+  for (const status of ['403', 0, 99, 200, 600, NaN, Infinity, 403.5, null, undefined, { valueOf() { assert.fail('coercion'); } }]) {
+    const error = httpError(); error.customData.httpStatus = status;
+    const result = await rejectionFixture('app-check-request', error, true).client.start();
+    assert.equal(result.diagnosticHttpStatus, null); assert.equal(result.diagnosticWaitSeconds, null);
+  }
+  for (const time of [null, undefined, 86400, '', PRIVATE, '24h:00m:00s', '00m:60s', '01d:00m:01s', '00m:01s '+PRIVATE, '9'.repeat(10000)]) {
+    const error = httpError(); error.customData.time = time;
+    const result = await rejectionFixture('app-check-request', error, true).client.start();
+    assert.equal(result.diagnosticHttpStatus, 403); assert.equal(result.diagnosticWaitSeconds, null);
+  }
+  for (const code of ['appCheck/fetch-network-error', 'appCheck/throttled '+PRIVATE, 'auth/network-request-failed']) {
+    const result = await rejectionFixture('app-check-request', httpError(403, '01d:00m:00s', code), true).client.start();
+    assert.equal(result.diagnosticHttpStatus, null); assert.equal(result.diagnosticWaitSeconds, null);
+  }
+});
+test('HTTP diagnostic descriptors reject getters, inheritance, hostile proxies and reentrant stop', async () => {
+  let accesses = 0;
+  const trap = () => { accesses++; assert.fail('getter read'); };
+  for (const field of ['httpStatus', 'time']) {
+    const error = httpError(); Object.defineProperty(error.customData, field, { get: trap });
+    const result = await rejectionFixture('app-check-request', error, true).client.start();
+    assert.equal(result.diagnosticHttpStatus, field === 'time' ? 403 : null); assert.equal(result.diagnosticWaitSeconds, null);
+  }
+  const error = httpError(); error.customData = Object.create(error.customData);
+  assert.equal((await rejectionFixture('app-check-request', error, true).client.start()).diagnosticHttpStatus, null);
+  const revoked = Proxy.revocable({}, {}); revoked.revoke();
+  for (const data of [revoked.proxy, new Proxy({}, { getOwnPropertyDescriptor() { throw Error(PRIVATE); } })]) {
+    const error = httpError(); error.customData = data;
+    assert.equal((await rejectionFixture('app-check-request', error, true).client.start()).diagnosticHttpStatus, null);
+  }
+  let f;
+  const reentrant = new Proxy(httpError(), { getOwnPropertyDescriptor(target, key) { if (key === 'customData') f.client.stop(); return Object.getOwnPropertyDescriptor(target, key); } });
+  f = rejectionFixture('app-check-request', reentrant, true);
+  const result = await f.client.start(); assert.equal(result.status, 'stopped');
+  assert.equal(result.diagnosticHttpStatus, null); assert.equal(result.diagnosticWaitSeconds, null);
+  assert.equal(accesses, 0);
+});
+test('HTTP diagnostics never inspect late errors or change terminal timeout, expiry, pagehide and invalid-access results', async () => {
+  for (const mode of ['timeout', 'expiry', 'stop', 'invalid']) {
+    const proof = deferred(), f = fixture({ proof }), pending = f.client.start(); await flush();
+    if (mode === 'timeout') { f.time.set(NOW + CONNECTION_STAGE_TIMEOUT_MILLIS); f.time.fire(); }
+    if (mode === 'expiry') { f.time.set(runtime().expiresAtMillis); f.time.fire(); }
+    if (mode === 'stop') f.client.stop();
+    if (mode === 'invalid') { f.location.href = 'https://wrong.example/'; f.client.checkAccess(); }
+    const result = await pending;
+    let inspected = 0;
+    proof.reject(new Proxy(httpError(), { getOwnPropertyDescriptor() { inspected++; assert.fail('late error inspection'); } }));
+    await flush(); assert.equal(inspected, 0); assert.equal(f.client.getState(), result);
+    assert.equal(result.diagnosticHttpStatus, null); assert.equal(result.diagnosticWaitSeconds, null);
+  }
+});
+test('HTTP diagnostic UI displays only numeric fields and clearly marks wait as an estimate without automatic retry', async () => {
+  const appSource = (await source('app.js')).replace(/^import[^\n]+\n/gm, '');
+  const nodes = new Map(['connection-start', 'connection-status', 'connection-uid', 'connection-expiry', 'connection-diagnostic'].map((id) => [id, {
+    textContent: '', disabled: true, addEventListener() {}, set innerHTML(_value) { assert.fail('HTML sink'); },
+  }]));
+  const result = await rejectionFixture('app-check-request', httpError(), true).client.start();
+  vm.runInNewContext(appSource, { runtime: {}, Intl, document: { getElementById: (id) => nodes.get(id), addEventListener() {} }, window: { addEventListener() {} }, createConnectionCheck: () => ({ getState: () => result }) });
+  assert.equal(nodes.get('connection-diagnostic').textContent, 'app-check-request / appCheck/throttled / HTTP 403 / SDK待機目安 約24時間（自動再試行なし）');
+  assert.ok(!JSON.stringify([...nodes.values()].map((node) => node.textContent)).includes(PRIVATE));
 });

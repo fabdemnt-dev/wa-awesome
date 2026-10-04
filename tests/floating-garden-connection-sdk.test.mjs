@@ -47,7 +47,7 @@ async function runClient(csp, persistedStorage = [], fault = null) {
         unexpected.push(endpoint);
         throw new Error('Unexpected synthetic endpoint');
       }
-      const rejection = fault === 'app-check-403' && url.origin === APP_CHECK_ORIGIN ? { status: 403, error: 'PERMISSION_DENIED' } :
+      const rejection = /^app-check-(201|400|401|403|404|429|500|503)$/.test(fault) && url.origin === APP_CHECK_ORIGIN ? { status: Number(fault.slice(-3)), error: 'SYNTHETIC_SERVER_DETAIL' } :
         fault === 'signup-disabled' && url.pathname === '/v1/accounts:signUp' ? { status: 400, error: 'OPERATION_NOT_ALLOWED' } :
         fault === 'lookup-invalid' && url.pathname === '/v1/accounts:lookup' ? { status: 400, error: 'INVALID_ID_TOKEN' } : null;
       const response = rejection ? { error: { message: rejection.error, code: rejection.status, details: 'synthetic-private-error-detail-not-for-display' } } : body;
@@ -57,6 +57,7 @@ async function runClient(csp, persistedStorage = [], fault = null) {
   vm.runInContext(`
     globalThis.window = globalThis; globalThis.self = globalThis; globalThis.top = globalThis;
     Date.now = () => ${NOW};
+    Math.random = () => 0.5;
     globalThis.location = new URL('https://wa-awesome-garden-stg.web.app/connection-check/');
     globalThis.addEventListener = () => {}; globalThis.removeEventListener = () => {};
     globalThis.navigator = { onLine: true, userAgent: 'Mozilla/5.0 Chrome/140.0.0.0', locks: { request: async (name, options, callback) => callback({ name }) } };
@@ -102,7 +103,7 @@ async function runClient(csp, persistedStorage = [], fault = null) {
     const report = JSON.parse(JSON.stringify(entry.namespace.report));
     assert.deepEqual(unexpected, [], 'all transport must match explicit synthetic endpoints');
     assert.deepEqual([...sdkLoads].sort(), [...sdkSources.keys()].sort(), 'exercise unchanged dynamic SDK loader exactly once');
-    for (const token of [...TOKENS, 'synthetic-private-error-detail-not-for-display']) assert.equal(JSON.stringify(states).includes(token), false, 'observer never receives token or raw error material');
+    for (const token of [...TOKENS, 'SYNTHETIC_SERVER_DETAIL', 'synthetic-private-error-detail-not-for-display']) assert.equal(JSON.stringify(states).includes(token), false, 'observer never receives token or raw error material');
     assert.equal(report.beforeStart.state.status, 'idle');
     assert.equal(report.sameFlight, true, 'duplicate starts share the one-shot operation');
     assert.deepEqual(report.repeated, report.result);
@@ -180,3 +181,26 @@ for (const scenario of [
     assert.deepEqual(result.observableStates.at(-1), result.result, 'stop after failure cannot replace its diagnostic');
   });
 }
+
+for (const status of [201, 400, 401, 403, 404, 429, 500, 503]) {
+  test(`official SDK HTTP ${status} preserves bounded status/wait through the page wrapper, without retry or Auth`, async () => {
+    const result = await runClient(CONNECTION_CSP, [], `app-check-${status}`);
+    assert.equal(result.result.status, 'failed');
+    assert.equal(result.result.diagnosticStage, 'app-check-request');
+    assert.equal(result.result.diagnosticCode, 'appCheck/throttled');
+    assert.equal(result.result.diagnosticHttpStatus, status);
+    assert.equal(result.result.diagnosticWaitSeconds, [403, 404].includes(status) ? 86400 : 1);
+    assert.equal(result.requests.length, 1);
+    assert.equal(result.guard, null);
+    assert.deepEqual(result.storage, []);
+    assert.equal(result.requests.some((request) => request.endpoint.startsWith(AUTH_ORIGIN)), false);
+    assert.deepEqual(result.observableStates.at(-1), result.result);
+  });
+}
+test('official SDK network error does not invent HTTP status or a wait duration', async () => {
+  const result = await runClient(legacyCsp(CONNECTION_CSP));
+  assert.equal(result.result.diagnosticCode, 'appCheck/fetch-network-error');
+  assert.equal(result.result.diagnosticHttpStatus, null);
+  assert.equal(result.result.diagnosticWaitSeconds, null);
+  assert.equal(result.requests.length, 1);
+});

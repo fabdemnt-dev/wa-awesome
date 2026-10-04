@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { buildPayload, renderHelper, prepareConnection } from '../scripts/prepare-floating-garden-connection.mjs';
-import { operate, prepareDependencies, writeBundle, checkBundle, validatePayload, validateEnvironment, validateConfiguration, validateWindow, canonicalVersionName, connectionMessage, payloadDigest, hostingConfig, runtimeConfig, PROJECT, PROJECT_NUMBER, ORIGIN, STARTS_AT, EXPIRES_AT, MAINTENANCE_MESSAGE, MAINTENANCE_CSP, CONNECTION_CSP, CONNECTION_DIGEST, CONNECTION_FILE_HASHES, ORIGINAL_CONNECTION_CSP, ORIGINAL_CONNECTION_DIGEST, ORIGINAL_CONNECTION_MESSAGE, PREVIOUS_CONNECTION_CSP, PREVIOUS_CONNECTION_DIGEST, PREVIOUS_CONNECTION_MESSAGE, PREVIOUS_CONNECTION_PAYLOAD, DIAGNOSTIC_CONNECTION_CSP, DIAGNOSTIC_CONNECTION_DIGEST, DIAGNOSTIC_CONNECTION_MESSAGE, DIAGNOSTIC_CONNECTION_PAYLOAD, hash, CONFIG_FILE, CONNECTION_NAMES } from '../scripts/deploy-floating-garden-connection-template.mjs';
+import { operate, prepareDependencies, writeBundle, checkBundle, validatePayload, validateEnvironment, validateConfiguration, validateWindow, canonicalVersionName, connectionMessage, payloadDigest, hostingConfig, runtimeConfig, PROJECT, PROJECT_NUMBER, ORIGIN, STARTS_AT, EXPIRES_AT, MAINTENANCE_MESSAGE, MAINTENANCE_CSP, CONNECTION_CSP, CONNECTION_DIGEST, CONNECTION_FILE_HASHES, ORIGINAL_CONNECTION_CSP, ORIGINAL_CONNECTION_DIGEST, ORIGINAL_CONNECTION_MESSAGE, PREVIOUS_CONNECTION_CSP, PREVIOUS_CONNECTION_DIGEST, PREVIOUS_CONNECTION_MESSAGE, PREVIOUS_CONNECTION_PAYLOAD, DIAGNOSTIC_CONNECTION_CSP, DIAGNOSTIC_CONNECTION_DIGEST, DIAGNOSTIC_CONNECTION_MESSAGE, DIAGNOSTIC_CONNECTION_PAYLOAD, KEY_CORRECTED_CONNECTION_CSP, KEY_CORRECTED_CONNECTION_DIGEST, KEY_CORRECTED_CONNECTION_MESSAGE, KEY_CORRECTED_CONNECTION_PAYLOAD, hash, CONFIG_FILE, CONNECTION_NAMES } from '../scripts/deploy-floating-garden-connection-template.mjs';
 import { HTML, CONFIG } from '../scripts/deploy-floating-garden-maintenance.mjs';
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const payload = buildPayload();
@@ -25,7 +25,7 @@ function harness(t, options = {}) {
   const root = temp(t), toolingDir = fakeTooling(root), commands = [], reads = [], logs = [];
   let kind = options.kind ?? 'maintenance', currentVersion = version(1), channelReads = 0, writes = 0, timeReads = 0;
   const metadata = () => ({ channels: [{ name: `sites/${PROJECT}/channels/live`, url: options.wrongOrigin ? 'https://wrong.example' : ORIGIN,
-    release: { type: options.releaseType ?? 'DEPLOY', message: options.unknown ? 'unknown' : (!writes && options.releaseMessage) || (kind === 'maintenance' ? MAINTENANCE_MESSAGE : kind === 'original-connection' ? ORIGINAL_CONNECTION_MESSAGE : kind === 'previous-connection' ? PREVIOUS_CONNECTION_MESSAGE : kind === 'diagnostic-connection' ? DIAGNOSTIC_CONNECTION_MESSAGE : connectionMessage(payload)), version: { name: options.releaseVersion ?? currentVersion, status: options.versionStatus ?? 'FINALIZED' } } }] });
+    release: { type: options.releaseType ?? 'DEPLOY', message: options.unknown ? 'unknown' : (!writes && options.releaseMessage) || (kind === 'maintenance' ? MAINTENANCE_MESSAGE : kind === 'original-connection' ? ORIGINAL_CONNECTION_MESSAGE : kind === 'previous-connection' ? PREVIOUS_CONNECTION_MESSAGE : kind === 'diagnostic-connection' ? DIAGNOSTIC_CONNECTION_MESSAGE : kind === 'key-corrected-connection' ? KEY_CORRECTED_CONNECTION_MESSAGE : connectionMessage(payload)), version: { name: options.releaseVersion ?? currentVersion, status: options.versionStatus ?? 'FINALIZED' } } }] });
   const run = (command, args, cwd) => {
     commands.push({ command, args, cwd });
     if (command === 'gcloud') {
@@ -64,10 +64,10 @@ function harness(t, options = {}) {
     const path = new URL(url).pathname;
     const connection = path.startsWith('/connection-check/');
     let status = 200, body = HTML, csp = MAINTENANCE_CSP;
-    if (connection && ['connection', 'diagnostic-connection', 'previous-connection', 'original-connection'].includes(kind)) {
-      const files = (kind === 'connection' || options.candidateAsHistorical) ? payload.connectionFiles : kind === 'diagnostic-connection' ? DIAGNOSTIC_CONNECTION_PAYLOAD.connectionFiles : PREVIOUS_CONNECTION_PAYLOAD.connectionFiles;
-      body = files[path.split('/').at(-1) || 'index.html']; csp = kind === 'connection' ? CONNECTION_CSP : kind === 'diagnostic-connection' ? DIAGNOSTIC_CONNECTION_CSP : kind === 'original-connection' ? ORIGINAL_CONNECTION_CSP : PREVIOUS_CONNECTION_CSP;
-      if (!writes && options.oldKeyReplacement) body = body.replaceAll('6Lc_LNwtAAAAADRAHvq10FwxirR3c5jZlxS9QpYw', options.oldKeyReplacement);
+    if (connection && ['connection', 'key-corrected-connection', 'diagnostic-connection', 'previous-connection', 'original-connection'].includes(kind)) {
+      const files = (kind === 'connection' || options.candidateAsHistorical) ? payload.connectionFiles : kind === 'key-corrected-connection' ? KEY_CORRECTED_CONNECTION_PAYLOAD.connectionFiles : kind === 'diagnostic-connection' ? DIAGNOSTIC_CONNECTION_PAYLOAD.connectionFiles : PREVIOUS_CONNECTION_PAYLOAD.connectionFiles;
+      body = files[path.split('/').at(-1) || 'index.html']; csp = kind === 'connection' ? CONNECTION_CSP : kind === 'key-corrected-connection' ? KEY_CORRECTED_CONNECTION_CSP : kind === 'diagnostic-connection' ? DIAGNOSTIC_CONNECTION_CSP : kind === 'original-connection' ? ORIGINAL_CONNECTION_CSP : PREVIOUS_CONNECTION_CSP;
+      if (!writes && options.liveKeyReplacement) body = body.replaceAll('6Lc_LNwtAAAAADRAHvql0FwxirR3c5jZlxS9QpYw', options.liveKeyReplacement);
     }
     else if (connection || path.startsWith('/lab/')) status = 404;
     if (options.badBytes || options.badPathBytes === path || (options.badPostBytes && writes)) body = 'wrong';
@@ -111,41 +111,47 @@ test('configs are Hosting-only with disjoint CSP rules and no hooks/redirects/re
   assert.ok(!cfg.hosting.headers[0].headers.some((h) => h.key === 'Content-Security-Policy'));
   assert.doesNotMatch(CONNECTION_CSP, /unsafe-|\*|firestore|cloudfunctions/);
 });
-test('original, fixed-CSP, historical diagnostic and corrected-key identities are independently pinned', () => {
+test('all historical identities and the HTTP-diagnostic candidate are independently pinned', () => {
   assert.equal(ORIGINAL_CONNECTION_DIGEST, 'd73fa35889621062065889b52242b37b052a81c375f78c208f80c5e4ddff3e2d');
   assert.equal(PREVIOUS_CONNECTION_DIGEST, '2303007a968a8e063f49275d120631a5fa08f91cf1a28ae771dda6ad8055123d');
   assert.equal(DIAGNOSTIC_CONNECTION_DIGEST, '9bcca9cdf43f3b17e3afbf64f84ea0dcb9737d882688ce92c364cb035aea3ca9');
-  assert.equal(CONNECTION_DIGEST, 'b0082507330235ac3022e0037869063b4e8c4d4d4b776a712e1af48730db8410');
+  assert.equal(KEY_CORRECTED_CONNECTION_DIGEST, 'b0082507330235ac3022e0037869063b4e8c4d4d4b776a712e1af48730db8410');
+  assert.equal(CONNECTION_DIGEST, 'd4f956c97940c5f5cc23bbc531f73900095bf0f5a2e28ce580b1fc8a8db66e22');
   assert.equal(payloadDigest(PREVIOUS_CONNECTION_PAYLOAD), PREVIOUS_CONNECTION_DIGEST);
   assert.equal(payloadDigest(DIAGNOSTIC_CONNECTION_PAYLOAD), DIAGNOSTIC_CONNECTION_DIGEST);
+  assert.equal(payloadDigest(KEY_CORRECTED_CONNECTION_PAYLOAD), KEY_CORRECTED_CONNECTION_DIGEST);
   const original = { ...PREVIOUS_CONNECTION_PAYLOAD, connectionConfig: PREVIOUS_CONNECTION_PAYLOAD.connectionConfig.replace(CONNECTION_CSP, ORIGINAL_CONNECTION_CSP) };
   assert.equal(payloadDigest(original), ORIGINAL_CONNECTION_DIGEST);
   assert.equal(PREVIOUS_CONNECTION_PAYLOAD.connectionConfig, original.connectionConfig.replace('https://firebaseappcheck.googleapis.com', 'https://content-firebaseappcheck.googleapis.com'));
   assert.equal(PREVIOUS_CONNECTION_PAYLOAD.connectionConfig, payload.connectionConfig);
   assert.equal(DIAGNOSTIC_CONNECTION_PAYLOAD.connectionConfig, payload.connectionConfig);
+  assert.equal(KEY_CORRECTED_CONNECTION_PAYLOAD.connectionConfig, payload.connectionConfig);
   assert.equal(PREVIOUS_CONNECTION_PAYLOAD.connectionFiles['connection-runtime.js'], DIAGNOSTIC_CONNECTION_PAYLOAD.connectionFiles['connection-runtime.js']);
   assert.equal(payloadDigest(payload), CONNECTION_DIGEST);
-  assert.equal(new Set([CONNECTION_DIGEST, ORIGINAL_CONNECTION_DIGEST, PREVIOUS_CONNECTION_DIGEST, DIAGNOSTIC_CONNECTION_DIGEST]).size, 4);
+  assert.equal(new Set([CONNECTION_DIGEST, ORIGINAL_CONNECTION_DIGEST, PREVIOUS_CONNECTION_DIGEST, DIAGNOSTIC_CONNECTION_DIGEST, KEY_CORRECTED_CONNECTION_DIGEST]).size, 5);
   assert.equal(ORIGINAL_CONNECTION_MESSAGE, `garden-connection-static-v1:${ORIGINAL_CONNECTION_DIGEST}`);
   assert.equal(PREVIOUS_CONNECTION_MESSAGE, `garden-connection-static-v1:${PREVIOUS_CONNECTION_DIGEST}`);
   assert.equal(DIAGNOSTIC_CONNECTION_MESSAGE, `garden-connection-static-v1:${DIAGNOSTIC_CONNECTION_DIGEST}`);
+  assert.equal(KEY_CORRECTED_CONNECTION_MESSAGE, `garden-connection-static-v1:${KEY_CORRECTED_CONNECTION_DIGEST}`);
   assert.equal(connectionMessage(payload), `garden-connection-static-v1:${CONNECTION_DIGEST}`);
   assert.deepEqual(Object.keys(CONNECTION_FILE_HASHES).sort(), CONNECTION_NAMES);
   for (const name of CONNECTION_NAMES) assert.equal(hash(payload.connectionFiles[name]), CONNECTION_FILE_HASHES[name]);
-  for (const historical of [PREVIOUS_CONNECTION_PAYLOAD, DIAGNOSTIC_CONNECTION_PAYLOAD]) {
+  for (const historical of [PREVIOUS_CONNECTION_PAYLOAD, DIAGNOSTIC_CONNECTION_PAYLOAD, KEY_CORRECTED_CONNECTION_PAYLOAD]) {
     assert.ok(Object.isFrozen(historical)); assert.ok(Object.isFrozen(historical.connectionFiles));
     assert.throws(() => { historical.connectionFiles['app.js'] = 'changed'; }, TypeError);
     assert.throws(() => validatePayload(historical), /fixed public config/);
   }
   assert.equal(PREVIOUS_CONNECTION_CSP, CONNECTION_CSP);
   assert.equal(DIAGNOSTIC_CONNECTION_CSP, CONNECTION_CSP);
+  assert.equal(KEY_CORRECTED_CONNECTION_CSP, CONNECTION_CSP);
   const connect = CONNECTION_CSP.split('; ').find((part) => part.startsWith('connect-src '));
   assert.ok(connect.split(' ').includes('https://content-firebaseappcheck.googleapis.com'));
   assert.ok(!connect.split(' ').includes('https://firebaseappcheck.googleapis.com'));
-  assert.equal(STARTS_AT, Date.parse('2026-10-03T02:15:00Z'));
-  assert.equal(EXPIRES_AT, Date.parse('2026-10-04T03:00:00Z'));
+  assert.equal(STARTS_AT, Date.parse('2026-10-04T03:00:00Z'));
+  assert.equal(EXPIRES_AT, Date.parse('2026-10-05T03:00:00Z'));
+  assert.equal(EXPIRES_AT - STARTS_AT, 24 * 60 * 60 * 1000);
 });
-test('candidate public bytes change only the twentieth site-key character in runtime and validator', () => {
+test('frozen corrected-key history differs only at the twentieth site-key character in runtime and validator', () => {
   const oldKey = '6Lc_LNwtAAAAADRAHvq10FwxirR3c5jZlxS9QpYw';
   const newKey = '6Lc_LNwtAAAAADRAHvql0FwxirR3c5jZlxS9QpYw';
   assert.equal(oldKey.length, 40); assert.equal(newKey.length, 40);
@@ -155,10 +161,29 @@ test('candidate public bytes change only the twentieth site-key character in run
     const historical = DIAGNOSTIC_CONNECTION_PAYLOAD.connectionFiles[name];
     if (['connection.js', 'connection-runtime.js'].includes(name)) {
       assert.equal(historical.split(oldKey).length, 2);
-      assert.equal(payload.connectionFiles[name], historical.replace(oldKey, newKey));
-    } else assert.equal(payload.connectionFiles[name], historical);
+      assert.equal(KEY_CORRECTED_CONNECTION_PAYLOAD.connectionFiles[name], historical.replace(oldKey, newKey));
+    } else assert.equal(KEY_CORRECTED_CONNECTION_PAYLOAD.connectionFiles[name], historical);
   }
-  for (const name of ['maintenanceHtml', 'maintenanceConfig', 'connectionConfig']) assert.equal(payload[name], DIAGNOSTIC_CONNECTION_PAYLOAD[name]);
+  for (const name of ['maintenanceHtml', 'maintenanceConfig', 'connectionConfig']) assert.equal(KEY_CORRECTED_CONNECTION_PAYLOAD[name], DIAGNOSTIC_CONNECTION_PAYLOAD[name]);
+});
+test('HTTP-diagnostic candidate preserves the corrected key and protection config, with only the approved 24-hour runtime window changed', () => {
+  const historical = KEY_CORRECTED_CONNECTION_PAYLOAD;
+  const historicalRuntime = JSON.parse(historical.connectionFiles['connection-runtime.js'].split('Object.freeze(')[1].split(');')[0]);
+  assert.equal(historicalRuntime.startsAtMillis, Date.parse('2026-10-03T02:15:00Z'));
+  assert.equal(historicalRuntime.expiresAtMillis, Date.parse('2026-10-04T03:00:00Z'));
+  assert.deepEqual(runtimeConfig(), { ...historicalRuntime, startsAtMillis: STARTS_AT, expiresAtMillis: EXPIRES_AT });
+  for (const name of ['maintenanceHtml', 'maintenanceConfig', 'connectionConfig']) assert.equal(payload[name], historical[name]);
+  for (const name of ['index.html', 'style.css']) assert.equal(payload.connectionFiles[name], historical.connectionFiles[name]);
+  for (const name of ['app.js', 'connection.js', 'connection-runtime.js']) assert.notEqual(payload.connectionFiles[name], historical.connectionFiles[name]);
+  const correctedHashes = {
+    'app.js': '3746cf5669873970d7d7f5fe032ca7195397c7394c31e8400466dc085c221b0e',
+    'connection.js': '366b155d2548a3bec76559219428874306a80369949d3d5b1a91063f29718668',
+    'index.html': 'df9f726f3b13dfa779ae068ab69594502dea548e64586cdf5d4dbf98046cd9b9',
+    'style.css': '25aef22d9e8bd13652cccbbd4a2f005a19de8b8b984c7a549d22440875d253e2',
+    'connection-runtime.js': 'c43ac18e1dec3bfa717a00d26ccddff4b76c43bb57b7b62067a2da40b6110e37',
+  };
+  for (const name of CONNECTION_NAMES) assert.equal(hash(historical.connectionFiles[name]), correctedHashes[name]);
+  assert.match(payload.connectionFiles['connection.js'], /CONNECTION_MAX_DURATION_MILLIS = 48 \* 60 \* 60 \* 1000/);
 });
 test('explicit modes, project, existing site, API, gcloud routing and CLI version fail closed', async (t) => {
   for (const options of [{ wrongProject: true }, { missingApi: true }, { missingSite: true }, { wrongCli: true }, { denied: true }, { config: { auth: { impersonate_service_account: 'other' } } }, { unknown: true }, { wrongOrigin: true }]) {
@@ -187,12 +212,12 @@ test('same recognized connection release is reverified without redeploy and stop
   const stopped = harness(t, { kind: 'connection', time: EXPIRES_AT + 100000 }); assert.equal((await stopped.perform('stop')).kind, 'maintenance'); assert.equal(stopped.writes(), 1);
   const already = harness(t, { time: EXPIRES_AT + 100000 }); assert.equal((await already.perform('stop')).deployed, false); assert.equal(already.writes(), 0);
 });
-test('the exact historical diagnostic release migrates with one write, verifying old and current bytes and headers', async (t) => {
-  const h = harness(t, { kind: 'diagnostic-connection' }), result = await h.perform();
+test('the exact corrected-key release migrates with one write, verifying old and current bytes and headers', async (t) => {
+  const h = harness(t, { kind: 'key-corrected-connection' }), result = await h.perform();
   assert.equal(result.deployed, true); assert.equal(result.kind, 'connection'); assert.equal(result.version, version(3)); assert.equal(h.writes(), 1);
   const paths = ['/', '/index.html', '/404.html', '/lab/floating-garden/trial/index.html', ...CONNECTION_NAMES.map((name) => `/connection-check/${name}`), '/connection-check/'];
   for (const path of paths) {
-    assert.equal(h.reads.filter((r) => r.url === `${ORIGIN}${path}` && r.kind === 'diagnostic-connection' && r.writes === 0).length, 1);
+    assert.equal(h.reads.filter((r) => r.url === `${ORIGIN}${path}` && r.kind === 'key-corrected-connection' && r.writes === 0).length, 1);
     assert.equal(h.reads.filter((r) => r.url === `${ORIGIN}${path}` && r.kind === 'connection' && r.writes === 1).length, 1);
   }
   const deployIndex = h.commands.findIndex((c) => c.args[1] === 'deploy');
@@ -200,14 +225,14 @@ test('the exact historical diagnostic release migrates with one write, verifying
   assert.equal(h.commands[deployIndex].args[5], connectionMessage(payload));
   assert.ok(h.logs.some((s) => s.startsWith('VERIFIED:')));
 });
-test('diagnostic-release inspect remains read-only and stop can restore maintenance after the unchanged expiry', async (t) => {
-  const inspected = harness(t, { kind: 'diagnostic-connection' });
-  assert.equal((await inspected.perform('inspect')).kind, 'diagnostic-connection'); assert.equal(inspected.writes(), 0);
-  const stopped = harness(t, { kind: 'diagnostic-connection', time: EXPIRES_AT + 100000 });
+test('corrected-key-release inspect remains read-only and stop can restore maintenance after the approved expiry', async (t) => {
+  const inspected = harness(t, { kind: 'key-corrected-connection' });
+  assert.equal((await inspected.perform('inspect')).kind, 'key-corrected-connection'); assert.equal(inspected.writes(), 0);
+  const stopped = harness(t, { kind: 'key-corrected-connection', time: EXPIRES_AT + 100000 });
   assert.equal((await stopped.perform('stop')).kind, 'maintenance'); assert.equal(stopped.writes(), 1);
   assert.ok(stopped.reads.filter((r) => r.writes).every((r) => r.kind === 'maintenance'));
 });
-test('diagnostic-release mismatched markers, all public bytes, CSP and remaining safety headers stop without a write', async (t) => {
+test('corrected-key-release mismatched markers, all public bytes, CSP and remaining safety headers stop without a write', async (t) => {
   const paths = ['/', '/index.html', '/404.html', '/lab/floating-garden/trial/index.html', ...CONNECTION_NAMES.map((name) => `/connection-check/${name}`), '/connection-check/'];
   const mismatches = [
     { releaseMessage: 'garden-connection-static-v1:unknown' },
@@ -217,9 +242,10 @@ test('diagnostic-release mismatched markers, all public bytes, CSP and remaining
     { connectionCsp: `${PREVIOUS_CONNECTION_CSP}; connect-src *` },
     { releaseMessage: ORIGINAL_CONNECTION_MESSAGE },
     { releaseMessage: PREVIOUS_CONNECTION_MESSAGE },
+    { releaseMessage: DIAGNOSTIC_CONNECTION_MESSAGE },
     { candidateAsHistorical: true },
-    { oldKeyReplacement: '6Lc_LNwtAAAAADRAHvql0FwxirR3c5jZlxS9QpYw' },
-    { oldKeyReplacement: '6Lc_LNwtAAAAADRAHvqIOFwxirR3c5jZlxS9QpYw' },
+    { liveKeyReplacement: '6Lc_LNwtAAAAADRAHvq10FwxirR3c5jZlxS9QpYw' },
+    { liveKeyReplacement: '6Lc_LNwtAAAAADRAHvqIOFwxirR3c5jZlxS9QpYw' },
     { releaseType: 'ROLLBACK' },
     { versionStatus: 'CREATED' },
     { releaseVersion: 'sites/wa-awesome/versions/unrelated' },
@@ -228,13 +254,13 @@ test('diagnostic-release mismatched markers, all public bytes, CSP and remaining
     ...['cache-control', 'x-content-type-options', 'referrer-policy', 'x-robots-tag'].map((key) => ({ headerOverrides: { [key]: 'wrong' } })),
   ];
   for (const options of mismatches) {
-    const h = harness(t, { kind: 'diagnostic-connection', ...options }); await assert.rejects(h.perform()); assert.equal(h.writes(), 0);
+    const h = harness(t, { kind: 'key-corrected-connection', ...options }); await assert.rejects(h.perform()); assert.equal(h.writes(), 0);
   }
 });
-test('a modified candidate cannot redefine the known diagnostic public bytes', async (t) => {
+test('a modified candidate cannot redefine the known corrected-key public bytes', async (t) => {
   for (const name of CONNECTION_NAMES) {
     const changed = structuredClone(payload); changed.connectionFiles[name] += '\n// unreviewed';
-    const h = harness(t, { kind: 'diagnostic-connection', payload: changed });
+    const h = harness(t, { kind: 'key-corrected-connection', payload: changed });
     await assert.rejects(h.perform()); assert.equal(h.writes(), 0); assert.equal(h.commands.length, 0);
   }
 });
@@ -242,12 +268,24 @@ test('old diagnostic key is rejected in the candidate before subprocesses or pub
   for (const name of ['connection.js', 'connection-runtime.js']) {
     const changed = structuredClone(payload);
     changed.connectionFiles[name] = DIAGNOSTIC_CONNECTION_PAYLOAD.connectionFiles[name];
-    const h = harness(t, { kind: 'diagnostic-connection', payload: changed });
+    const h = harness(t, { kind: 'key-corrected-connection', payload: changed });
     await assert.rejects(h.perform());
     assert.equal(h.writes(), 0); assert.equal(h.commands.length, 0); assert.equal(h.reads.length, 0);
   }
 });
-test('older fixed-CSP release remains inspectable/stoppable but cannot migrate directly to the corrected key', async (t) => {
+test('historical diagnostic release remains inspectable/stoppable but cannot migrate directly to the HTTP diagnostic update', async (t) => {
+  const inspected = harness(t, { kind: 'diagnostic-connection' });
+  assert.equal((await inspected.perform('inspect')).kind, 'diagnostic-connection'); assert.equal(inspected.writes(), 0);
+  const blocked = harness(t, { kind: 'diagnostic-connection' });
+  await assert.rejects(blocked.perform(), /cannot migrate directly/); assert.equal(blocked.writes(), 0);
+  const stopped = harness(t, { kind: 'diagnostic-connection', time: EXPIRES_AT + 100000 });
+  assert.equal((await stopped.perform('stop')).kind, 'maintenance'); assert.equal(stopped.writes(), 1);
+  for (const options of [{ connectionCsp: ORIGINAL_CONNECTION_CSP }, { candidateAsHistorical: true }, { releaseMessage: KEY_CORRECTED_CONNECTION_MESSAGE }, { releaseMessage: connectionMessage(payload) }]) {
+    const invalid = harness(t, { kind: 'diagnostic-connection', ...options });
+    await assert.rejects(invalid.perform('stop')); assert.equal(invalid.writes(), 0);
+  }
+});
+test('older fixed-CSP release remains inspectable/stoppable but cannot migrate directly to the HTTP diagnostic update', async (t) => {
   const inspected = harness(t, { kind: 'previous-connection' });
   assert.equal((await inspected.perform('inspect')).kind, 'previous-connection'); assert.equal(inspected.writes(), 0);
   const blocked = harness(t, { kind: 'previous-connection' });
@@ -259,7 +297,7 @@ test('older fixed-CSP release remains inspectable/stoppable but cannot migrate d
     await assert.rejects(invalid.perform('stop')); assert.equal(invalid.writes(), 0);
   }
 });
-test('original pre-fix release is inspectable/stoppable but cannot migrate directly to the corrected key', async (t) => {
+test('original pre-fix release is inspectable/stoppable but cannot migrate directly to the HTTP diagnostic update', async (t) => {
   const inspected = harness(t, { kind: 'original-connection' });
   assert.equal((await inspected.perform('inspect')).kind, 'original-connection'); assert.equal(inspected.writes(), 0);
   const blocked = harness(t, { kind: 'original-connection' });
@@ -271,7 +309,7 @@ test('original pre-fix release is inspectable/stoppable but cannot migrate direc
     await assert.rejects(invalid.perform('stop')); assert.equal(invalid.writes(), 0);
   }
 });
-test('recognized corrected-key release is never redeployed, but every byte/header and final identity are required', async (t) => {
+test('recognized HTTP-diagnostic candidate is never redeployed, but every byte/header and final identity are required', async (t) => {
   const exact = harness(t, { kind: 'connection' });
   assert.equal((await exact.perform()).deployed, false); assert.equal(exact.writes(), 0);
   for (const options of [{ race: true }, { badHeaders: true }, { connectionCsp: ORIGINAL_CONNECTION_CSP }, ...CONNECTION_NAMES.map((name) => ({ badPathBytes: `/connection-check/${name}` }))]) {
@@ -286,15 +324,15 @@ test('unknown and malformed release identities stop even when every public byte 
     await assert.rejects(invalid.perform()); assert.equal(invalid.writes(), 0); assert.equal(invalid.reads.length, 0);
   }
 });
-test('a raced diagnostic release blocks migration, and a post-write race never reports completion', async (t) => {
-  const raced = harness(t, { kind: 'diagnostic-connection', race: true });
+test('a raced corrected-key release blocks migration, and a post-write race never reports completion', async (t) => {
+  const raced = harness(t, { kind: 'key-corrected-connection', race: true });
   await assert.rejects(raced.perform(), /changed before publication/); assert.equal(raced.writes(), 0);
-  const postRaced = harness(t, { kind: 'diagnostic-connection', postRace: true });
+  const postRaced = harness(t, { kind: 'key-corrected-connection', postRace: true });
   await assert.rejects(postRaced.perform(), /changed during post-publication/); assert.equal(postRaced.writes(), 1);
   assert.ok(!postRaced.logs.some((s) => s.startsWith('VERIFIED:')));
 });
-test('uncertain diagnostic-release migration is never retried and only metadata is read after the attempt', async (t) => {
-  const h = harness(t, { kind: 'diagnostic-connection', uncertain: true });
+test('uncertain corrected-key-release migration is never retried and only metadata is read after the attempt', async (t) => {
+  const h = harness(t, { kind: 'key-corrected-connection', uncertain: true });
   await assert.rejects(h.perform()); assert.equal(h.writes(), 1);
   assert.equal(h.commands.at(-1).args[1], 'hosting:channel:list');
   assert.ok(h.reads.every((r) => r.writes === 0));
@@ -304,14 +342,14 @@ test('uncertain diagnostic-release migration is never retried and only metadata 
 });
 test('migration completion requires current public bytes, current headers and the acknowledged version', async (t) => {
   for (const options of [{ badPostBytes: true }, { badPostHeaders: true }, { wrongReturnedVersion: true }]) {
-    const h = harness(t, { kind: 'diagnostic-connection', ...options });
+    const h = harness(t, { kind: 'key-corrected-connection', ...options });
     await assert.rejects(h.perform()); assert.equal(h.writes(), 1); assert.ok(!h.logs.some((s) => s.startsWith('VERIFIED:')));
   }
 });
 test('fixed window never advances and requires ten minutes remaining before deploy', async (t) => {
   assert.doesNotThrow(() => validateWindow(EXPIRES_AT - 600000));
   for (const time of [STARTS_AT - 1, EXPIRES_AT - 599999, EXPIRES_AT, NaN]) { const h = harness(t, { time }); await assert.rejects(h.perform(), /window/); assert.equal(h.commands.length, 0); }
-  const elapsed = harness(t, { kind: 'diagnostic-connection', times: [STARTS_AT + 60000, EXPIRES_AT - 599999] });
+  const elapsed = harness(t, { kind: 'key-corrected-connection', times: [STARTS_AT + 60000, EXPIRES_AT - 599999] });
   await assert.rejects(elapsed.perform(), /window/); assert.equal(elapsed.writes(), 0); assert.ok(elapsed.reads.length > 0);
 });
 test('race, extra upload, changed config and symlinks block the one write', async (t) => {
