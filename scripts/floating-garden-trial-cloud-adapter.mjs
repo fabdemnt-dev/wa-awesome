@@ -44,6 +44,14 @@ const MAX_BYTES = 16 * 1024 * 1024;
 const sha = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const plain = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const same = isDeepStrictEqual;
+// The Console formats the same closed Rules differently from the file. Compare
+// lexical tokens, preserving identifiers, quoted strings and every punctuation
+// token. This accepts whitespace only, not comments, extra clauses or grants.
+export function sameDenyAllRules(actual, expected) {
+  if (typeof actual !== 'string' || typeof expected !== 'string' || actual.length > 16384 || expected.length > 16384) return false;
+  const tokens = (text) => text.match(/'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|[A-Za-z_][A-Za-z_0-9]*|\*\*|[^\s]/g) ?? [];
+  return same(tokens(actual), tokens(expected));
+}
 class AdapterStop extends Error { constructor(code) { super(`STOP: ${code}. Raw provider diagnostics are suppressed; inspect before any further write.`); this.code = code; } }
 const safe = (code) => new AdapterStop(code);
 function requireThat(test, code) { if (!test) throw safe(code); }
@@ -444,7 +452,7 @@ export function createCloudAdapter({ packet, review, toolingDir, runner = makeCl
   async function deployRules() { return boundary(async () => {
     requireThat(readyMode === 'deploy' && !attemptedRules, 'rules-deploy-mode'); requireLocal();
     const current = await rulesState();
-    requireThat(current === checkedFile(join(ROOT, 'config/floating-garden-trial/deny-all.rules')).toString(), 'rules-initial-deny-all');
+    requireThat(sameDenyAllRules(current, checkedFile(join(ROOT, 'config/floating-garden-trial/deny-all.rules')).toString()), 'rules-initial-deny-all');
     const admin = await readAdmin(); assertRecords(admin, true); attemptedRules = true;
     return classifyDeployResult(cli(['deploy', '--only', 'firestore:rules'], 'game', 'firebase.trial.json'));
   }); }
@@ -486,7 +494,7 @@ export function createCloudAdapter({ packet, review, toolingDir, runner = makeCl
     const run = gcloud(['run', 'services', 'list', '--platform=managed']);
     requireThat(Array.isArray(run) && run.length === 0, 'run-initial-empty');
     const admin = await readAdmin(); requireThat(admin.gate === null && admin.usage === null && admin.testers.every((t) => t === null), 'admin-initial-empty');
-    requireThat(await rulesState() === checkedFile(join(ROOT, 'config/floating-garden-trial/deny-all.rules')).toString(), 'rules-initial-deny-all');
+    requireThat(sameDenyAllRules(await rulesState(), checkedFile(join(ROOT, 'config/floating-garden-trial/deny-all.rules')).toString()), 'rules-initial-deny-all');
     const hosting = await readHosting(); requireThat(['connection', 'maintenance'].includes(hosting.kind), 'hosting-initial-release');
     // Loading the exact prepared module only constructs callable descriptors;
     // the module initializes Admin and reads the HMAC only inside a handler.

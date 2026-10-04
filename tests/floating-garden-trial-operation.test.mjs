@@ -503,3 +503,22 @@ test('pinned Firestore GAPIC disables Commit RPC retries without initializing cr
 });
 
 }
+
+import { sameDenyAllRules } from '../scripts/floating-garden-trial-cloud-adapter.mjs';
+const consoleClosedRules = "rules_version = '2';\n\n\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    match /{document=**} {\n      allow read, write: if false;\n    }\n  }\n}\n";
+test('initial closed Rules accept observed Console whitespace only, at both preflight and deployment guards',async()=>{
+ const expected=await readFile(join(ROOT,'config/floating-garden-trial/deny-all.rules'),'utf8');
+ assert.equal(sameDenyAllRules(consoleClosedRules,expected),true);
+ assert.equal(sameDenyAllRules(expected,expected),true);
+ assert.equal(sameDenyAllRules(consoleClosedRules.replaceAll('\n','\r\n').replaceAll('  ','\t'),expected),true);
+ const source=await readFile(join(ROOT,'scripts/floating-garden-trial-cloud-adapter.mjs'),'utf8');
+ assert.equal((source.match(/requireThat\(sameDenyAllRules\(/g)??[]).length,2);
+});
+test('initial Rules token comparison rejects permission, path, string and lexical changes',async()=>{
+ const expected=await readFile(join(ROOT,'config/floating-garden-trial/deny-all.rules'),'utf8');
+ for(const altered of [consoleClosedRules.replace('if false','if true'),consoleClosedRules.replace('if false','if request.auth != null'),consoleClosedRules.replace('false','fa lse'),consoleClosedRules.replace("'2'","' 2'"),consoleClosedRules.replace('{document=**}','{document=*}'),consoleClosedRules.replace('allow read, write: if false;','allow read, write: if false; allow read: if true;'),consoleClosedRules+'\nservice cloud.firestore { match /databases/{database}/documents { match /{document=**} { allow read: if true; } } }'])assert.equal(sameDenyAllRules(altered,expected),false);
+});
+test('initial Rules token comparison remains narrow on comments, unexpected types and oversized input',async()=>{
+ const expected=await readFile(join(ROOT,'config/floating-garden-trial/deny-all.rules'),'utf8');
+ for(const altered of ['// comment\n'+consoleClosedRules,consoleClosedRules.replace('if false','if /*comment*/ false'),consoleClosedRules+' '.repeat(16385),null,{},123])assert.equal(sameDenyAllRules(altered,expected),false);
+});
