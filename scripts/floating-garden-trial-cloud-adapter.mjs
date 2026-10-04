@@ -2,8 +2,9 @@
 // module, and constructing an adapter, performs no SDK setup or cloud operation.
 // Never print returned admin data, provider errors, SDK objects or CLI output.
 import { execFileSync } from 'node:child_process';
-import { readFileSync, lstatSync, readdirSync, realpathSync } from 'node:fs';
+import { readFileSync, lstatSync, readdirSync, realpathSync, mkdirSync, mkdtempSync, rmSync, openSync, fstatSync, writeFileSync, fsyncSync, closeSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
+import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { inflateRawSync } from 'node:zlib';
@@ -27,6 +28,7 @@ export const ADMIN_PATHS = Object.freeze({ gate: 'floatingGardenTrial/config', u
 export const REQUIRED_APIS = Object.freeze([...new Set([...APPROVED_APIS,
   'firebase.googleapis.com', 'firebasehosting.googleapis.com', 'firestore.googleapis.com',
   'identitytoolkit.googleapis.com', 'serviceusage.googleapis.com', 'cloudresourcemanager.googleapis.com'])]);
+export const RESUME_REQUIRED_APIS = Object.freeze([...REQUIRED_APIS, 'firebaseextensions.googleapis.com', 'cloudbilling.googleapis.com']);
 export const CLEANUP_WARNING = `Functions successfully deployed but could not set up cleanup policy in location ${REGION}. Pass the --force option to automatically set up a cleanup policy or run 'firebase functions:artifacts:setpolicy' to manually set up a cleanup policy.`;
 export const CLI_EFFECTS = Object.freeze({
   version: '14.27.0', serviceIdentityGeneration: ['pubsub.googleapis.com', 'eventarc.googleapis.com'],
@@ -75,6 +77,9 @@ const FAILURE_REASONS = new Set([
   'source-archive-bytes', 'source-archive-compression', 'source-archive-crc', 'source-archive-descriptor', 'source-archive-directory',
   'source-archive-entry', 'source-archive-local-entry', 'source-archive-overlap', 'source-archive-path', 'source-archive-size',
   'source-bucket-owner', 'source-dependencies', 'source-five-exports', 'source-object-identity', 'source-runtime',
+  'resume-prior-scope', 'resume-source-change', 'resume-window', 'resume-prior-admin', 'resume-hosting',
+  'resume-replace-mode', 'resume-replace-expected', 'resume-admin-concurrent-change', 'resume-replacement-required',
+  'resume-log-prepare', 'resume-log-write',
 ]);
 function ownValue(value, key) {
   if (value === null || typeof value !== 'object' || types.isProxy(value)) return undefined;
@@ -275,8 +280,8 @@ export function makeCloudRunner({ exec = execFileSync, env = process.env } = {})
       maxBuffer: MAX_BYTES, timeout: 15 * 60 * 1000, env: { ...env, NO_COLOR: '1', FORCE_COLOR: '0', CI: 'true',
         CLOUDSDK_CORE_DISABLE_PROMPTS: 'true', CLOUDSDK_CORE_LOG_HTTP: 'false', CLOUDSDK_CORE_DISABLE_FILE_LOGGING: 'true' } }) || '', stderr: '' }; }
     catch (error) {
-      // Captured streams live only in process memory until classification. Do
-      // not print, persist or attach this internal runner result to the journal.
+      // Captured streams stay internal. Only the explicit resume boundary may
+      // retain them in its private owner log; never attach them to the journal.
       const stream = (key) => {
         const value = ownValue(error, key);
         if (typeof value === 'string') return value.length <= MAX_BYTES ? value : '';
@@ -297,10 +302,11 @@ function checkedDirectory(dir) {
 }
 function checkedFile(path) { const s = lstatSync(path); requireThat(s.isFile() && !s.isSymbolicLink() && s.nlink === 1 && s.size <= 4 * 1024 * 1024, 'local-file'); return readFileSync(path); }
 
-export function createCloudAdapter({ packet, review, toolingDir, runner = makeCloudRunner(), requestClient,
+export function createCloudAdapter({ packet, review, toolingDir, prior, runner = makeCloudRunner(), requestClient,
   db: injectedDb, now = Date.now, fetchImpl = fetch, env = process.env, execArgv = process.execArgv } = {}) {
   let firebase, auth, database = injectedDb, manifest, expectedSource, readyMode, localReady = false;
   let attemptedFunctions = false, attemptedRules = false, attemptedHosting = false, attemptedCreate = false;
+  let priorProof, attemptedWindowReplacement = false, windowReplaced = false;
   const checkedReview = () => {
     // Inspection and stopping remain possible after expiry; no time extension.
     publicTrialConfig(review);
@@ -359,7 +365,20 @@ export function createCloudAdapter({ packet, review, toolingDir, runner = makeCl
     }
     localReady = true;
   }
-  function setupTooling() { if (!firebase) firebase = checkTooling(toolingDir, runText); }
+  function withPrivateReadCwd(callback) {
+    const directory = mkdtempSync(join(tmpdir(), 'garden-trial-cli-read-'));
+    try {
+      checkedDirectory(directory); requireThat((lstatSync(directory).mode & 0o777) === 0o700, 'local-path');
+      return callback(directory);
+    } finally {
+      // Only this just-created owned temporary directory is removed. Firebase
+      // metadata/version commands must not rotate the original packet's logs.
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }
+  function setupTooling() {
+    if (!firebase) firebase = checkTooling(toolingDir, (command, args) => withPrivateReadCwd((cwd) => runText(command, args, cwd)));
+  }
   function requireLocal() { requireThat(localReady, 'preflight-required'); localScope(); }
   function sdkRequire() {
     requireLocal();
@@ -424,6 +443,54 @@ export function createCloudAdapter({ packet, review, toolingDir, runner = makeCl
       records.testers.every((t) => same(t, { active: false, expiresAtMillis: review.endsAtMillis })) && same(records.usage, {
       projectId: PROJECT, startsAtMillis: review.startsAtMillis, endsAtMillis: review.endsAtMillis, maxRooms: 20, createdRoomCount: 0 }), 'admin-initial');
   }
+  function stoppedRecords(input) {
+    const config = publicTrialConfig(input);
+    return { gate: { enabled: false, projectId: PROJECT, region: REGION, previewOrigin: ORIGIN,
+      startsAtMillis: config.startsAtMillis, endsAtMillis: config.endsAtMillis, maxRooms: 20, testerUids: [] },
+    usage: { projectId: PROJECT, startsAtMillis: config.startsAtMillis, endsAtMillis: config.endsAtMillis, maxRooms: 20, createdRoomCount: 0 },
+    testers: input.testerUids.map(() => ({ active: false, expiresAtMillis: config.endsAtMillis })) };
+  }
+  function checkResumeSource() {
+    requireThat(prior && prior.packet && prior.review && prior.packet.output !== packet.output &&
+      same(prior.review.testerUids, review.testerUids), 'resume-prior-scope');
+    publicTrialConfig(prior.review);
+    requireThat(prior.review.retainBuildArtifacts && prior.review.allowInitialFunctionRecreate && prior.review.approvePublicInvoker,
+      'cli-effects-review');
+    requireThat(review.startsAtMillis > prior.review.startsAtMillis && now() < review.startsAtMillis, 'resume-window');
+    const oldManifest = parse(checkedFile(prior.packet.manifestPath).toString());
+    const before = Object.keys(oldManifest.files).filter((path) => path.startsWith('game/functions/')).sort();
+    const after = Object.keys(manifest.files).filter((path) => path.startsWith('game/functions/')).sort();
+    requireThat(same(before, after) && before.every((path) => path === 'game/functions/trial-config.json' ||
+      oldManifest.files[path] === manifest.files[path]), 'resume-source-change');
+    const oldConfig = parse(checkedFile(join(prior.packet.gameDir, 'functions/trial-config.json')).toString());
+    const newConfig = parse(checkedFile(join(packet.gameDir, 'functions/trial-config.json')).toString());
+    requireThat(same({ ...oldConfig, startsAtMillis: review.startsAtMillis, endsAtMillis: review.endsAtMillis }, newConfig), 'resume-source-change');
+  }
+  async function replaceStoppedWindow(next, expected) { return boundary(async () => {
+    requireThat(readyMode === 'resume' && priorProof && !attemptedWindowReplacement, 'resume-replace-mode');
+    requireLocal(); checkResumeSource(); assertRecords(next, true);
+    requireThat(same(expected, priorProof.admin) && same(expected, stoppedRecords(prior.review)), 'resume-replace-expected');
+    const db = await getDb(), r = refs(db); let writes = false;
+    attemptedWindowReplacement = true;
+    try {
+      await db.runTransaction(async (tx) => {
+        const existing = await Promise.all(r.map((ref) => tx.get(ref)));
+        requireThat(same(existing.map(data), [expected.gate, expected.usage, ...expected.testers]), 'resume-admin-concurrent-change');
+        requireThat(now() < review.startsAtMillis, 'resume-window');
+        // All four remain disabled and unused. Only the reviewed fixed window
+        // changes; flags, IDs, count, project and maximum rooms are untouched.
+        tx.update(r[0], { startsAtMillis: next.gate.startsAtMillis, endsAtMillis: next.gate.endsAtMillis });
+        tx.update(r[1], { startsAtMillis: next.usage.startsAtMillis, endsAtMillis: next.usage.endsAtMillis });
+        for (let i = 0; i < 2; i++) tx.update(r[i + 2], { expiresAtMillis: next.testers[i].expiresAtMillis });
+        writes = true;
+      }, { maxAttempts: 1 });
+      assertRecords(await readAdmin(), true);
+      windowReplaced = true;
+      return result('success');
+    } catch (error) {
+      return Object.freeze({ kind: writes ? 'unknown' : 'failed', diagnostic: describeAdapterFailure(error) });
+    }
+  }); }
   async function createStoppedAdmin(records) { return boundary(async () => {
     requireThat(readyMode === 'deploy' && !attemptedCreate, 'admin-create-mode'); requireLocal(); assertRecords(records, true);
     const db = await getDb(), r = refs(db); let writes = false;
@@ -438,10 +505,10 @@ export function createCloudAdapter({ packet, review, toolingDir, runner = makeCl
     } catch { return result(writes ? 'unknown' : 'failed'); }
   }); }
   async function updateAdmin(next, expected) { return boundary(async () => {
-    requireThat(['deploy', 'activate', 'stop'].includes(readyMode), 'admin-update-mode'); requireLocal(); assertRecords(next); assertRecords(expected);
+    requireThat(['deploy', 'resume', 'activate', 'stop'].includes(readyMode), 'admin-update-mode'); requireLocal(); assertRecords(next); assertRecords(expected);
     requireThat(same(next.usage, expected.usage), 'admin-usage-untouched');
     const activation = next.gate?.enabled === true;
-    if (activation) { requireThat(['deploy', 'activate'].includes(readyMode) && now() >= review.startsAtMillis && now() < review.endsAtMillis && expected.gate?.enabled === false && next.testers.every((t) => t?.active === true), 'admin-activation'); }
+    if (activation) { requireThat(['deploy', 'resume', 'activate'].includes(readyMode) && (readyMode !== 'resume' || windowReplaced) && now() >= review.startsAtMillis && now() < review.endsAtMillis && expected.gate?.enabled === false && next.testers.every((t) => t?.active === true), 'admin-activation'); }
     else requireThat(next.gate === null || next.gate.enabled === false, 'admin-stop');
     const preservedGate = (gate) => gate === null ? null : Object.fromEntries(Object.entries(gate).filter(([key]) => !['enabled', 'testerUids'].includes(key)));
     requireThat(same(preservedGate(next.gate), preservedGate(expected.gate)), 'admin-gate-preservation');
@@ -464,12 +531,47 @@ export function createCloudAdapter({ packet, review, toolingDir, runner = makeCl
   }); }
   function hostingConfig(kind) { return parse(checkedFile(join(kind === 'game' ? packet.gameDir : packet.stoppedDir, kind === 'game' ? 'firebase.hosting-only.json' : 'firebase.maintenance.json')).toString()); }
   function marker(kind) { return `garden-trial-${kind}-v1:${sha(checkedFile(packet.manifestPath))}`; }
-  function cli(args, kind = 'game', config) {
+  function cli(args, kind = 'game', config, readOnly = false) {
     setupTooling(); const cwd = kind === 'game' ? packet.gameDir : packet.stoppedDir;
-    return rawRun(process.execPath, [firebase, ...args, '--config', config ?? (kind === 'game' ? 'firebase.hosting-only.json' : 'firebase.maintenance.json'), '--project', PROJECT, '--non-interactive', '--json'], cwd);
+    const name = config ?? (kind === 'game' ? 'firebase.hosting-only.json' : 'firebase.maintenance.json');
+    const invoke = (work) => rawRun(process.execPath, [firebase, ...args, '--config', readOnly ? join(cwd, name) : name, '--project', PROJECT, '--non-interactive', '--json'], work);
+    return readOnly ? withPrivateReadCwd(invoke) : invoke(cwd);
+  }
+  function deployCommand(args, kind, config, stage, options) {
+    if (readyMode !== 'resume') return classifyDeployResult(cli(args, kind, config), options);
+    const handles = []; let raw;
+    const close = () => { for (const fd of handles) try { closeSync(fd); } catch { /* No raw error reflection. */ } };
+    try {
+      requireThat(['functions', 'rules', 'hosting-game', 'hosting-stopped'].includes(stage), 'resume-log-prepare');
+      const directory = join(packet.output, 'recovery-logs');
+      try { mkdirSync(directory, { mode: 0o700 }); } catch (error) { if (error.code !== 'EEXIST') throw error; }
+      checkedDirectory(directory);
+      requireThat((lstatSync(directory).mode & 0o777) === 0o700, 'resume-log-prepare');
+      // Reserve both names before issuing a command. Existing files/links are
+      // never overwritten. Original operation and Firebase debug logs remain.
+      for (const stream of ['stdout', 'stderr']) {
+        const fd = openSync(join(directory, `${stage}.${stream}.log`), 'wx', 0o600); handles.push(fd);
+        const info = fstatSync(fd);
+        requireThat(info.isFile() && info.nlink === 1 && (info.mode & 0o777) === 0o600, 'resume-log-prepare');
+      }
+    } catch { close(); throw safe('resume-log-prepare'); }
+    try {
+      raw = cli(args, kind, config);
+      for (const [i, stream] of ['stdout', 'stderr'].entries()) {
+        const text = ownValue(raw, stream) ?? '';
+        requireThat(typeof text === 'string' && Buffer.byteLength(text) <= MAX_BYTES, 'resume-log-write');
+        writeFileSync(handles[i], text, { encoding: 'utf8' }); fsyncSync(handles[i]);
+      }
+      // Only bounded diagnostics leave the private capture boundary. These
+      // owner-local files are never printed, uploaded or stored in the journal.
+      return classifyDeployResult(raw, options);
+    } catch {
+      return Object.freeze({ kind: 'unknown', diagnostic: normalizeFailureDiagnostic({ reason: 'resume-log-write',
+        exitCode: ownValue(raw, 'exitCode'), timedOut: ownValue(raw, 'timedOut') }) });
+    } finally { close(); }
   }
   function cliRead(args) {
-    const r = cli(args);
+    const r = cli(args, 'game', undefined, true);
     if (r?.exitCode !== 0) {
       const diagnostic = cliFailureDiagnostic(r);
       throw safe('hosting-cli-read', { ...diagnostic, reason: diagnostic.reason === 'unclassified' ? 'hosting-cli-read' : diagnostic.reason });
@@ -518,7 +620,8 @@ export function createCloudAdapter({ packet, review, toolingDir, runner = makeCl
   async function readHosting() { return boundary(async () => { requireLocal(); const a = readRelease(); await verifyHostingBytes(a.kind); requireThat(same(a, readRelease()), 'hosting-concurrent-change'); return a; }); }
   async function verifyHosting(kind) { return boundary(async () => { const h = await readHosting(); requireThat(h.kind === kind, 'hosting-target'); return { verified: true }; }); }
   async function deployHosting(kind) { return boundary(async () => {
-    requireThat(['game', 'stopped'].includes(kind) && (kind === 'game' ? readyMode === 'deploy' : ['deploy', 'stop'].includes(readyMode)) && !attemptedHosting, 'hosting-deploy-mode');
+    requireThat(['game', 'stopped'].includes(kind) && (kind === 'game' ? ['deploy', 'resume'].includes(readyMode) : ['deploy', 'resume', 'stop'].includes(readyMode)) && !attemptedHosting, 'hosting-deploy-mode');
+    if (readyMode === 'resume') requireThat(windowReplaced, 'resume-replacement-required');
     requireLocal(); const current = await readHosting();
     if (current.kind === kind) return result('success');
     const admin = await readAdmin(); assertRecords(admin);
@@ -526,7 +629,7 @@ export function createCloudAdapter({ packet, review, toolingDir, runner = makeCl
       (admin.gate === null || admin.gate.enabled === false && admin.gate.testerUids.length === 0) && admin.testers.every((t) => t === null || t.active === false), 'hosting-private-gate');
     requireThat(same(current, readRelease()), 'hosting-concurrent-change'); requireLocal();
     attemptedHosting = true;
-    return classifyDeployResult(cli(['deploy', '--only', `hosting:${PROJECT}`, '--message', marker(kind)], kind));
+    return deployCommand(['deploy', '--only', `hosting:${PROJECT}`, '--message', marker(kind)], kind, undefined, `hosting-${kind}`);
   }); }
   async function functionsList() {
     const value = await request(`https://cloudfunctions.googleapis.com/v2/projects/${PROJECT}/locations/-/functions?pageSize=1000`);
@@ -569,23 +672,38 @@ export function createCloudAdapter({ packet, review, toolingDir, runner = makeCl
     return set.source.files[0].content;
   }
   async function verifyRules() { return boundary(async () => { requireLocal(); requireThat(await rulesState() === checkedFile(join(packet.gameDir, 'firestore.rules')).toString(), 'rules-bytes'); return { verified: true }; }); }
+  async function verifyResumeSource() { return boundary(async () => {
+    requireThat(['stop', 'inspect'].includes(readyMode), 'preflight-required'); requireLocal();
+    const apis = gcloud(['services', 'list', '--enabled']);
+    requireThat(Array.isArray(apis) && RESUME_REQUIRED_APIS.every((api) => apis.some((a) => a.config?.name === api)), 'apis-already-enabled');
+    await verifyFunctions();
+    requireThat(same(await readAdmin(), stoppedRecords(review)), 'resume-prior-admin');
+    requireThat(sameDenyAllRules(await rulesState(), checkedFile(join(ROOT, 'config/floating-garden-trial/deny-all.rules')).toString()), 'rules-initial-deny-all');
+    requireThat((await readHosting()).kind === 'connection', 'resume-hosting');
+    return { verified: true };
+  }); }
   async function deployFunctions() { return boundary(async () => {
-    requireThat(readyMode === 'deploy' && !attemptedFunctions, 'functions-deploy-mode'); requireLocal();
+    requireThat(['deploy', 'resume'].includes(readyMode) && !attemptedFunctions, 'functions-deploy-mode'); requireLocal();
     requireThat(review.retainBuildArtifacts && review.allowInitialFunctionRecreate && review.approvePublicInvoker, 'cli-effects-review');
-    requireThat((await functionsList()).length === 0, 'functions-already-present');
+    if (readyMode === 'resume') {
+      requireThat(windowReplaced && priorProof, 'resume-replacement-required'); checkResumeSource();
+      await priorProof.adapter.verifyFunctions();
+      requireThat(same(await readHosting(), priorProof.hosting), 'resume-hosting');
+    } else requireThat((await functionsList()).length === 0, 'functions-already-present');
     const admin = await readAdmin(); assertRecords(admin, true);
     attemptedFunctions = true;
-    return classifyDeployResult(cli(['deploy', '--only', FUNCTION_NAMES.map((name) => `functions:${CODEBASE}:${name}`).join(',')], 'game', 'firebase.trial.json'), { allowCleanupWarning: true });
+    return deployCommand(['deploy', '--only', FUNCTION_NAMES.map((name) => `functions:${CODEBASE}:${name}`).join(',')], 'game', 'firebase.trial.json', 'functions', { allowCleanupWarning: true });
   }); }
   async function deployRules() { return boundary(async () => {
-    requireThat(readyMode === 'deploy' && !attemptedRules, 'rules-deploy-mode'); requireLocal();
+    requireThat(['deploy', 'resume'].includes(readyMode) && !attemptedRules, 'rules-deploy-mode'); requireLocal();
+    if (readyMode === 'resume') requireThat(windowReplaced, 'resume-replacement-required');
     const current = await rulesState();
     requireThat(sameDenyAllRules(current, checkedFile(join(ROOT, 'config/floating-garden-trial/deny-all.rules')).toString()), 'rules-initial-deny-all');
     const admin = await readAdmin(); assertRecords(admin, true); attemptedRules = true;
-    return classifyDeployResult(cli(['deploy', '--only', 'firestore:rules'], 'game', 'firebase.trial.json'));
+    return deployCommand(['deploy', '--only', 'firestore:rules'], 'game', 'firebase.trial.json', 'rules');
   }); }
   async function preflight(mode) { return boundary(async () => {
-    requireThat(['deploy', 'activate', 'inspect', 'stop'].includes(mode), 'preflight-mode'); localScope();
+    requireThat(['deploy', 'resume', 'activate', 'inspect', 'stop'].includes(mode), 'preflight-mode'); localScope();
     validateConfiguration(gcloud(['config', 'list', '--all']));
     const project = gcloud(['projects', 'describe', PROJECT]);
     requireThat(project.projectId === PROJECT && String(project.projectNumber) === PROJECT_NUMBER && project.lifecycleState === 'ACTIVE', 'project-identity');
@@ -599,6 +717,19 @@ export function createCloudAdapter({ packet, review, toolingDir, runner = makeCl
     }
     validateOperationReview(review, { now: now() });
     requireThat(review.retainBuildArtifacts && review.allowInitialFunctionRecreate && review.approvePublicInvoker, 'cli-effects-review');
+    if (mode === 'resume') {
+      checkResumeSource();
+      // Share the existing ADC clients without creating another named Admin
+      // app. This prior adapter is used only for exact readback verification.
+      const old = createCloudAdapter({ packet: prior.packet, review: prior.review, toolingDir, runner,
+        requestClient: await client(), db: await getDb(), now, fetchImpl, env, execArgv });
+      await old.preflight('stop'); await old.verifyResumeSource();
+      const admin = await old.readAdmin(); requireThat(same(admin, stoppedRecords(prior.review)), 'resume-prior-admin');
+      requireThat(sameDenyAllRules(await rulesState(), checkedFile(join(ROOT, 'config/floating-garden-trial/deny-all.rules')).toString()), 'rules-initial-deny-all');
+      const hosting = await readHosting(); requireThat(hosting.kind === 'connection', 'resume-hosting');
+      priorProof = { adapter: old, admin: structuredClone(admin), hosting: structuredClone(hosting) };
+      readyMode = mode; return { verified: true };
+    }
     const apis = gcloud(['services', 'list', '--enabled']);
     requireThat(Array.isArray(apis) && REQUIRED_APIS.every((api) => apis.some((a) => a.config?.name === api)), 'apis-already-enabled');
     const api = await bootstrapApis({ apply: false, run: gcloudText, log: () => {} });
@@ -630,6 +761,6 @@ export function createCloudAdapter({ packet, review, toolingDir, runner = makeCl
     requireThat(same(Object.keys(exports).sort(), [...FUNCTION_NAMES].sort()) && FUNCTION_NAMES.every((name) => typeof exports[name] === 'function'), 'source-five-exports');
     readyMode = mode; return { verified: true };
   }); }
-  return Object.freeze({ preflight, readAdmin, createStoppedAdmin, updateAdmin, deployFunctions, verifyFunctions,
+  return Object.freeze({ preflight, readAdmin, createStoppedAdmin, replaceStoppedWindow, updateAdmin, deployFunctions, verifyFunctions, verifyResumeSource,
     deployRules, verifyRules, readHosting, deployHosting, verifyHosting });
 }

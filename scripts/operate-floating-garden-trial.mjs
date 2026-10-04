@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Bounded, user-operated trial execution. The default is an offline plan.
 // Preparation/testing is not authority to invoke any mutation mode.
-import { readFile, writeFile, lstat, readdir, mkdir, open, rename, unlink, realpath } from 'node:fs/promises';
+import { readFile, writeFile, lstat, readdir, mkdir, open, rename, unlink, realpath, cp } from 'node:fs/promises';
 import { resolve, join, dirname, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
@@ -70,9 +70,10 @@ function validIdentity(value) { return plain(value) && typeof value.version === 
 function clock(now) { const value = now(); if (!Number.isSafeInteger(value) || value <= 0) stop(); return value; }
 
 /** Pure orchestrator. Tests inject all cloud, journal, clock and wait capabilities. */
-export async function operateTrial({ mode, review, cloud, journal, now = Date.now, wait = (ms) => new Promise((done) => setTimeout(done, ms)), log = console.log, checkLocal = async () => {} }) {
+export async function operateTrial({ mode, review, priorReview, cloud, journal, now = Date.now, wait = (ms) => new Promise((done) => setTimeout(done, ms)), log = console.log, checkLocal = async () => {} }) {
   publicTrialConfig(review);
-  if (!['inspect', 'deploy', 'activate', 'stop'].includes(mode)) stop();
+  if (!['inspect', 'deploy', 'resume', 'activate', 'stop'].includes(mode)) stop();
+  const publishing = mode === 'deploy' || mode === 'resume';
   let stage = 'preflight';
   let failureDiagnostic = null;
   const mutationSucceeded = (result) => {
@@ -81,7 +82,7 @@ export async function operateTrial({ mode, review, cloud, journal, now = Date.no
       stop();
     }
   };
-  const issue = async (name) => { journal.issued(name); if (journal.flush) await journal.flush(); };
+  const issue = async (name) => { await checkLocal(); journal.issued(name); if (journal.flush) await journal.flush(); if (mode === 'resume') log(`STAGE: ${name}`); };
   try {
     await checkLocal();
     if (mode === 'inspect') {
@@ -94,8 +95,9 @@ export async function operateTrial({ mode, review, cloud, journal, now = Date.no
       return result;
     }
     if (!approvalReady(review)) stop();
+    if (mode === 'resume') validateResumeReview(review, priorReview);
     const current = clock(now);
-    if (mode === 'deploy' && current >= review.startsAtMillis) stop();
+    if (publishing && current >= review.startsAtMillis) stop();
     if (mode === 'activate' && (current < review.startsAtMillis || current >= review.endsAtMillis)) stop();
     journal.begin(mode);
     await cloud.preflight(mode);
@@ -127,19 +129,28 @@ export async function operateTrial({ mode, review, cloud, journal, now = Date.no
         verified(await cloud.verifyHosting('stopped'));
         journal.verified(stage);
       }
-      journal.finish('stopped');
+      await checkLocal(); journal.finish('stopped');
       log('STOPPED: gate/testers disabled and stopped Hosting verified; usage, functions, artifacts, accounts, secrets and IAM retained.');
       return { mode, status: 'stopped' };
     }
-    if (mode === 'deploy') {
-      stage = 'initial-admin-read';
-      if (adminState(await cloud.readAdmin(), review) !== 'absent') stop();
+    if (publishing) {
+      stage = mode === 'resume' ? 'prior-stopped-admin-read' : 'initial-admin-read';
+      const initialAdmin = await cloud.readAdmin();
+      if (mode === 'resume') assertState(initialAdmin, priorReview, 'stopped', { unused: true });
+      else if (adminState(initialAdmin, review) !== 'absent') stop();
       const initialHosting = await cloud.readHosting();
-      if (!validIdentity(initialHosting) || !['connection', 'maintenance'].includes(initialHosting.kind)) stop();
+      if (!validIdentity(initialHosting) || !(mode === 'resume' ? ['connection'] : ['connection', 'maintenance']).includes(initialHosting.kind)) stop();
       verified(await cloud.verifyHosting(initialHosting.kind));
-      stage = 'create-stopped-admin'; await checkLocal(); await issue(stage);
-      mutationSucceeded(await cloud.createStoppedAdmin(adminRecords(review)));
-      assertState(await cloud.readAdmin(), review, 'stopped', { unused: true }); journal.verified(stage);
+      if (mode === 'resume') {
+        stage = 'replace-stopped-window';
+        if (clock(now) >= review.startsAtMillis) stop();
+        await issue(stage);
+        mutationSucceeded(await cloud.replaceStoppedWindow(adminRecords(review), initialAdmin));
+      } else {
+        stage = 'create-stopped-admin'; await checkLocal(); await issue(stage);
+        mutationSucceeded(await cloud.createStoppedAdmin(adminRecords(review)));
+      }
+      assertState(await cloud.readAdmin(), review, 'stopped', { unused: true }); await checkLocal(); journal.verified(stage);
       stage = 'deploy-functions'; await checkLocal(); await issue(stage);
       const functions = await cloud.deployFunctions();
       // A known cleanup-only error may mask function errors. Never trust its
@@ -159,7 +170,7 @@ export async function operateTrial({ mode, review, cloud, journal, now = Date.no
       await issue(stage); mutationSucceeded(await cloud.deployHosting('game'));
       verified(await cloud.verifyHosting('game')); journal.verified(stage);
       assertState(await cloud.readAdmin(), review, 'stopped', { unused: true });
-      journal.finish('published-stopped');
+      await checkLocal(); journal.finish('published-stopped');
       const readyAt = clock(now);
       // Do not burn the chosen seven days by silently activating after a delayed
       // build, and never move the deadline. An explicit later activate is allowed
@@ -179,20 +190,22 @@ export async function operateTrial({ mode, review, cloud, journal, now = Date.no
         return { mode, status: 'published-stopped', reason: 'late-wake' };
       }
     }
-    if (mode === 'deploy') journal.begin('activate');
+    if (publishing) journal.begin('activate');
     stage = 'activation-readback'; await checkLocal();
     if (clock(now) < review.startsAtMillis || clock(now) >= review.endsAtMillis) stop();
     verified(await cloud.verifyFunctions()); verified(await cloud.verifyRules()); verified(await cloud.verifyHosting('game'));
     const before = await cloud.readAdmin(); assertState(before, review, 'stopped', { unused: true });
+    stage = 'activate-two-testers'; await issue(stage);
+    // Local integrity checks and durable journaling can also cross the fixed
+    // start grace period. Recheck immediately before the actual activation.
     if (clock(now) < review.startsAtMillis || clock(now) >= review.endsAtMillis) stop();
-    if (mode === 'deploy' && clock(now) - review.startsAtMillis > 60000) {
+    if (publishing && clock(now) - review.startsAtMillis > 60000) {
       journal.finish('published-stopped');
       log('READY_STOPPED: verification missed the fixed start; no automatic activation or extension.');
       return { mode, status: 'published-stopped', reason: 'late-verification' };
     }
-    stage = 'activate-two-testers'; await issue(stage);
     mutationSucceeded(await cloud.updateAdmin(adminRecords(review, true), before));
-    assertState(await cloud.readAdmin(), review, 'active', { minimumCount: 0 }); journal.verified(stage);
+    assertState(await cloud.readAdmin(), review, 'active', { minimumCount: 0 }); await checkLocal(); journal.verified(stage);
     journal.finish('active');
     log('ACTIVE: exact two testers and fixed window verified. The first game still needs the approved owner check.');
     return { mode, status: 'active' };
@@ -246,12 +259,67 @@ export async function verifyOperationPacket(packet) {
   await inventory(packet.gameDir, 'game/'); await inventory(packet.stoppedDir, 'stopped/');
   if (hash(await regular(packet.reviewPath, 8192)) !== packet.reviewDigest || hash(await regular(packet.manifestPath, 32768)) !== packet.manifestDigest) stop();
 }
-export async function createJournal(packet, { now = Date.now } = {}) {
+// Resume is a new reviewed operation, never a retry of an uncertain journal.
+export function validateResumeReview(review, priorReview) {
+  if (!approvalReady(review) || !approvalReady(priorReview) ||
+      !same(review.testerUids, priorReview.testerUids) || review.startsAtMillis <= priorReview.startsAtMillis) stop();
+}
+function predecessorShape(value) {
+  return plain(value) && same(Object.keys(value).sort(), ['journalDigest', 'manifestDigest', 'output', 'reviewDigest']) &&
+    typeof value.output === 'string' && value.output.startsWith('/') && resolve(value.output) === value.output &&
+    ['manifestDigest', 'reviewDigest', 'journalDigest'].every((key) => /^[a-f0-9]{64}$/.test(value[key]));
+}
+async function unlocked(output) {
+  try { await lstat(join(output, 'OPERATION.lock')); } catch (error) { if (error.code === 'ENOENT') return; throw error; }
+  stop();
+}
+export async function readPriorOperation(output, expected) {
+  const { packet, review } = await readOperationPacket(output);
+  await unlocked(packet.output);
+  const bytes = await regular(join(packet.output, STATE_FILE), 32768), state = JSON.parse(bytes);
+  if (!plain(state) || !same(Object.keys(state).sort(), ['deploy', 'events', 'manifestDigest', 'reviewDigest', 'schemaVersion', 'stop']) ||
+      state.schemaVersion !== 1 || state.manifestDigest !== packet.manifestDigest || state.reviewDigest !== packet.reviewDigest ||
+      !plain(state.deploy) || state.deploy.status !== 'failed' || state.deploy.stage !== 'deploy-functions' ||
+      Object.keys(state.deploy).some((key) => !['status', 'stage', 'diagnostic'].includes(key)) ||
+      Object.hasOwn(state.deploy, 'diagnostic') && !dataEqual(state.deploy.diagnostic, normalizeFailureDiagnostic(state.deploy.diagnostic)) ||
+      !dataEqual(state.stop, { status: 'new' }) || !Array.isArray(state.events) || state.events.length !== 3) stop();
+  const stages = [['create-stopped-admin', 'issued'], ['create-stopped-admin', 'verified'], ['deploy-functions', 'issued']];
+  for (let i = 0; i < stages.length; i++) {
+    const event = state.events[i];
+    if (!plain(event) || !same(Object.keys(event).sort(), ['atMillis', 'stage', 'status']) ||
+        event.stage !== stages[i][0] || event.status !== stages[i][1] ||
+        !Number.isSafeInteger(event.atMillis) || event.atMillis <= 0 || i > 0 && event.atMillis < state.events[i - 1].atMillis) stop();
+  }
+  const predecessor = Object.freeze({ output: packet.output, manifestDigest: packet.manifestDigest,
+    reviewDigest: packet.reviewDigest, journalDigest: hash(bytes) });
+  if (expected !== undefined && (!predecessorShape(expected) || !dataEqual(predecessor, expected))) stop();
+  return { packet, review, predecessor };
+}
+export async function verifyPriorOperation(prior) {
+  await verifyOperationPacket(prior.packet);
+  await unlocked(prior.packet.output);
+  if (!predecessorShape(prior.predecessor) || prior.packet.output !== prior.predecessor.output ||
+      prior.packet.manifestDigest !== prior.predecessor.manifestDigest || prior.packet.reviewDigest !== prior.predecessor.reviewDigest ||
+      hash(await regular(join(prior.packet.output, STATE_FILE), 32768)) !== prior.predecessor.journalDigest) stop();
+}
+export async function readPriorForMode(mode, journal) {
+  const predecessor = journal.predecessor();
+  // The predecessor is audit data for stop/inspect. Changed old files must not
+  // prevent gate-first revocation using the new packet's exact known records.
+  return mode === 'activate' && predecessor ? readPriorOperation(predecessor.output, predecessor) : undefined;
+}
+export async function createJournal(packet, { now = Date.now, prior } = {}) {
   const path = join(packet.output, STATE_FILE);
-  let state;
+  let state, existed = true;
   try { state = JSON.parse(await regular(path, 32768)); }
-  catch (error) { if (error.code !== 'ENOENT') throw error; state = { schemaVersion: 1, manifestDigest: packet.manifestDigest, reviewDigest: packet.reviewDigest, deploy: { status: 'new' }, stop: { status: 'new' }, events: [] }; }
+  catch (error) { if (error.code !== 'ENOENT') throw error; existed = false; state = { schemaVersion: 1, manifestDigest: packet.manifestDigest, reviewDigest: packet.reviewDigest, deploy: { status: 'new' }, stop: { status: 'new' }, events: [] }; }
   if (state.schemaVersion !== 1 || state.manifestDigest !== packet.manifestDigest || state.reviewDigest !== packet.reviewDigest || !plain(state.deploy) || !plain(state.stop) || !Array.isArray(state.events) || state.events.length > 32) stop();
+  if (prior) {
+    if (existed || packet.output === prior.packet.output) stop();
+    await verifyPriorOperation(prior);
+    state.predecessor = { ...prior.predecessor };
+  }
+  if (Object.hasOwn(state, 'predecessor') && (!predecessorShape(state.predecessor) || state.predecessor.output === packet.output)) stop();
   let operation = null, pending = Promise.resolve();
   function persist() {
     const copy = json(state);
@@ -266,9 +334,11 @@ export async function createJournal(packet, { now = Date.now } = {}) {
   function event(stage, status) { if (state.events.length >= 32) stop(); state.events.push({ stage, status, atMillis: clock(now) }); persist(); }
   return {
     begin(mode) {
+      if (!['deploy', 'resume', 'activate', 'stop'].includes(mode)) stop();
       const selected = mode === 'stop' ? 'stop' : 'deploy';
       const current = state[selected].status;
-      if (mode === 'deploy' && current !== 'new' || mode === 'activate' && current !== 'published-stopped' || mode === 'stop' && current !== 'new') stop();
+      if ((mode === 'deploy' || mode === 'resume') && current !== 'new' ||
+          mode === 'resume' && !state.predecessor || mode === 'deploy' && state.predecessor || mode === 'activate' && current !== 'published-stopped' || mode === 'stop' && current !== 'new') stop();
       operation = selected;
       state[operation] = { status: 'running', stage: mode }; persist();
     },
@@ -282,6 +352,7 @@ export async function createJournal(packet, { now = Date.now } = {}) {
       }
     },
     snapshot() { return { deploy: { ...state.deploy }, stop: { ...state.stop } }; },
+    predecessor() { return state.predecessor ? { ...state.predecessor } : null; },
     flush() { return pending; },
   };
 }
@@ -290,9 +361,24 @@ export function parseReviewBase64(value) {
   const bytes = Buffer.from(value, 'base64url'); if (bytes.length > 8192 || bytes.toString('base64url') !== value) stop();
   const review = JSON.parse(bytes.toString('utf8')); publicTrialConfig(review); return review;
 }
-async function installRuntime(packet) {
+export async function installRuntime(packet, prior) {
   const root = join(packet.gameDir, 'functions');
-  try { await lstat(join(root, 'node_modules')); return; } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  try { await lstat(join(root, 'node_modules')); if (prior) stop(); return; } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  if (prior) {
+    // Reuse the already verified, pinned runtime without a new network install.
+    // Copy links verbatim so resolution remains subject to the adapter's strict
+    // local-root/version guards; never dereference an external dependency link.
+    await verifyPriorOperation(prior);
+    const previous = join(prior.packet.gameDir, 'functions');
+    for (const name of ['package.json', 'package-lock.json']) {
+      if (!(await regular(join(root, name))).equals(await regular(join(previous, name)))) stop();
+    }
+    await directory(join(previous, 'node_modules'));
+    await cp(join(previous, 'node_modules'), join(root, 'node_modules'), { recursive: true, errorOnExist: true, force: false, verbatimSymlinks: true });
+    await directory(join(root, 'node_modules'));
+    await verifyPriorOperation(prior);
+    return;
+  }
   const userConfig = join(packet.output, 'empty-user.npmrc'), globalConfig = join(packet.output, 'empty-global.npmrc');
   await writeFile(userConfig, '', { flag: 'wx', mode: 0o600 }); await writeFile(globalConfig, '', { flag: 'wx', mode: 0o600 });
   execFileSync('npm', ['ci', '--ignore-scripts', '--no-audit', '--no-fund', '--registry=https://registry.npmjs.org/', `--userconfig=${userConfig}`, `--globalconfig=${globalConfig}`], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], timeout: 600000, maxBuffer: 4 * 1024 * 1024 });
@@ -300,11 +386,11 @@ async function installRuntime(packet) {
 export const PLAN = 'PLAN_ONLY: prepare and review exact seven-day private input before any execution. Target wa-awesome-garden-stg only: five Functions, dedicated Rules/Hosting and exactly two tester records. Public invoker, managed service identity calls and bounded CLI initial recreate need explicit approval. Retain artifacts; no automatic cleanup policy. Default mode makes no network, SDK, auth, install or cloud call.';
 export async function main(args = process.argv.slice(2), { log = console.log } = {}) {
   if (!args.length || args.length === 1 && args[0] === '--plan') { log(PLAN); return 0; }
-  let lock, packet, journal;
+  let lock, packet, journal, prior;
   try {
     validateOperatorEnvironment(process.env, process.execArgv);
     for (const key of ['FIRESTORE_EMULATOR_HOST', 'FIREBASE_AUTH_EMULATOR_HOST', 'FIREBASE_DATABASE_EMULATOR_HOST', 'FIREBASE_STORAGE_EMULATOR_HOST', 'CLOUDSDK_AUTH_DISABLE_CREDENTIALS']) if (process.env[key]) stop();
-    const modes = ['--run-reviewed', '--activate', '--stop', '--inspect'];
+    const modes = ['--run-reviewed', '--resume-reviewed', '--activate', '--stop', '--inspect'];
     if (!modes.includes(args[0])) stop();
     if (args[0] === '--run-reviewed') {
       if (args.length !== 7 || args[1] !== '--review-base64' || args[3] !== '--out' || args[5] !== '--tooling-dir' || !args[4].startsWith('/') || !args[6].startsWith('/')) stop();
@@ -312,22 +398,40 @@ export async function main(args = process.argv.slice(2), { log = console.log } =
       if (Date.now() >= review.startsAtMillis) stop();
       await prepareTrialOperation({ review, output: args[4], repositoryRoot: ROOT });
       ({ packet } = await readOperationPacket(args[4]));
+    } else if (args[0] === '--resume-reviewed') {
+      if (args.length !== 9 || args[1] !== '--review-base64' || args[3] !== '--prior-operation' || args[5] !== '--out' ||
+          args[7] !== '--tooling-dir' || ![args[4], args[6], args[8]].every((path) => path.startsWith('/'))) stop();
+      const review = parseReviewBase64(args[2]);
+      prior = await readPriorOperation(args[4]); validateResumeReview(review, prior.review);
+      if (Date.now() >= review.startsAtMillis) stop();
+      // A new packet or dependency install must never touch the retained prior operation.
+      for (const path of [args[6], args[8]]) {
+        const rel = relative(prior.packet.output, resolve(path));
+        if (rel === '' || rel !== '..' && !rel.startsWith(`..${sep}`) && !rel.startsWith(sep)) stop();
+      }
+      await prepareTrialOperation({ review, output: args[6], repositoryRoot: ROOT });
+      ({ packet } = await readOperationPacket(args[6]));
+      await verifyPriorOperation(prior);
     } else {
       if (args.length !== 5 || args[1] !== '--operation' || args[3] !== '--tooling-dir' || !args[2].startsWith('/') || !args[4].startsWith('/')) stop();
       ({ packet } = await readOperationPacket(args[2]));
     }
     const { review } = await readOperationPacket(packet.output);
-    const mode = ({ '--run-reviewed': 'deploy', '--activate': 'activate', '--stop': 'stop', '--inspect': 'inspect' })[args[0]];
+    const mode = ({ '--run-reviewed': 'deploy', '--resume-reviewed': 'resume', '--activate': 'activate', '--stop': 'stop', '--inspect': 'inspect' })[args[0]];
     if (mode !== 'inspect') {
       lock = await open(join(packet.output, 'OPERATION.lock'), 'wx', 0o600);
       await lock.writeFile('This operation is in progress. Do not remove or rerun after an uncertain interruption.\n');
     }
-    journal = await createJournal(packet);
-    if (mode === 'deploy') await installRuntime(packet);
+    journal = await createJournal(packet, { prior });
+    if (!prior) prior = await readPriorForMode(mode, journal);
+    if (prior) validateResumeReview(review, prior.review);
+    if (mode === 'deploy' || mode === 'resume') await installRuntime(packet, mode === 'resume' ? prior : undefined);
     const { createCloudAdapter } = await import('./floating-garden-trial-cloud-adapter.mjs');
     const toolingDir = args.at(-1);
-    const cloud = await createCloudAdapter({ packet, review, toolingDir });
-    const result = await operateTrial({ mode, review, cloud, journal, log, checkLocal: () => verifyOperationPacket(packet) });
+    const cloud = await createCloudAdapter({ packet, review, toolingDir, ...(prior ? { prior } : {}) });
+    const checkLocal = async () => { await verifyOperationPacket(packet); if (prior) await verifyPriorOperation(prior); };
+    const result = await operateTrial({ mode, review, priorReview: prior?.review, cloud, journal, log, checkLocal });
+    await checkLocal();
     await journal.flush();
     log(`OPERATION_DIRECTORY: ${packet.output}`);
     return result.status === 'blocked' ? 1 : 0;

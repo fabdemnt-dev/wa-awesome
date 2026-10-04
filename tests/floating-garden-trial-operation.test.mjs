@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, readdir, lstat, mkdtemp, mkdir, cp, symlink, rm, writeFile } from 'node:fs/promises';
+import { readFile, readdir, lstat, mkdtemp, mkdir, cp, symlink, rm, writeFile, chmod } from 'node:fs/promises';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
@@ -277,6 +277,8 @@ const { createCloudAdapter, classifyDeployResult, CLEANUP_WARNING, validateFunct
   REGION, RUNTIME_ACCOUNT, makeCloudRunner } = adapterModule;
 const { prepareTrialOperation } = await load('scripts/prepare-floating-garden-trial-operation.mjs');
 const { FUNCTION_NAMES } = await load('scripts/prepare-floating-garden-trial.mjs');
+const { EMBEDDED: fixtureConnectionPayload, connectionMessage: fixtureConnectionMessage,
+  CONNECTION_CSP: fixtureConnectionCsp } = await load('scripts/deploy-floating-garden-connection-check.mjs');
 const require = createRequire(join(ROOT, 'package.json'));
 const archiver = require('archiver'); // Already pinned transitively by firebase-tools.
 const NOW = 1791095800000;
@@ -358,6 +360,7 @@ async function providerHarness(t, overrides = {}) {
   await writeFile(join(toolingDir, 'node_modules/firebase-tools/lib/bin/firebase.js'), '// synthetic; never executed');
   const runner = (cmd, args, cwd) => {
     cli.push({ cmd, args, cwd });
+    if (overrides.command) { const handled = overrides.command(cmd, args, cwd); if (handled !== undefined) return handled; }
     if (cmd === 'gcloud') return identityRunner(cmd, args);
     assert.equal(cmd, process.execPath);
     if (args.includes('--version')) return { exitCode: 0, stdout: '14.27.0' };
@@ -367,18 +370,25 @@ async function providerHarness(t, overrides = {}) {
     else {
       assert.equal(args[1], 'hosting:channel:list');
       result = { channels: [{ name: `sites/${PROJECT}/channels/live`, url: ORIGIN,
-        release: { type: 'DEPLOY', message: `garden-trial-${hosting}-v1:${p.manifestDigest}`,
+        release: { type: 'DEPLOY', message: hosting === 'maintenance' ? 'garden-maintenance-static-v1' :
+          hosting === 'connection' ? fixtureConnectionMessage(fixtureConnectionPayload) : `garden-trial-${hosting}-v1:${p.manifestDigest}`,
           version: { name: `sites/${PROJECT}/versions/synthetic`, status: 'FINALIZED' } } }] };
     }
     return { exitCode: 0, stdout: JSON.stringify({ status: 'success', result }) };
   };
   const fetchImpl = async (url, options) => {
-    assert.equal(new URL(url).origin, ORIGIN); assert.equal(options.redirect, 'manual');
+    assert.equal(new URL(url).origin, ORIGIN); assert.equal(options.redirect, ['connection', 'maintenance'].includes(hosting) ? 'error' : 'manual');
     const path = new URL(url).pathname; publicReads.push({ hosting, path });
     const dir = hosting === 'game' ? p.gameDir : p.stoppedDir;
     const config = JSON.parse(await readFile(join(dir, hosting === 'game' ? 'firebase.hosting-only.json' : 'firebase.maintenance.json')));
     const headers = Object.fromEntries(config.hosting.headers[0].headers.map((h) => [h.key, h.value]));
     if (hosting === 'game' && path === '/') return new Response('', { status: 302, headers: { ...headers, location: '/lab/floating-garden/trial/index.html' } });
+    if (hosting === 'connection' && path.startsWith('/connection-check/')) {
+      const name = path.slice('/connection-check/'.length) || 'index.html';
+      const bytes = fixtureConnectionPayload.connectionFiles[name]; assert.notEqual(bytes, undefined);
+      headers['Content-Security-Policy'] = fixtureConnectionCsp;
+      return new Response(bytes, { status: 200, headers });
+    }
     const key = path === '/' ? 'index.html' : path.slice(1); let body, status;
     try { body = await readFile(join(dir, 'public', key)); status = 200; }
     catch { body = await readFile(join(p.stoppedDir, 'public/404.html')); status = 404; }
@@ -387,7 +397,8 @@ async function providerHarness(t, overrides = {}) {
   };
   const cloud = createCloudAdapter({ ...fixture, toolingDir, runner, requestClient, fetchImpl, env: {}, execArgv: [], now: () => NOW });
   await cloud.preflight('stop'); // Only injected identity reads; no absence requirement.
-  return { ...fixture, cloud, manifest, requests, cli, publicReads, functions, setHosting: (value) => { hosting = value; } };
+  return { ...fixture, cloud, manifest, requests, cli, publicReads, functions, toolingDir, runner, requestClient, fetchImpl,
+    setHosting: (value) => { hosting = value; } };
 }
 
 test('constructing the adapter does not evaluate packet/review or call capabilities', () => {
@@ -395,7 +406,7 @@ test('constructing the adapter does not evaluate packet/review or call capabilit
   const no = () => assert.fail('Capability invoked during construction');
   const cloud = createCloudAdapter({ packet: hostile, review: hostile, toolingDir: '/synthetic', runner: no,
     requestClient: { request: no }, db: hostile, now: no, fetchImpl: no, env: {}, execArgv: [] });
-  assert.deepEqual(Object.keys(cloud).sort(), ['preflight', 'readAdmin', 'createStoppedAdmin', 'updateAdmin', 'deployFunctions', 'verifyFunctions', 'deployRules', 'verifyRules', 'readHosting', 'deployHosting', 'verifyHosting'].sort());
+  assert.deepEqual(Object.keys(cloud).sort(), ['preflight', 'readAdmin', 'createStoppedAdmin', 'replaceStoppedWindow', 'updateAdmin', 'deployFunctions', 'verifyFunctions', 'verifyResumeSource', 'deployRules', 'verifyRules', 'readHosting', 'deployHosting', 'verifyHosting'].sort());
 });
 
 test('CLI classification distinguishes success, exact cleanup warning, failure and unknown', () => {
@@ -553,6 +564,243 @@ test('provider proof fails closed on wrong source generation and Rules bytes', a
 test('provider proof rejects mismatched public game bytes', async (t) => {
   const h = await providerHarness(t, { publicBody: (path, bytes) => path.endsWith('/trialruntime.js') ? Buffer.from('wrong') : bytes });
   await assert.rejects(h.cloud.verifyHosting('game'), /hosting-bytes/);
+});
+
+function resumeRecords(input) {
+  return { gate: { enabled: false, projectId: PROJECT, region: REGION, previewOrigin: ORIGIN,
+    startsAtMillis: input.startsAtMillis, endsAtMillis: input.endsAtMillis, maxRooms: 20, testerUids: [] },
+    usage: { projectId: PROJECT, startsAtMillis: input.startsAtMillis, endsAtMillis: input.endsAtMillis, maxRooms: 20, createdRoomCount: 0 },
+    testers: input.testerUids.map(() => ({ active: false, expiresAtMillis: input.endsAtMillis })) };
+}
+async function recoveryHarness(t, options = {}) {
+  let current = NOW + 60000, drift = false, rulesChanged = false;
+  const deniedRules = await readFile(join(ROOT, 'config/floating-garden-trial/deny-all.rules'), 'utf8');
+  const h = await providerHarness(t, {
+    response: (url, value) => {
+      if (url.includes('/rulesets/')) value = { ...value, source: { files: [{ name: 'firestore.rules', content: rulesChanged ? 'unapproved' : deniedRules }] } };
+      if (drift && url.startsWith('https://cloudfunctions.googleapis.com/')) value = { ...value, functions: value.functions.slice(1) };
+      return options.response ? options.response(url, value) : value;
+    },
+    command: (cmd, args, cwd) => {
+      if (options.command) { const handled = options.command(cmd, args, cwd); if (handled !== undefined) return handled; }
+      if (cmd === 'gcloud' && args[0] === 'services') return { exitCode: 0, stdout: JSON.stringify(adapterModule.RESUME_REQUIRED_APIS.filter((name) => name !== options.missingApi).map((name) => ({ config: { name } }))) };
+      if (cmd === process.execPath && args[1] === 'deploy') return options.deployResult ?? { exitCode: 0, stdout: '{"status":"success"}' };
+    },
+  });
+  h.setHosting(options.hosting ?? 'connection');
+  const nextReview = { ...h.review, startsAtMillis: NOW + 3600000, endsAtMillis: NOW + 3600000 + 604800000,
+    ...(options.newReview ?? {}) };
+  const nextPacket = await prepareTrialOperation({ review: nextReview, output: join(h.root, 'recovery'), now: current });
+  const initial = resumeRecords(h.review), paths = ['floatingGardenTrial/config', 'floatingGardenTrial/usage', ...h.review.testerUids.map((uid) => `floatingGardenTrialTesters/${uid}`)];
+  const docs = new Map(paths.map((path, i) => [path, structuredClone([initial.gate, initial.usage, ...initial.testers][i])]));
+  if (options.mutateDocs) options.mutateDocs(docs, paths);
+  const writes = [], transactionReads = []; let transactions = 0;
+  const snap = (ref) => ({ exists: docs.has(ref.path), data: () => structuredClone(docs.get(ref.path)) });
+  const db = { doc: (path) => ({ path }), getAll: async (...refs) => refs.map(snap),
+    runTransaction: async (callback, config) => {
+      transactions++; assert.deepEqual(config, { maxAttempts: 1 }); const queued = [];
+      if (options.beforeTransaction) options.beforeTransaction(docs, paths);
+      await callback({ get: async (ref) => { transactionReads.push(ref.path); return snap(ref); },
+        create: () => assert.fail('Recovery must never create a document'),
+        update: (ref, value) => { assert(docs.has(ref.path)); assert.equal(transactionReads.length, 4);
+          writes.push({ path: ref.path, value: structuredClone(value) }); queued.push([ref.path, value]); } });
+      if (!options.commitUnknown || options.applyBeforeUnknown) for (const [path, value] of queued) docs.set(path, { ...docs.get(path), ...value });
+      if (options.commitUnknown) throw Error('synthetic private uncertain commit');
+    } };
+  const prior = { packet: h.packet, review: h.review };
+  const shared = { toolingDir: h.toolingDir, runner: h.runner, requestClient: h.requestClient, fetchImpl: h.fetchImpl, db,
+    env: {}, execArgv: [], now: () => current };
+  const cloud = createCloudAdapter({ ...shared, packet: nextPacket, review: nextReview, prior });
+  const old = createCloudAdapter({ ...shared, ...prior });
+  return { ...h, cloud, old, nextReview, nextPacket, prior, initial, next: resumeRecords(nextReview), docs, paths, writes, transactionReads,
+    transactions: () => transactions, moveClock: (value) => { current = value; }, drift: () => { drift = true; },
+    changeRules: () => { rulesChanged = true; }, fresh: () => createCloudAdapter({ ...shared, packet: nextPacket, review: nextReview, prior }) };
+}
+
+test('recovery readiness accepts only the same exact connection baseline as execution before a new clock is chosen', async (t) => {
+  for (const hosting of ['connection', 'maintenance']) {
+    const h = await recoveryHarness(t, { hosting });
+    await h.old.preflight('stop');
+    if (hosting === 'connection') assert.deepEqual(await h.old.verifyResumeSource(), { verified: true });
+    else { await assert.rejects(h.old.verifyResumeSource(), /resume-hosting/); await assert.rejects(h.cloud.preflight('resume'), /resume-hosting/); }
+    assert.equal(h.transactions(), 0); assert.equal(h.writes.length, 0); assert(!h.cli.some(({ args }) => args.includes('deploy')));
+  }
+});
+
+test('recovery requires pinned deployment services already enabled with one bounded list and never enables any', async (t) => {
+  for (const missingApi of ['cloudbilling.googleapis.com', 'firebaseextensions.googleapis.com', 'run.googleapis.com']) {
+    const h = await recoveryHarness(t, { missingApi });
+    await h.old.preflight('stop');
+    await assert.rejects(h.old.verifyResumeSource(), /apis-already-enabled/);
+    const services = h.cli.filter(({ cmd, args }) => cmd === 'gcloud' && args[0] === 'services');
+    assert.equal(services.length, 1); assert.equal(services[0].args[1], 'list');
+    assert.equal(h.transactions(), 0); assert(!h.cli.some(({ args }) => args.includes('deploy') || args.includes('enable')));
+  }
+  const h = await recoveryHarness(t); await h.cloud.preflight('resume');
+  assert.equal(h.cli.filter(({ cmd, args }) => cmd === 'gcloud' && args[0] === 'services').length, 1);
+});
+
+test('prior readiness CLI metadata and version checks isolate their cwd and preserve original debug logs', async (t) => {
+  const fs = require('node:fs'), readDirectories = [];
+  const h = await recoveryHarness(t, { command: (cmd, args, cwd) => {
+    if (cmd !== process.execPath) return undefined;
+    assert(!args.includes('deploy')); assert.equal(fs.lstatSync(cwd).mode & 0o777, 0o700);
+    assert(cwd.startsWith(join(tmpdir(), 'garden-trial-cli-read-')));
+    readDirectories.push(cwd); fs.writeFileSync(join(cwd, 'firebase-debug.log'), 'synthetic read-only CLI log');
+  } });
+  const originals = [join(h.prior.packet.gameDir, 'firebase-debug.log'), join(h.prior.packet.gameDir, 'firebase-debug.1.log'), join(h.toolingDir, 'firebase-debug.log')];
+  for (const path of originals) await writeFile(path, 'original private evidence', { mode: 0o600 });
+  await h.old.preflight('stop'); await h.old.verifyResumeSource();
+  assert(readDirectories.length >= 5);
+  for (const directory of readDirectories) assert.equal(fs.existsSync(directory), false);
+  for (const path of originals) assert.equal(await readFile(path, 'utf8'), 'original private evidence');
+  for (const { cmd, args, cwd } of h.cli) if (cmd === process.execPath) {
+    assert.notEqual(cwd, h.prior.packet.gameDir); assert.notEqual(cwd, h.toolingDir);
+    if (!args.includes('--version')) assert.equal(args[args.indexOf('--config') + 1], join(h.prior.packet.gameDir, 'firebase.hosting-only.json'));
+  }
+});
+
+test('resume preflight proves old backend while replacement CAS updates only four disabled window fields', async (t) => {
+  const h = await recoveryHarness(t), beforeFiles = await Promise.all([h.prior.packet.manifestPath, h.prior.packet.reviewPath].map((path) => readFile(path)));
+  assert.deepEqual(await h.cloud.preflight('resume'), { verified: true });
+  assert.deepEqual(await h.cloud.readAdmin(), h.initial);
+  assert.deepEqual(await h.cloud.replaceStoppedWindow(h.next, h.initial), { kind: 'success' });
+  assert.equal(h.transactions(), 1); assert.deepEqual(h.transactionReads, h.paths);
+  assert.deepEqual(h.writes, [
+    { path: h.paths[0], value: { startsAtMillis: h.nextReview.startsAtMillis, endsAtMillis: h.nextReview.endsAtMillis } },
+    { path: h.paths[1], value: { startsAtMillis: h.nextReview.startsAtMillis, endsAtMillis: h.nextReview.endsAtMillis } },
+    ...h.paths.slice(2).map((path) => ({ path, value: { expiresAtMillis: h.nextReview.endsAtMillis } })),
+  ]);
+  assert.deepEqual(await h.cloud.readAdmin(), h.next);
+  const afterFiles = await Promise.all([h.prior.packet.manifestPath, h.prior.packet.reviewPath].map((path) => readFile(path)));
+  assert.deepEqual(afterFiles, beforeFiles);
+  await assert.rejects(h.cloud.replaceStoppedWindow(h.next, h.initial), /resume-replace-mode/);
+  await assert.rejects(h.cloud.createStoppedAdmin(h.next), /admin-create-mode/);
+});
+
+test('resume requires replacement before any deployment then updates only the same five function selectors', async (t) => {
+  const h = await recoveryHarness(t, { deployResult: { exitCode: 1, stdout: JSON.stringify({ status: 'error', error: CLEANUP_WARNING }) } });
+  await h.cloud.preflight('resume');
+  for (const action of [() => h.cloud.deployFunctions(), () => h.cloud.deployRules(), () => h.cloud.deployHosting('game')]) await assert.rejects(action(), /resume-replacement-required/);
+  assert.deepEqual(await h.cloud.replaceStoppedWindow(h.next, h.initial), { kind: 'success' });
+  const beforeProofReads = h.requests.length;
+  assert.deepEqual(await h.cloud.deployFunctions(), { kind: 'cleanup-warning' });
+  assert(h.requests.length > beforeProofReads); // Prior exact source is independently re-proved.
+  const deployment = h.cli.filter(({ args }) => args.includes('deploy'));
+  assert.equal(deployment.length, 1); assert.equal(deployment[0].cwd, h.nextPacket.gameDir);
+  assert.equal(deployment[0].args[deployment[0].args.indexOf('--only') + 1], FUNCTION_NAMES.map((name) => `functions:floating-garden-trial:${name}`).join(','));
+  assert.equal(deployment[0].args[deployment[0].args.indexOf('--config') + 1], 'firebase.trial.json');
+  assert(!deployment[0].args.some((arg) => /force|delete|setpolicy/.test(arg)));
+  await assert.rejects(h.cloud.deployFunctions(), /functions-deploy-mode/);
+});
+
+test('resume rejects missing, active, extra or used prior admin state before any writes', async (t) => {
+  const mutations = [
+    (docs, paths) => docs.delete(paths[0]), (docs, paths) => docs.delete(paths[2]),
+    (docs, paths) => { docs.get(paths[0]).enabled = true; },
+    (docs, paths) => { docs.get(paths[2]).active = true; },
+    (docs, paths) => { docs.get(paths[1]).createdRoomCount = 1; },
+    (docs, paths) => { docs.get(paths[0]).unexpected = true; },
+  ];
+  for (const mutateDocs of mutations) {
+    const h = await recoveryHarness(t, { mutateDocs });
+    await assert.rejects(h.cloud.preflight('resume'), /resume-prior-admin/);
+    assert.equal(h.transactions(), 0); assert(!h.cli.some(({ args }) => args.includes('deploy')));
+  }
+});
+
+test('resume rejects changed tester identities, started windows, source drift and non-closed Rules', async (t) => {
+  const different = await recoveryHarness(t, { newReview: { testerUids: ['synthetic_alpha', 'synthetic_changed'] } });
+  await assert.rejects(different.cloud.preflight('resume'), /resume-prior-scope/);
+  const started = await recoveryHarness(t); started.moveClock(started.nextReview.startsAtMillis);
+  await assert.rejects(started.cloud.preflight('resume'), /resume-window/);
+  const source = await recoveryHarness(t);
+  const changedPath = join(source.nextPacket.gameDir, 'functions/index.js'); await writeFile(changedPath, (await readFile(changedPath)) + '\n// unrelated change\n');
+  const changedManifest = JSON.parse(await readFile(source.nextPacket.manifestPath));
+  changedManifest.files['game/functions/index.js'] = createHash('sha256').update(await readFile(changedPath)).digest('hex');
+  await writeFile(source.nextPacket.manifestPath, JSON.stringify(changedManifest, null, 2) + '\n');
+  const changedPacket = { ...source.nextPacket, manifestDigest: createHash('sha256').update(await readFile(source.nextPacket.manifestPath)).digest('hex') };
+  const changedAdapter = createCloudAdapter({ packet: changedPacket, review: source.nextReview, prior: source.prior,
+    toolingDir: source.toolingDir, runner: source.runner, requestClient: source.requestClient, env: {}, execArgv: [], now: () => NOW + 60000 });
+  await assert.rejects(changedAdapter.preflight('resume'), /resume-source-change/);
+  const rules = await recoveryHarness(t); rules.changeRules();
+  await assert.rejects(rules.cloud.preflight('resume'), /rules-initial-deny-all/);
+});
+
+test('recovery CAS compares all four documents including usage and never resets a concurrent admission', async (t) => {
+  const h = await recoveryHarness(t, { beforeTransaction: (docs, paths) => { docs.get(paths[1]).createdRoomCount = 1; } });
+  await h.cloud.preflight('resume');
+  const result = await h.cloud.replaceStoppedWindow(h.next, h.initial);
+  assert.equal(result.kind, 'failed'); assert.equal(result.diagnostic.reason, 'resume-admin-concurrent-change');
+  assert.equal(h.transactions(), 1); assert.equal(h.writes.length, 0); assert.equal(h.docs.get(h.paths[1]).createdRoomCount, 1);
+  await assert.rejects(h.cloud.replaceStoppedWindow(h.next, h.initial), /resume-replace-mode/);
+});
+
+test('uncertain recovery replacement is never retried or treated as success even if it committed', async (t) => {
+  const h = await recoveryHarness(t, { commitUnknown: true, applyBeforeUnknown: true });
+  await h.cloud.preflight('resume');
+  assert.equal((await h.cloud.replaceStoppedWindow(h.next, h.initial)).kind, 'unknown');
+  assert.equal(h.transactions(), 1); assert.deepEqual(await h.cloud.readAdmin(), h.next);
+  await assert.rejects(h.cloud.replaceStoppedWindow(h.next, h.initial), /resume-replace-mode/);
+  await assert.rejects(h.cloud.deployFunctions(), /resume-replacement-required/);
+  await assert.rejects(h.fresh().preflight('resume'), /resume-prior-admin/);
+});
+
+test('resume rechecks the future start at replacement and exact old backend before function update', async (t) => {
+  const late = await recoveryHarness(t); await late.cloud.preflight('resume'); late.moveClock(late.nextReview.startsAtMillis);
+  await assert.rejects(late.cloud.replaceStoppedWindow(late.next, late.initial), /resume-window/); assert.equal(late.transactions(), 0);
+  const drift = await recoveryHarness(t); await drift.cloud.preflight('resume'); await drift.cloud.replaceStoppedWindow(drift.next, drift.initial); drift.drift();
+  await assert.rejects(drift.cloud.deployFunctions(), /function-inventory/);
+  assert(!drift.cli.some(({ args }) => args.includes('deploy')));
+});
+
+test('resume captures raw CLI streams only in fresh private bounded files and returns sanitized diagnostics', async (t) => {
+  const marker = 'SYNTHETIC_PRIVATE_CAPTURE_uid_token_owner@example.invalid';
+  const stdout = JSON.stringify({ status: 'error', error: `Missing permissions required for functions deploy. ${marker}` }), stderr = `synthetic provider detail ${marker}`;
+  const h = await recoveryHarness(t, { deployResult: { exitCode: 2, stdout, stderr } });
+  await h.cloud.preflight('resume'); await h.cloud.replaceStoppedWindow(h.next, h.initial);
+  const original = await readFile(h.prior.packet.manifestPath);
+  const result = await h.cloud.deployFunctions();
+  assert.deepEqual(result, { kind: 'failed', diagnostic: { reason: 'permission', exitCode: 2, timedOut: false } });
+  assert(!JSON.stringify(result).includes(marker));
+  const logs = join(h.nextPacket.output, 'recovery-logs'); assert.equal((await lstat(logs)).mode & 0o777, 0o700);
+  for (const [name, bytes] of [['stdout', stdout], ['stderr', stderr]]) {
+    const path = join(logs, `functions.${name}.log`), info = await lstat(path);
+    assert(info.isFile()); assert(!info.isSymbolicLink()); assert.equal(info.nlink, 1); assert.equal(info.mode & 0o777, 0o600);
+    assert.equal(await readFile(path, 'utf8'), bytes); assert(info.size < 16 * 1024 * 1024);
+  }
+  assert.deepEqual(await readFile(h.prior.packet.manifestPath), original);
+  await assert.rejects(h.cloud.deployFunctions(), /functions-deploy-mode/);
+  assert.equal(h.cli.filter(({ args }) => args.includes('deploy')).length, 1);
+});
+
+test('resume log capture rejects existing names, links and nonprivate directories before issuing a command', async (t) => {
+  for (const kind of ['existing', 'file-link', 'directory-link', 'public-directory']) {
+    const h = await recoveryHarness(t); await h.cloud.preflight('resume'); await h.cloud.replaceStoppedWindow(h.next, h.initial);
+    const logs = join(h.nextPacket.output, 'recovery-logs'), unrelated = join(h.root, 'unrelated');
+    await mkdir(unrelated, { mode: 0o700 }); await writeFile(join(unrelated, 'kept'), 'do not overwrite');
+    if (kind === 'directory-link') await symlink(unrelated, logs);
+    else {
+      await mkdir(logs, { mode: 0o700 });
+      if (kind === 'existing') await writeFile(join(logs, 'functions.stdout.log'), 'original log', { mode: 0o600 });
+      if (kind === 'file-link') await symlink(join(unrelated, 'kept'), join(logs, 'functions.stdout.log'));
+      if (kind === 'public-directory') await chmod(logs, 0o755);
+    }
+    await assert.rejects(h.cloud.deployFunctions(), /resume-log-prepare/);
+    assert(!h.cli.some(({ args }) => args.includes('deploy'))); assert.equal(await readFile(join(unrelated, 'kept'), 'utf8'), 'do not overwrite');
+    if (kind === 'existing') assert.equal(await readFile(join(logs, 'functions.stdout.log'), 'utf8'), 'original log');
+    await assert.rejects(h.cloud.deployFunctions(), /functions-deploy-mode/);
+  }
+});
+
+test('capture failure after an issued CLI command returns unknown and blocks replay', async (t) => {
+  const h = await recoveryHarness(t, { deployResult: { exitCode: 0, stdout: 'x'.repeat(16 * 1024 * 1024 + 1), stderr: '' } });
+  await h.cloud.preflight('resume'); await h.cloud.replaceStoppedWindow(h.next, h.initial);
+  assert.deepEqual(await h.cloud.deployFunctions(), { kind: 'unknown', diagnostic: { reason: 'resume-log-write', exitCode: 0, timedOut: false } });
+  assert.equal(h.cli.filter(({ args }) => args.includes('deploy')).length, 1);
+  const logs = join(h.nextPacket.output, 'recovery-logs');
+  for (const stream of ['stdout', 'stderr']) assert.equal((await lstat(join(logs, `functions.${stream}.log`))).size, 0);
+  await assert.rejects(h.cloud.deployFunctions(), /functions-deploy-mode/);
 });
 
 async function stopHarness(t, { unknown = false, concurrent = false } = {}) {
@@ -755,13 +1003,13 @@ test('failed read-only command propagates only categorized metadata and actual e
 
 import { sameDenyAllRules } from '../scripts/floating-garden-trial-cloud-adapter.mjs';
 const consoleClosedRules = "rules_version = '2';\n\n\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    match /{document=**} {\n      allow read, write: if false;\n    }\n  }\n}\n";
-test('initial closed Rules accept observed Console whitespace only, at both preflight and deployment guards',async()=>{
+test('initial closed Rules accept observed Console whitespace only, at initial/recovery and deployment guards',async()=>{
  const expected=await readFile(join(ROOT,'config/floating-garden-trial/deny-all.rules'),'utf8');
  assert.equal(sameDenyAllRules(consoleClosedRules,expected),true);
  assert.equal(sameDenyAllRules(expected,expected),true);
  assert.equal(sameDenyAllRules(consoleClosedRules.replaceAll('\n','\r\n').replaceAll('  ','\t'),expected),true);
  const source=await readFile(join(ROOT,'scripts/floating-garden-trial-cloud-adapter.mjs'),'utf8');
- assert.equal((source.match(/requireThat\(sameDenyAllRules\(/g)??[]).length,2);
+ assert.equal((source.match(/requireThat\(sameDenyAllRules\(/g)??[]).length,4);
 });
 test('initial Rules token comparison rejects permission, path, string and lexical changes',async()=>{
  const expected=await readFile(join(ROOT,'config/floating-garden-trial/deny-all.rules'),'utf8');
@@ -847,4 +1095,151 @@ test('a valid unexpected Tokyo function is not printed and prevents full invento
 });
 test('oversized successful body is incomplete',()=>{assert.throws(()=>validateTokyoInventory({status:200,data:{functions:[{...inventory[0],extra:'x'.repeat(16*1024*1024)}]}}),e=>e.code==='tokyo-inventory-incomplete');});
 
+}
+
+// Final verified recovery orchestrator regression; all capabilities are local/injected.
+{
+const test = (await import('node:test')).default;
+const assert = (await import('node:assert/strict')).default;
+const { mkdtemp, rm, readFile, writeFile, mkdir, lstat, symlink, readlink } = await import('node:fs/promises');
+const { join } = await import('node:path');
+const { tmpdir } = await import('node:os');
+const { createHash } = await import('node:crypto');
+const { prepareTrialOperation } = await import('../scripts/prepare-floating-garden-trial-operation.mjs');
+const { adminRecords, operateTrial, readOperationPacket, readPriorOperation, verifyPriorOperation, readPriorForMode, verifyOperationPacket, createJournal, validateResumeReview, installRuntime, main, MAX_START_WAIT_MILLIS } = await import('../scripts/operate-floating-garden-trial.mjs');
+const OLD=1800000000000, START=OLD+1000000, WEEK=604800000;
+const priorReview=()=>({schemaVersion:1,startsAtMillis:OLD,endsAtMillis:OLD+WEEK,testerUids:['SYNTHETIC_A','SYNTHETIC_B'],retainBuildArtifacts:true,allowInitialFunctionRecreate:true,approvePublicInvoker:true});
+const nextReview=()=>({...priorReview(),startsAtMillis:START,endsAtMillis:START+WEEK});
+const clone=v=>structuredClone(v), sha=bytes=>createHash('sha256').update(bytes).digest('hex');
+async function fixture(t){
+ const root=await mkdtemp(join(tmpdir(),'garden-resume-local-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const old=join(root,'old');await prepareTrialOperation({review:priorReview(),output:old,now:OLD-1000});
+ const {packet}=await readOperationPacket(old), journal=await createJournal(packet,{now:()=>OLD-1000});
+ journal.begin('deploy');journal.issued('create-stopped-admin');journal.verified('create-stopped-admin');journal.issued('deploy-functions');journal.fail('deploy-functions',{reason:'unclassified',exitCode:1,timedOut:false});await journal.flush();
+ const prior=await readPriorOperation(old), out=join(root,'new');await prepareTrialOperation({review:nextReview(),output:out,now:START-10000});
+ const next=await readOperationPacket(out);return {root,prior,...next};
+}
+function harness(){
+ let time=START-10000, admin=adminRecords(priorReview()), hosting={kind:'connection',version:'initial'};
+ const calls=[], mutations=[];
+ const journal={begin:v=>calls.push('begin:'+v),issued:v=>calls.push('issued:'+v),verified:v=>calls.push('verified:'+v),finish:v=>calls.push('finish:'+v),fail:v=>calls.push('fail:'+v),flush:async()=>calls.push('flush')};
+ const mutate=(name,fn)=>async(...args)=>{calls.push(name);mutations.push(name);fn?.(...args);return {kind:'success'};};
+ const cloud={preflight:async mode=>calls.push('preflight:'+mode),readAdmin:async()=>clone(admin),readHosting:async()=>clone(hosting),verifyHosting:async kind=>({verified:kind===hosting.kind}),verifyFunctions:async()=>({verified:true}),verifyRules:async()=>({verified:true}),
+ replaceStoppedWindow:mutate('replaceStoppedWindow',(next,expected)=>{assert.deepEqual(expected,admin);assert.deepEqual(admin,adminRecords(priorReview()));assert.deepEqual(next,adminRecords(nextReview()));admin=clone(next);}),
+ createStoppedAdmin:mutate('createStoppedAdmin'),deployFunctions:mutate('deployFunctions'),deployRules:mutate('deployRules'),deployHosting:mutate('deployHosting',kind=>{hosting={kind,version:'next'};}),updateAdmin:mutate('updateAdmin',next=>{assert.equal(time>=START,true);admin=clone(next);})};
+ return {cloud,journal,calls,mutations,get time(){return time;},set time(v){time=v;},get admin(){return admin;},set admin(v){admin=v;},set hosting(v){hosting=v;},run:changes=>operateTrial({mode:'resume',review:nextReview(),priorReview:priorReview(),cloud,journal,now:()=>time,wait:async ms=>{time+=ms;},log:()=>{},checkLocal:async()=>calls.push('checkLocal'),...changes})};
+}
+test('resume replaces only stopped window before existing publication stages and fixed-start activation',async()=>{
+ const h=harness(),r=await h.run();assert.equal(r.status,'active');assert.equal(h.time,START);
+ assert.deepEqual(h.mutations,['replaceStoppedWindow','deployFunctions','deployRules','deployHosting','updateAdmin']);assert.deepEqual(h.admin,adminRecords(nextReview(),true));
+ assert(h.calls.includes('begin:resume'));assert(h.calls.includes('preflight:resume'));
+ for(const name of h.mutations){const i=h.calls.indexOf(name);assert.equal(h.calls[i-1],'flush');assert.match(h.calls[i-2],/^issued:/);assert.equal(h.calls[i-3],'checkLocal');}
+});
+test('resume only accepts explicit later exact week, same ordered pair and both approval reviews',async()=>{
+ validateResumeReview(nextReview(),priorReview());
+ for(const review of [{...nextReview(),testerUids:['SYNTHETIC_B','SYNTHETIC_A']},{...nextReview(),testerUids:['SYNTHETIC_A','OTHER']},{...nextReview(),startsAtMillis:OLD,endsAtMillis:OLD+WEEK},{...nextReview(),endsAtMillis:START+WEEK+1},{...nextReview(),retainBuildArtifacts:false}])assert.throws(()=>validateResumeReview(review,priorReview()));
+ assert.throws(()=>validateResumeReview(nextReview(),{...priorReview(),approvePublicInvoker:false}));
+ const h=harness();assert.equal((await h.run({priorReview:undefined})).status,'blocked');assert.deepEqual(h.mutations,[]);
+});
+test('used, active, partial, wrong-window records and non-connection Hosting block replacement',async()=>{
+ for(const change of [a=>a.usage.createdRoomCount=1,a=>a.gate.enabled=true,a=>a.testers[0].active=true,a=>a.usage=null,a=>a.gate.startsAtMillis++,a=>a.testers[0]=null]){const h=harness();change(h.admin);assert.equal((await h.run()).status,'blocked');assert.deepEqual(h.mutations,[]);}
+ for(const kind of ['maintenance','stopped','game','unknown']){const h=harness();h.hosting={kind,version:'unexpected'};assert.equal((await h.run()).status,'blocked');assert.deepEqual(h.mutations,[]);}
+});
+test('preflight failure, replacement unknown and concurrent local change never retry or deploy',async()=>{
+ const one=harness();one.cloud.preflight=async()=>{throw Error('PRIVATE');};assert.equal((await one.run()).status,'blocked');assert.deepEqual(one.mutations,[]);
+ const two=harness();let attempts=0;two.cloud.replaceStoppedWindow=async()=>{attempts++;return{kind:'unknown'};};assert.equal((await two.run()).status,'blocked');assert.equal(attempts,1);assert.deepEqual(two.mutations,[]);
+ const three=harness();const original=three.cloud.replaceStoppedWindow;let changed=false;three.cloud.replaceStoppedWindow=async(...args)=>{const result=await original(...args);changed=true;return result;};assert.equal((await three.run({checkLocal:async()=>{if(changed)throw Error('changed');}})).status,'blocked');assert.deepEqual(three.mutations,['replaceStoppedWindow']);
+});
+test('resume rejects passed start before preflight and after slow preflight',async()=>{
+ for(const kind of ['before','after']){const h=harness();if(kind==='before')h.time=START;else h.cloud.preflight=async()=>{h.time=START;};assert.equal((await h.run()).status,'blocked');assert.deepEqual(h.mutations,[]);}
+});
+test('resume retains fixed window across missed-start, distant-start and late-wake paths',async()=>{
+ const passed=harness();passed.cloud.deployFunctions=async()=>{passed.time=START+1;return{kind:'success'};};assert.equal((await passed.run()).reason,'start-passed');assert.equal(passed.admin.gate.enabled,false);
+ const distant=harness();distant.time=START-MAX_START_WAIT_MILLIS-1;assert.equal((await distant.run()).reason,'future-start');assert.equal(distant.admin.gate.enabled,false);
+ const late=harness();assert.equal((await late.run({wait:async()=>{late.time=START+60001;}})).reason,'late-wake');assert.equal(late.admin.gate.enabled,false);
+ const proof=harness();let count=0;proof.cloud.verifyFunctions=async()=>{if(++count===2)proof.time=START+60001;return{verified:true};};assert.equal((await proof.run()).reason,'late-verification');assert.equal(proof.admin.gate.enabled,false);
+ for(const h of [passed,distant,late,proof]){assert(!h.mutations.includes('updateAdmin'));assert.equal(h.admin.gate.endsAtMillis,START+WEEK);}
+});
+test('exact failed predecessor has immutable digests and remains byte-for-byte unchanged',async t=>{
+ const f=await fixture(t),statePath=join(f.prior.packet.output,'OPERATION-STATE.json'),before=await readFile(statePath);
+ assert.equal(f.prior.predecessor.journalDigest,sha(before));await verifyPriorOperation(f.prior);
+ const j=await createJournal(f.packet,{prior:f.prior,now:()=>START-1});j.begin('resume');j.issued('replace-stopped-window');await j.flush();
+ assert.deepEqual(await readFile(statePath),before);const fresh=await createJournal(f.packet);assert.deepEqual(fresh.predecessor(),f.prior.predecessor);assert.throws(()=>fresh.begin('resume'));assert.throws(()=>fresh.begin('deploy'));assert.throws(()=>fresh.begin('activate'));
+ const persisted=JSON.parse(await readFile(join(f.packet.output,'OPERATION-STATE.json')));assert.equal(persisted.deploy.stage,'replace-stopped-window');assert.equal(persisted.predecessor.journalDigest,sha(before));
+ await assert.rejects(createJournal(f.packet,{prior:f.prior}));
+});
+test('original failed journal cannot be retried; resumed published-stopped journal allows explicit activate/stop',async t=>{
+ const f=await fixture(t),old=await createJournal(f.prior.packet);assert.throws(()=>old.begin('resume'));assert.throws(()=>old.begin('deploy'));assert.throws(()=>old.begin('activate'));
+ const j=await createJournal(f.packet,{prior:f.prior,now:()=>START});j.begin('resume');j.finish('published-stopped');await j.flush();
+ const later=await createJournal(f.packet);const loaded=await readPriorOperation(later.predecessor().output,later.predecessor());assert.deepEqual(loaded.predecessor,f.prior.predecessor);later.begin('activate');later.finish('active');await later.flush();
+ const final=await createJournal(f.packet);assert.throws(()=>final.begin('resume'));assert.throws(()=>final.begin('activate'));final.begin('stop');final.finish('stopped');await final.flush();
+});
+test('predecessor rejects altered event sequence, unknown state, old locks and changed hashes',async t=>{
+ const f=await fixture(t),p=join(f.prior.packet.output,'OPERATION-STATE.json'),original=await readFile(p),base=JSON.parse(original);
+ const edits=[s=>s.deploy.status='running',s=>s.deploy.stage='deploy-rules',s=>s.stop.status='failed',s=>s.events.push(s.events[2]),s=>s.events[2].status='verified',s=>s.events.reverse(),s=>delete s.events[1].atMillis,s=>s.events[0].atMillis=-1,s=>s.events[2].atMillis=OLD-2000,s=>s.predecessor=f.prior.predecessor,s=>s.manifestDigest='f'.repeat(64),s=>s.deploy.diagnostic.reason='PRIVATE'];
+ for(const edit of edits){const state=clone(base);edit(state);await writeFile(p,JSON.stringify(state));await assert.rejects(readPriorOperation(f.prior.packet.output));}
+ await writeFile(p,original);await writeFile(join(f.prior.packet.output,'OPERATION.lock'),'uncertain');await assert.rejects(readPriorOperation(f.prior.packet.output));await rm(join(f.prior.packet.output,'OPERATION.lock'));
+ await writeFile(p,Buffer.concat([original,Buffer.from('\n')]));await assert.rejects(verifyPriorOperation(f.prior));await assert.rejects(readPriorOperation(f.prior.packet.output,f.prior.predecessor));await writeFile(p,original);
+ for(const name of ['private-review.json','OPERATION-MANIFEST.json','game/functions/trial-config.json']){const path=join(f.prior.packet.output,name),bytes=await readFile(path);await writeFile(path,Buffer.concat([bytes,Buffer.from('\n')]));await assert.rejects(verifyPriorOperation(f.prior));await writeFile(path,bytes);}
+ await verifyPriorOperation(f.prior);
+});
+test('resume runtime copies only from canonical prior root with unchanged package/lock and fresh destination',async t=>{
+ const f=await fixture(t),oldModules=join(f.prior.packet.gameDir,'functions/node_modules'),newModules=join(f.packet.gameDir,'functions/node_modules');
+ await mkdir(join(oldModules,'synthetic'),{recursive:true});await mkdir(join(oldModules,'.bin'));await writeFile(join(oldModules,'synthetic/cli.js'),'// synthetic');await symlink('../synthetic/cli.js',join(oldModules,'.bin/synthetic'));
+ await installRuntime(f.packet,f.prior);assert.equal(await readFile(join(newModules,'synthetic/cli.js'),'utf8'),'// synthetic');assert.equal(await readlink(join(newModules,'.bin/synthetic')),'../synthetic/cli.js');assert.notEqual((await lstat(join(oldModules,'synthetic/cli.js'))).ino,(await lstat(join(newModules,'synthetic/cli.js'))).ino);
+ await assert.rejects(installRuntime(f.packet,f.prior));await verifyPriorOperation(f.prior);
+});
+test('resume runtime rejects changed lock or symlinked prior modules without touching source',async t=>{
+ const f=await fixture(t),source=join(f.prior.packet.gameDir,'functions/node_modules'),destination=join(f.packet.gameDir,'functions/node_modules');
+ const real=join(f.root,'elsewhere');await mkdir(real);await symlink(real,source);await assert.rejects(installRuntime(f.packet,f.prior));await assert.rejects(lstat(destination),{code:'ENOENT'});await rm(source);
+ await mkdir(source);const lock=join(f.packet.gameDir,'functions/package-lock.json');await writeFile(lock,(await readFile(lock,'utf8'))+'\n');await assert.rejects(installRuntime(f.packet,f.prior));await assert.rejects(lstat(destination),{code:'ENOENT'});
+});
+test('CLI resume requires exact explicit arguments; defaults remain plan-only',async()=>{
+ const logs=[];assert.equal(await main(['--plan'],{log:x=>logs.push(x)}),0);
+ for(const args of [['--resume-reviewed'],['--resume-reviewed','--review-base64','{}'],['--resume-reviewed','--operation','/unused','--tooling-dir','/unused']])assert.equal(await main(args,{log:x=>logs.push(x)}),1);
+ assert(logs[0].startsWith('PLAN_ONLY:'));assert(logs.slice(1).every(x=>x.startsWith('STOP:')));
+});
+
+test('changed predecessor blocks later activation but cannot block exact gate-first stop',async t=>{
+ const f=await fixture(t),j=await createJournal(f.packet,{prior:f.prior,now:()=>START});j.begin('resume');j.finish('published-stopped');await j.flush();
+ await writeFile(join(f.prior.packet.output,'OPERATION-STATE.json'),'changed original');
+ await assert.rejects(readPriorForMode('activate',j));assert.equal(await readPriorForMode('stop',j),undefined);assert.equal(await readPriorForMode('inspect',j),undefined);
+ const h=harness();h.admin=adminRecords(nextReview(),true);h.hosting={kind:'game',version:'new'};h.time=START;
+ assert.equal((await h.run({mode:'stop',journal:j,priorReview:undefined,checkLocal:()=>verifyOperationPacket(f.packet)})).status,'stopped');await j.flush();
+ assert.equal(h.admin.gate.enabled,false);assert.deepEqual(h.mutations,['updateAdmin','deployHosting']);assert.deepEqual(j.predecessor(),f.prior.predecessor);
+});
+
+test('slow durable activation journal cannot bypass automatic fixed-start grace period',async()=>{
+ const h=harness();h.journal.issued=stage=>{h.calls.push('issued:'+stage);if(stage==='activate-two-testers')h.time=START+60001;};
+ assert.equal((await h.run()).reason,'late-verification');assert.equal(h.admin.gate.enabled,false);assert(!h.mutations.includes('updateAdmin'));
+});
+
+}
+
+// Exact generic owner bootstrap: readiness must precede the single approved clock.
+{
+const finalPayload=JSON.parse(execFileSync('python3',['-I','-c',"import ast,json,pathlib,sys; t=ast.parse(pathlib.Path(sys.argv[1]).read_text()); print(json.dumps({n.targets[0].id:ast.literal_eval(n.value) for n in t.body if isinstance(n,ast.Assign) and n.targets[0].id.startswith('FINAL_')}))",join(ROOT,'scripts/start-floating-garden-trial-owner.py')],{encoding:'utf8',stdio:['ignore','pipe','pipe'],timeout:10000,maxBuffer:262144}));
+const test = (await import('node:test')).default;const assert = (await import('node:assert/strict')).default;
+const {resumeAfterReadiness,inspectOrStop} = await import('data:text/javascript;base64,'+Buffer.from(finalPayload.FINAL_RESUME).toString('base64'));
+const NOW=1800000000000,prior={packet:{output:'/old/operation'},review:{schemaVersion:1,startsAtMillis:NOW-1000,endsAtMillis:NOW-1000+604800000,testerUids:['PRIVATE_SYNTHETIC_A','PRIVATE_SYNTHETIC_B'],retainBuildArtifacts:true,allowInitialFunctionRecreate:true,approvePublicInvoker:true},predecessor:{journalDigest:'SYNTHETIC'}};
+function harness(){const calls=[],logs=[],writes=[];let nowCalls=0,execution;
+ const cloud={preflight:async m=>calls.push('preflight:'+m),verifyResumeSource:async()=>{calls.push('ready');return{verified:true}}};
+ const operator={readPriorOperation:async p=>{assert.equal(p,'/old/operation');calls.push('prior');return prior},verifyPriorOperation:async p=>{assert.equal(p,prior);calls.push('prior-again')},main:async(args)=>{calls.push('main');execution=args;return 0}};
+ const adapter={describeAdapterFailure:()=>({reason:'unclassified',exitCode:null,timedOut:false}),createCloudAdapter:args=>{assert.equal(args.packet,prior.packet);assert.equal(args.review,prior.review);return cloud}};
+ const options={base:'/fresh',priorBase:'/old',source:'/source',load:async p=>p.endsWith('/operate-floating-garden-trial.mjs')?operator:adapter,now:()=>{calls.push('clock');nowCalls++;return NOW},write:async(...args)=>{calls.push('write');writes.push(args)},log:s=>logs.push(s)};
+ return{calls,logs,writes,operator,cloud,options,get nowCalls(){return nowCalls},get execution(){return execution},run:()=>resumeAfterReadiness(options)};
+}
+test('readiness completes before one chosen clock; exact seven days and private same pair',async()=>{const h=harness();assert.equal(await h.run(),0);assert.deepEqual(h.calls,['prior','preflight:stop','ready','prior-again','clock','write','main']);assert.equal(h.nowCalls,1);const r=JSON.parse(Buffer.from(h.execution[2],'base64url'));assert.deepEqual(r.testerUids,prior.review.testerUids);assert.equal(r.startsAtMillis,NOW+1800000);assert.equal(r.endsAtMillis-r.startsAtMillis,604800000);assert.deepEqual(h.writes[0][2],{flag:'wx',mode:0o600});assert(!h.logs.join().includes('PRIVATE'));assert.equal(h.execution[0],'--resume-reviewed')});
+test('each readiness failure produces no dates, record or execution',async()=>{for(const phase of ['prior','preflight','ready','recheck']){const h=harness();const fail=async()=>{throw Error('PRIVATE_SECRET')};if(phase==='prior')h.operator.readPriorOperation=fail;if(phase==='preflight')h.cloud.preflight=fail;if(phase==='ready')h.cloud.verifyResumeSource=fail;if(phase==='recheck')h.operator.verifyPriorOperation=fail;assert.equal(await h.run(),1);assert.equal(h.nowCalls,0);assert.equal(h.writes.length,0);assert(!h.calls.includes('main'));assert(!h.logs.join().includes('PRIVATE'))}});
+test('unproven readiness and invalid clock fail closed',async()=>{const h=harness();h.cloud.verifyResumeSource=async()=>({verified:false});assert.equal(await h.run(),1);assert.equal(h.nowCalls,0);const b=harness();b.options.now=()=>NaN;assert.equal(await b.run(),1);assert.equal(b.writes.length,0);assert(!b.calls.includes('main'))});
+test('existing launch record and failed operation are never retried',async()=>{const h=harness();h.options.write=async()=>{throw Error('EXISTS')};assert.equal(await h.run(),1);assert(!h.calls.includes('main'));const b=harness();b.operator.main=async()=>{b.calls.push('main');return 1};assert.equal(await b.run(),1);assert.equal(b.calls.filter(x=>x==='main').length,1);assert.equal(b.nowCalls,1);assert(!b.logs.some(x=>x.startsWith('OWNER_COMMAND_FINISHED')))});
+test('inspect and stop never create a window or expose review',async()=>{for(const mode of ['--inspect','--stop']){const h=harness();assert.equal(await inspectOrStop({...h.options,mode}),0);assert.equal(h.nowCalls,0);assert.equal(h.writes.length,0);assert.deepEqual(h.execution,[mode,'--operation','/fresh/operation','--tooling-dir','/old/tooling'])}await assert.rejects(inspectOrStop({mode:'--activate'}))});
+
+test('final recovery source baseline pins the same58 unchanged files and exactly two replacements',async()=>{
+ const baseline=finalPayload.FINAL_SOURCE_BASELINE, overrides=finalPayload.FINAL_SOURCE_FILES;
+ assert.equal(Object.keys(baseline).length,60);assert.deepEqual(Object.keys(overrides).sort(),['scripts/floating-garden-trial-cloud-adapter.mjs','scripts/operate-floating-garden-trial.mjs']);
+ for(const [path,digest] of Object.entries(baseline)){assert.match(digest,/^[a-f0-9]{64}$/);if(!Object.hasOwn(overrides,path))assert.equal(sha(await readFile(join(ROOT,path))),digest,path);}
+ if(finalPayload.FINAL_SOURCE_COMMIT==='PENDING_REVIEW')assert(Object.values(overrides).every(x=>x==='PENDING_REVIEW'));
+ else{assert.match(finalPayload.FINAL_SOURCE_COMMIT,/^[a-f0-9]{40}$/);for(const [path,digest] of Object.entries(overrides))assert.equal(sha(await readFile(join(ROOT,path))),digest,path);}
+});
 }
