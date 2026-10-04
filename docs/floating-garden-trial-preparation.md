@@ -155,3 +155,46 @@ node scripts/prepare-floating-garden-trial.mjs --config CONFIRMED_CONFIG.json NE
 ## 未検証
 
 実App Check成功系、HostingのCORS/TLS、実Android2台、touch/background/別ネットワーク、cloudのIAM・課金・APIs・provider設定・価格tierは未検証です。Auth/Functions HTTP・trial画面は隔離emulator CIで検証し、代替部分と最終headの結果を検証記録・PRに明示します。既知のローカルFunctions/Chromium IPC制限を回避して試験することはしていません。今回通したローカルunit/Rules/aggregateの実測件数は別の検証記録に記載します。
+
+## 2026-10-04: 所有者が実行する配信・停止手順のローカル準備
+
+以下は未実行の追加手順です。ソース保存、ローカル試験、接続確認の成功はゲーム配信・参加登録・開始の承認にはなりません。GitHubのGoogle API Key検出については、検出値が専用Firebase Web設定と一致すること、および本人提示の正しいproject URLと画像で25 APIに制限されていることを確認しました。Generative Language APIやAgent Platform/Vertex AI APIは含まれません。現時点で権限付き秘密鍵の流出や緊急失効の必要性を示す材料はありませんが、全サービスの無害性や不正利用ゼロを保証する判断ではありません。最初に示された別projectの画像は庭園の根拠に使っていません。キー値は再掲せず、警告解除・鍵失効・設定変更は行いません。今回の6ファイルのソース保存は承認済みです。実配信・アクセス設定・参加登録・試験開始は別の確認事項です。
+
+### 確認済みの前提と残る境界
+
+- 専用接続ページでChromeとFirefoxのApp Check・匿名Authがそれぞれ成功し、別々の2IDであることを非公開で照合済みです。ブラウザの保存情報を消しません。これは実ゲーム2席の動作確認ではありません。
+- 所有者の読み取り結果で、既存API、専用runtime、HMACのversion 1と権限を確認しました。ビルド用Computeアカウントには既存の無条件Editor権限があり、この手順は追加のビルド権限を要求しません。実行前にも現在値を読み取り、不足や変更は自動修復せず停止します。
+- Functions・Cloud Run・Artifact Registryは当該読み取り時点で空でした。新しい配信はこの専用プロジェクトのみに限定します。既存プロジェクトやmainへは適用しません。
+- 7日の正確な開始・終了時刻はまだ選択していません。実値の入力と承認は実行前に一度まとめます。
+
+### 追加したローカル手順
+
+`prepare-floating-garden-trial-operation.mjs` は、正確に7日間の期間、非公開の2ID、個別承認フラグを検証し、リポジトリ外の新規0700ディレクトリにgame/stopped両bundleを作ります。非公開入力は0600の `private-review.json` だけに保存し、配信対象、GitHub、診断出力へIDをコピーしません。manifestで各ファイルのSHA-256を固定します。
+
+`operate-floating-garden-trial.mjs` は既定と `--plan` がオフライン説明だけです。実行モードは、内容とハッシュを確認したソース、既存の所有者認証、pinned Firebase CLI 14.27.0、既存lockfileのSDKを使用します。Firebase CLIやSDKのログには非公開情報が残り得るため、debugファイルの提出を求めません。表示する失敗は固定の段階名だけです。
+
+1. 変更前に専用project、既存API、runtime/HMAC、空のFunctions/Run、deny-all Rules、既知のHosting、未登録の4管理記録を確認します。新しいAPIや権限を自動追加して通しません。
+2. 停止状態のgate、usage、2testerを一度だけ作成します。以下の5関数を指定して配信し、東京・Node.js 22・専用runtime・HMAC binding・実行上限・Run最新revision/IAM・世代を固定した配信source ZIPの全バイトを読み戻します。
+   - floatingGardenCreateRoom
+   - floatingGardenJoinRoom
+   - floatingGardenStartMatch
+   - floatingGardenGetSnapshot
+   - floatingGardenSubmitAction
+3. 専用Rules全文と専用Hostingの全配信バイト・HTTP status・安全ヘッダーを確認します。ここまではgateを閉じたままです。
+4. 選んだ開始が30分以内なら待機し、開始時に再検証して正確な2IDのみ有効にします。配信完了が開始に間に合わない、待機・最終確認が1分以上遅れる場合は停止状態で終了し、期限をずらしたり無断で開始したりしません。より先の開始は別途明示したactivation操作が必要です。
+5. 変更前の記録をファイルと親ディレクトリまで同期し、未確定・失敗・中断後は変更コマンドを再実行しません。`--inspect` で現在値を読み、必要な復旧だけ別途判断します。CLI内部の通信再試行とは別の制御です。
+
+### 実行前に一括確認する内容
+
+- 対象 `wa-awesome-garden-stg`、配信先 `https://wa-awesome-garden-stg.web.app`、東京の5関数と専用Rules、上記2ブラウザだけの期間限定参加登録、選択した開始・終了時刻。
+- 5 callableのCloud Run `roles/run.invoker` に `allUsers` を付与すること。ネットワーク到達性を公開し、利用可否はAuth/App Check・2ID・固定期間・Rulesで判定します。
+- Firebase CLIが既存Pub/Sub・Eventarc service identity生成APIを呼ぶこと、および初回作成直後の容量不足で、その対象関数だけを内部で削除・再作成し得ること。新しい個人用token、service-account key、追加runtime権限は作りません。
+- Functions配信に伴うsource bucket、build、Artifact Registry保存物。自動削除ポリシーは設定せず保持します。CLIのcleanup警告が出ても、5関数すべての独立読み戻しに成功しなければ先へ進みません。警告を成功の証拠にはしません。
+- 保存物を保持するため終了後も保存費用等が残り得ます。20部屋・maxInstances・7日間は厳密な課金上限ではありません。削除する場合は、対象と復元不能性を別途確認します。
+- 終了または本人が求めた停止時のgate/tester無効化と停止Hosting配信。ゲーム開始後の最初の2席の操作確認は別の確認段階です。
+
+### 停止の順序と保持するもの
+
+`--stop` は期限後も使えます。まず既知のgate/testerのフラグだけを無効化し、読み戻します。片方のtesterやgateが欠けていても作り直さず、usageは欠落・不正値を含めそのまま保持します。無関係なHosting更新や配信不能があっても、既知のbackendアクセスの停止を先に行います。その後、既知のHosting releaseだけをscriptなしの停止画面へ戻し、旧ゲームと接続ページの各パスが停止404になることを確認します。
+
+room、receipt、usage、Authユーザー、Functions、build source、Artifact、secret、service account、IAMは削除しません。期限だけでHostingや保存物が自動削除されるとは扱いません。途中で結果が不明になった場合は、同じ変更の再送ではなく読み取り確認で止めます。
