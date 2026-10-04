@@ -13,6 +13,8 @@ import { createRequire } from 'node:module';
 import { chromium } from './e2e/node_modules/playwright/index.mjs';
 import { emulatorConfig } from './helpers/floating-garden-emulators.mjs';
 import { abortDeniedBrowserRequest } from './helpers/floating-garden-browser-network.mjs';
+import { sanitizeTrialSnapshotRevisions } from './helpers/floating-garden-trial-sdk-fixture.mjs';
+import { FIRESTORE_DIAGNOSTIC_SOURCE, isOnlineDiagnosticFirestoreRequest, loadTrialDiagnosticFirestoreSdk, collectTrialSdkWatchDiagnostics } from './helpers/floating-garden-trial-sdk-discard-fixture.mjs';
 import { EMULATOR_CONFIG, EMULATOR_PORTS } from '../lab/floating-garden/online/config.js';
 import { ONLINE_SAVE_KEY } from '../lab/floating-garden/online/controller.js';
 import { legalActions, getDecision, rankMatch, applyMatchAction } from '../lab/floating-garden/match-engine.js';
@@ -32,6 +34,8 @@ const entryPath = '/lab/floating-garden/online/index.html';
 const callablePath = `/demo-floating-garden/asia-northeast1/`;
 const output = resolve(process.env.FLOATING_GARDEN_BROWSER_ARTIFACTS || '/tmp/floating-garden-online-browser-emulator-qa');
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
+const sdkDiagnosticInstrumentation = { source: FIRESTORE_DIAGNOSTIC_SOURCE, eventLimit: 256,
+  boundary: 'test-only Listen-arrival and LocalStore-discard observers; unchanged game/app sources, original SDK comparisons/logging/callbacks and native emulator networking' };
 
 async function serveActualApp() {
   const served = new Map();
@@ -102,9 +106,18 @@ test('actual app: two isolated Chromium contexts use Firebase emulators through 
   const contexts = [], pages = [], observed = [], pageErrors = [], blocked = [], deniedConnectivityProbes = [], routeErrors = [];
   const interruptedSeats = new Set();
   const transcript = [], captures = new Set();
+  let completedMatchSdkWatchDiagnostics = [];
+  const collectWatchObservations = () => Promise.all(pages.map(async (page, seat) => {
+    const revision = await domRevision(page).catch(() => null);
+    return { seat, domRevision: Number.isSafeInteger(revision) && revision >= 0 ? revision : null,
+      sdkWatchDiagnostics: await collectTrialSdkWatchDiagnostics(page),
+      completedMatchSdkWatchDiagnostics: completedMatchSdkWatchDiagnostics[seat] || null,
+      snapshotRevisions: observed[seat].snapshots.slice(-256).map(sanitizeTrialSnapshotRevisions) };
+  }));
   let roomId = null, stage = 'initialization', drop = null;
   await mkdir(output, { recursive: true });
   try {
+    const diagnosticFirestoreSdk = await loadTrialDiagnosticFirestoreSdk();
     const hosted = await serveActualApp();
     server = hosted.server;
     const { origin, served } = hosted;
@@ -122,6 +135,9 @@ test('actual app: two isolated Chromium contexts use Firebase emulators through 
       observed.push(observation);
       await context.route('**/*', async (route) => {
         const request = route.request(), url = new URL(request.url());
+        if (isOnlineDiagnosticFirestoreRequest(request.url(), request.method())) {
+          return route.fulfill({ status: 200, body: diagnosticFirestoreSdk, headers: { 'content-type': 'text/javascript', 'access-control-allow-origin': '*' } });
+        }
         const allowed = allowedLocalOrigins.has(url.origin) || (url.origin === sdkOrigin && url.pathname.startsWith(sdkPrefix) && url.pathname.endsWith('.js'));
         if (!allowed) {
           // Even this known SDK diagnostic stays blocked. No response is mocked,
@@ -366,6 +382,13 @@ test('actual app: two isolated Chromium contexts use Firebase emulators through 
     }))));
     assert.equal(boards[0].own.length, 16); assert.equal(boards[1].own.length, 16);
     assert.deepEqual(boards[0].own, boards[1].other); assert.deepEqual(boards[1].own, boards[0].other);
+    // Reload starts a new SDK recorder; retain the completed gameplay evidence.
+    completedMatchSdkWatchDiagnostics = await Promise.all(pages.map(collectTrialSdkWatchDiagnostics));
+    for (const [seat, diagnostics] of completedMatchSdkWatchDiagnostics.entries()) {
+      assert.ok(diagnostics, `seat ${seat} loaded the pinned test-only Firestore diagnostic recorder`);
+      assert.ok(Number.isSafeInteger(diagnostics.counts.listenDocumentChange) && diagnostics.counts.listenDocumentChange > 0,
+        `seat ${seat} recorded at least one real Listen document arrival during gameplay`);
+    }
     for (const [seat, page] of pages.entries()) {
       await page.screenshot({ path: resolve(output, `finished-seat-${seat}.png`), fullPage: true });
       await page.reload(); await ready(page); await waitRevision(page, finished.match.revision);
@@ -385,16 +408,18 @@ test('actual app: two isolated Chromium contexts use Firebase emulators through 
     for (const type of ['draw', 'offer', 'accept', 'decline', 'place', 'self', 'store-empty', 'store-swap', 'use-storage', 'request-invite', 'pass-invite', 'yield', 'welcome', 'meditate', 'stone', 'final-stone', 'final-pass-final']) assert.ok(covered.has(type), `missing browser branch: ${type}`);
     assert.deepEqual(blocked, [], 'no unexpected denied destination; known SDK connectivity probes also remain blocked');
     assert.deepEqual(pageErrors, []); assert.deepEqual(routeErrors, []);
-    await writeFile(resolve(output, 'summary.json'), JSON.stringify({ projectId: config.projectId, status: 'passed', actions: finished.match.revision, branches: [...covered], independentAuthUsers: 2, sameIdRetry: true, offlineReconnect: true, unchangedEntryAndTransport: true, networkOrigins: [...allowedLocalOrigins, sdkOrigin], deniedConnectivityProbes }, null, 2));
+    const watchObservations = await collectWatchObservations();
+    await writeFile(resolve(output, 'summary.json'), JSON.stringify({ projectId: config.projectId, status: 'passed', actions: finished.match.revision, branches: [...covered], independentAuthUsers: 2, sameIdRetry: true, offlineReconnect: true, unchangedEntryAndTransport: true, networkOrigins: [...allowedLocalOrigins, sdkOrigin], deniedConnectivityProbes, sdkDiagnosticInstrumentation, watchObservations }, null, 2));
     console.log(`Actual-app emulator browser QA passed: ${finished.match.revision} committed actions; artifacts ${output}`);
   } catch (error) {
     // Test-only demo identities/room state only. Never record Auth tokens, headers,
     // browser storage dumps, or traces containing authentication responses.
+    const watchObservations = await collectWatchObservations();
     await Promise.allSettled(pages.flatMap((page, seat) => [
       page.screenshot({ path: resolve(output, `failure-seat-${seat}.png`), fullPage: true, timeout: 5000 }),
       page.content().then((html) => writeFile(resolve(output, `failure-seat-${seat}.html`), html)),
     ]));
-    await writeFile(resolve(output, 'failure.json'), JSON.stringify({ stage, error: error.stack || error.message, roomId, transcript, pageErrors, blocked, deniedConnectivityProbes, routeErrors, observations: observed.map(({ seat, authRequests, firestoreRequests, calls, console }) => ({ seat, authRequests, firestoreRequests, console, calls: calls.map(({ method, payload }) => ({ method, requestId: payload?.requestId, expectedRevision: payload?.expectedRevision, command: payload?.command })) })) }, null, 2));
+    await writeFile(resolve(output, 'failure.json'), JSON.stringify({ stage, error: error.stack || error.message, roomId, transcript, pageErrors, blocked, deniedConnectivityProbes, routeErrors, sdkDiagnosticInstrumentation, observations: observed.map(({ seat, authRequests, firestoreRequests, calls, console }) => ({ seat, authRequests, firestoreRequests, console, ...watchObservations[seat], calls: calls.map(({ method, payload }) => ({ method, requestId: payload?.requestId, expectedRevision: payload?.expectedRevision, command: payload?.command })) })) }, null, 2));
     throw error;
   } finally {
     await Promise.allSettled(contexts.map((context) => context.close()));

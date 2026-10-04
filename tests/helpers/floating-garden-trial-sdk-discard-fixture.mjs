@@ -1,6 +1,6 @@
 // Test-only diagnostic instrumentation, outside every deployable tree. The
-// vendored SDK stays byte-for-byte official; only the exact emulator-original
-// module response receives these two observational comma expressions. Neither
+// vendored SDK stays byte-for-byte official; only an exact test SDK module
+// response receives these two observational comma expressions. Neither
 // SDK comparisons, callbacks, log levels nor native network behavior is changed.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
@@ -19,6 +19,10 @@ const ARRIVAL_HOOK = '__PRIVATE_trialRecordArrival1080';
 
 export function isTrialDiagnosticFirestoreRequest(address, method) {
   return method === 'GET' && address === `${FIRESTORE_DIAGNOSTIC_SOURCE.url}?trial-emulator-original=1`;
+}
+
+export function isOnlineDiagnosticFirestoreRequest(address, method) {
+  return method === 'GET' && address === FIRESTORE_DIAGNOSTIC_SOURCE.url;
 }
 
 // Self-contained for embedding in the browser module. No arguments, documents,

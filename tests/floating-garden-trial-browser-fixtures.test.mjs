@@ -11,7 +11,7 @@ import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
 import { prepareTrialEmulator } from './helpers/prepare-floating-garden-trial-emulator.mjs';
 import { trialSdkFixture, sanitizeTrialRelayFailure, createTrialListenerDiagnostics, sanitizeTrialSnapshotRevisions } from './helpers/floating-garden-trial-sdk-fixture.mjs';
 import { FIRESTORE_DIAGNOSTIC_SOURCE, DISCARD_ANCHOR, ARRIVAL_ANCHOR, createTrialSdkWatchDiagnostics, instrumentTrialFirestoreSdk,
-  isTrialDiagnosticFirestoreRequest, loadTrialDiagnosticFirestoreSdk, collectTrialSdkWatchDiagnostics } from './helpers/floating-garden-trial-sdk-discard-fixture.mjs';
+  isTrialDiagnosticFirestoreRequest, isOnlineDiagnosticFirestoreRequest, loadTrialDiagnosticFirestoreSdk, collectTrialSdkWatchDiagnostics } from './helpers/floating-garden-trial-sdk-discard-fixture.mjs';
 
 const origin = 'https://wa-garden-ci-trial--garden-7day-ci0001.web.app';
 const fixture = { kind: 'floating-garden-trial-browser-emulator-only-v1', browserOrigin: 'http://127.0.0.1:8783', projectId: 'demo-floating-garden-trial',
@@ -50,6 +50,81 @@ test('only the exact original Firestore GET receives SDK instrumentation', () =>
     assert.equal(isTrialDiagnosticFirestoreRequest(candidate, 'GET'), false);
   }
   for (const method of ['POST', 'HEAD', undefined]) assert.equal(isTrialDiagnosticFirestoreRequest(address, method), false);
+});
+
+test('online diagnostic requests match only the exact official Firestore GET without a query', () => {
+  const address = FIRESTORE_DIAGNOSTIC_SOURCE.url;
+  assert.equal(isOnlineDiagnosticFirestoreRequest(address, 'GET'), true);
+  for (const candidate of [address + '?trial-emulator-original=1', address + '?token=never-record', address + '#fragment',
+    address.replace('https:', 'http:'), address.replace('10.8.0', '10.8.1'), address.replace('firestore', 'auth'),
+    address.replace('www.gstatic.com', 'www.gstatic.com:443'), address.replace('www.gstatic.com', 'user@www.gstatic.com'),
+    address.replace('www.gstatic.com', '127.0.0.1:8183'), address.replace('firebase-firestore', '%66irebase-firestore')]) {
+    assert.equal(isOnlineDiagnosticFirestoreRequest(candidate, 'GET'), false);
+  }
+  for (const method of ['POST', 'HEAD', 'get', undefined]) assert.equal(isOnlineDiagnosticFirestoreRequest(address, method), false);
+});
+
+const onlineBrowserSource = () => readFile(new URL('./floating-garden-online-browser-emulator.mjs', import.meta.url), 'utf8');
+
+test('actual online route serves pinned diagnostics only for its exact SDK request and keeps native emulator requests', async () => {
+  const source = await onlineBrowserSource(), diagnosticFirestoreSdk = await loadTrialDiagnosticFirestoreSdk();
+  let callback;
+  const context = { context: { route(pattern, handler) { assert.equal(pattern, '**/*'); callback = handler; } },
+    URL, isOnlineDiagnosticFirestoreRequest, diagnosticFirestoreSdk, sdkOrigin: 'https://www.gstatic.com', sdkPrefix: '/firebasejs/10.8.0/',
+    allowedLocalOrigins: new Set(['http://127.0.0.1:8083']), drop: null };
+  const start = source.indexOf("await context.route('**/*',"), end = source.indexOf('      const page = await context.newPage()', start);
+  assert.ok(start >= 0 && end > start);
+  await vm.runInNewContext(`(async () => { ${source.slice(start, end)} })()`, context);
+  for (const [address, method, instrumented] of [[FIRESTORE_DIAGNOSTIC_SOURCE.url, 'GET', true],
+    [FIRESTORE_DIAGNOSTIC_SOURCE.url, 'POST', false], [FIRESTORE_DIAGNOSTIC_SOURCE.url, 'HEAD', false],
+    [FIRESTORE_DIAGNOSTIC_SOURCE.url + '?trial-emulator-original=1', 'GET', false],
+    [FIRESTORE_DIAGNOSTIC_SOURCE.url.replace('firestore', 'auth'), 'GET', false],
+    ['http://127.0.0.1:8083/google.firestore.v1.Firestore/Listen/channel?SID=never-record', 'GET', false],
+    ['http://127.0.0.1:8083/google.firestore.v1.Firestore/Listen/channel', 'POST', false]]) {
+    let fulfilled = 0, continued = 0;
+    await callback({ request: () => ({ url: () => address, method: () => method }),
+      fulfill: (response) => { fulfilled += 1; assert.equal(response.status, 200); assert.equal(response.body, diagnosticFirestoreSdk); },
+      continue: () => { continued += 1; }, fetch: () => assert.fail('diagnostics must never relay native emulator traffic') });
+    assert.equal(fulfilled, instrumented ? 1 : 0); assert.equal(continued, instrumented ? 0 : 1);
+  }
+  assert.match(source, /const diagnosticFirestoreSdk = await loadTrialDiagnosticFirestoreSdk\(\)/);
+  assert.match(source, /source: FIRESTORE_DIAGNOSTIC_SOURCE, eventLimit: 256/);
+});
+
+test('actual online artifact collection reuses bounded sanitized evidence and keeps pre-reload gameplay diagnostics', async () => {
+  const source = await onlineBrowserSource(), secret = 'never-record-auth-room-name-payload';
+  const gameplay = createTrialSdkWatchDiagnostics(() => 1);
+  gameplay.arrival('Listen', { documentChange: { document: { name: secret, fields: { revision: { integerValue: '53' }, token: { stringValue: secret } } } } });
+  const completed = gameplay.snapshot(), revisions = [53, 52, -1, Infinity, null];
+  const context = { pages: revisions.map((value) => ({ value })), domRevision: async ({ value }) => { if (value === null) throw Error(secret); return value; },
+    collectTrialSdkWatchDiagnostics: async () => null, completedMatchSdkWatchDiagnostics: [completed], sanitizeTrialSnapshotRevisions,
+    observed: revisions.map(() => ({ snapshots: Array.from({ length: 300 }, (_, revision) => ({ room: { revision, match: { revision }, id: secret }, self: { uid: secret } })) })) };
+  const start = source.indexOf('  const collectWatchObservations ='), end = source.indexOf('  let roomId =', start);
+  assert.ok(start >= 0 && end > start);
+  const observations = await vm.runInNewContext(`(async () => { ${source.slice(start, end)} return collectWatchObservations(); })()`, context);
+  assert.deepEqual(Array.from(observations, ({ domRevision }) => domRevision), [53, 52, null, null, null]);
+  assert.deepEqual(observations[0].completedMatchSdkWatchDiagnostics, completed);
+  for (const observation of observations) {
+    assert.equal(observation.sdkWatchDiagnostics, null);
+    assert.equal(observation.snapshotRevisions.length, 256);
+    assert.equal(observation.snapshotRevisions[0].revision, 44);
+    assert.equal(observation.snapshotRevisions.at(-1).matchRevision, 299);
+  }
+  assert.doesNotMatch(JSON.stringify(observations), /never-record|token|payload|self|uid/);
+});
+
+test('online success requires actual Listen observations before the final reload', async () => {
+  const source = await onlineBrowserSource();
+  const start = source.indexOf('    completedMatchSdkWatchDiagnostics = await'), end = source.indexOf('    for (const [seat, page] of pages.entries())', start);
+  assert.ok(start >= 0 && end > start && source.indexOf('await page.reload()', end) > end);
+  async function check(diagnostics) {
+    const context = { assert, pages: [0, 1], collectTrialSdkWatchDiagnostics: async () => diagnostics };
+    return vm.runInNewContext(`(async () => { let completedMatchSdkWatchDiagnostics; ${source.slice(start, end)} return completedMatchSdkWatchDiagnostics; })()`, context);
+  }
+  for (const diagnostics of [null, { counts: { listenDocumentChange: 0 } }, { counts: { listenDocumentChange: '1' } }]) await assert.rejects(check(diagnostics));
+  const diagnostics = createTrialSdkWatchDiagnostics(() => 1);
+  diagnostics.arrival('Listen', { documentChange: { document: { fields: {} } } });
+  assert.equal((await check(diagnostics.snapshot())).length, 2);
 });
 
 function diagnosticDocument({ seconds = 123, nanoseconds = 7, revision = 5, matchRevision = 4, found = true } = {}) {
