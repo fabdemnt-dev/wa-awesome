@@ -1,0 +1,69 @@
+name: Garden one-time read-only CI access check
+
+on:
+  push:
+    branches: ['verify/garden-ci-access-20261006']
+    paths:
+      - '.github/workflows/garden-ci-access-check.yml'
+      - 'scripts/floating-garden-ci-access-check.mjs'
+      - 'tests/floating-garden-ci-access-check.test.mjs'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: garden-ci-access-check-20261006
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    if: >-
+      github.repository_id == '1321198654' &&
+      github.ref == 'refs/heads/verify/garden-ci-access-20261006' &&
+      github.event_name == 'push' &&
+      github.run_number == 1 &&
+      github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Reject debug mode before authentication
+        env:
+          RUNNER_DEBUG_ENABLED: ${{ runner.debug == '1' }}
+        run: |
+          set -euo pipefail
+          if [ "$RUNNER_DEBUG_ENABLED" != 'false' ]; then
+            echo 'ci_debug_guard passed=false'
+            exit 1
+          fi
+      - name: Checkout reviewed probe
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '22'
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Verify probe offline before authentication
+        run: node --test tests/floating-garden-ci-access-check.test.mjs
+      - name: Require existing secret without reading or printing its value
+        env:
+          EXISTING_SECRET_PRESENT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON != '' }}
+        run: |
+          set -euo pipefail
+          if [ "$EXISTING_SECRET_PRESENT" != 'true' ]; then
+            echo 'existing_secret available=false'
+            exit 1
+          fi
+      - name: Authenticate using the existing repository secret
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          project_id: wa-awesome-garden-stg
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+          create_credentials_file: true
+          export_environment_variables: true
+          cleanup_credentials: true
+      - name: Read fixed garden metadata and test permissions
+        run: node scripts/floating-garden-ci-access-check.mjs --run-ci-read-only
