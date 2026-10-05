@@ -13,7 +13,7 @@ const problem = (error) => messages[codeOf(error)] || '通信の結果を確認�
 /** UI-independent authoritative client. api: create/join/start/getSnapshot/submit; subscribe: roomId, next, error. */
 export function createOnlineController({ api, ensureUser, subscribe = () => () => {}, storage, requestId = () => crypto.randomUUID(), isOnline = () => true } = {}) {
   let alive = true, generation = 0, listener = null, resuming = null, sending = null, suspended = false, queuedResume = null;
-  let saved = null, storageIssue = null;
+  let saved = null, storageIssue = null, returnTarget = null, returning = null;
   const observers = new Set();
   const state = { uid: null, room: null, self: null, connection: 'initial', pending: null, busy: false, notice: '', error: false, storageIssue: null, terminal: null, ui: { ...freshPreview(), comparison: null, returnConfirm: false } };
   try {
@@ -40,7 +40,68 @@ export function createOnlineController({ api, ensureUser, subscribe = () => () =
       state.storageIssue = storageIssue; state.error = true; state.notice = storageIssue; publish(); return false;
     }
   }
-  const canConfirm = () => alive && !sending && !resuming && !state.pending && !storageIssue && isOnline() && state.connection === 'ready' && Boolean(state.uid);
+  const canConfirm = () => alive && !returning && !sending && !resuming && !state.pending && !storageIssue && isOnline() && state.connection === 'ready' && Boolean(state.uid);
+  // A lobby return only forgets this browser's recovery pointer. Keep a server-
+  // confirmed, solitary host and its exact confirmation separate from terminal recovery.
+  function canReturnLobby(checking = false) {
+    const { room, self } = state;
+    return alive && !suspended && !sending && !resuming && (!returning || checking)
+      && (!state.busy || checking) && !state.pending && !saved?.pending && !storageIssue && !state.error
+      && isOnline() && state.connection === 'ready' && Boolean(state.uid) && saved?.uid === state.uid
+      && Boolean(room) && room.id === saved?.roomId && room.status === 'waiting'
+      && room.match === null && room.gameId === null && Number.isSafeInteger(room.revision) && room.revision >= 0
+      && self?.isHost === true && self.seat === room.hostSeat
+      && Array.isArray(room.players) && room.players.length === 1 && room.players[0]?.seat === self.seat;
+  }
+  const canReturnToEntry = () => Boolean(state.terminal && !state.pending && !state.busy) || canReturnLobby();
+  function invalidateLobbyReturn() {
+    if (!returnTarget) return;
+    returnTarget = null; state.ui.returnConfirm = false;
+  }
+  function returnRecoveryUnchanged(target) {
+    try {
+      const raw = storage.getItem(ONLINE_SAVE_KEY);
+      if (!raw || JSON.stringify(JSON.parse(raw)) !== target.recovery || JSON.stringify(saved) !== target.recovery) {
+        state.connection = 'conflict'; invalidateLobbyReturn();
+        status('別のタブの復帰情報が変わりました。元のタブの操作を確認して、このページを再読み込みしてください', true); return false;
+      }
+      return true;
+    } catch {
+      storageIssue = '復帰情報を確認できないため操作を止めています'; state.storageIssue = storageIssue;
+      invalidateLobbyReturn(); status(storageIssue, true); return false;
+    }
+  }
+  function clearRecovery() {
+    const previous = saved; saved = { version: 1, uid: state.uid, roomId: null, inviteCode: null, pending: null };
+    if (!persist()) { saved = previous; return false; }
+    generation += 1; stopListener(); returnTarget = null; state.room = null; state.self = null; state.terminal = null;
+    state.ui = { ...freshPreview(), comparison: null, returnConfirm: false }; state.busy = false;
+    state.notice = 'この端末の復帰先を解除しました'; state.error = false; state.connection = isOnline() ? 'ready' : 'offline'; publish(); return true;
+  }
+  function confirmLobbyReturn(target) {
+    if (!canReturnLobby() || !returnRecoveryUnchanged(target)) return Promise.resolve(false);
+    const token = generation;
+    const current = () => state.ui.returnConfirm && returnTarget === target && token === generation
+      && target.uid === state.uid && target.room === JSON.stringify(state.room) && target.self === JSON.stringify(state.self);
+    state.busy = true;
+    const task = Promise.resolve().then(async () => {
+      try {
+        if (!current() || !canReturnLobby(true)) return false;
+        if (!await authenticate(token)) return false;
+        // Authentication can yield while another player joins, a tab writes recovery,
+        // or the page is suspended. Never use the pre-auth eligibility after that wait.
+        if (!current() || !canReturnLobby(true) || !returnRecoveryUnchanged(target)) return false;
+        return clearRecovery();
+      } catch (error) {
+        if (alive && token === generation) { state.connection = 'error'; status(problem(error), true); }
+        return false;
+      } finally {
+        if (returning === task) returning = null;
+        if (alive && (token === generation || !state.room)) { state.busy = false; publish(); }
+      }
+    });
+    returning = task; publish(); return task;
+  }
   function invalidatePreview() { Object.assign(state.ui, freshPreview()); }
   function accept(snapshot, token = generation, { fromCache = false, allowSuperseded = false } = {}) {
     if (!alive || token !== generation || !snapshot?.room || !state.uid) return false;
@@ -54,7 +115,7 @@ export function createOnlineController({ api, ensureUser, subscribe = () => () =
       // A stale cache must not roll confirmed data back or leave a ready client
       // claiming live synchronization. Preserve stronger blockers and recovery.
       if (fromCache && state.connection === 'ready' && room.revision >= 0 && (!room.match || room.match.revision >= 0) && room.gameId === previous.gameId && Boolean(room.match) === Boolean(previous.match)) {
-        state.connection = 'cache'; publish();
+        state.connection = 'cache'; invalidateLobbyReturn(); publish();
       }
       // A live server event may overtake an in-flight refresh. Only a fully
       // validated, consistently older reply can leave that confirmed state ready.
@@ -64,6 +125,7 @@ export function createOnlineController({ api, ensureUser, subscribe = () => () =
         && (!room.match || (room.match.revision >= 0 && room.match.revision <= previous.match.revision));
     }
     if (!previous || previous.gameId !== room.gameId || previous.match?.revision !== room.match?.revision) invalidatePreview();
+    if (returnTarget && (fromCache || returnTarget.room !== JSON.stringify(room) || returnTarget.self !== JSON.stringify(self))) invalidateLobbyReturn();
     state.room = clone(room); state.self = clone(self);
     if (!fromCache) state.terminal = room.status === 'finished' ? 'finished' : null;
     state.connection = fromCache ? 'cache' : isOnline() ? 'ready' : 'offline';
@@ -150,14 +212,14 @@ export function createOnlineController({ api, ensureUser, subscribe = () => () =
   }
   function resume() {
     if (!alive) return Promise.resolve(false);
-    if (resuming || sending) {
-      const running = sending || resuming;
+    if (resuming || sending || returning) {
+      const running = returning || sending || resuming;
       if (!suspended) return running;
       queuedResume ||= running.finally(() => { queuedResume = null; return resume(); });
       return queuedResume;
     }
     suspended = false;
-    const token = ++generation; stopListener(); invalidatePreview();
+    const token = ++generation; stopListener(); invalidatePreview(); invalidateLobbyReturn();
     state.connection = isOnline() ? 'syncing' : 'offline'; state.busy = true; state.storageIssue = storageIssue; publish();
     const task = Promise.resolve().then(async () => {
       try {
@@ -215,7 +277,7 @@ export function createOnlineController({ api, ensureUser, subscribe = () => () =
     state.notice = ''; state.error = false; publish(); return true;
   }
   return {
-    getState: () => ({ ...clone(state), canConfirm: canConfirm(), inviteCode: saved?.inviteCode || null }),
+    getState: () => ({ ...clone(state), canConfirm: canConfirm(), canReturnToEntry: canReturnToEntry(), inviteCode: saved?.inviteCode || null }),
     observe(fn) { observers.add(fn); return () => observers.delete(fn); },
     resume,
     create(displayName) { if (saved?.roomId) return Promise.resolve(false); return mutate('create', { displayName: displayName.trim() }); },
@@ -225,17 +287,21 @@ export function createOnlineController({ api, ensureUser, subscribe = () => () =
     commit(expectedRevision = state.room?.match?.revision) { const pending = state.ui.pending; return pending?.type === 'tile' ? submit('place', { index: pending.index, rotation: state.ui.rotation }, expectedRevision) : pending ? submit('stone', { index: pending.index, stone: pending.stone }, expectedRevision) : Promise.resolve(false); },
     compare(seat, pair = false) { if (!state.room?.match?.players.some((player) => player.seat === seat && player.seat !== state.self?.seat)) return false; state.ui.comparison = { seat, pair }; publish(); return true; },
     closeComparison() { state.ui.comparison = null; publish(); },
-    offline() { state.connection = 'offline'; invalidatePreview(); publish(); },
-    suspend() { suspended = true; generation += 1; stopListener(); state.connection = 'syncing'; invalidatePreview(); state.busy = false; publish(); },
-    storageChanged() { state.connection = 'conflict'; invalidatePreview(); status('別のタブで復帰情報が更新されました。通信が終わったらこのページを再読み込みしてください', true); },
-    requestReturn() { if (!state.terminal || state.pending || state.busy) return false; state.ui.returnConfirm = true; publish(); return true; },
-    cancelReturn() { state.ui.returnConfirm = false; publish(); },
+    offline() { state.connection = 'offline'; invalidatePreview(); invalidateLobbyReturn(); publish(); },
+    suspend() { suspended = true; generation += 1; stopListener(); state.connection = 'syncing'; invalidatePreview(); invalidateLobbyReturn(); state.busy = false; publish(); },
+    storageChanged() { state.connection = 'conflict'; invalidatePreview(); invalidateLobbyReturn(); status('別のタブで復帰情報が更新されました。通信が終わったらこのページを再読み込みしてください', true); },
+    requestReturn() {
+      if (!canReturnToEntry() || returning) return false;
+      returnTarget = state.terminal ? null : { uid: state.uid, room: JSON.stringify(state.room), self: JSON.stringify(state.self), recovery: JSON.stringify(saved) };
+      if (returnTarget && !returnRecoveryUnchanged(returnTarget)) return false;
+      state.ui.returnConfirm = true; publish(); return true;
+    },
+    cancelReturn() { returnTarget = null; state.ui.returnConfirm = false; publish(); },
     returnToEntry() {
-      if (!state.ui.returnConfirm || !state.terminal || state.pending || state.busy || storageIssue) return false;
-      const previous = saved; saved = { version: 1, uid: state.uid, roomId: null, inviteCode: null, pending: null };
-      if (!persist()) { saved = previous; return false; }
-      generation += 1; stopListener(); state.room = null; state.self = null; state.terminal = null; state.ui = { ...freshPreview(), comparison: null, returnConfirm: false };
-      state.notice = 'この端末の復帰先を解除しました'; state.error = false; state.connection = isOnline() ? 'ready' : 'offline'; publish(); return true;
+      if (!state.ui.returnConfirm || returning) return false;
+      if (returnTarget) return confirmLobbyReturn(returnTarget);
+      if (!state.terminal || state.pending || state.busy || storageIssue) return false;
+      return clearRecovery();
     },
     dispose() { alive = false; generation += 1; stopListener(); observers.clear(); },
   };

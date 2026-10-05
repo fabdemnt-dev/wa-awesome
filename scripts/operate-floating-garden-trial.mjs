@@ -8,8 +8,8 @@ import { createHash } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
 import { execFileSync } from 'node:child_process';
 import { prepareTrialOperation, publicTrialConfig } from './prepare-floating-garden-trial-operation.mjs';
-import { validateEnvironment as validateOperatorEnvironment } from './deploy-floating-garden-connection-template.mjs';
-import { normalizeFailureDiagnostic, describeAdapterFailure } from './floating-garden-trial-cloud-adapter.mjs';
+import { validateEnvironment as validateOperatorEnvironment, checkTooling } from './deploy-floating-garden-connection-template.mjs';
+import { normalizeFailureDiagnostic, describeAdapterFailure, makeCloudRunner, classifyDeployResult } from './floating-garden-trial-cloud-adapter.mjs';
 
 export const PROJECT = 'wa-awesome-garden-stg';
 export const ORIGIN = 'https://wa-awesome-garden-stg.web.app';
@@ -18,6 +18,7 @@ export const MAX_START_WAIT_MILLIS = 30 * 60000;
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const STATE_FILE = 'OPERATION-STATE.json';
 export const ACTIVATION_RECOVERY_FILE = 'ACTIVATION-RECOVERY-STATE.json';
+export const HOSTING_UPDATE_FILES = Object.freeze(['game/public/lab/floating-garden/online/controller.js', 'game/public/lab/floating-garden/online/view.js']);
 const json = (value) => `${JSON.stringify(value, null, 2)}\n`;
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 const same = (a, b) => json(a) === json(b);
@@ -343,6 +344,7 @@ export async function createJournal(packet, { now = Date.now, prior } = {}) {
     state.predecessor = { ...prior.predecessor };
   }
   if (Object.hasOwn(state, 'predecessor') && (!predecessorShape(state.predecessor) || state.predecessor.output === packet.output)) stop();
+  if (Object.hasOwn(state, 'hostingUpdate') && !hostingUpdateShape(state.hostingUpdate)) stop();
   return journalWriter(packet, path, state, now);
 }
 function journalWriter(packet, path, state, now, activationOnly = false) {
@@ -360,11 +362,12 @@ function journalWriter(packet, path, state, now, activationOnly = false) {
   function event(stage, status) { if (state.events.length >= 32) stop(); state.events.push({ stage, status, atMillis: clock(now) }); persist(); }
   return {
     begin(mode) {
-      if (!['deploy', 'resume', 'activate', 'stop'].includes(mode) || activationOnly && mode !== 'activate') stop();
+      if (!['deploy', 'resume', 'activate', 'stop', 'update-hosting'].includes(mode) || activationOnly && mode !== 'activate') stop();
       const selected = mode === 'stop' ? 'stop' : 'deploy';
       const current = state[selected].status;
       if ((mode === 'deploy' || mode === 'resume') && current !== 'new' ||
           mode === 'resume' && !state.predecessor || mode === 'deploy' && state.predecessor || mode === 'activate' && current !== 'published-stopped' || mode === 'stop' && current !== 'new') stop();
+      if (mode === 'update-hosting' && (!state.hostingUpdate || current !== 'new') || state.hostingUpdate && ['deploy', 'resume', 'activate'].includes(mode)) stop();
       operation = selected;
       state[operation] = { status: 'running', stage: mode }; persist();
     },
@@ -450,6 +453,123 @@ export async function createActivationRecoveryJournal(packet, proof, { now = Dat
   try { await directoryHandle.sync(); } finally { await directoryHandle.close(); }
   return journalWriter(packet, path, state, now, true);
 }
+function exactEvents(events, stages) {
+  if (!Array.isArray(events) || events.length !== stages.length * 2) stop();
+  for (let i = 0; i < events.length; i++) {
+    const e = events[i];
+    if (!plain(e) || !same(Object.keys(e).sort(), ['atMillis', 'stage', 'status']) || e.stage !== stages[Math.floor(i / 2)] ||
+        e.status !== (i % 2 ? 'verified' : 'issued') || !Number.isSafeInteger(e.atMillis) || e.atMillis <= 0 || i > 0 && e.atMillis < events[i - 1].atMillis) stop();
+  }
+}
+export async function readActiveHostingPrior(output) {
+  const { packet, review } = await readOperationPacket(output), proof = await readVerifiedHostingRecovery(packet, review);
+  await unlocked(packet.output);
+  const bytes = await regular(join(packet.output, ACTIVATION_RECOVERY_FILE), 32768), receipt = JSON.parse(bytes);
+  if (!plain(receipt) || !same(Object.keys(receipt).sort(), ['deploy', 'events', 'manifestDigest', 'predecessor', 'recovery', 'reviewDigest', 'schemaVersion', 'stop']) ||
+      receipt.schemaVersion !== 1 || receipt.manifestDigest !== packet.manifestDigest || receipt.reviewDigest !== packet.reviewDigest ||
+      !dataEqual(receipt.deploy, { status: 'active' }) || !dataEqual(receipt.stop, { status: 'new' }) ||
+      !dataEqual(receipt.predecessor, proof.prior.predecessor) || !dataEqual(receipt.recovery, proof.receipts)) stop();
+  exactEvents(receipt.events, ['activate-two-testers']);
+  if (receipt.events.some((e) => e.atMillis < review.startsAtMillis || e.atMillis >= review.endsAtMillis)) stop();
+  return { packet, review, proof, activationReceiptDigest: hash(bytes) };
+}
+export async function verifyActiveHostingPrior(prior) {
+  await verifyVerifiedHostingRecovery(prior.packet, prior.proof); await unlocked(prior.packet.output);
+  if (hash(await regular(join(prior.packet.output, ACTIVATION_RECOVERY_FILE), 32768)) !== prior.activationReceiptDigest) stop();
+}
+export async function verifyHostingUpdatePacket(packet, review, prior) {
+  await verifyOperationPacket(packet); await verifyActiveHostingPrior(prior);
+  if (packet.output === prior.packet.output || packet.reviewDigest !== prior.packet.reviewDigest || !dataEqual(review, prior.review) ||
+      !same(Object.keys(packet.manifest.files).sort(), Object.keys(prior.packet.manifest.files).sort())) stop();
+  const changed = Object.keys(packet.manifest.files).filter((path) => packet.manifest.files[path] !== prior.packet.manifest.files[path]);
+  if (!changed.length || changed.some((path) => !HOSTING_UPDATE_FILES.includes(path))) stop();
+}
+function hostingUpdateShape(value) {
+  return plain(value) && same(Object.keys(value).sort(), ['activationReceiptDigest', 'originalJournalDigest', 'priorManifestDigest', 'priorOutput', 'reviewDigest', 'schemaVersion']) &&
+    value.schemaVersion === 1 && typeof value.priorOutput === 'string' && value.priorOutput.startsWith('/') && resolve(value.priorOutput) === value.priorOutput &&
+    ['activationReceiptDigest', 'originalJournalDigest', 'priorManifestDigest', 'reviewDigest'].every((key) => /^[a-f0-9]{64}$/.test(value[key]));
+}
+export async function createHostingUpdateJournal(packet, review, prior, { now = Date.now } = {}) {
+  await verifyHostingUpdatePacket(packet, review, prior);
+  const hostingUpdate = { schemaVersion: 1, priorOutput: prior.packet.output, priorManifestDigest: prior.packet.manifestDigest,
+    reviewDigest: prior.packet.reviewDigest, originalJournalDigest: prior.proof.receipts.originalJournalDigest, activationReceiptDigest: prior.activationReceiptDigest };
+  const path = join(packet.output, STATE_FILE), state = { schemaVersion: 1, manifestDigest: packet.manifestDigest, reviewDigest: packet.reviewDigest,
+    hostingUpdate, deploy: { status: 'new' }, stop: { status: 'new' }, events: [] };
+  const handle = await open(path, 'wx', 0o600);
+  try { await handle.writeFile(json(state)); await handle.sync(); } finally { await handle.close(); }
+  return journalWriter(packet, path, state, now);
+}
+export async function selectVerifiedHostingOperation(originalOut, updateOut) {
+  const original = resolve(originalOut);
+  try {
+    const { packet } = await readOperationPacket(updateOut), state = JSON.parse(await regular(join(packet.output, STATE_FILE), 32768));
+    if (state.schemaVersion !== 1 || state.manifestDigest !== packet.manifestDigest || state.reviewDigest !== packet.reviewDigest ||
+        !hostingUpdateShape(state.hostingUpdate) || state.hostingUpdate.priorOutput !== original || state.hostingUpdate.reviewDigest !== packet.reviewDigest ||
+        !dataEqual(state.deploy, { status: 'active' }) || !plain(state.stop) || !['new', 'running', 'failed', 'stopped'].includes(state.stop.status) ||
+        !Array.isArray(state.events) || state.events.length < 2 || state.events.length > 6) stop();
+    exactEvents(state.events.slice(0, 2), ['update-hosting']);
+    if (state.events.slice(2).some((e) => !['stop-admin-write', 'stop-hosting-write'].includes(e.stage) || !['issued', 'verified'].includes(e.status))) stop();
+    return packet.output;
+  } catch { /* Never promote an incomplete update or depend on mutable prior logs for a verified one. */ }
+  return (await readOperationPacket(original)).packet.output;
+}
+export async function createHostingPublisher({ packet, toolingDir, runner = makeCloudRunner() }) {
+  await verifyOperationPacket(packet); await directory(toolingDir);
+  const firebase = checkTooling(toolingDir, (command, args) => {
+    const r = runner(command, args, packet.output);
+    if (r?.exitCode !== 0 || r.signal || r.timedOut || typeof r.stdout !== 'string') stop();
+    return r.stdout;
+  });
+  let attempted = false;
+  return async () => {
+    if (attempted) stop(); attempted = true;
+    await verifyOperationPacket(packet);
+    const logs = join(packet.output, 'hosting-update-logs'), handles = [];
+    try {
+      await mkdir(logs, { mode: 0o700 }); await directory(logs);
+      for (const stream of ['stdout', 'stderr']) handles.push(await open(join(logs, `hosting.${stream}.log`), 'wx', 0o600));
+      const raw = runner(process.execPath, [firebase, 'deploy', '--only', `hosting:${PROJECT}`, '--message', `garden-trial-game-v1:${packet.manifestDigest}`,
+        '--config', 'firebase.hosting-only.json', '--project', PROJECT, '--non-interactive', '--json'], packet.gameDir);
+      for (const [i, stream] of ['stdout', 'stderr'].entries()) {
+        const value = raw?.[stream] ?? '';
+        if (typeof value !== 'string' || Buffer.byteLength(value) > 16 * 1024 * 1024) stop();
+        await handles[i].writeFile(value); await handles[i].sync();
+      }
+      return classifyDeployResult(raw);
+    } catch { return { kind: 'unknown', diagnostic: normalizeFailureDiagnostic() }; }
+    finally { for (const handle of handles) await handle.close(); }
+  };
+}
+export async function operateHostingUpdate({ review, oldCloud, newCloud, publish, journal, checkLocal = async () => {}, now = Date.now, log = console.log }) {
+  publicTrialConfig(review);
+  let stage = 'hosting-update-preflight', failureDiagnostic;
+  const activeWindow = () => { if (clock(now) < review.startsAtMillis || clock(now) >= review.endsAtMillis) stop(); };
+  try {
+    await checkLocal(); activeWindow(); if (!approvalReady(review)) stop();
+    journal.begin('update-hosting'); await journal.flush();
+    await oldCloud.preflight('inspect'); await newCloud.preflight('inspect');
+    verified(await oldCloud.verifyFunctions()); verified(await oldCloud.verifyRules()); verified(await oldCloud.verifyHosting('game'));
+    const before = await oldCloud.readAdmin(); assertState(before, review, 'active');
+    const hosting = await oldCloud.readHosting(); if (!validIdentity(hosting) || hosting.kind !== 'game') stop();
+    await checkLocal(); await journal.verify(); activeWindow();
+    if (!dataEqual(before, await oldCloud.readAdmin()) || !dataEqual(hosting, await oldCloud.readHosting())) stop();
+    stage = 'update-hosting'; journal.issued(stage); await journal.flush(); await journal.verify(); await checkLocal(); activeWindow();
+    log('STAGE: update-hosting');
+    const result = await publish();
+    if (result?.kind !== 'success') { failureDiagnostic = normalizeFailureDiagnostic(result?.diagnostic); stop(); }
+    stage = 'verify-hosting-update';
+    verified(await newCloud.verifyHosting('game')); verified(await newCloud.verifyFunctions()); verified(await newCloud.verifyRules());
+    const after = await oldCloud.readAdmin(); assertState(after, review, 'active'); if (!dataEqual(before, after)) stop();
+    await checkLocal(); await journal.verify(); activeWindow();
+    journal.verified('update-hosting'); journal.finish('active'); await journal.flush(); await journal.verify();
+    log('HOSTING_UPDATED: verified; testers, room usage and the fixed deadline are unchanged.');
+    return { mode: 'update-hosting', status: 'active' };
+  } catch (error) {
+    const diagnostic = failureDiagnostic ?? describeAdapterFailure(error); journal.fail(stage, diagnostic); await journal.flush();
+    log(`STOP: ${stage}. reason=${diagnostic.reason}. No Hosting update is retried; inspect the saved operation before any further action.`);
+    return { mode: 'update-hosting', status: 'blocked', stage, diagnostic };
+  }
+}
 export function parseReviewBase64(value) {
   if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,11000}$/.test(value)) stop();
   const bytes = Buffer.from(value, 'base64url'); if (bytes.length > 8192 || bytes.toString('base64url') !== value) stop();
@@ -484,13 +604,23 @@ export function formatTrialJst(milliseconds) {
 export const PLAN = 'PLAN_ONLY: prepare and review exact seven-day private input before any execution. Target wa-awesome-garden-stg only: five Functions, dedicated Rules/Hosting and exactly two tester records. Public invoker, managed service identity calls and bounded CLI initial recreate need explicit approval. Retain artifacts; no automatic cleanup policy. Default mode makes no network, SDK, auth, install or cloud call.';
 export async function main(args = process.argv.slice(2), { log = console.log } = {}) {
   if (!args.length || args.length === 1 && args[0] === '--plan') { log(PLAN); return 0; }
-  let lock, packet, journal, prior, recoveryProof;
+  let lock, packet, journal, prior, recoveryProof, hostingPrior;
   try {
     validateOperatorEnvironment(process.env, process.execArgv);
     for (const key of ['FIRESTORE_EMULATOR_HOST', 'FIREBASE_AUTH_EMULATOR_HOST', 'FIREBASE_DATABASE_EMULATOR_HOST', 'FIREBASE_STORAGE_EMULATOR_HOST', 'CLOUDSDK_AUTH_DISABLE_CREDENTIALS']) if (process.env[key]) stop();
-    const modes = ['--run-reviewed', '--resume-reviewed', '--activate', '--activate-verified-hosting', '--stop', '--inspect'];
+    const modes = ['--update-hosting-reviewed', '--run-reviewed', '--resume-reviewed', '--activate', '--activate-verified-hosting', '--stop', '--inspect'];
     if (!modes.includes(args[0])) stop();
-    if (args[0] === '--run-reviewed') {
+    if (args[0] === '--update-hosting-reviewed') {
+      if (args.length !== 7 || args[1] !== '--prior-operation' || args[3] !== '--out' || args[5] !== '--tooling-dir' ||
+          ![args[2], args[4], args[6]].every((path) => path.startsWith('/'))) stop();
+      hostingPrior = await readActiveHostingPrior(args[2]);
+      if (Date.now() < hostingPrior.review.startsAtMillis || Date.now() >= hostingPrior.review.endsAtMillis) stop();
+      const rel = relative(hostingPrior.packet.output, resolve(args[4]));
+      if (rel === '' || rel !== '..' && !rel.startsWith(`..${sep}`) && !rel.startsWith(sep)) stop();
+      await prepareTrialOperation({ review: hostingPrior.review, output: args[4], repositoryRoot: ROOT });
+      ({ packet } = await readOperationPacket(args[4]));
+      await verifyHostingUpdatePacket(packet, hostingPrior.review, hostingPrior);
+    } else if (args[0] === '--run-reviewed') {
       if (args.length !== 7 || args[1] !== '--review-base64' || args[3] !== '--out' || args[5] !== '--tooling-dir' || !args[4].startsWith('/') || !args[6].startsWith('/')) stop();
       const review = parseReviewBase64(args[2]); if (!approvalReady(review)) stop();
       if (Date.now() >= review.startsAtMillis) stop();
@@ -515,7 +645,7 @@ export async function main(args = process.argv.slice(2), { log = console.log } =
       ({ packet } = await readOperationPacket(args[2]));
     }
     const { review } = await readOperationPacket(packet.output);
-    const mode = ({ '--run-reviewed': 'deploy', '--resume-reviewed': 'resume', '--activate': 'activate', '--activate-verified-hosting': 'activate', '--stop': 'stop', '--inspect': 'inspect' })[args[0]];
+    const mode = ({ '--update-hosting-reviewed': 'update-hosting', '--run-reviewed': 'deploy', '--resume-reviewed': 'resume', '--activate': 'activate', '--activate-verified-hosting': 'activate', '--stop': 'stop', '--inspect': 'inspect' })[args[0]];
     const recoveryRequested = args[0] === '--activate-verified-hosting';
     if (recoveryRequested) log(`END: ${formatTrialJst(review.endsAtMillis)}`);
     if (recoveryRequested && Date.now() < review.startsAtMillis) {
@@ -527,6 +657,19 @@ export async function main(args = process.argv.slice(2), { log = console.log } =
     if (mode !== 'inspect') {
       lock = await open(join(packet.output, 'OPERATION.lock'), 'wx', 0o600);
       await lock.writeFile('This operation is in progress. Do not remove or rerun after an uncertain interruption.\n');
+    }
+    if (hostingPrior) {
+      journal = await createHostingUpdateJournal(packet, review, hostingPrior);
+      await installRuntime(packet, hostingPrior.proof.prior);
+      const { createCloudAdapter } = await import('./floating-garden-trial-cloud-adapter.mjs');
+      const toolingDir = args.at(-1), oldCloud = createCloudAdapter({ packet: hostingPrior.packet, review, toolingDir }),
+        newCloud = createCloudAdapter({ packet, review, toolingDir });
+      const publish = await createHostingPublisher({ packet, toolingDir });
+      const checkLocal = () => verifyHostingUpdatePacket(packet, review, hostingPrior);
+      log(`END: ${formatTrialJst(review.endsAtMillis)}`);
+      const result = await operateHostingUpdate({ review, oldCloud, newCloud, publish, journal, checkLocal, log });
+      await journal.flush(); log(`OPERATION_DIRECTORY: ${packet.output}`);
+      return result.status === 'active' ? 0 : 1;
     }
     if (recoveryRequested) {
       recoveryProof = await readVerifiedHostingRecovery(packet, review);

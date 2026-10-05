@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createOnlineController, ONLINE_SAVE_KEY } from '../lab/floating-garden/online/controller.js';
+import { createTrialStorage, trialRecoveryKey } from '../lab/floating-garden/trial/bootstrap.js';
 import { renderOnline } from '../lab/floating-garden/online/view.js';
 import { localTestAllowed, EMULATOR_CONFIG, EMULATOR_PORTS } from '../lab/floating-garden/online/config.js';
 import { createMatch, applyMatchAction, legalActions, getDecision, publicMatch, rankMatch, MATCH_VERSION } from '../lab/floating-garden/match-engine.js';
@@ -211,6 +212,193 @@ async function playing() { const service = server(), a = service.client('a'), b 
   await a.controller.create('Host');assert.equal(service.subscriptions.length,2);assert.equal(service.subscriptions[1].roomId,'room-2');
   const current=a.controller.getState();old.next({room:finished});old.fail(error('unavailable'));assert.deepEqual(a.controller.getState(),current);
   a.controller.dispose();assert.ok(service.subscriptions.every(watch=>watch.stops===1));
+ });
+async function lobby(options = {}) {
+  const service = server(), a = service.client('a', options);
+  await a.controller.resume(); await a.controller.create('Host');
+  return { service, a };
+}
+ test('solitary host explicitly returns locally with the same UID and without changing the server room', async () => {
+  let authentications=0;
+  const {service,a}=await lobby({ensureUser:async()=>{authentications++;return {uid:'a'};}});
+  const before=clone(service.room),calls=service.calls.length,authCount=authentications,watch=service.subscriptions[0];
+  assert.equal(a.controller.getState().canReturnToEntry,true);
+  assert.match(renderOnline(a.controller.getState()),/入口へ戻って別の部屋に参加/);
+  assert.equal(await a.controller.returnToEntry(),false);
+  assert.equal(a.controller.requestReturn(),true);
+  const html=renderOnline(a.controller.getState());
+  assert.match(html,/このブラウザーの復帰先だけを解除/);assert.match(html,/匿名認証（UID）は変わりません/);
+  assert.match(html,/サーバー上の部屋・参加情報・招待コードは変更しません/);
+  assert.equal(await a.controller.returnToEntry(),true);
+  assert.deepEqual(JSON.parse(a.storage.getItem(ONLINE_SAVE_KEY)),{version:1,uid:'a',roomId:null,inviteCode:null,pending:null});
+  assert.equal(a.controller.getState().uid,'a');assert.equal(a.controller.getState().room,null);assert.equal(a.controller.getState().self,null);
+  assert.equal(a.controller.getState().canConfirm,true);assert.equal(a.controller.getState().canReturnToEntry,false);
+  assert.equal(authentications,authCount+1,'confirmation rechecks the existing identity');
+  assert.equal(service.calls.length,calls,'return calls no room API, including getSnapshot');assert.deepEqual(service.room,before);
+  assert.equal(watch.stops,1);assert.equal(await a.controller.returnToEntry(),false);
+  const cleared=a.controller.getState();watch.next({room:before});watch.fail(error('unavailable'));assert.deepEqual(a.controller.getState(),cleared);
+  const reloaded=service.client('a',{storage:a.storage});await reloaded.controller.resume();
+  assert.equal(reloaded.controller.getState().uid,'a');assert.equal(reloaded.controller.getState().room,null);assert.equal(service.calls.length,calls);
+  a.controller.dispose();reloaded.controller.dispose();
+ });
+ test('lobby return writes only the existing trial-namespaced recovery key', async () => {
+  const raw=memoryStorage('untouched-emulator-recovery'),project='isolated-garden-trial';
+  raw.map.set('firebase:authUser:existing-app','unchanged-auth');raw.map.set('floating-garden-cpu-match','unchanged-cpu');
+  raw.map.set(trialRecoveryKey('other-trial'),'unchanged-other-trial');
+  const wrapped=createTrialStorage(raw,project),{service,a}=await lobby({storage:wrapped});
+  const others=[...raw.map].filter(([key])=>key!==trialRecoveryKey(project)),calls=service.calls.length;
+  assert.equal(a.controller.requestReturn(),true);assert.equal(await a.controller.returnToEntry(),true);
+  assert.deepEqual([...raw.map].filter(([key])=>key!==trialRecoveryKey(project)),others);
+  assert.deepEqual(JSON.parse(raw.getItem(trialRecoveryKey(project))),{version:1,uid:'a',roomId:null,inviteCode:null,pending:null});
+  assert.equal(service.calls.length,calls);a.controller.dispose();
+ });
+ test('canceling a lobby confirmation preserves recovery, room, identity, and its live listener', async () => {
+  const {service,a}=await lobby(),before=a.controller.getState(),raw=a.storage.getItem(ONLINE_SAVE_KEY),calls=service.calls.length;
+  assert.equal(a.controller.requestReturn(),true);a.controller.cancelReturn();
+  assert.equal(await a.controller.returnToEntry(),false);assert.deepEqual(a.controller.getState(),before);
+  assert.equal(a.storage.getItem(ONLINE_SAVE_KEY),raw);assert.equal(service.calls.length,calls);assert.equal(service.subscriptions[0].stops,0);
+  a.controller.dispose();
+ });
+ test('lobby return requires confirmed online, settled, error-free state and a single self-host', async () => {
+  const cases={
+    cache:({service})=>service.listenersByUid.get('a')({room:clone(service.room),fromCache:true}),
+    offline:({a})=>a.controller.offline(),
+    suspended:({a})=>a.controller.suspend(),
+    conflict:({a})=>a.controller.storageChanged(),
+    error:({service})=>service.subscriptions[0].fail(error('unavailable')),
+    disposed:({a})=>a.controller.dispose(),
+    'two players':({service})=>{service.room.players.push({seat:1,name:'Guest'});service.room.revision++;service.publish();},
+    'wrong host':({service})=>{service.room.hostSeat=1;service.publish();},
+    'started ID':({service})=>{service.room.gameId='game-started';service.publish();},
+    'playing status':({service})=>{service.room.status='playing';service.publish();},
+    'existing match':({service})=>{service.room.match=publicMatch(createMatch({playerCount:2,seed:'return-guard',humanSeat:-1}));service.publish();},
+    'negative revision':({service,a})=>{a.api.getSnapshot=async()=>({...service.snapshot('a'),room:{...service.room,revision:-1}});return a.controller.resume();},
+    'not host':({service,a})=>{a.api.getSnapshot=async()=>({...service.snapshot('a'),self:{seat:0,isHost:false}});return a.controller.resume();},
+  };
+  for(const [name,change] of Object.entries(cases)) {
+    const fixture=await lobby();await change(fixture);const {service,a}=fixture,raw=a.storage.getItem(ONLINE_SAVE_KEY),calls=service.calls.length;
+    assert.equal(a.controller.getState().canReturnToEntry,false,name);assert.equal(a.controller.requestReturn(),false,name);
+    assert.equal(await a.controller.returnToEntry(),false,name);assert.doesNotMatch(renderOnline(a.controller.getState()),/data-action="return-entry"/,name);
+    assert.equal(a.storage.getItem(ONLINE_SAVE_KEY),raw,name);assert.equal(service.calls.length,calls,name);a.controller.dispose();
+  }
+  let online=true;const {a}=await lobby({isOnline:()=>online});online=false;
+  assert.equal(a.controller.getState().connection,'ready');assert.equal(a.controller.requestReturn(),false,'network predicate wins before an offline event');a.controller.dispose();
+ });
+ test('any changed lobby cancels the old confirmation, even before match start or at the same revision', async () => {
+  const changes={
+    participant:room=>room.players.push({seat:1,name:'Guest'}),
+    revision:room=>room.revision++,
+    name:room=>{room.players[0].name='Changed host';},
+    started:room=>{room.status='playing';room.gameId='new-game';},
+    terminal:room=>{room.status='finished';room.revision++;},
+  };
+  for(const [name,change] of Object.entries(changes)) {
+    const {service,a}=await lobby(),raw=a.storage.getItem(ONLINE_SAVE_KEY),calls=service.calls.length;
+    assert.equal(a.controller.requestReturn(),true);change(service.room);service.publish();
+    assert.equal(a.controller.getState().ui.returnConfirm,false,name);assert.equal(await a.controller.returnToEntry(),false,name);
+    assert.equal(a.storage.getItem(ONLINE_SAVE_KEY),raw,name);assert.equal(service.calls.length,calls,name);a.controller.dispose();
+  }
+ });
+ test('identity changes and auth failures during lobby confirmation preserve the original recovery', async () => {
+  for(const outcome of ['different','missing','failure']) {
+    let verifying=false;const entered=deferred(),released=deferred();
+    const {service,a}=await lobby({ensureUser:async()=>{if(!verifying)return {uid:'a'};entered.resolve();return released.promise;}});
+    const raw=a.storage.getItem(ONLINE_SAVE_KEY),calls=service.calls.length;verifying=true;a.controller.requestReturn();
+    const returning=a.controller.returnToEntry();await entered.promise;
+    assert.equal(a.controller.getState().busy,true);assert.equal(a.controller.getState().canConfirm,false);assert.equal(a.controller.getState().canReturnToEntry,false);
+    assert.equal(a.controller.returnToEntry(),false,'double confirm is single flight');assert.equal(a.controller.requestReturn(),false);
+    if(outcome==='failure')released.reject(error('unavailable'));else released.resolve(outcome==='different'?{uid:'b'}:null);
+    assert.equal(await returning,false,outcome);assert.equal(a.storage.getItem(ONLINE_SAVE_KEY),raw);assert.equal(a.controller.getState().uid,'a');
+    assert.equal(a.controller.getState().room.id,'room-1');assert.equal(a.controller.getState().connection,outcome==='failure'?'error':'identity-mismatch');
+    assert.equal(a.controller.getState().busy,false);assert.equal(service.calls.length,calls);a.controller.dispose();
+  }
+ });
+ test('a lobby confirmation rechecks every asynchronous auth race without losing recovery', async () => {
+  const changes={
+    participant:({service})=>{service.room.players.push({seat:1,name:'Guest'});service.room.revision++;service.publish();},
+    started:({service})=>{service.room.status='playing';service.room.gameId='new-game';service.publish();},
+    revised:({service})=>{service.room.revision++;service.publish();},
+    cache:({service})=>service.listenersByUid.get('a')({room:clone(service.room),fromCache:true}),
+    offline:({a})=>a.controller.offline(),
+    conflict:({a})=>a.controller.storageChanged(),
+    cancel:({a})=>a.controller.cancelReturn(),
+    suspend:({a})=>a.controller.suspend(),
+    dispose:({a})=>a.controller.dispose(),
+  };
+  for(const [name,change] of Object.entries(changes)) {
+    let verifying=false;const entered=deferred(),released=deferred();
+    const fixture=await lobby({ensureUser:async()=>{if(verifying){entered.resolve();await released.promise;}return {uid:'a'};}});
+    const {service,a}=fixture,raw=a.storage.getItem(ONLINE_SAVE_KEY),calls=service.calls.length;
+    verifying=true;assert.equal(a.controller.requestReturn(),true);const returning=a.controller.returnToEntry();await entered.promise;
+    change(fixture);released.resolve();assert.equal(await returning,false,name);
+    assert.equal(a.storage.getItem(ONLINE_SAVE_KEY),raw,name);assert.equal(a.controller.getState().room.id,'room-1',name);
+    assert.equal(service.calls.length,calls,name);a.controller.dispose();
+  }
+ });
+ test('lobby recovery is reread before confirmation and after authentication, including undelivered storage events', async () => {
+  const changes={
+    identity:value=>({...value,uid:'other'}),room:value=>({...value,roomId:'different-room'}),
+    invite:value=>({...value,inviteCode:'changed-code'}),
+    pending:value=>({...value,pending:{uid:'a',kind:'start',payload:{roomId:value.roomId,requestId:'other-tab-request'}}}),
+    deleted:()=>null,corrupt:()=>'{bad',
+  };
+  for(const moment of ['before request','before confirm','during auth'])for(const [name,change] of Object.entries(changes)) {
+    let verifying=false;const entered=deferred(),released=deferred();
+    const {service,a}=await lobby({ensureUser:async()=>{if(verifying){entered.resolve();await released.promise;}return {uid:'a'};}});
+    const calls=service.calls.length,changed=change(JSON.parse(a.storage.getItem(ONLINE_SAVE_KEY))),raw=typeof changed==='string'?changed:changed&&JSON.stringify(changed);
+    const apply=()=>{if(raw===null)a.storage.map.delete(ONLINE_SAVE_KEY);else a.storage.setItem(ONLINE_SAVE_KEY,raw);};
+    if(moment==='before request'){apply();assert.equal(a.controller.requestReturn(),false,`${moment}/${name}`);}
+    else {
+      assert.equal(a.controller.requestReturn(),true);
+      if(moment==='before confirm'){apply();assert.equal(await a.controller.returnToEntry(),false,`${moment}/${name}`);}
+      else {verifying=true;const returning=a.controller.returnToEntry();await entered.promise;apply();released.resolve();assert.equal(await returning,false,`${moment}/${name}`);}
+    }
+    assert.equal(a.storage.getItem(ONLINE_SAVE_KEY),raw,`${moment}/${name}`);assert.equal(a.controller.getState().room.id,'room-1');
+    assert.equal(a.controller.getState().canReturnToEntry,false);assert.equal(service.calls.length,calls);a.controller.dispose();
+  }
+ });
+ test('failed lobby recovery reads or writes fail closed without clearing the room or retiring its watcher', async () => {
+  for(const mode of ['read','write']) {
+    const {service,a}=await lobby(),raw=a.storage.getItem(ONLINE_SAVE_KEY),calls=service.calls.length;
+    assert.equal(a.controller.requestReturn(),true);
+    a.storage[mode==='read'?'getItem':'setItem']=()=>{throw new Error('storage denied');};
+    assert.equal(await a.controller.returnToEntry(),false,mode);assert.equal(a.storage.map.get(ONLINE_SAVE_KEY),raw);
+    assert.equal(a.controller.getState().room.id,'room-1');assert.ok(a.controller.getState().storageIssue);assert.equal(a.controller.getState().canReturnToEntry,false);
+    assert.equal(service.subscriptions[0].stops,0);assert.equal(service.calls.length,calls);a.controller.dispose();
+  }
+ });
+ test('an unconfirmed create and an in-flight refresh cannot authorize lobby return', async () => {
+  const service=server(),a=service.client('a');await a.controller.resume();const created=deferred(),release=deferred(),original=a.api.create;
+  a.api.create=async payload=>{await original(payload);created.resolve();await release.promise;throw error('unavailable');};
+  const creating=a.controller.create('Host');await created.promise;const raw=a.storage.getItem(ONLINE_SAVE_KEY);
+  assert.equal(a.controller.requestReturn(),false);assert.equal(await a.controller.returnToEntry(),false);
+  release.resolve();await creating;assert.ok(a.controller.getState().pending);assert.equal(a.controller.requestReturn(),false);assert.equal(a.storage.getItem(ONLINE_SAVE_KEY),raw);
+  a.api.create=original;await a.controller.resume();assert.equal(a.controller.getState().canReturnToEntry,true);
+  assert.equal(a.controller.requestReturn(),true);const fetched=deferred(),finish=deferred(),getSnapshot=a.api.getSnapshot;
+  a.api.getSnapshot=async payload=>{fetched.resolve();await finish.promise;return getSnapshot(payload);};
+  const resuming=a.controller.resume();await fetched.promise;assert.equal(a.controller.getState().ui.returnConfirm,false);assert.equal(a.controller.requestReturn(),false);
+  assert.equal(await a.controller.returnToEntry(),false);finish.resolve();await resuming;assert.equal(a.controller.getState().canReturnToEntry,true);a.controller.dispose();
+ });
+ test('suspending lobby confirmation queues safe resume, and canceled auth cannot authorize a later confirmation', async () => {
+  let verifying=false;const entered=deferred(),released=deferred();
+  const {a}=await lobby({ensureUser:async()=>{if(verifying){entered.resolve();await released.promise;}return {uid:'a'};}});
+  a.controller.requestReturn();verifying=true;const returning=a.controller.returnToEntry();await entered.promise;
+  a.controller.suspend();const resuming=a.controller.resume();released.resolve();assert.equal(await returning,false);await resuming;
+  assert.equal(a.controller.getState().room.id,'room-1');assert.equal(a.controller.getState().canReturnToEntry,true);assert.equal(a.controller.getState().ui.returnConfirm,false);
+  assert.equal(a.controller.requestReturn(),true);a.controller.cancelReturn();assert.equal(await a.controller.returnToEntry(),false);
+  assert.equal(a.controller.requestReturn(),true);assert.equal(await a.controller.returnToEntry(),true);a.controller.dispose();
+ });
+ test('terminal returns preserve their offline, synchronous local-only behavior and labels', async () => {
+  for(const terminal of ['finished','expired']) {
+    let auth=0;const {service,a}=await lobby({ensureUser:async()=>{auth++;return {uid:'a'};}});
+    if(terminal==='finished'){service.room.status='finished';service.room.revision++;service.publish();}
+    else {a.api.getSnapshot=async()=>{throw error('not-found');};await a.controller.resume();}
+    a.controller.offline();const calls=service.calls.length,authCount=auth;
+    assert.equal(a.controller.requestReturn(),true);const html=renderOnline(a.controller.getState());
+    assert.match(html,terminal==='finished'?/結果画面への自動復帰が解除/:/期限切れ・削除済みの部屋への復帰情報/);
+    assert.doesNotMatch(html,/入口へ戻って別の部屋に参加/);assert.equal(a.controller.returnToEntry(),true);
+    assert.equal(a.controller.getState().uid,'a');assert.equal(service.calls.length,calls);assert.equal(auth,authCount);a.controller.dispose();
+  }
  });
  test('confirmed draw is never applied optimistically and double clicks are single-flight', async () => {
   const {a}=await playing(), waiting=deferred(), api=a.api.submit;
@@ -455,4 +643,16 @@ function mounted(controller) {
  });
  test('real DOM lifecycle routes visibility/pageshow/online and blocks offline confirmation', async () => {
   const {a}=await playing(),app=mounted(a.controller);await app.app.ready;app.pageListeners.get('offline')();assert.equal(app.button('command-draw').disabled,true);await app.pageListeners.get('online')();assert.equal(app.button('command-draw').disabled,false);app.pageListeners.get('pagehide')();await app.pageListeners.get('pageshow')();assert.equal(a.controller.getState().canConfirm,true);await app.documentListeners.get('visibilitychange')();assert.equal(a.controller.getState().canConfirm,true);app.app.unmount();
+ });
+
+ test('real lobby return handlers support cancel, Escape, stale-click rejection, and joining from the entry', async () => {
+  const service=server(),a=service.client('a'),app=mounted(a.controller);await app.app.ready;
+  app.input('online-name','Host');await app.click('create');const raw=a.storage.getItem(ONLINE_SAVE_KEY),calls=service.calls.length;
+  app.click('return-entry');const stale=app.button('confirm-return');app.click('cancel-return');await app.clickButton(stale);
+  assert.equal(a.storage.getItem(ONLINE_SAVE_KEY),raw);assert.equal(a.controller.getState().ui.returnConfirm,false);
+  app.click('return-entry');app.escape();assert.equal(a.controller.getState().ui.returnConfirm,false);assert.equal(a.storage.getItem(ONLINE_SAVE_KEY),raw);
+  app.click('return-entry');await app.click('confirm-return');
+  assert.equal(a.controller.getState().room,null);assert.equal(a.controller.getState().uid,'a');assert.equal(service.calls.length,calls);
+  assert.ok(app.button('join'));assert.equal(app.button('join').disabled,false);assert.equal(app.button('return-entry'),null);
+  assert.match(app.root.innerHTML,/相手から受け取った招待コード/);app.app.unmount();
  });
