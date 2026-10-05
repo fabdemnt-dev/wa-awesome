@@ -64,6 +64,8 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/floatingGardenRooms/$(roomId)).data.expiresAtMillis is number
         && get(/databases/$(database)/documents/floatingGardenRooms/$(roomId)).data.expiresAtMillis > request.time.toMillis()
         && get(/databases/$(database)/documents/floatingGardenRooms/$(roomId)/members/$(request.auth.uid)).data.active == true
+        && get(/databases/$(database)/documents/floatingGardenRooms/$(roomId)/members/$(request.auth.uid)).data.seat is int
+        && get(/databases/$(database)/documents/floatingGardenRooms/$(roomId)/members/$(request.auth.uid)).data.seat in [0, 1]
         && get(/databases/$(database)/documents/floatingGardenRooms/$(roomId)/members/$(request.auth.uid)).data.expiresAtMillis is number
         && get(/databases/$(database)/documents/floatingGardenRooms/$(roomId)/members/$(request.auth.uid)).data.expiresAtMillis > request.time.toMillis();
     }

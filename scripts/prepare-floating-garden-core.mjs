@@ -7,7 +7,7 @@ import path from 'node:path';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const output = path.join(root, 'functions/floating-garden-online/core');
 const check = process.argv.includes('--check');
-const files = ['engine.js', 'match-engine.js'];
+const files = ['engine.js', 'match-engine.js', 'cpu.js'];
 const esmPackage = `${JSON.stringify({ private: true, type: 'module' }, null, 2)}\n`;
 if (!check) await mkdir(output, { recursive: true });
 for (const name of [...files, 'package.json']) {

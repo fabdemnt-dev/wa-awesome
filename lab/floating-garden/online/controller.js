@@ -107,6 +107,11 @@ export function createOnlineController({ api, ensureUser, subscribe = () => () =
     if (!alive || token !== generation || !snapshot?.room || !state.uid) return false;
     const { room, self = state.self } = snapshot;
     if (!saved?.roomId || room.id !== saved.roomId || !Number.isSafeInteger(room.revision) || room.rulesVersion !== MATCH_VERSION || !self || ![0, 1].includes(self.seat) || !Array.isArray(room.players) || !room.players.some((player) => player?.seat === self.seat)) return false;
+    const npcCount = room.npcCount ?? 0;
+    if (!Number.isInteger(npcCount) || npcCount < 0 || npcCount > 2 || room.playerCount !== 2 + npcCount
+      || room.players.some((player, seat) => player?.seat !== seat)
+      || (room.match && npcCount > 0 && (room.players.length !== room.playerCount || room.match.players?.length !== room.playerCount))
+      || (!room.match && (room.players.length < 1 || room.players.length > 2))) return false;
     const previous = state.room;
     if (previous?.gameId && room.gameId !== previous.gameId) return false;
     if (room.match && (room.match.version !== MATCH_VERSION || !Number.isSafeInteger(room.match.revision))) return false;
@@ -280,7 +285,11 @@ export function createOnlineController({ api, ensureUser, subscribe = () => () =
     getState: () => ({ ...clone(state), canConfirm: canConfirm(), canReturnToEntry: canReturnToEntry(), inviteCode: saved?.inviteCode || null }),
     observe(fn) { observers.add(fn); return () => observers.delete(fn); },
     resume,
-    create(displayName) { if (saved?.roomId) return Promise.resolve(false); return mutate('create', { displayName: displayName.trim() }); },
+    create(displayName, npcCount = 0) {
+      if (saved?.roomId || !Number.isInteger(npcCount) || npcCount < 0 || npcCount > 2) return Promise.resolve(false);
+      // Preserve the original two-human wire shape and durable recovery receipts.
+      return mutate('create', { displayName: displayName.trim(), ...(npcCount ? { npcCount } : {}) });
+    },
     join(inviteCode, displayName) { if (saved?.roomId) return Promise.resolve(false); return mutate('join', { inviteCode: inviteCode.trim(), displayName: displayName.trim() }); },
     start(expectedRevision = state.room?.revision) { if (state.room?.status !== 'waiting' || !state.self?.isHost || state.room.players.length !== 2 || expectedRevision !== state.room.revision) return Promise.resolve(false); return mutate('start', { roomId: state.room.id, expectedRevision }); },
     submit, preview,

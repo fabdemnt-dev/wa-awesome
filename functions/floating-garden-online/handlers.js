@@ -3,7 +3,7 @@
 const crypto = require('node:crypto');
 const {
   RULES_VERSION, PLAYER_COUNT, ROOM_TTL_MILLIS, RECEIPT_RETENTION_MILLIS, GardenError, fail, exactObject,
-  uidOf, requestIdOf, idOf, revisionOf, sanitizeDisplayName, commandOf, hashPayload, uidKey, assertNotExpired,
+  uidOf, requestIdOf, idOf, revisionOf, sanitizeDisplayName, npcCountOf, roomPlayerCount, commandOf, hashPayload, uidKey, assertNotExpired,
   requireMember, toPublicSnapshot, publicRoom,
 } = require('./contract');
 const { createInviteCode, parseInviteCode, inviteMac, safeEqual, hashIp } = require('./invite-code');
@@ -11,6 +11,38 @@ const { createInviteCode, parseInviteCode, inviteMac, safeEqual, hashIp } = requ
 // Firebase is intentionally absent here. Production and tests use identical transaction handlers.
 let stagedCore;
 function loadCore() { return stagedCore ||= import('./core/match-engine.js'); }
+let stagedCpu;
+function loadCpu() { return stagedCpu ||= import('./core/cpu.js'); }
+const MAX_NPC_ACTIONS_PER_OPERATION = 32;
+const NPC_NAMES = Object.freeze(['森の庭', '結晶の庭']);
+
+/** Finish only server-owned decisions. All transitions remain in the caller's transaction.
+ * The chooser receives a whitelist projection and public legal actions, never private state.
+ * No clocks, timers or randomness are used, so transaction retries repeat the same decisions.
+ */
+function advanceNpcTurns(core, chooseCpuAction, state, budget = MAX_NPC_ACTIONS_PER_OPERATION) {
+  if (!Number.isInteger(budget) || budget < 0 || budget > MAX_NPC_ACTIONS_PER_OPERATION) throw new TypeError('Invalid NPC action budget');
+  let nextState = state;
+  const commands = [];
+  while (nextState.phase !== 'finished') {
+    const decision = core.getDecision(nextState);
+    if (!decision || !Number.isInteger(decision.seat) || decision.seat < 0 || decision.seat >= nextState.players.length) {
+      fail('internal', 'NPCの手番を確認できません。', { reason: 'npc-invalid-decision' });
+    }
+    // Human response, placement and care decisions must never be automated, even offline.
+    if (decision.seat < PLAYER_COUNT) break;
+    if (commands.length >= budget) fail('internal', 'NPCの処理を完了できませんでした。再試行してください。', { reason: 'npc-action-budget' });
+    const visible = toPublicSnapshot(nextState);
+    const legal = core.legalActions(visible);
+    const chosen = chooseCpuAction(visible, structuredClone(legal));
+    const accepted = legal.find((action) => chosen && Object.keys(action).length === Object.keys(chosen).length &&
+      Object.entries(action).every(([key, value]) => chosen[key] === value));
+    if (!accepted || accepted.seat !== decision.seat) fail('internal', 'NPCの操作を確認できません。', { reason: 'npc-illegal-action' });
+    nextState = core.applyMatchAction(nextState, accepted);
+    commands.push(accepted);
+  }
+  return { state: nextState, commands };
+}
 const RATE_LIMITS = Object.freeze({
   create: { limit: 5, ipLimit: 20, windowMillis: 600000 },
   join: { limit: 20, ipLimit: 60, windowMillis: 60000 },
@@ -32,7 +64,7 @@ function secureMatch(core, randomInt = crypto.randomInt, playerCount = PLAYER_CO
 }
 
 function createHandlers({ db, now = Date.now, randomUUID = crypto.randomUUID, randomInt = crypto.randomInt,
-  inviteSecret, timestampFromMillis = (millis) => millis, coreLoader = loadCore, rateLimits = RATE_LIMITS } = {}) {
+  inviteSecret, timestampFromMillis = (millis) => millis, coreLoader = loadCore, cpuLoader = loadCpu, npcActionBudget = MAX_NPC_ACTIONS_PER_OPERATION, rateLimits = RATE_LIMITS } = {}) {
   if (!db?.runTransaction || !db?.doc || typeof inviteSecret !== 'function') throw new TypeError('db and inviteSecret are required');
   const roomRef = (id) => db.doc(`floatingGardenRooms/${id}`);
   const memberRef = (id, uid) => db.doc(`floatingGardenRooms/${id}/members/${uid}`);
@@ -120,6 +152,12 @@ function createHandlers({ db, now = Date.now, randomUUID = crypto.randomUUID, ra
     const room = snapshot.data();
     assertNotExpired(room, now());
     if (room.rulesVersion !== RULES_VERSION) fail('failed-precondition', 'ゲームの版が一致しません。', { reason: 'rules-version' });
+    const playerCount = roomPlayerCount(room);
+    if (!Array.isArray(room.players) || !room.players.every((player, seat) => player?.seat === seat) ||
+        (room.status === 'waiting' ? room.players.length < 1 || room.players.length > PLAYER_COUNT :
+          room.players.length !== playerCount || !Array.isArray(room.match?.players) || room.match.players.length !== playerCount)) {
+      fail('internal', '部屋の参加人数を確認できません。');
+    }
     return room;
   }
   function readSelf(snapshot, room) {
@@ -135,9 +173,10 @@ function createHandlers({ db, now = Date.now, randomUUID = crypto.randomUUID, ra
 
   async function floatingGardenCreateRoom(request) {
     const uid = uidOf(request);
-    exactObject(request.data, ['displayName', 'requestId']);
+    exactObject(request.data, ['displayName', 'requestId', ...(Object.hasOwn(request.data || {}, 'npcCount') ? ['npcCount'] : [])]);
     const requestId = requestIdOf(request.data.requestId);
     const name = sanitizeDisplayName(request.data.displayName);
+    const npcCount = Object.hasOwn(request.data, 'npcCount') ? npcCountOf(request.data.npcCount) : 0;
     const key = getKey();
     const invitation = createInviteCode(uid, requestId, key);
     const roomId = idOf(randomUUID());
@@ -149,7 +188,7 @@ function createHandlers({ db, now = Date.now, randomUUID = crypto.randomUUID, ra
       if (roomSnapshot.exists || locatorSnapshot.exists) fail('failed-precondition', '部屋を作成できませんでした。新しいリクエストIDで再試行してください。', { reason: 'identifier-collision' });
       const expiresAtMillis = now() + ROOM_TTL_MILLIS;
       const publicState = {
-        id: roomId, status: 'waiting', hostSeat: 0, playerCount: PLAYER_COUNT, gameId: null,
+        id: roomId, status: 'waiting', hostSeat: 0, playerCount: PLAYER_COUNT + npcCount, ...(npcCount ? { npcCount } : {}), gameId: null,
         revision: 1, rulesVersion: RULES_VERSION, expiresAtMillis, players: [{ seat: 0, name }], match: null, scores: [],
       };
       tx.create(room, publicState);
@@ -204,8 +243,9 @@ function createHandlers({ db, now = Date.now, randomUUID = crypto.randomUUID, ra
     const expectedRevision = revisionOf(request.data.expectedRevision);
     const core = await coreLoader();
     const gameId = idOf(randomUUID(), 'ゲームID');
-    // Fix entropy once per incoming call, outside the retried transaction callback.
-    const prepared = secureMatch(core, randomInt);
+    // Memoize entropy once per incoming call after the room's mode is authenticated.
+    // Retried transaction callbacks reuse exactly this deck rather than reshuffling.
+    let prepared;
     return mutate({ request, uid, requestId, type: 'start', payload: request.data }, async (tx) => {
       const [roomSnapshot, memberSnapshot, gameSnapshot] = await Promise.all([
         tx.get(roomRef(roomId)), tx.get(memberRef(roomId, uid)), tx.get(gameRef(roomId, gameId)),
@@ -217,10 +257,19 @@ function createHandlers({ db, now = Date.now, randomUUID = crypto.randomUUID, ra
       if (room.status !== 'waiting' || room.gameId) fail('failed-precondition', '既に対戦が始まっています。', { reason: 'match-already-started' });
       if (room.players.length !== PLAYER_COUNT) fail('failed-precondition', '2人が揃ってから始めてください。', { reason: 'room-not-ready' });
       if (gameSnapshot.exists) fail('failed-precondition', 'ゲームIDが重複しました。新しいリクエストIDで再試行してください。');
+      const playerCount = roomPlayerCount(room);
+      prepared ||= secureMatch(core, randomInt, playerCount);
+      if (prepared.players.length !== playerCount) fail('failed-precondition', '部屋の参加人数が更新されています。再試行してください。');
+      const players = [...room.players, ...Array.from({ length: playerCount - PLAYER_COUNT }, (_, index) => ({
+        seat: PLAYER_COUNT + index, name: NPC_NAMES[index], isHuman: false,
+      }))];
       const initialState = structuredClone(prepared);
-      initialState.players.forEach((player) => { player.name = room.players[player.seat].name; player.isHuman = true; });
+      initialState.players.forEach((player) => { player.name = players[player.seat].name; player.isHuman = player.seat < PLAYER_COUNT; });
       core.assertMatchInvariants(initialState);
-      const next = publicRoom({ ...room, status: 'playing', gameId, revision: room.revision + 1, match: toPublicSnapshot(initialState), scores: [] });
+      const commitTime = now();
+      assertNotExpired(room, commitTime);
+      assertNotExpired(memberSnapshot.data(), commitTime);
+      const next = publicRoom({ ...room, players, status: 'playing', gameId, revision: room.revision + 1, match: toPublicSnapshot(initialState), scores: [] });
       tx.create(gameRef(roomId, gameId), { gameId, rulesVersion: RULES_VERSION, initialState, state: initialState, commands: [],
         expiresAtMillis: room.expiresAtMillis, expiresAt: timestampFromMillis(room.expiresAtMillis) });
       tx.set(roomRef(roomId), next);
@@ -250,7 +299,7 @@ function createHandlers({ db, now = Date.now, randomUUID = crypto.randomUUID, ra
     const expectedRevision = revisionOf(request.data.expectedRevision);
     if (request.data.rulesVersion !== RULES_VERSION) fail('failed-precondition', 'ゲームの版が一致しません。', { reason: 'rules-version' });
     const command = commandOf(request.data.command);
-    const core = await coreLoader();
+    const [core, cpu] = await Promise.all([coreLoader(), cpuLoader()]);
     return mutate({ request, uid, requestId, type: 'submit', payload: request.data }, async (tx) => {
       const [roomSnapshot, memberSnapshot, gameSnapshot] = await Promise.all([
         tx.get(roomRef(roomId)), tx.get(memberRef(roomId, uid)), tx.get(gameRef(roomId, gameId)),
@@ -263,6 +312,9 @@ function createHandlers({ db, now = Date.now, randomUUID = crypto.randomUUID, ra
       assertNotExpired(game, now());
       if (game.rulesVersion !== RULES_VERSION || game.state.version !== RULES_VERSION) fail('failed-precondition', 'ゲームの版が一致しません。', { reason: 'rules-version' });
       const state = game.state;
+      const playerCount = roomPlayerCount(room);
+      if (state.players.length !== playerCount) fail('internal', '部屋の参加人数を確認できません。');
+      commandOf(command, playerCount);
       assertRevision(state.revision, expectedRevision);
       if (room.match?.revision !== state.revision) fail('internal', '公開状態を再同期できません。');
       if (core.getDecision(state)?.seat !== self.seat) fail('permission-denied', 'いまはあなたが操作する番ではありません。');
@@ -273,14 +325,22 @@ function createHandlers({ db, now = Date.now, randomUUID = crypto.randomUUID, ra
         if (['illegal-action', 'stale-action', 'invalid-action'].includes(error.code)) fail('failed-precondition', 'いまはその操作を選べません。最新の手番を確認してください。', { reason: 'illegal-action' });
         throw error;
       }
+      const advanced = advanceNpcTurns(core, cpu.chooseCpuAction, nextState, npcActionBudget);
+      nextState = advanced.state;
+      // A room, human membership or game can expire while the CPU is thinking.
+      // Reject before staging any writes so the human move and NPC chain roll back together.
+      const commitTime = now();
+      assertNotExpired(room, commitTime);
+      assertNotExpired(memberSnapshot.data(), commitTime);
+      assertNotExpired(game, commitTime);
       const finished = nextState.phase === 'finished';
       const next = publicRoom({ ...room, status: finished ? 'finished' : 'playing', revision: room.revision + 1,
         match: toPublicSnapshot(nextState), scores: finished ? core.rankMatch(nextState) : [] });
-      tx.update(gameRef(roomId, gameId), { state: nextState, commands: [...game.commands, accepted] });
+      tx.update(gameRef(roomId, gameId), { state: nextState, commands: [...game.commands, accepted, ...advanced.commands] });
       tx.set(roomRef(roomId), next);
       return { result: output(next, self), expiresAtMillis: room.expiresAtMillis };
     });
   }
   return { floatingGardenCreateRoom, floatingGardenJoinRoom, floatingGardenStartMatch, floatingGardenGetSnapshot, floatingGardenSubmitAction };
 }
-module.exports = { createHandlers, loadCore, secureMatch, RATE_LIMITS, GardenError };
+module.exports = { createHandlers, loadCore, loadCpu, secureMatch, advanceNpcTurns, MAX_NPC_ACTIONS_PER_OPERATION, RATE_LIMITS, GardenError };

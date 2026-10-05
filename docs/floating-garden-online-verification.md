@@ -1,5 +1,24 @@
 # 庭園オンライン試作：実装・検証記録
 
+## 2026-10-05 NPC追加のソース準備
+
+人間2人＋NPC1人（3席）、その後NPC2人（4席）の順に、2つのcontrollerと実handlerを接続して最後まで検証しました。全員16マス、共通採点、同じ回数の手入れ、全privateコマンドの再生一致を確認しています。既存2席モード、現在の試用部屋、UID枠・期間・部屋数は変更していません。
+
+- ローカルonline/core/新NPC/実生成trial bundle/client/linked suite: 147件成功、失敗・skipなし
+- 実generatorとbrowser-fixture準備: 34件成功
+- 実Firestore Rules: 通常7件、trial11件成功。NPC席を有効な人間membershipと扱わず、2UID制限を維持
+- 実Firestore transaction回帰: 6件成功。2/3/4席の完走、NPC連鎖を含む重複・競合と完全再生を確認
+- 全体回帰: 1,194件成功、失敗・skipなし。既存の同一lockfileで準備済みの専用SDKを使用し、GAPIC検査も成功。別のSDK回帰16件と生成Functions entry/middleware10件成功
+
+新しい3/4席のAuth→Callable→Firestore試験と実Chromium画面試験も追加しています。ただしこのローカルexecutorはChromiumのsocket作成を拒否し、dot cloud browserもloopbackページを拒否したため、実画面の幅・ダイアログ・再読込の成功はまだ主張しません。実CallableもAuth・Firestore起動後のFunctions Unix socket（EPERM）で停止し、実行上限90秒で終了しました。最新commitの隔離CIで結果と画像を確認してから公開判断します。物理スマホの確認は別です。
+
+独立した読み取り専用レビューでも重大な指摘はなく、online147件・generator/fixture34件・旧pin検査1件を再実行して成功しました。
+
+旧owner起動ヘルパーのcommit・hashは変更していません。検証対象を誤ってHEADと比較していたテストだけを、ヘルパーが実際に取得する旧commitの60ファイルと比較するよう修正しました。新NPCソースを既存の承認に含める変更ではありません。CIはこのオフライン検査用にGit履歴を取得します。
+
+以下は2026-10-02時点の履歴です。
+
+
 2026-10-02 UTC。**オンライン試作。ゲームの本番公開は無効です。**
 
 ## Draft PR / CI 検証

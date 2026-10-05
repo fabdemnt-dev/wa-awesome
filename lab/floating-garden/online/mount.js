@@ -5,7 +5,7 @@ import { ONLINE_SAVE_KEY } from './controller.js?v=20261002-online-1';
 export function mountOnline(root, { controller } = {}) {
   const document = root.ownerDocument, page = document.defaultView;
   let mounted = true, renderEpoch = 0, returnFocus = null, savedPage = null, lastFocus = null;
-  const fields = { displayName: '', inviteCode: '' };
+  const fields = { displayName: '', inviteCode: '', npcCount: 0 };
   function restorePage() {
     if (!savedPage) return;
     document.body.style.overflow = savedPage.overflow;
@@ -40,6 +40,7 @@ export function mountOnline(root, { controller } = {}) {
   function onInput(event) {
     if (event.target.id === 'online-name') fields.displayName = event.target.value;
     if (event.target.id === 'online-code') fields.inviteCode = event.target.value;
+    if (event.target.id === 'online-npc-count') fields.npcCount = Number(event.target.value);
   }
   function onClick(event) {
     const target = event.target.closest('button[data-action]');
@@ -50,7 +51,7 @@ export function mountOnline(root, { controller } = {}) {
     if (action === 'return-entry') return controller.requestReturn();
     if (action === 'cancel-return') return controller.cancelReturn();
     if (action === 'confirm-return') return controller.returnToEntry();
-    if (action === 'create') return controller.create(fields.displayName);
+    if (action === 'create') return controller.create(fields.displayName, fields.npcCount);
     if (action === 'join') return controller.join(fields.inviteCode, fields.displayName);
     if (action === 'start') return controller.start(Number(target.dataset.roomRevision));
     if (action === 'inspect') { returnFocus = target.dataset.focus; controller.compare(Number(target.dataset.seat)); root.querySelector('[data-action="comparison-close"]')?.focus(); return; }

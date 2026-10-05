@@ -40,6 +40,8 @@ service cloud.firestore {
         && room.expiresAtMillis > request.time.toMillis()
         && room.expiresAtMillis <= __TRIAL_ENDS_AT_MILLIS__
         && member.active == true
+        && member.seat is int
+        && member.seat in [0, 1]
         && member.expiresAtMillis is int
         && member.expiresAtMillis > request.time.toMillis()
         && member.expiresAtMillis <= __TRIAL_ENDS_AT_MILLIS__;

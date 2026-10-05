@@ -1516,11 +1516,20 @@ test('Hosting-only wrapper forwards exact original/new/tooling paths without rea
 test('prepared Hosting wrapper forwards existing packet paths without preparing source or choosing dates',async()=>{const h=harness();assert.equal(await resumePreparedHosting({...h.options,source:'/temporary/fixed-source'}),0);assert.deepEqual(h.calls,['main']);assert.equal(h.nowCalls,0);assert.equal(h.writes.length,0);assert.deepEqual(h.execution,['--resume-hosting-prepared','--prior-operation','/fresh/operation','--operation','/garden-lobby-entry-reviewed-v1/operation','--tooling-dir','/old/tooling'])});
 test('stop and inspect select the latest verified packet; activation recovery always keeps the original',async()=>{for(const mode of ['--stop','--inspect','--activate-verified-hosting']){const h=harness();h.operator.selectVerifiedHostingOperation=async()=>{h.calls.push('select-latest');return '/latest/operation'};assert.equal(await inspectOrStop({...h.options,mode}),0);assert.equal(h.execution[2],mode==='--activate-verified-hosting'?'/fresh/operation':'/latest/operation');assert.equal(h.calls.includes('select-latest'),mode!=='--activate-verified-hosting');assert.equal(h.nowCalls,0);assert.equal(h.writes.length,0)}});
 
-test('final recovery source baseline pins the same56 unchanged files and exactly four replacements',async()=>{
+test('historical owner recovery pins its reviewed 60-file source without authorizing the current feature tree',async()=>{
  const baseline=finalPayload.FINAL_SOURCE_BASELINE, overrides=finalPayload.FINAL_SOURCE_FILES;
  assert.equal(Object.keys(baseline).length,60);assert.deepEqual(Object.keys(overrides).sort(),['lab/floating-garden/online/controller.js','lab/floating-garden/online/view.js','scripts/floating-garden-trial-cloud-adapter.mjs','scripts/operate-floating-garden-trial.mjs']);
- for(const [path,digest] of Object.entries(baseline)){assert.match(digest,/^[a-f0-9]{64}$/);if(!Object.hasOwn(overrides,path))assert.equal(sha(await readFile(join(ROOT,path))),digest,path);}
+ for(const digest of Object.values(baseline))assert.match(digest,/^[a-f0-9]{64}$/);
+ // This owner helper intentionally downloads its reviewed commit, not HEAD.
+ // New features must not silently expand a previously approved deployment.
+ // CI checks out full history so the exact old artifact remains verifiable offline.
  if(finalPayload.FINAL_SOURCE_COMMIT==='PENDING_REVIEW')assert(Object.values(overrides).every(x=>x==='PENDING_REVIEW'));
- else{assert.match(finalPayload.FINAL_SOURCE_COMMIT,/^[a-f0-9]{40}$/);for(const [path,digest] of Object.entries(overrides))assert.equal(sha(await readFile(join(ROOT,path))),digest,path);}
+ else{
+  assert.match(finalPayload.FINAL_SOURCE_COMMIT,/^[a-f0-9]{40}$/);
+  for(const [path,digest] of Object.entries({...baseline,...overrides})){
+   const approved=execFileSync('git',['show',`${finalPayload.FINAL_SOURCE_COMMIT}:${path}`],{cwd:ROOT,stdio:['ignore','pipe','pipe'],maxBuffer:4*1024*1024});
+   assert.equal(sha(approved),digest,path);
+  }
+ }
 });
 }

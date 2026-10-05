@@ -151,7 +151,7 @@ const storage = () => { const map = new Map(); return { map, getItem: (key) => m
   for (const rejection of ['functions/unauthenticated', 'functions/permission-denied']) {
     const { transport, fake } = await transportFixture(), durable = storage(); let requestCount = 0, createdRooms = 0, makeRequestIdCalls = 0;
     const receipt = { roomId: 'original-room', seat: 0, inviteCode: 'GARDEN-original' };
-    const room = { id: receipt.roomId, revision: 0, rulesVersion: MATCH_VERSION, players: [{ seat: 0, name: 'Host' }], status: 'waiting', match: null, expiresAtMillis: config().endsAtMillis };
+    const room = { id: receipt.roomId, playerCount: 2, revision: 0, rulesVersion: MATCH_VERSION, players: [{ seat: 0, name: 'Host' }], status: 'waiting', match: null, expiresAtMillis: config().endsAtMillis };
     const receipts = new Map();
     fake.setBehavior(async (name, payload) => {
       if (name === 'floatingGardenGetSnapshot') return { data: { room, self: { seat: 0, isHost: true } } };

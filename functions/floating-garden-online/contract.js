@@ -2,7 +2,10 @@
 
 const crypto = require('node:crypto');
 const RULES_VERSION = 'floating-garden-match-1';
+// Online rooms always have two authenticated humans; extra seats are server-owned.
 const PLAYER_COUNT = 2;
+const MAX_NPC_COUNT = 2;
+const MAX_PLAYER_COUNT = PLAYER_COUNT + MAX_NPC_COUNT;
 const ROOM_TTL_MILLIS = 24 * 60 * 60 * 1000;
 const RECEIPT_RETENTION_MILLIS = 7 * ROOM_TTL_MILLIS;
 
@@ -45,10 +48,21 @@ const COMMAND_FIELDS = Object.freeze({
   'request-invite': [], 'pass-invite': [], welcome: [], yield: [], place: ['index', 'rotation'],
   meditate: [], stone: ['index', 'stone'], 'pass-final': [],
 });
-function commandOf(value) {
+function npcCountOf(value) {
+  if (!Number.isInteger(value) || value < 0 || value > MAX_NPC_COUNT) fail('invalid-argument', 'NPCは0〜2人で選んでください。');
+  return value;
+}
+function roomPlayerCount(room) {
+  const npcCount = room.npcCount === undefined ? 0 : room.npcCount;
+  if (!Number.isInteger(npcCount) || npcCount < 0 || npcCount > MAX_NPC_COUNT || room.playerCount !== PLAYER_COUNT + npcCount) {
+    fail('internal', '部屋の参加人数を確認できません。');
+  }
+  return PLAYER_COUNT + npcCount;
+}
+function commandOf(value, playerCount = MAX_PLAYER_COUNT) {
   if (!value || !Object.hasOwn(COMMAND_FIELDS, value.type)) fail('invalid-argument', '操作を確認してください。');
   exactObject(value, ['type', ...COMMAND_FIELDS[value.type]], '操作');
-  if (Object.hasOwn(value, 'target') && (!Number.isInteger(value.target) || value.target < 0 || value.target >= PLAYER_COUNT)) fail('invalid-argument', '譲る席を確認してください。');
+  if (Object.hasOwn(value, 'target') && (!Number.isInteger(value.target) || value.target < 0 || value.target >= playerCount)) fail('invalid-argument', '譲る席を確認してください。');
   if (Object.hasOwn(value, 'index') && (!Number.isInteger(value.index) || value.index < 0 || value.index > 15)) fail('invalid-argument', '配置するマスを確認してください。');
   if (Object.hasOwn(value, 'rotation') && (!Number.isInteger(value.rotation) || value.rotation < 0 || value.rotation > 3)) fail('invalid-argument', '回転を確認してください。');
   if (Object.hasOwn(value, 'stone') && !['moon', 'wind', 'color', 'echo'].includes(value.stone)) fail('invalid-argument', '石を確認してください。');
@@ -65,7 +79,7 @@ function assertNotExpired(value, now) {
   if (!Number.isSafeInteger(value?.expiresAtMillis) || value.expiresAtMillis <= now) fail('failed-precondition', '部屋の保存期限が切れています。', { reason: 'room-expired' });
 }
 function requireMember(member, room) {
-  if (!member || member.active !== true || !Number.isInteger(member.seat) || member.seat < 0 || member.seat >= room.players.length ||
+  if (!member || member.active !== true || !Number.isInteger(member.seat) || member.seat < 0 || member.seat >= PLAYER_COUNT || member.seat >= room.players.length ||
       room.players[member.seat]?.seat !== member.seat || member.isHost !== (member.seat === 0)) fail('permission-denied', 'この部屋には参加していません。');
   return { seat: member.seat, isHost: member.seat === 0 };
 }
@@ -78,7 +92,7 @@ function toPublicSnapshot(state) {
   return {
     version: state.version, revision: state.revision,
     players: state.players.map((player) => ({
-      seat: player.seat, id: `p${player.seat}`, name: player.name, isHuman: true,
+      seat: player.seat, id: `p${player.seat}`, name: player.name, isHuman: player.seat < PLAYER_COUNT,
       garden: player.garden.map((tile) => publicTile(tile)), tileIds: player.tileIds.slice(),
       power: player.power, storage: publicTile(player.storage, true), careCount: player.careCount,
     })),
@@ -95,16 +109,18 @@ function toPublicSnapshot(state) {
   };
 }
 function publicRoom(room) {
+  const playerCount = roomPlayerCount(room);
   return {
-    id: room.id, status: room.status, hostSeat: 0, playerCount: PLAYER_COUNT,
+    id: room.id, status: room.status, hostSeat: 0, playerCount,
+    ...(playerCount > PLAYER_COUNT ? { npcCount: playerCount - PLAYER_COUNT } : {}),
     gameId: room.gameId, revision: room.revision, rulesVersion: RULES_VERSION,
     expiresAtMillis: room.expiresAtMillis,
-    players: room.players.map((player) => ({ seat: player.seat, name: player.name })),
+    players: room.players.map((player) => ({ seat: player.seat, name: player.name, ...(player.seat >= PLAYER_COUNT ? { isHuman: false } : {}) })),
     // The stored match was already explicitly projected. Reconstruct its whitelist on reads as well.
     match: room.match ? toPublicSnapshot({ ...room.match, deck: { length: room.match.deckRemaining }, deckCursor: 0 }) : null,
     scores: room.scores.map(({ seat, score, rank }) => ({ seat, score, rank })),
   };
 }
-module.exports = { RULES_VERSION, PLAYER_COUNT, ROOM_TTL_MILLIS, RECEIPT_RETENTION_MILLIS, GardenError, fail, exactObject,
-  uidOf, requestIdOf, idOf, revisionOf, sanitizeDisplayName, commandOf, hashPayload, uidKey, assertNotExpired,
+module.exports = { RULES_VERSION, PLAYER_COUNT, MAX_NPC_COUNT, MAX_PLAYER_COUNT, ROOM_TTL_MILLIS, RECEIPT_RETENTION_MILLIS, GardenError, fail, exactObject,
+  uidOf, requestIdOf, idOf, revisionOf, sanitizeDisplayName, npcCountOf, roomPlayerCount, commandOf, hashPayload, uidKey, assertNotExpired,
   requireMember, publicTile, toPublicSnapshot, publicRoom };

@@ -171,3 +171,82 @@ test('real Firestore revocation, expiry and rejected input preserve room and ser
   const server = (await roomRef(created.roomId).collection('serverGames').doc(snapshot.room.gameId).get()).data();
   assert.equal(server.state.revision, 0); assert.deepEqual(server.commands, []);
 });
+
+for (const npcCount of [1, 2]) test(`real Firestore ${2 + npcCount}-seat NPC match commits atomic batches, idempotent retries and a complete replay`, { timeout: 240000 }, async () => {
+  const seats = [`npc-host-${id()}`, `npc-guest-${id()}`];
+  const created = await call(seats[0], 'CreateRoom', { displayName: 'Host', npcCount, requestId: id() });
+  await call(seats[1], 'JoinRoom', { inviteCode: created.inviteCode, displayName: 'Guest', requestId: id() });
+  let snapshot = await call(seats[0], 'GetSnapshot', { roomId: created.roomId });
+  assert.equal(snapshot.room.players.length, 2, 'NPC seats do not fill the human lobby');
+  assert.equal(snapshot.room.playerCount, 2 + npcCount);
+  snapshot = await call(seats[0], 'StartMatch', { roomId: created.roomId, expectedRevision: snapshot.room.revision, requestId: id() });
+  assert.equal(snapshot.room.players.length, 2 + npcCount);
+  assert.deepEqual(snapshot.room.match.players.map((player) => player.isHuman), [true, true, ...Array(npcCount).fill(false)]);
+  assert.equal((await roomRef(created.roomId).collection('members').get()).size, 2);
+  let humanOperations = 0; let npcOperations = 0; let duplicateVerified = false; let concurrentVerified = false;
+  const acceptedRetries = [];
+  const publicOnly = (value) => {
+    if (!value || typeof value !== 'object') return;
+    for (const [key, child] of Object.entries(value)) {
+      assert.ok(!['deck', 'deckCursor', 'seed', 'uid', 'private', 'secret', 'commands', 'initialState'].includes(key), `private field ${key}`);
+      publicOnly(child);
+    }
+  };
+  while (snapshot.room.status !== 'finished') {
+    const before = snapshot.room; const decision = getDecision(before.match);
+    assert.ok(decision.seat === 0 || decision.seat === 1, 'every committed snapshot waits for a human');
+    const legal = legalActions(before.match);
+    // Force two early gifts to actual NPC seats to exercise real batch contention.
+    let action = (!duplicateVerified || !concurrentVerified) && legal.find((candidate) => candidate.type === 'offer' && candidate.target === 1 + npcCount);
+    action ||= legal.find((candidate) => ({ source: 'draw', choose: 'self', 'invite-response': 'pass-invite',
+      'offer-response': 'accept', welcome: 'welcome', place: 'place', care: 'meditate', 'final-stone': 'pass-final' })[before.match.step] === candidate.type) || legal[0];
+    const uid = seats[action.seat]; const payload = mutation(snapshot, action);
+    const npcGift = action.type === 'offer' && action.target >= 2;
+    if (npcGift && !duplicateVerified) {
+      const results = await Promise.all(Array.from({ length: 3 }, () => call(uid, 'SubmitAction', payload)));
+      results.forEach((result) => assert.deepEqual(result, results[0]));
+      snapshot = results[0]; duplicateVerified = true;
+      assert.equal(snapshot.room.match.revision, before.match.revision + 3, 'offer, NPC accept and NPC placement commit exactly once');
+      assert.deepEqual(await call(uid, 'SubmitAction', payload), snapshot);
+      acceptedRetries.push({ uid, payload, response: structuredClone(snapshot) });
+    } else if (npcGift && !concurrentVerified) {
+      const candidates = [payload, { ...payload, requestId: id() }];
+      const outcomes = await Promise.allSettled(candidates.map((data) => call(uid, 'SubmitAction', data)));
+      assert.equal(outcomes.filter((outcome) => outcome.status === 'fulfilled').length, 1);
+      assert.equal(outcomes.find((outcome) => outcome.status === 'rejected').reason.details.reason, 'stale-revision');
+      const acceptedIndex = outcomes.findIndex((outcome) => outcome.status === 'fulfilled');
+      snapshot = outcomes[acceptedIndex].value; concurrentVerified = true;
+      assert.equal(snapshot.room.match.revision, before.match.revision + 3);
+      acceptedRetries.push({ uid, payload: candidates[acceptedIndex], response: structuredClone(snapshot) });
+    } else snapshot = await call(uid, 'SubmitAction', payload);
+    humanOperations += 1;
+    const advanced = snapshot.room.match.revision - before.match.revision - 1;
+    assert.ok(advanced >= 0 && advanced <= 32); npcOperations += advanced;
+    assert.equal(snapshot.room.revision, before.revision + 1);
+    assert.equal(snapshot.room.playerCount, 2 + npcCount);
+    publicOnly(snapshot);
+    assert.deepEqual((await roomRef(created.roomId).get()).data(), snapshot.room, 'human and NPC results share the committed public revision');
+    if (humanOperations % 20 === 0) assert.deepEqual((await call(seats[1], 'GetSnapshot', { roomId: created.roomId })).room, snapshot.room);
+    assert.ok(humanOperations < 500);
+  }
+  assert.equal(duplicateVerified, true); assert.equal(concurrentVerified, true); assert.ok(npcOperations > 0);
+  const gameRef = roomRef(created.roomId).collection('serverGames').doc(snapshot.room.gameId);
+  const server = (await gameRef.get()).data();
+  const replayed = server.commands.reduce((state, command) => applyMatchAction(state, command), server.initialState);
+  assert.equal(assertMatchInvariants(replayed), true);
+  assert.deepEqual(replayed, server.state);
+  assert.deepEqual(toPublicSnapshot(replayed), snapshot.room.match);
+  assert.deepEqual(snapshot.room.scores, rankMatch(replayed));
+  assert.equal(server.commands.length, snapshot.room.match.revision);
+  assert.equal(server.commands.filter((command) => command.seat < 2).length, humanOperations);
+  assert.equal(server.commands.filter((command) => command.seat >= 2).length, npcOperations);
+  assert.ok(replayed.players.every((player) => player.garden.filter(Boolean).length === 16));
+  assert.equal(new Set(replayed.players.map((player) => player.careCount)).size, 1);
+  const memberships = await roomRef(created.roomId).collection('members').get();
+  assert.deepEqual(memberships.docs.map((doc) => doc.id).sort(), seats.slice().sort());
+  assert.deepEqual(memberships.docs.map((doc) => doc.data().seat).sort(), [0, 1]);
+  const both = await Promise.all(seats.map((uid) => call(uid, 'GetSnapshot', { roomId: created.roomId })));
+  both.forEach((result, seat) => { assert.deepEqual(result.room, snapshot.room); assert.equal(result.self.seat, seat); });
+  for (const prior of acceptedRetries) assert.deepEqual(await call(prior.uid, 'SubmitAction', prior.payload), prior.response);
+  assert.deepEqual((await gameRef.get()).data(), server, 'replaying old NPC batches never advances the finished game');
+});

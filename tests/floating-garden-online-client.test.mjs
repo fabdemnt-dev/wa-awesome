@@ -56,6 +56,7 @@ async function playing() { const service = server(), a = service.client('a'), b 
   assert.equal(b.controller.getState().room.match.players[0].isHuman,undefined);
   assert.equal(a.controller.getState().canConfirm,true);
   const html=renderOnline(b.controller.getState()); assert.match(html,/あなたの庭 <small>P2 Guest/); assert.match(html,/data-seat="0"/); assert.doesNotMatch(html,/CPU|残数アシスト|deckCursor/);
+  assert.match(html,/<p>次の選択を待っています<\/p>/); assert.doesNotMatch(html,/庭づくりが完了しました/);
   assert.equal(a.storage.map.has('floating-garden-match-save-v1'),false);
   assert.deepEqual(Object.keys(service.calls.find(call=>call.kind==='start').payload).sort(),['expectedRevision','requestId','roomId']);
  });
@@ -573,7 +574,12 @@ async function lobby(options = {}) {
       seen.add(action.type);const {type,seat,revision,...extra}=action;assert.equal(await c.submit(type,extra,revision),true);
     }
     assert.deepEqual(a.controller.getState().room,b.controller.getState().room);assert.deepEqual(a.controller.getState().room.scores,rankMatch(service.match));assert.ok(service.match.players.every(p=>p.garden.every(Boolean)));assert.equal(service.match.players[0].careCount,service.match.players[1].careCount);
-    assert.match(renderOnline(a.controller.getState()),/サーバーで確定した共通の結果/);
+    for (const client of clients) {
+      const html = renderOnline(client.getState());
+      assert.match(html,/サーバーで確定した共通の結果/);
+      assert.match(html,/<p>庭づくりが完了しました<\/p>/);
+      assert.doesNotMatch(html,/次の選択を待っています/);
+    }
     assert.equal(a.controller.requestReturn(),true);assert.equal(a.controller.returnToEntry(),true);assert.equal(a.controller.getState().room,null);assert.equal(a.controller.getState().uid,'a');assert.equal(b.controller.getState().room.status,'finished');
   }
   for(const type of ['draw','use-storage','self','store','offer','accept','decline','request-invite','pass-invite','welcome','yield','place','meditate','stone','pass-final']) assert.ok(seen.has(type),`missing ${type}`);
@@ -655,4 +661,38 @@ function mounted(controller) {
   assert.equal(a.controller.getState().room,null);assert.equal(a.controller.getState().uid,'a');assert.equal(service.calls.length,calls);
   assert.ok(app.button('join'));assert.equal(app.button('join').disabled,false);assert.equal(app.button('return-entry'),null);
   assert.match(app.root.innerHTML,/相手から受け取った招待コード/);app.app.unmount();
+ });
+
+
+ test('NPC choice is bounded, preserves the legacy zero-NPC payload, and survives entry rerenders', async () => {
+  for (const count of [0, 1, 2]) {
+    const service=server(),a=service.client('a'),app=mounted(a.controller);await app.app.ready;
+    assert.match(app.root.innerHTML, /id="online-npc-count"/);
+    app.input('online-name','Host');app.input('online-npc-count',String(count));
+    await a.controller.resume();
+    assert.match(app.root.innerHTML,new RegExp(`<option value="${count}" selected>`));
+    await app.click('create');
+    const payload=service.calls.find(call=>call.kind==='create').payload;
+    assert.equal(payload.npcCount,count || undefined);app.app.unmount();
+  }
+  const service=server(),a=service.client('a');await a.controller.resume();
+  for(const count of [-1,3,1.5,'1',null,NaN]) assert.equal(await a.controller.create('Host',count),false);
+  assert.equal(service.calls.some(call=>call.kind==='create'),false);a.controller.dispose();
+ });
+ for(const npcCount of [1,2]) test(`render ${npcCount+2} gardens, distinguish NPCs, and keep all comparison targets`,async()=>{
+  const {a,service}=await playing();
+  const match=createMatch({playerCount:2+npcCount,seed:'npc-view',humanSeat:-1});
+  match.players.forEach((player)=>{player.isHuman=player.seat<2;player.name=player.seat<2?['Host','Guest'][player.seat]:`NPC ${player.seat-1}`;});
+  const room={...service.room,revision:100,npcCount,playerCount:2+npcCount,match:publicMatch(match),players:match.players.map(({seat,name,isHuman})=>({seat,name,...(isHuman?{}:{isHuman:false})}))};
+  service.listenersByUid.get('a')({room,fromCache:false});
+  const html=renderOnline(a.controller.getState());
+  assert.match(html,new RegExp(`${npcCount+1} GARDENS`));
+  assert.match(html,new RegExp(`data-opponent-count="${npcCount+1}"`));
+  assert.equal((html.match(/class="opponent-card"/g)||[]).length,npcCount+1);
+  for(let seat=1;seat<2+npcCount;seat++){
+    assert.equal(a.controller.compare(seat,true),true);
+    assert.match(renderOnline(a.controller.getState()),new RegExp(`P${seat+1} ${seat<2?'Guest':`NPC ${seat-1}`}`));
+    a.controller.closeComparison();
+  }
+  assert.equal(a.controller.compare(2+npcCount),false);a.controller.dispose();
  });

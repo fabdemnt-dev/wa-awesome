@@ -16,7 +16,7 @@ const SHARED = ['engine.js', 'match-engine.js', 'session.js', 'view.js', 'match-
 const ONLINE = ['controller.js', 'mount.js', 'view.js', 'style.css'];
 const TRIAL = ['index.html', 'app.js', 'bootstrap.js', 'config.js', 'firebase.js', 'style.css'];
 const SERVER = ['index.js', 'trial-handlers.js', 'config.js', 'package.json', 'package-lock.json'];
-const TRUSTED = ['handlers.js', 'contract.js', 'invite-code.js', 'core/engine.js', 'core/match-engine.js', 'core/package.json'];
+const TRUSTED = ['handlers.js', 'contract.js', 'invite-code.js', 'core/engine.js', 'core/match-engine.js', 'core/cpu.js', 'core/package.json'];
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
 function projectId(value) {
   if (typeof value !== 'string' || !/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(value) || value.startsWith('demo-') || ['wa-awesome', 'wa-awesome-mofumofu-stg'].includes(value)) throw new Error('A verified new garden-only Firebase project is required');
@@ -111,7 +111,7 @@ export async function prepareTrialBundle({ config, output, now = Date.now(), rep
     if (!info.isFile() || info.isSymbolicLink() || !((await realpath(path)).startsWith((await realpath(source)) + '/'))) throw new Error(`Unsafe source file ${from}`);
     prepared.push({ from, to, bytes: await readFile(path) });
   }
-  for (const name of ['engine.js', 'match-engine.js']) {
+  for (const name of ['engine.js', 'match-engine.js', 'cpu.js']) {
     const canonical = await readFile(join(source, 'lab/floating-garden', name));
     const staged = prepared.find((item) => item.to === `functions/online/core/${name}`).bytes;
     if (!canonical.equals(staged)) throw new Error(`Trusted staged core mismatch: ${name}`);

@@ -1,7 +1,7 @@
 #online-app { max-width: 1070px; margin: auto; padding: 0 24px; }
 .online-entry, .online-lobby { max-width: 680px; margin: 0 auto 1rem; }
 .online-entry label, .online-lobby label { display: block; margin: 1rem 0 .45rem; }
-.online-entry input, .online-lobby input { box-sizing: border-box; width: 100%; min-width: 0; padding: .8rem; border: 1px solid #6e8296; border-radius: .6rem; color: #f2f4fc; background: #101c2b; font: inherit; }
+.online-entry input, .online-entry select, .online-lobby input { box-sizing: border-box; width: 100%; min-width: 0; padding: .8rem; border: 1px solid #6e8296; border-radius: .6rem; color: #f2f4fc; background: #101c2b; font: inherit; }
 .online-entry button, .online-lobby button { margin-top: .8rem; }
 .online-connection { margin-bottom: 1rem; overflow-wrap: anywhere; }
 .online-connection p { margin: .3rem 0; }
@@ -29,4 +29,14 @@
   #online-comparison .paired-garden .compact-score h4, #online-comparison .paired-garden .compact-score summary { font-size: .72rem; }
   #online-comparison .paired-garden .compact-score .score-summary dt { font-size: .65rem; }
   #online-comparison .paired-garden .stone-breakdown li > div { flex-wrap: wrap; gap: 3px 6px; }
+}
+
+/* Keep the reviewed single inline-style hash unchanged; extra boards use CSS only. */
+@media (max-width: 779px) {
+  #online-app .opponent-cards[data-opponent-count="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #online-app .opponent-cards[data-opponent-count="3"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 479px) {
+  #online-app .opponent-cards[data-opponent-count="3"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #online-app .opponent-cards[data-opponent-count="3"] .opponent-card:last-child { grid-column: 1 / -1; }
 }

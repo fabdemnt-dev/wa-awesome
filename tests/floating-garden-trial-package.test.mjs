@@ -17,13 +17,13 @@ const sourceFiles = [
   ...['controller.js', 'mount.js', 'view.js', 'style.css'].map((name) => `lab/floating-garden/online/${name}`),
   ...['index.html', 'app.js', 'bootstrap.js', 'config.js', 'firebase.js', 'style.css'].map((name) => `lab/floating-garden/trial/${name}`),
   ...['index.js', 'trial-handlers.js', 'config.js', 'package.json', 'package-lock.json'].map((name) => `functions/floating-garden-trial/${name}`),
-  ...['handlers.js', 'contract.js', 'invite-code.js', 'core/engine.js', 'core/match-engine.js', 'core/package.json'].map((name) => `functions/floating-garden-online/${name}`),
+  ...['handlers.js', 'contract.js', 'invite-code.js', 'core/engine.js', 'core/match-engine.js', 'core/cpu.js', 'core/package.json'].map((name) => `functions/floating-garden-online/${name}`),
 ].sort();
 const generatedFiles = ['functions/trial-config.json', 'public/lab/floating-garden/trial/trialruntime.js', 'firestore.rules', 'firestore.indexes.json', 'firebase.trial.json', 'ADMIN-RECORDS-REVIEW.json', 'REVIEW-PLAN.json', 'SOURCE-SHA256.json'];
 function outputPath(source) { return source.startsWith('lab/') ? 'public/' + source : source.replace('functions/floating-garden-trial/', 'functions/').replace('functions/floating-garden-online/', 'functions/online/'); }
 async function sourceFixture(dir) {
   const source = join(dir, 'source');
-  for (const path of [...sourceFiles, 'functions/floating-garden-trial/firestore.rules.template']) {
+  for (const path of [...sourceFiles, 'lab/floating-garden/cpu.js', 'functions/floating-garden-trial/firestore.rules.template']) {
     await mkdir(dirname(join(source, path)), { recursive: true });
     await cp(join(root, path), join(source, path));
   }
@@ -64,7 +64,7 @@ test('trial bundle has one new project, exactly five isolated functions, complet
   assert.ok(names.includes('public/lab/floating-garden/trial/style.css'));
   assert.ok(!names.includes('public/lab/floating-garden/online/app.js'));
   assert.ok(!names.includes('public/lab/floating-garden/online/firebase.js'));
-  for (const name of ['engine.js', 'match-engine.js']) assert.deepEqual(await readFile(join(output, 'functions/online/core', name)), await readFile(join(root, 'lab/floating-garden', name)));
+  for (const name of ['engine.js', 'match-engine.js', 'cpu.js']) assert.deepEqual(await readFile(join(output, 'functions/online/core', name)), await readFile(join(root, 'lab/floating-garden', name)));
   for (const name of ['handlers.js', 'contract.js', 'invite-code.js']) assert.deepEqual(await readFile(join(output, 'functions/online', name)), await readFile(join(root, 'functions/floating-garden-online', name)));
   // Every relative JS/CSS/HTML dependency points to a copied public file. No bundle imports server code.
   for (const name of names.filter((name) => name.startsWith('public/') && /\.(js|html|css)$/.test(name))) {

@@ -27,6 +27,7 @@ test.before(async () => {
       [`${roomPath}/members/host`]: member(),
       [`${roomPath}/members/guest`]: member({ seat: 1, isHost: false }),
       [`${roomPath}/members/revoked`]: member({ active: false }),
+      ...Object.fromEntries([2, 3, -1, '0', 0.5].map((seat, index) => [`${roomPath}/members/bad-seat-${index}`, member({ seat })])),
       [`${roomPath}/members/expired-member`]: member({ expiresAtMillis: 1 }),
       [`${roomPath}/members/missing-active`]: { seat: 1, expiresAtMillis },
       [`${roomPath}/members/missing-expiry`]: { seat: 1, active: true },
@@ -63,7 +64,7 @@ test('active participants can get only their room and own membership in every pu
 });
 
 test('unsigned clients, outsiders, expired/revoked/malformed memberships fail closed', async () => {
-  for (const context of [env.unauthenticatedContext(), ...['outsider', 'revoked', 'expired-member', 'missing-active', 'missing-expiry', 'string-expiry'].map((uid) => env.authenticatedContext(uid))]) {
+  for (const context of [env.unauthenticatedContext(), ...['outsider', 'revoked', 'expired-member', 'missing-active', 'missing-expiry', 'string-expiry', ...Array.from({length:5},(_,i)=>`bad-seat-${i}`)].map((uid) => env.authenticatedContext(uid))]) {
     const db = context.firestore();
     await assertFails(getDoc(doc(db, roomPath)));
     await assertFails(getDoc(doc(db, `${roomPath}/members/host`)));

@@ -31,7 +31,7 @@ export async function prepareTrialEmulator(output, now = Date.now()) {
   await writeFile(join(out, 'browser-fixture/entry.js'), `// TEST ONLY: explicit bootstrap location seam, not the production app.js entry.\nimport runtime from './trialruntime.js';\nimport { bootstrapTrial } from './bootstrap.js';\nawait bootstrapTrial(document.querySelector('#online-app'), document.querySelector('#trial-status'), runtime, { location: new URL(${JSON.stringify(runtime.previewOrigin + '/lab/floating-garden/trial/index.html')}) });\n`);
   const source = join(out, 'emulator-functions');
   await mkdir(source);
-  for (const name of ['trial-handlers.js', 'config.js', 'package.json', 'package-lock.json', 'online/handlers.js', 'online/contract.js', 'online/invite-code.js', 'online/core/engine.js', 'online/core/match-engine.js', 'online/core/package.json']) {
+  for (const name of ['trial-handlers.js', 'config.js', 'package.json', 'package-lock.json', 'online/handlers.js', 'online/contract.js', 'online/invite-code.js', 'online/core/engine.js', 'online/core/match-engine.js', 'online/core/cpu.js', 'online/core/package.json']) {
     const destination = join(source, name); await mkdir(dirname(destination), { recursive: true });
     await copyFile(join(out, 'functions', name), destination);
   }

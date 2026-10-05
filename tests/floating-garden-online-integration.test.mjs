@@ -53,7 +53,7 @@ function publicOnly(value, forbiddenValues = []) {
   }
   visit(value);
   const room = value.room || value;
-  assert.deepEqual(Object.keys(room).sort(), ['id', 'status', 'hostSeat', 'playerCount', 'gameId', 'revision', 'rulesVersion', 'expiresAtMillis', 'players', 'match', 'scores'].sort(), 'public room is an explicit allowlist');
+  assert.deepEqual(Object.keys(room).sort(), ['id', 'status', 'hostSeat', 'playerCount', 'gameId', 'revision', 'rulesVersion', 'expiresAtMillis', 'players', 'match', 'scores', ...(room.playerCount > 2 ? ['npcCount'] : [])].sort(), 'public room is an explicit allowlist');
   const json = JSON.stringify(value);
   for (const secret of forbiddenValues) if (secret) assert.ok(!json.includes(secret), 'private value leaked into public response');
 }
@@ -354,4 +354,53 @@ test('expiry and membership revocation reject live reads and new actions without
   }
   await rejected(host.call('SubmitAction', { ...payload, requestId: requestId() }), 'failed-precondition');
   assert.equal((await roomRef(created.roomId).get()).data().match.revision, 0);
+});
+
+
+for (const npcCount of [1, 2]) test(`real Auth/Callable/Firestore: two humans + ${npcCount} NPC finish and recover atomic batches`, { timeout: 240000 }, async () => {
+  const seats = [await client(`npc-${npcCount}-host`), await client(`npc-${npcCount}-guest`)];
+  const outsider = await client(`npc-${npcCount}-outsider`);
+  const created = await seats[0].call('CreateRoom', { displayName: 'Host', npcCount, requestId: requestId() });
+  await seats[1].call('JoinRoom', { displayName: 'Guest', inviteCode: created.inviteCode, requestId: requestId() });
+  await rejected(outsider.call('JoinRoom', { displayName: 'Third human', inviteCode: created.inviteCode, requestId: requestId() }), 'failed-precondition');
+  let snapshot = await seats[0].call('GetSnapshot', { roomId: created.roomId });
+  const watchers = seats.map((value) => watchRoom(value, created.roomId));
+  try {
+    snapshot = await seats[0].call('StartMatch', { roomId: created.roomId, expectedRevision: snapshot.room.revision, requestId: requestId() });
+    assert.equal(snapshot.room.playerCount, 2 + npcCount);
+    assert.equal((await roomRef(created.roomId).collection('members').get()).size, 2);
+    let count = 0, batches = 0;
+    while (snapshot.room.status !== 'finished') {
+      assert.ok(++count < 400);
+      const match = snapshot.room.match, legal = legalActions(match);
+      assert.ok(getDecision(match).seat < 2);
+      const action = ['self', 'pass-invite', 'meditate', 'pass-final'].map((type) => legal.find((candidate) => candidate.type === type)).find(Boolean) || legal[0];
+      const payload = wireAction(snapshot, action), before = snapshot.room;
+      if (count % 19 === 0) {
+        const copies = await Promise.all([seats[action.seat].call('SubmitAction', payload), seats[action.seat].call('SubmitAction', payload)]);
+        assert.deepEqual(copies[0], copies[1]); snapshot = copies[0];
+      } else snapshot = await seats[action.seat].call('SubmitAction', payload);
+      assert.equal(snapshot.room.revision, before.revision + 1);
+      if (snapshot.room.match.revision > before.match.revision + 1) {
+        batches += 1;
+        assert.deepEqual(await seats[action.seat].call('SubmitAction', payload), snapshot, 'accepted human + NPC batch replays once');
+      }
+      publicOnly(snapshot, seats.map((value) => value.auth.currentUser.uid));
+      const received = await Promise.all(watchers.map((watcher) => watcher.wait(snapshot.room.revision)));
+      received.forEach((room) => assert.deepEqual(room, snapshot.room));
+      if (count % 23 === 0) {
+        await rejected(seats[action.seat].call('SubmitAction', { ...payload, requestId: requestId() }), 'failed-precondition', 'stale-revision');
+        assert.deepEqual((await seats[1].call('GetSnapshot', { roomId: created.roomId })).room, snapshot.room);
+      }
+    }
+    assert.ok(batches > 0); assert.equal(snapshot.room.scores.length, 2 + npcCount);
+    assert.ok(snapshot.room.match.players.every((player) => player.garden.filter(Boolean).length === 16));
+    const game = (await roomRef(created.roomId).collection('serverGames').doc(snapshot.room.gameId).get()).data();
+    let replay = game.initialState;
+    for (const command of game.commands) replay = applyMatchAction(replay, command);
+    assert.deepEqual(replay, game.state); assert.equal(assertMatchInvariants(replay), true);
+    assert.deepEqual(rankMatch(replay), snapshot.room.scores);
+    assert.equal((await roomRef(created.roomId).collection('members').get()).size, 2);
+    await rejected(outsider.call('GetSnapshot', { roomId: created.roomId }), 'permission-denied');
+  } finally { watchers.forEach((watcher) => watcher.stop()); await Promise.all([...seats, outsider].map(close)); }
 });

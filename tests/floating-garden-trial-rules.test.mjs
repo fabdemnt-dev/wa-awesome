@@ -176,3 +176,13 @@ test('generated static false and fixed expired/future windows deny even a matchi
     } finally { await local.cleanup(); }
   }
 });
+
+
+test('NPC seats never become authenticated human memberships even for enrolled testers', async () => {
+  const db = env.authenticatedContext('host').firestore();
+  for (const seat of [2, 3, -1, '0', 0.5]) {
+    await adminSet(`${roomPath}/members/host`, member({ seat }));
+    await assertFails(getDoc(doc(db, roomPath)));
+    await assertFails(getDoc(doc(db, `${roomPath}/members/host`)));
+  }
+});

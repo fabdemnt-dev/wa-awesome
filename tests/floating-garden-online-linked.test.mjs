@@ -13,7 +13,7 @@ const { createHandlers } = require('../functions/floating-garden-online/handlers
 const names = { create: 'floatingGardenCreateRoom', join: 'floatingGardenJoinRoom', start: 'floatingGardenStartMatch', getSnapshot: 'floatingGardenGetSnapshot', submit: 'floatingGardenSubmitAction' };
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
-test('actual client/server contract completes a linked two-human match with lost create/action responses and reloads', async () => {
+for (const npcCount of [0, 1, 2]) test(`actual client/server contract completes two humans + ${npcCount} NPC with lost responses and reloads`, async () => {
   const db = createMemoryStore();
   const handlers = createHandlers({ db, inviteSecret: () => 'linked-controller-test-only-hmac-key-not-production' });
   const values = [new Map(), new Map()];
@@ -33,7 +33,7 @@ test('actual client/server contract completes a linked two-human match with lost
   }
   try {
     controllers[0] = client(0); await controllers[0].resume();
-    dropNext[0] = 'create'; assert.equal(await controllers[0].create('Linked host'), false);
+    dropNext[0] = 'create'; assert.equal(await controllers[0].create('Linked host', npcCount), false);
     const pendingCreate = JSON.parse(values[0].get(ONLINE_SAVE_KEY)).pending;
     assert.equal(controllers[0].getState().room, null);
     controllers[0].dispose(); controllers[0] = client(0); await controllers[0].resume();
@@ -76,6 +76,9 @@ test('actual client/server contract completes a linked two-human match with lost
     }
     assert.deepEqual(controllers[0].getState().room, controllers[1].getState().room);
     const room = controllers[0].getState().room;
+    assert.equal(room.playerCount, 2 + npcCount);
+    assert.equal(room.match.players.filter((player) => player.isHuman === false).length, npcCount);
+    assert.equal(room.scores.length, 2 + npcCount);
     assert.deepEqual(room.scores, rankMatch(room.match));
     assert.ok(room.match.players.every((player) => player.garden.every(Boolean)));
     assert.equal(Object.hasOwn(room.match, 'deck'), false);
