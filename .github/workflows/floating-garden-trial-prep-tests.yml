@@ -9,6 +9,8 @@ on:
       - 'functions/floating-garden-online/**'
       - 'lab/floating-garden/**'
       - 'scripts/prepare-floating-garden-trial.mjs'
+      - 'scripts/floating-garden-active-update*.mjs'
+      - 'tests/floating-garden-active-update*'
       - 'scripts/deploy-floating-garden-maintenance.mjs'
       - 'scripts/bootstrap-floating-garden-apis.mjs'
       - 'scripts/bootstrap-floating-garden-runtime.mjs'
@@ -56,6 +58,8 @@ jobs:
         run: npm run check:floating-garden:core && npm test
       - name: Test trial gates and denied-by-default Firestore rules
         run: npm run test:floating-garden:trial:rules
+      - name: Verify active-update preservation with real Firestore transactions
+        run: npm run test:floating-garden:active-update:transactions
       - name: Install browser test dependencies
         run: npm ci --prefix tests/e2e --ignore-scripts --no-audit --no-fund
       - name: Prepare Chromium

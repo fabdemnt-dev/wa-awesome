@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { createOnlineController, ONLINE_SAVE_KEY } from '../lab/floating-garden/online/controller.js';
+import { createOnlineController, ONLINE_SAVE_KEY, NPC_RULES_VERSION } from '../lab/floating-garden/online/controller.js';
 import { createTrialStorage, trialRecoveryKey } from '../lab/floating-garden/trial/bootstrap.js';
 import { renderOnline } from '../lab/floating-garden/online/view.js';
 import { localTestAllowed, EMULATOR_CONFIG, EMULATOR_PORTS } from '../lab/floating-garden/online/config.js';
@@ -272,7 +272,7 @@ async function lobby(options = {}) {
     'wrong host':({service})=>{service.room.hostSeat=1;service.publish();},
     'started ID':({service})=>{service.room.gameId='game-started';service.publish();},
     'playing status':({service})=>{service.room.status='playing';service.publish();},
-    'existing match':({service})=>{service.room.match=publicMatch(createMatch({playerCount:2,seed:'return-guard',humanSeat:-1}));service.publish();},
+    'existing match':({service})=>{const match=publicMatch(createMatch({playerCount:2,seed:'return-guard',humanSeat:-1}));Object.assign(service.room,{match,players:match.players.map(({seat,name})=>({seat,name})),status:'playing',gameId:'game-started',revision:service.room.revision+1});service.publish();},
     'negative revision':({service,a})=>{a.api.getSnapshot=async()=>({...service.snapshot('a'),room:{...service.room,revision:-1}});return a.controller.resume();},
     'not host':({service,a})=>{a.api.getSnapshot=async()=>({...service.snapshot('a'),self:{seat:0,isHost:false}});return a.controller.resume();},
   };
@@ -683,7 +683,7 @@ function mounted(controller) {
   const {a,service}=await playing();
   const match=createMatch({playerCount:2+npcCount,seed:'npc-view',humanSeat:-1});
   match.players.forEach((player)=>{player.isHuman=player.seat<2;player.name=player.seat<2?['Host','Guest'][player.seat]:`NPC ${player.seat-1}`;});
-  const room={...service.room,revision:100,npcCount,playerCount:2+npcCount,match:publicMatch(match),players:match.players.map(({seat,name,isHuman})=>({seat,name,...(isHuman?{}:{isHuman:false})}))};
+  const room={...service.room,rulesVersion:NPC_RULES_VERSION,revision:100,npcCount,playerCount:2+npcCount,match:publicMatch(match),players:match.players.map(({seat,name,isHuman})=>({seat,name,...(isHuman?{}:{isHuman:false})}))};
   service.listenersByUid.get('a')({room,fromCache:false});
   const html=renderOnline(a.controller.getState());
   assert.match(html,new RegExp(`${npcCount+1} GARDENS`));
@@ -696,3 +696,26 @@ function mounted(controller) {
   }
   assert.equal(a.controller.compare(2+npcCount),false);a.controller.dispose();
  });
+
+for (const npcCount of [0, 1, 2]) test(`controller admits only the matching ${2 + npcCount}-seat room protocol and unchanged engine version`, async () => {
+  const { a, service } = await playing();
+  const match = createMatch({ playerCount: 2 + npcCount, seed: 'protocol-client', humanSeat: -1 });
+  const valid = { ...service.room, revision: 100, rulesVersion: npcCount ? NPC_RULES_VERSION : MATCH_VERSION,
+    playerCount: 2 + npcCount, ...(npcCount ? { npcCount } : {}), match: publicMatch(match),
+    players: match.players.map(({ seat, name }) => ({ seat, name, ...(seat >= 2 ? { isHuman: false } : {}) })) };
+  const original = a.controller.getState().room;
+  const wrongVersion = npcCount ? MATCH_VERSION : NPC_RULES_VERSION;
+  for (const room of [{ ...valid, rulesVersion: wrongVersion }, { ...valid, rulesVersion: 'future-unknown-protocol' },
+    { ...valid, npcCount: null }, { ...valid, match: { ...valid.match, version: NPC_RULES_VERSION } },
+    { ...valid, players: valid.players.slice(0, -1) },
+    { ...valid, match: { ...valid.match, players: valid.match.players.slice(0, -1) } }]) {
+    for (const fromCache of [false, true]) {
+      service.listenersByUid.get('a')({ room, fromCache });
+      assert.deepEqual(a.controller.getState().room, original);
+    }
+  }
+  service.listenersByUid.get('a')({ room: valid, fromCache: false });
+  assert.deepEqual(a.controller.getState().room, valid);
+  assert.equal(a.controller.getState().canConfirm, true);
+  a.controller.dispose();
+});

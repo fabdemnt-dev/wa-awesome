@@ -76,6 +76,8 @@ for (const npcCount of [0, 1, 2]) test(`actual client/server contract completes 
     }
     assert.deepEqual(controllers[0].getState().room, controllers[1].getState().room);
     const room = controllers[0].getState().room;
+    assert.equal(room.rulesVersion, npcCount ? 'floating-garden-online-npc-1' : 'floating-garden-match-1');
+    assert.equal(room.match.version, 'floating-garden-match-1');
     assert.equal(room.playerCount, 2 + npcCount);
     assert.equal(room.match.players.filter((player) => player.isHuman === false).length, npcCount);
     assert.equal(room.scores.length, 2 + npcCount);

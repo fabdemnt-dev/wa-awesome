@@ -635,16 +635,25 @@ export function createCloudAdapter({ packet, review, toolingDir, prior, runner =
     const value = await request(`https://cloudfunctions.googleapis.com/v2/projects/${PROJECT}/locations/-/functions?pageSize=1000`);
     requireThat(plain(value) && !value.nextPageToken && !(value.unreachable?.length) && Array.isArray(value.functions ?? []), 'function-inventory'); return value.functions ?? [];
   }
-  async function verifyFunctions() { return boundary(async () => {
+  async function verifyFunctions({ includeProof = false, functionNames = FUNCTION_NAMES } = {}) { return boundary(async () => {
     requireLocal(); const functions = await functionsList();
     requireThat(functions.length === 5 && new Set(functions.map((f) => f.name)).size === 5, 'function-inventory');
-    const proven = new Set(), services = new Set();
-    for (const name of FUNCTION_NAMES) {
+    requireThat(Array.isArray(functionNames) && functionNames.length > 0 && new Set(functionNames).size === functionNames.length && functionNames.every(name => FUNCTION_NAMES.includes(name)), 'function-inventory');
+    const proven = new Set(), services = new Set(), proof = [];
+    for (const name of functionNames) {
       const fn = functions.find((f) => f.name === `projects/${PROJECT}/locations/${REGION}/functions/${name}`);
       const { service, revision, source } = validateFunctionMetadata(fn, name);
       requireThat(!services.has(service), 'function-duplicate-service'); services.add(service);
-      validateRunService(await request(`https://run.googleapis.com/v2/${service}`), service, revision);
-      validateInvokerPolicy(await request(`https://run.googleapis.com/v2/${service}:getIamPolicy?options.requestedPolicyVersion=3`));
+      const run = await request(`https://run.googleapis.com/v2/${service}`);
+      validateRunService(run, service, revision);
+      const iam = await request(`https://run.googleapis.com/v2/${service}:getIamPolicy?options.requestedPolicyVersion=3`);
+      validateInvokerPolicy(iam);
+      let functionIam;
+      if (includeProof) {
+        functionIam = await request(`https://cloudfunctions.googleapis.com/v2/${fn.name}:getIamPolicy?options.requestedPolicyVersion=3`);
+        requireThat(plain(functionIam) && Object.keys(functionIam).every(key => ['version', 'etag', 'bindings', 'auditConfigs'].includes(key)) && Array.isArray(functionIam.bindings ?? []), 'run-invoker-policy');
+      }
+      proof.push({ function: fn, run, iam, ...(includeProof ? { functionIam } : {}) });
       const key = JSON.stringify(source);
       if (!proven.has(key)) {
         const bucket = await request(`https://storage.googleapis.com/storage/v1/b/${source.bucket}?fields=name,projectNumber`);
@@ -657,9 +666,10 @@ export function createCloudAdapter({ packet, review, toolingDir, prior, runner =
       }
     }
     requireThat(same(functions, await functionsList()), 'functions-concurrent-change');
-    return { verified: true };
+    // Private detailed evidence is opt-in and is never logged by this adapter.
+    return includeProof ? { verified: true, functions: proof } : { verified: true };
   }); }
-  async function rulesState() {
+  async function rulesState(includeProof = false) {
     const release = await request(`https://firebaserules.googleapis.com/v1/projects/${PROJECT}/releases/cloud.firestore`);
     requireThat(release.name === `projects/${PROJECT}/releases/cloud.firestore` && typeof release.rulesetName === 'string' &&
       new RegExp(`^projects/${PROJECT}/rulesets/[A-Za-z0-9_-]+$`).test(release.rulesetName), 'rules-release');
@@ -669,9 +679,13 @@ export function createCloudAdapter({ packet, review, toolingDir, prior, runner =
       typeof set.source.files[0].content === 'string', 'rules-source');
     const again = await request(`https://firebaserules.googleapis.com/v1/projects/${PROJECT}/releases/cloud.firestore`);
     requireThat(same(again, release), 'rules-concurrent-change');
-    return set.source.files[0].content;
+    return includeProof ? { release, ruleset: set } : set.source.files[0].content;
   }
-  async function verifyRules() { return boundary(async () => { requireLocal(); requireThat(await rulesState() === checkedFile(join(packet.gameDir, 'firestore.rules')).toString(), 'rules-bytes'); return { verified: true }; }); }
+  async function verifyRules({ includeProof = false } = {}) { return boundary(async () => {
+    requireLocal(); const proof = await rulesState(true);
+    requireThat(proof.ruleset.source.files[0].content === checkedFile(join(packet.gameDir, 'firestore.rules')).toString(), 'rules-bytes');
+    return includeProof ? { verified: true, ...proof } : { verified: true };
+  }); }
   async function verifyResumeSource() { return boundary(async () => {
     requireThat(['stop', 'inspect'].includes(readyMode), 'preflight-required'); requireLocal();
     const apis = gcloud(['services', 'list', '--enabled']);

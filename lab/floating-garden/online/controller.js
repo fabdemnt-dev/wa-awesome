@@ -1,6 +1,8 @@
 import { applyPlacement, createTile } from '../engine.js?v=20261002-match-save';
 import { getDecision, legalActions, MATCH_VERSION } from '../match-engine.js?v=20261002-match-save';
 
+// Wire protocol is distinct from the shared engine version only for NPC rooms.
+export const NPC_RULES_VERSION = 'floating-garden-online-npc-1';
 export const ONLINE_SAVE_KEY = 'floating-garden-online-recovery-v1';
 const clone = (value) => structuredClone(value);
 const immutable = (value) => { Object.freeze(value); for (const child of Object.values(value)) if (child && typeof child === 'object') immutable(child); return value; };
@@ -106,11 +108,12 @@ export function createOnlineController({ api, ensureUser, subscribe = () => () =
   function accept(snapshot, token = generation, { fromCache = false, allowSuperseded = false } = {}) {
     if (!alive || token !== generation || !snapshot?.room || !state.uid) return false;
     const { room, self = state.self } = snapshot;
-    if (!saved?.roomId || room.id !== saved.roomId || !Number.isSafeInteger(room.revision) || room.rulesVersion !== MATCH_VERSION || !self || ![0, 1].includes(self.seat) || !Array.isArray(room.players) || !room.players.some((player) => player?.seat === self.seat)) return false;
-    const npcCount = room.npcCount ?? 0;
+    if (!saved?.roomId || room.id !== saved.roomId || !Number.isSafeInteger(room.revision) || !self || ![0, 1].includes(self.seat) || !Array.isArray(room.players) || !room.players.some((player) => player?.seat === self.seat)) return false;
+    const npcCount = room.npcCount === undefined ? 0 : room.npcCount;
     if (!Number.isInteger(npcCount) || npcCount < 0 || npcCount > 2 || room.playerCount !== 2 + npcCount
+      || room.rulesVersion !== (npcCount > 0 ? NPC_RULES_VERSION : MATCH_VERSION)
       || room.players.some((player, seat) => player?.seat !== seat)
-      || (room.match && npcCount > 0 && (room.players.length !== room.playerCount || room.match.players?.length !== room.playerCount))
+      || (room.match && (room.players.length !== room.playerCount || room.match.players?.length !== room.playerCount))
       || (!room.match && (room.players.length < 1 || room.players.length > 2))) return false;
     const previous = state.room;
     if (previous?.gameId && room.gameId !== previous.gameId) return false;

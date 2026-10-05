@@ -178,6 +178,7 @@ for (const npcCount of [1, 2]) test(`real Firestore ${2 + npcCount}-seat NPC mat
   await call(seats[1], 'JoinRoom', { inviteCode: created.inviteCode, displayName: 'Guest', requestId: id() });
   let snapshot = await call(seats[0], 'GetSnapshot', { roomId: created.roomId });
   assert.equal(snapshot.room.players.length, 2, 'NPC seats do not fill the human lobby');
+  assert.equal(snapshot.room.rulesVersion, 'floating-garden-online-npc-1');
   assert.equal(snapshot.room.playerCount, 2 + npcCount);
   snapshot = await call(seats[0], 'StartMatch', { roomId: created.roomId, expectedRevision: snapshot.room.revision, requestId: id() });
   assert.equal(snapshot.room.players.length, 2 + npcCount);
@@ -223,6 +224,7 @@ for (const npcCount of [1, 2]) test(`real Firestore ${2 + npcCount}-seat NPC mat
     const advanced = snapshot.room.match.revision - before.match.revision - 1;
     assert.ok(advanced >= 0 && advanced <= 32); npcOperations += advanced;
     assert.equal(snapshot.room.revision, before.revision + 1);
+    assert.equal(snapshot.room.rulesVersion, 'floating-garden-online-npc-1');
     assert.equal(snapshot.room.playerCount, 2 + npcCount);
     publicOnly(snapshot);
     assert.deepEqual((await roomRef(created.roomId).get()).data(), snapshot.room, 'human and NPC results share the committed public revision');

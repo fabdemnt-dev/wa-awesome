@@ -2,8 +2,8 @@
 
 const crypto = require('node:crypto');
 const {
-  RULES_VERSION, PLAYER_COUNT, ROOM_TTL_MILLIS, RECEIPT_RETENTION_MILLIS, GardenError, fail, exactObject,
-  uidOf, requestIdOf, idOf, revisionOf, sanitizeDisplayName, npcCountOf, roomPlayerCount, commandOf, hashPayload, uidKey, assertNotExpired,
+  RULES_VERSION, NPC_RULES_VERSION, PLAYER_COUNT, ROOM_TTL_MILLIS, RECEIPT_RETENTION_MILLIS, GardenError, fail, exactObject,
+  uidOf, requestIdOf, idOf, revisionOf, sanitizeDisplayName, npcCountOf, roomPlayerCount, roomRulesVersion, commandOf, hashPayload, uidKey, assertNotExpired,
   requireMember, toPublicSnapshot, publicRoom,
 } = require('./contract');
 const { createInviteCode, parseInviteCode, inviteMac, safeEqual, hashIp } = require('./invite-code');
@@ -78,7 +78,7 @@ function createHandlers({ db, now = Date.now, randomUUID = crypto.randomUUID, ra
       return value;
     } catch { fail('unavailable', '招待機能のサーバー設定を確認しています。しばらくしてからお試しください。'); }
   }
-  async function replay(tx, snapshot, hash, uid) {
+  async function replay(tx, snapshot, hash, uid, type, payload) {
     const data = snapshot.data();
     if (data.payloadHash !== hash) fail('already-exists', '同じリクエストIDを別の操作に再利用できません。', { reason: 'request-id-reused' });
     assertNotExpired(data, now());
@@ -86,6 +86,11 @@ function createHandlers({ db, now = Date.now, randomUUID = crypto.randomUUID, ra
     const [roomSnapshot, memberSnapshot] = await Promise.all([tx.get(roomRef(roomId)), tx.get(memberRef(roomId, uid))]);
     const currentRoom = readRoom(roomSnapshot);
     readSelf(memberSnapshot, currentRoom);
+    if (type === 'submit') {
+      const gameSnapshot = await tx.get(gameRef(roomId, payload.gameId));
+      if (currentRoom.gameId !== payload.gameId) fail('failed-precondition', 'ゲームが一致しません。最新の部屋を開いてください。', { reason: 'wrong-game' });
+      assertGameProtocol(currentRoom, gameSnapshot.exists ? gameSnapshot.data() : null, payload.rulesVersion);
+    }
     return data.result;
   }
   async function consumeRate(type, uid, request, key, identity = null) {
@@ -135,13 +140,13 @@ function createHandlers({ db, now = Date.now, randomUUID = crypto.randomUUID, ra
     if (previous.exists) return db.runTransaction(async (tx) => {
       const current = await tx.get(ref);
       if (!current.exists) fail('failed-precondition', '操作記録の保存期限が切れています。', { reason: 'receipt-expired' });
-      return replay(tx, current, hash, uid);
+      return replay(tx, current, hash, uid, type, payload);
     });
     // A separate committed budget counts invalid invite / illegal move attempts too.
     await consumeRate(type, uid, request, key, { requestId, hash });
     return db.runTransaction(async (tx) => {
       const current = await tx.get(ref);
-      if (current.exists) return replay(tx, current, hash, uid);
+      if (current.exists) return replay(tx, current, hash, uid, type, payload);
       const { result, expiresAtMillis } = await body(tx);
       saveReceipt(tx, ref, type, hash, result, expiresAtMillis);
       return result;
@@ -151,7 +156,7 @@ function createHandlers({ db, now = Date.now, randomUUID = crypto.randomUUID, ra
     if (!snapshot.exists) fail('not-found', '部屋が見つかりません。');
     const room = snapshot.data();
     assertNotExpired(room, now());
-    if (room.rulesVersion !== RULES_VERSION) fail('failed-precondition', 'ゲームの版が一致しません。', { reason: 'rules-version' });
+    roomRulesVersion(room);
     const playerCount = roomPlayerCount(room);
     if (!Array.isArray(room.players) || !room.players.every((player, seat) => player?.seat === seat) ||
         (room.status === 'waiting' ? room.players.length < 1 || room.players.length > PLAYER_COUNT :
@@ -159,6 +164,11 @@ function createHandlers({ db, now = Date.now, randomUUID = crypto.randomUUID, ra
       fail('internal', '部屋の参加人数を確認できません。');
     }
     return room;
+  }
+  function assertGameProtocol(room, game, requestedVersion) {
+    if (requestedVersion !== room.rulesVersion || game?.rulesVersion !== room.rulesVersion || game?.state?.version !== RULES_VERSION) {
+      fail('failed-precondition', 'ゲームの版が一致しません。', { reason: 'rules-version' });
+    }
   }
   function readSelf(snapshot, room) {
     const member = snapshot.exists ? snapshot.data() : null;
@@ -189,7 +199,7 @@ function createHandlers({ db, now = Date.now, randomUUID = crypto.randomUUID, ra
       const expiresAtMillis = now() + ROOM_TTL_MILLIS;
       const publicState = {
         id: roomId, status: 'waiting', hostSeat: 0, playerCount: PLAYER_COUNT + npcCount, ...(npcCount ? { npcCount } : {}), gameId: null,
-        revision: 1, rulesVersion: RULES_VERSION, expiresAtMillis, players: [{ seat: 0, name }], match: null, scores: [],
+        revision: 1, rulesVersion: npcCount ? NPC_RULES_VERSION : RULES_VERSION, expiresAtMillis, players: [{ seat: 0, name }], match: null, scores: [],
       };
       tx.create(room, publicState);
       tx.create(memberRef(roomId, uid), { seat: 0, isHost: true, active: true, expiresAtMillis });
@@ -270,7 +280,7 @@ function createHandlers({ db, now = Date.now, randomUUID = crypto.randomUUID, ra
       assertNotExpired(room, commitTime);
       assertNotExpired(memberSnapshot.data(), commitTime);
       const next = publicRoom({ ...room, players, status: 'playing', gameId, revision: room.revision + 1, match: toPublicSnapshot(initialState), scores: [] });
-      tx.create(gameRef(roomId, gameId), { gameId, rulesVersion: RULES_VERSION, initialState, state: initialState, commands: [],
+      tx.create(gameRef(roomId, gameId), { gameId, rulesVersion: room.rulesVersion, initialState, state: initialState, commands: [],
         expiresAtMillis: room.expiresAtMillis, expiresAt: timestampFromMillis(room.expiresAtMillis) });
       tx.set(roomRef(roomId), next);
       return { result: output(next, self), expiresAtMillis: room.expiresAtMillis };
@@ -297,7 +307,7 @@ function createHandlers({ db, now = Date.now, randomUUID = crypto.randomUUID, ra
     const gameId = idOf(request.data.gameId, 'ゲームID');
     const requestId = requestIdOf(request.data.requestId);
     const expectedRevision = revisionOf(request.data.expectedRevision);
-    if (request.data.rulesVersion !== RULES_VERSION) fail('failed-precondition', 'ゲームの版が一致しません。', { reason: 'rules-version' });
+    if (![RULES_VERSION, NPC_RULES_VERSION].includes(request.data.rulesVersion)) fail('failed-precondition', 'ゲームの版が一致しません。', { reason: 'rules-version' });
     const command = commandOf(request.data.command);
     const [core, cpu] = await Promise.all([coreLoader(), cpuLoader()]);
     return mutate({ request, uid, requestId, type: 'submit', payload: request.data }, async (tx) => {
@@ -305,12 +315,13 @@ function createHandlers({ db, now = Date.now, randomUUID = crypto.randomUUID, ra
         tx.get(roomRef(roomId)), tx.get(memberRef(roomId, uid)), tx.get(gameRef(roomId, gameId)),
       ]);
       const room = readRoom(roomSnapshot);
+      if (request.data.rulesVersion !== room.rulesVersion) fail('failed-precondition', 'ゲームの版が一致しません。', { reason: 'rules-version' });
       const self = readSelf(memberSnapshot, room);
       if (room.gameId !== gameId) fail('failed-precondition', 'ゲームが一致しません。最新の部屋を開いてください。', { reason: 'wrong-game' });
       if (room.status !== 'playing' || !gameSnapshot.exists) fail('failed-precondition', '現在は操作できません。', { reason: room.status === 'finished' ? 'match-finished' : 'match-not-started' });
       const game = gameSnapshot.data();
       assertNotExpired(game, now());
-      if (game.rulesVersion !== RULES_VERSION || game.state.version !== RULES_VERSION) fail('failed-precondition', 'ゲームの版が一致しません。', { reason: 'rules-version' });
+      assertGameProtocol(room, game, request.data.rulesVersion);
       const state = game.state;
       const playerCount = roomPlayerCount(room);
       if (state.players.length !== playerCount) fail('internal', '部屋の参加人数を確認できません。');

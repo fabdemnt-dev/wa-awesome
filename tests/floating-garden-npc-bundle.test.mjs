@@ -90,7 +90,7 @@ function fixture({ initialTime = START + 1000, seed = 13, env, database } = {}) 
   function actionRequest(room, action, requestId = id()) {
     const current = db.peek(roomPath(room)); const { seat, revision, ...command } = action;
     assert.ok(seat === 0 || seat === 1, 'only the two real human seats may submit');
-    return request(TESTERS[seat], { roomId: room.roomId, gameId: current.gameId, rulesVersion: bundle.contract.RULES_VERSION,
+    return request(TESTERS[seat], { roomId: room.roomId, gameId: current.gameId, rulesVersion: current.rulesVersion,
       expectedRevision: current.match.revision, requestId, command });
   }
   const act = (room, action, requestId) => handlers.floatingGardenSubmitAction(actionRequest(room, action, requestId));
@@ -152,6 +152,8 @@ for (const npcCount of [1, 2]) test(`generated trial wrapper completes a ${2 + n
     assertPublic(snapshot);
     assert.equal(snapshot.room.playerCount, 2 + npcCount);
     assert.equal(snapshot.room.npcCount, npcCount);
+    assert.equal(snapshot.room.rulesVersion, bundle.contract.NPC_RULES_VERSION);
+    assert.equal(snapshot.room.match.version, bundle.core.MATCH_VERSION);
     assert.deepEqual((await f.snapshot(room, 0)).room, snapshot.room);
     assert.deepEqual((await f.snapshot(room, 1)).room, snapshot.room);
     assert.ok(humanOperations < 500);
@@ -160,6 +162,8 @@ for (const npcCount of [1, 2]) test(`generated trial wrapper completes a ${2 + n
   assert.equal(f.db.paths().filter((path) => path.includes('/members/')).length, 2);
   assert.equal(f.db.paths().filter((path) => path.startsWith('floatingGardenTrialTesters/')).length, 2);
   const game = f.db.peek(f.gamePath(room)); assertReplay(game);
+  assert.equal(game.rulesVersion, bundle.contract.NPC_RULES_VERSION);
+  assert.equal(game.state.version, bundle.contract.RULES_VERSION);
   assert.ok(npcOperations > 0);
   assert.equal(game.commands.filter((command) => command.seat >= 2).length, npcOperations);
   assert.equal(game.commands.filter((command) => command.seat < 2).length, humanOperations);

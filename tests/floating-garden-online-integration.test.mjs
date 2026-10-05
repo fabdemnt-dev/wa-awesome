@@ -367,6 +367,7 @@ for (const npcCount of [1, 2]) test(`real Auth/Callable/Firestore: two humans + 
   const watchers = seats.map((value) => watchRoom(value, created.roomId));
   try {
     snapshot = await seats[0].call('StartMatch', { roomId: created.roomId, expectedRevision: snapshot.room.revision, requestId: requestId() });
+    assert.equal(snapshot.room.rulesVersion, 'floating-garden-online-npc-1');
     assert.equal(snapshot.room.playerCount, 2 + npcCount);
     assert.equal((await roomRef(created.roomId).collection('members').get()).size, 2);
     let count = 0, batches = 0;

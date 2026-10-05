@@ -1,6 +1,16 @@
 # 庭園オンライン試作：実装・検証記録
 
-## 2026-10-05 NPC追加のソース準備
+## 2026-10-05 現在の公開範囲と追加検証
+
+公開中の試用は既存の人間2人用です。NPC追加はDraft [PR #365](https://github.com/fabdemnt-dev/wa-awesome/pull/365)でソースを保存した段階で、試用へは未反映です。
+
+NPC基本実装のcommit `b0f920a564ee64bf06b185dc39016fe3852793ab` は5つのCIが成功しました。[庭園emulator](https://github.com/fabdemnt-dev/wa-awesome/actions/runs/37267013964)、[trial準備](https://github.com/fabdemnt-dev/wa-awesome/actions/runs/37267013897)、[全体Test](https://github.com/fabdemnt-dev/wa-awesome/actions/runs/37267013953)、[Shadow Card](https://github.com/fabdemnt-dev/wa-awesome/actions/runs/37267013888)、[Deep Mining](https://github.com/fabdemnt-dev/wa-awesome/actions/runs/37267013892)です。
+
+実Auth→Callable→FirestoreのNPC3/4席を通過し、実Chromiumでも3席227エンジン操作・4席313操作で全員16/16、同じ採点まで完走しました。応答消失・再読込、320/390/768/1180px・200%拡大を確認しています。CIから取得した3席・4席それぞれの390px・1180px・終了画面の計6画像も目視確認しました。これは隔離したCIブラウザーの証拠で、物理スマホの検証ではありません。
+
+その後、使用中の試用へ安全に更新するため、NPC専用room版と[active-update設計](floating-garden-active-update.md)を追加しています。この追加差分の検証と、上記b0f920aのCI結果は区別します。旧実生成handlerが新NPC部屋への遅いjoin/start/submit・再送を拒否すること、既存2人部屋の継続を検査しています。新しい更新toolingは実generatorのpacketとローカル注入のprovider応答を使い、使用済み数・既存データ・固定期限の保持と、途中失敗・応答不明での停止を検査します。実Cloud APIの更新試験ではありません。最新追加差分のCIはそのcommitのChecksで判断してください。
+
+## 2026-10-05 NPC追加の初期ローカル検証（上記CIより前）
 
 人間2人＋NPC1人（3席）、その後NPC2人（4席）の順に、2つのcontrollerと実handlerを接続して最後まで検証しました。全員16マス、共通採点、同じ回数の手入れ、全privateコマンドの再生一致を確認しています。既存2席モード、現在の試用部屋、UID枠・期間・部屋数は変更していません。
 

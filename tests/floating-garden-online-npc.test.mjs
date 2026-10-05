@@ -36,7 +36,7 @@ function fixture(options = {}) {
   }
   function actionData(room, action, requestId = id()) {
     const saved = db.peek(roomPath(room)); const { seat, revision, ...command } = action;
-    return { roomId: room.roomId, gameId: saved.gameId, rulesVersion: contract.RULES_VERSION, expectedRevision: saved.match.revision, command, requestId };
+    return { roomId: room.roomId, gameId: saved.gameId, rulesVersion: saved.rulesVersion, expectedRevision: saved.match.revision, command, requestId };
   }
   async function act(room, action, uid = action.seat === 0 ? 'host' : 'guest', requestId) {
     return handlers.floatingGardenSubmitAction(request(uid, actionData(room, action, requestId)));
@@ -68,6 +68,7 @@ test('server stages byte-identical public-only CPU and loads it as ESM', async (
 for (const npcCount of [0, 1, 2]) test(`create/start preserves two human memberships with ${npcCount} NPC seats`, async () => {
   const f = fixture(); const room = await f.create(npcCount);
   let saved = f.db.peek(f.roomPath(room));
+  assert.equal(saved.rulesVersion, npcCount ? contract.NPC_RULES_VERSION : contract.RULES_VERSION);
   assert.equal(saved.playerCount, 2 + npcCount); assert.equal(saved.npcCount ?? 0, npcCount);
   assert.deepEqual(saved.players, [{ seat: 0, name: '星の庭' }]);
   const start = () => f.handlers.floatingGardenStartMatch(f.request('host', { roomId: room.roomId, expectedRevision: saved.revision, requestId: f.id() }));
@@ -76,6 +77,9 @@ for (const npcCount of [0, 1, 2]) test(`create/start preserves two human members
   assert.equal(saved.players.length, 2);
   await reject(f.join(room, 'third-human'), 'failed-precondition', 'room-full');
   const snapshot = await start();
+  assert.equal(snapshot.room.rulesVersion, saved.rulesVersion);
+  assert.equal(snapshot.room.match.version, core.MATCH_VERSION);
+  assert.equal(f.db.peek(f.gamePath(room)).rulesVersion, saved.rulesVersion);
   assert.equal(snapshot.room.players.length, 2 + npcCount);
   assert.deepEqual(snapshot.room.match.players.map((p) => p.isHuman), [true, true, ...Array(npcCount).fill(false)]);
   assert.deepEqual(snapshot.room.players.slice(2), ['森の庭', '結晶の庭'].slice(0, npcCount).map((name, index) => ({ seat: 2 + index, name, isHuman: false })));
@@ -367,4 +371,33 @@ test('corrupt or mixed room modes fail closed on snapshot, resume, start and act
     await reject(f.act(room, core.legalActions(snapshot.room.match)[0]), 'internal');
     assert.deepEqual(f.db.peek(f.gamePath(room)), game);
   }
+});
+
+for (const npcCount of [0, 1, 2]) test(`room wire version must agree with the immutable ${2 + npcCount}-seat mode at every boundary`, async () => {
+  const f = fixture(); const room = await f.create(npcCount); await f.join(room);
+  const lobby = f.db.peek(f.roomPath(room));
+  const wrong = npcCount ? contract.RULES_VERSION : contract.NPC_RULES_VERSION;
+  f.db.set(f.roomPath(room), { ...lobby, rulesVersion: wrong });
+  await reject(f.get(room), 'failed-precondition', 'rules-version');
+  await reject(f.join(room), 'failed-precondition', 'rules-version');
+  await reject(f.handlers.floatingGardenStartMatch(f.request('host', { roomId: room.roomId, expectedRevision: 2, requestId: f.id() })), 'failed-precondition', 'rules-version');
+  assert.throws(() => contract.publicRoom({ ...lobby, rulesVersion: wrong }), (error) => error.details?.reason === 'rules-version');
+  f.db.set(f.roomPath(room), lobby);
+  const snapshot = await f.handlers.floatingGardenStartMatch(f.request('host', { roomId: room.roomId, expectedRevision: 2, requestId: f.id() }));
+  const request = f.request('host', f.actionData(room, core.legalActions(snapshot.room.match)[0]));
+  const beforeGame = f.db.peek(f.gamePath(room));
+  await reject(f.handlers.floatingGardenSubmitAction({ ...request, data: { ...request.data, rulesVersion: wrong } }), 'failed-precondition', 'rules-version');
+  assert.deepEqual(f.db.peek(f.gamePath(room)), beforeGame);
+  const acceptedRequest = { ...request, data: { ...request.data, requestId: f.id() } };
+  const accepted = await f.handlers.floatingGardenSubmitAction(acceptedRequest);
+  const stored = f.db.peek(f.gamePath(room));
+  for (const patch of [{ rulesVersion: wrong }, { state: { ...stored.state, version: contract.NPC_RULES_VERSION } }]) {
+    const corrupted = { ...stored, ...patch }; f.db.set(f.gamePath(room), corrupted);
+    const roomBefore = f.db.peek(f.roomPath(room));
+    await reject(f.act(room, core.legalActions(accepted.room.match)[0]), 'failed-precondition', 'rules-version');
+    await reject(f.handlers.floatingGardenSubmitAction(acceptedRequest), 'failed-precondition', 'rules-version');
+    assert.deepEqual(f.db.peek(f.gamePath(room)), corrupted); assert.deepEqual(f.db.peek(f.roomPath(room)), roomBefore);
+  }
+  f.db.set(f.gamePath(room), stored);
+  assert.deepEqual(await f.handlers.floatingGardenSubmitAction(acceptedRequest), accepted);
 });

@@ -1,7 +1,10 @@
 'use strict';
 
 const crypto = require('node:crypto');
+// The match engine stays unchanged. NPC rooms have a distinct wire/storage protocol
+// in the existing field checked by every pre-NPC handler, including receipt replay.
 const RULES_VERSION = 'floating-garden-match-1';
+const NPC_RULES_VERSION = 'floating-garden-online-npc-1';
 // Online rooms always have two authenticated humans; extra seats are server-owned.
 const PLAYER_COUNT = 2;
 const MAX_NPC_COUNT = 2;
@@ -59,6 +62,11 @@ function roomPlayerCount(room) {
   }
   return PLAYER_COUNT + npcCount;
 }
+function roomRulesVersion(room) {
+  const expected = roomPlayerCount(room) > PLAYER_COUNT ? NPC_RULES_VERSION : RULES_VERSION;
+  if (room.rulesVersion !== expected) fail('failed-precondition', 'ゲームの版が一致しません。', { reason: 'rules-version' });
+  return expected;
+}
 function commandOf(value, playerCount = MAX_PLAYER_COUNT) {
   if (!value || !Object.hasOwn(COMMAND_FIELDS, value.type)) fail('invalid-argument', '操作を確認してください。');
   exactObject(value, ['type', ...COMMAND_FIELDS[value.type]], '操作');
@@ -110,10 +118,11 @@ function toPublicSnapshot(state) {
 }
 function publicRoom(room) {
   const playerCount = roomPlayerCount(room);
+  const rulesVersion = roomRulesVersion(room);
   return {
     id: room.id, status: room.status, hostSeat: 0, playerCount,
     ...(playerCount > PLAYER_COUNT ? { npcCount: playerCount - PLAYER_COUNT } : {}),
-    gameId: room.gameId, revision: room.revision, rulesVersion: RULES_VERSION,
+    gameId: room.gameId, revision: room.revision, rulesVersion,
     expiresAtMillis: room.expiresAtMillis,
     players: room.players.map((player) => ({ seat: player.seat, name: player.name, ...(player.seat >= PLAYER_COUNT ? { isHuman: false } : {}) })),
     // The stored match was already explicitly projected. Reconstruct its whitelist on reads as well.
@@ -121,6 +130,6 @@ function publicRoom(room) {
     scores: room.scores.map(({ seat, score, rank }) => ({ seat, score, rank })),
   };
 }
-module.exports = { RULES_VERSION, PLAYER_COUNT, MAX_NPC_COUNT, MAX_PLAYER_COUNT, ROOM_TTL_MILLIS, RECEIPT_RETENTION_MILLIS, GardenError, fail, exactObject,
-  uidOf, requestIdOf, idOf, revisionOf, sanitizeDisplayName, npcCountOf, roomPlayerCount, commandOf, hashPayload, uidKey, assertNotExpired,
+module.exports = { RULES_VERSION, NPC_RULES_VERSION, PLAYER_COUNT, MAX_NPC_COUNT, MAX_PLAYER_COUNT, ROOM_TTL_MILLIS, RECEIPT_RETENTION_MILLIS, GardenError, fail, exactObject,
+  uidOf, requestIdOf, idOf, revisionOf, sanitizeDisplayName, npcCountOf, roomPlayerCount, roomRulesVersion, commandOf, hashPayload, uidKey, assertNotExpired,
   requireMember, publicTile, toPublicSnapshot, publicRoom };

@@ -83,7 +83,7 @@ git diff --check
 ## NPCモードの互換性と確定単位（2026-10-05）
 
 - createの任意フィールド `npcCount` は整数0〜2だけを受け付けます。省略は従来の2人戦。0を選ぶUIは従来と同じpayloadを送信します。
-- 2人戦の公開room形とルール版は変更しません。NPC部屋のみ `npcCount` を追加し、`playerCount` は3または4になります。既存部屋の人数を変更するAPIはありません。
+- 2人戦の公開room形とroomの版 `floating-garden-match-1` は変更しません。NPC部屋のみ `npcCount` を追加し、`playerCount` は3または4、roomの通信・保存プロトコル版は `floating-garden-online-npc-1` になります。エンジン本体のmatch.versionは従来どおりです。既存部屋の人数を変更するAPIはありません。
 - 待合室のplayersは参加済みの人間だけ。開始時にNPC席を追加します。membershipの有効な席は0と1だけで、NPC用membershipは作成しません。
 - 人間の合法操作と、その直後から次の人間の判断までのNPC操作を同じtransactionに保存します。1回の操作あたりNPCは最大32コマンド。上限・不正手・期限超過では全体を確定しません。
 - NPCは公開snapshotと合法コマンドだけを受け取ります。山札順・seedを参照せず、同じ状態では同じ手を選ぶため、transaction再実行・receipt再送で二重進行しません。
@@ -95,3 +95,5 @@ git diff --check
 ### 試用へ追加する前の確認
 
 この変更はソース準備です。現在の2UID・20部屋・既存の終了時刻や部屋を変更していません。公開時には最新commitのCI、3/4席の実画面、生成したclient/server/Rulesの互換性を確認し、対象を限定した別の承認が必要です。既存のHosting-only更新ヘルパーでbackend変更を配信しないでください。NPC追加を理由に人間枠・試用期限・部屋数・IAM・App Check設定を広げません。
+
+NPC専用room版は、更新前の古い呼出しを安全に拒否するための境界です。更新前のコードも同じrulesVersion欄を最初に検査するため、遅れて実行されたjoin/start/submitやreceipt再送が新NPC部屋へ書き込めません。既存2人部屋への正当な古い操作は継続でき、部屋作成数が再開後に増えることもあります。残数を更新前の値へ戻してはいけません。30秒のtimeoutを古い処理の終了証明とは扱いません。
