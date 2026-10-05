@@ -89,7 +89,7 @@ test('local preparer has no SDK, subprocess, deploy-executor or network import/c
  assert.ok(!/\b(?:fetch|execFile|spawn|execSync)\s*\(/.test(source));
 });
 
-import { approvalReady, adminRecords, adminState, operateTrial, readOperationPacket, verifyOperationPacket, createJournal, readVerifiedHostingRecovery, verifyVerifiedHostingRecovery, createActivationRecoveryJournal, ACTIVATION_RECOVERY_FILE, formatTrialJst, readActiveHostingPrior, verifyActiveHostingPrior, verifyHostingUpdatePacket, createHostingUpdateJournal, selectVerifiedHostingOperation, createHostingPublisher, operateHostingUpdate, HOSTING_UPDATE_FILES, parseReviewBase64, main, MAX_START_WAIT_MILLIS } from '../scripts/operate-floating-garden-trial.mjs';
+import { approvalReady, adminRecords, adminState, operateTrial, readOperationPacket, verifyOperationPacket, createJournal, readVerifiedHostingRecovery, verifyVerifiedHostingRecovery, createActivationRecoveryJournal, ACTIVATION_RECOVERY_FILE, formatTrialJst, readActiveHostingPrior, verifyActiveHostingPrior, verifyHostingUpdatePacket, verifyPreparedHostingPacket, createHostingUpdateJournal, selectVerifiedHostingOperation, createHostingPublisher, operateHostingUpdate, HOSTING_UPDATE_FILES, parseReviewBase64, main, MAX_START_WAIT_MILLIS } from '../scripts/operate-floating-garden-trial.mjs';
 const approvedReview = () => ({ ...review(), retainBuildArtifacts: true, allowInitialFunctionRecreate: true, approvePublicInvoker: true });
 const clone = (value) => structuredClone(value);
 function fakeOperation(value = approvedReview()) {
@@ -333,13 +333,13 @@ test('inspect and gate-first stop remain usable after normal game/stopped CLI ca
 });
 
 // A separate one-shot activation receipt recovers only the verified Hosting-cache failure.
-async function hostingRecoveryFixture(t) {
+async function hostingRecoveryFixture(t, {repositoryRoot=ROOT}={}) {
  const dir=await temp(t),oldReview={...approvedReview(),startsAtMillis:NOW-1000000,endsAtMillis:NOW-1000000+WEEK};
- const original=join(dir,'original');await prepareTrialOperation({review:oldReview,output:original,now:oldReview.startsAtMillis-10000});
+ const original=join(dir,'original');await prepareTrialOperation({review:oldReview,output:original,now:oldReview.startsAtMillis-10000,repositoryRoot});
  const old=await readOperationPacket(original),oldJournal=await createJournal(old.packet,{now:()=>oldReview.startsAtMillis-1000});
  oldJournal.begin('deploy');oldJournal.issued('create-stopped-admin');oldJournal.verified('create-stopped-admin');oldJournal.issued('deploy-functions');oldJournal.fail('deploy-functions');await oldJournal.flush();
  const {readPriorOperation}=await import('../scripts/operate-floating-garden-trial.mjs'),prior=await readPriorOperation(original);
- const out=join(dir,'operation');await prepareTrialOperation({review:approvedReview(),output:out,now:NOW-10000});
+ const out=join(dir,'operation');await prepareTrialOperation({review:approvedReview(),output:out,now:NOW-10000,repositoryRoot});
  const {packet,review:value}=await readOperationPacket(out),journal=await createJournal(packet,{prior,now:()=>NOW-1000});
  journal.begin('resume');for(const stage of ['replace-stopped-window','deploy-functions','deploy-rules','deploy-hosting']){journal.issued(stage);journal.verified(stage);}
  journal.fail('deploy-hosting');await journal.flush();const cache=await officialHostingCache(packet),logs=join(out,'recovery-logs');await mkdir(logs,{mode:0o700});
@@ -414,11 +414,11 @@ test('ordinary inspect and gate-first stop remain available after activation rec
 // Authorized active-trial UI replacement: one Hosting deployment and no admin writes.
 async function hostingUpdateFixture(t) {
  const f=await hostingRecoveryFixture(t),activated=await activationHarness(f);assert.equal((await activated.run()).status,'active');await activated.journal.flush();
- const prior=await readActiveHostingPrior(f.packet.output),out=join(f.dir,'hosting-update');await prepareTrialOperation({review:f.review,output:out,now:NOW+180000});
- const manifestPath=join(out,'OPERATION-MANIFEST.json'),manifest=await json(manifestPath);
- for(const path of HOSTING_UPDATE_FILES){await writeFile(join(out,path),(await readFile(join(out,path),'utf8'))+'\n// synthetic reviewed UI update\n');manifest.files[path]=sha(await readFile(join(out,path)));}
- await writeFile(manifestPath,JSON.stringify(manifest,null,2)+'\n');const {packet,review:value}=await readOperationPacket(out);
- return{...f,prior,packet,review:value};
+ const prior=await readActiveHostingPrior(f.packet.output),out=join(f.dir,'hosting-update'),source=join(f.dir,'source-update');
+ for(const part of ['lab/floating-garden','functions/floating-garden-trial','functions/floating-garden-online']){await mkdir(dirname(join(source,part)),{recursive:true});await cp(join(ROOT,part),join(source,part),{recursive:true});}
+ for(const path of HOSTING_UPDATE_FILES){const from=join(source,path.slice('game/public/'.length));await writeFile(from,(await readFile(from,'utf8'))+'\n// synthetic reviewed UI update\n');}
+ await prepareTrialOperation({review:f.review,output:out,now:NOW+180000,repositoryRoot:source});
+ const {packet,review:value}=await readOperationPacket(out);return{...f,prior,packet,review:value};
 }
 async function hostingUpdateHarness(f, count=2) {
  let time=NOW+180000,admin=adminRecords(f.review,true,count),hosting={kind:'game',version:'original-v1'},attempts=0;
@@ -446,6 +446,48 @@ test('Hosting-only source allowlist rejects changed review, other files, invento
  await writeFile(path,Buffer.concat([bytes,Buffer.from('\n')]));manifest.files['game/functions/trial-config.json']=sha(await readFile(path));await writeFile(f.packet.manifestPath,JSON.stringify(manifest));await assert.rejects(verifyHostingUpdatePacket((await readOperationPacket(f.packet.output)).packet,f.review,f.prior));
  await writeFile(path,bytes);await writeFile(f.packet.manifestPath,manifestBytes);await writeFile(join(f.packet.gameDir,'public/extra.txt'),'extra');await assert.rejects(verifyHostingUpdatePacket(f.packet,f.review,f.prior));
 });
+test('real generation changes exactly two public assets and their authenticated source-audit entries',async t=>{
+ const f=await hostingUpdateFixture(t),changed=Object.keys(f.packet.manifest.files).filter(path=>f.packet.manifest.files[path]!==f.prior.packet.manifest.files[path]);
+ assert.deepEqual(changed.sort(),['game/SOURCE-SHA256.json',...HOSTING_UPDATE_FILES].sort());await verifyHostingUpdatePacket(f.packet,f.review,f.prior);await verifyPreparedHostingPacket(f.packet,f.review,f.prior);
+ const before=await json(join(f.prior.packet.gameDir,'SOURCE-SHA256.json')),after=await json(join(f.packet.gameDir,'SOURCE-SHA256.json'));assert.deepEqual(Object.keys(after).filter(key=>before[key]!==after[key]).sort(),HOSTING_UPDATE_FILES.map(path=>path.slice('game/public/'.length)).sort());
+ for(const path of HOSTING_UPDATE_FILES){const key=path.slice('game/public/'.length);assert.equal(before[key],f.prior.packet.manifest.files[path]);assert.equal(after[key],f.packet.manifest.files[path]);}
+});
+test('source audit rejects extra/missing keys, unrelated changes, wrong public hashes and noncanonical duplicate entries',async t=>{
+ const f=await hostingUpdateFixture(t),auditPath=join(f.packet.gameDir,'SOURCE-SHA256.json'),audit=await json(auditPath),manifest=await json(f.packet.manifestPath),publicKey=HOSTING_UPDATE_FILES[0].slice('game/public/'.length),other=Object.keys(audit).find(key=>!HOSTING_UPDATE_FILES.includes('game/public/'+key));
+ const cases=[v=>{v.extra='f'.repeat(64)},v=>{delete v[other]},v=>{v[other]='f'.repeat(64)},v=>{v[publicKey]='f'.repeat(64)},v=>{v[publicKey]=123}];
+ for(const change of cases){const value=clone(audit);change(value);await writeFile(auditPath,JSON.stringify(value,null,2)+'\n');const next=clone(manifest);next.files['game/SOURCE-SHA256.json']=sha(await readFile(auditPath));await writeFile(f.packet.manifestPath,JSON.stringify(next,null,2)+'\n');const {packet}=await readOperationPacket(f.packet.output);await assert.rejects(verifyHostingUpdatePacket(packet,f.review,f.prior));}
+ const duplicate=JSON.stringify(audit,null,2).replace('{','{\n'+JSON.stringify(publicKey)+':'+JSON.stringify(audit[publicKey])+',')+'\n';await writeFile(auditPath,duplicate);manifest.files['game/SOURCE-SHA256.json']=sha(await readFile(auditPath));await writeFile(f.packet.manifestPath,JSON.stringify(manifest,null,2)+'\n');await assert.rejects(verifyHostingUpdatePacket((await readOperationPacket(f.packet.output)).packet,f.review,f.prior));
+});
+test('prepared Hosting continuation rejects every local execution artifact without deleting it',async t=>{
+ const f=await hostingUpdateFixture(t);await verifyPreparedHostingPacket(f.packet,f.review,f.prior);
+ for(const path of ['OPERATION-STATE.json','OPERATION.lock','ACTIVATION-RECOVERY-STATE.json','hosting-update-logs','recovery-logs','game/functions/node_modules','game/.firebase','firebase-debug.log','game/firebase-debug.log','extra-note']){
+  const full=join(f.packet.output,path),directory=['hosting-update-logs','recovery-logs','game/functions/node_modules','game/.firebase'].includes(path);if(directory)await mkdir(full,{recursive:true});else await writeFile(full,'retained');
+  await assert.rejects(verifyPreparedHostingPacket(f.packet,f.review,f.prior));assert(await lstat(full));await rm(full,{recursive:true});
+ }
+ await verifyPreparedHostingPacket(f.packet,f.review,f.prior);
+});
+async function fullMainHostingFixture(t, prepared, setupFailure=false, tamperPrepared=false) {
+ const sourceDir=await temp(t),source=join(sourceDir,'previous-source');
+ for(const part of ['lab/floating-garden','functions/floating-garden-trial','functions/floating-garden-online']){await mkdir(dirname(join(source,part)),{recursive:true});await cp(join(ROOT,part),join(source,part),{recursive:true});}
+ for(const path of HOSTING_UPDATE_FILES){const target=join(source,path.slice('game/public/'.length));await writeFile(target,(await readFile(target,'utf8'))+'\n// synthetic previous approved UI\n');}
+ const f=await hostingRecoveryFixture(t,{repositoryRoot:source}),active=await activationHarness(f);assert.equal((await active.run()).status,'active');await active.journal.flush();
+ const runtime=join(f.prior.packet.gameDir,'functions/node_modules');await mkdir(runtime);await writeFile(join(runtime,'synthetic-runtime-canary'),'local runtime copy only');
+ const out=join(f.dir,'main-update');if(prepared)await prepareTrialOperation({review:f.review,output:out,now:NOW+180000});
+ if(tamperPrepared){const path=HOSTING_UPDATE_FILES[0],full=join(out,path),auditPath=join(out,'game/SOURCE-SHA256.json'),manifestPath=join(out,'OPERATION-MANIFEST.json'),audit=await json(auditPath),manifest=await json(manifestPath);await writeFile(full,(await readFile(full,'utf8'))+'\n// unreviewed resealed packet\n');audit[path.slice('game/public/'.length)]=sha(await readFile(full));await writeFile(auditPath,JSON.stringify(audit,null,2)+'\n');manifest.files[path]=sha(await readFile(full));manifest.files['game/SOURCE-SHA256.json']=sha(await readFile(auditPath));await writeFile(manifestPath,JSON.stringify(manifest,null,2)+'\n');}
+ const files=[f.state,f.packet.reviewPath,f.packet.manifestPath,join(f.packet.output,ACTIVATION_RECOVERY_FILE)],original=await Promise.all(files.map(path=>readFile(path)));
+ const pending=prepared?await readFile(join(out,'OPERATION-MANIFEST.json')):null,publicMtime=prepared?(await lstat(join(out,HOSTING_UPDATE_FILES[0]))).mtimeMs:null;
+ const runner=join(f.dir,'offline-hosting-main.mjs'),mode=prepared?'--resume-hosting-prepared':'--update-hosting-reviewed',args=[mode,'--prior-operation',f.packet.output,prepared?'--operation':'--out',out,'--tooling-dir',join(f.dir,'mock-tooling')];
+ await writeFile(runner,`import {main,adminRecords} from ${JSON.stringify(new URL('../scripts/operate-floating-garden-trial.mjs',import.meta.url).href)}; Date.now=()=>${NOW+180000}; const calls=[],logs=[];let published=false;const hostingCapabilities={createCloudAdapter:({packet,review})=>{const old=packet.output===${JSON.stringify(f.packet.output)};calls.push(old?'factory-old':'factory-new');return {preflight:async mode=>calls.push('preflight:'+mode),verifyFunctions:async()=>({verified:true}),verifyRules:async()=>({verified:true}),verifyHosting:async kind=>({verified:kind==='game'}),readAdmin:async()=>{if(!old)throw Error('unexpected second Admin app');return adminRecords(review,true,2)},readHosting:async()=>({kind:'game',version:published?'new':'old'})}},createHostingPublisher:async()=>{calls.push('publisher-factory');if(${JSON.stringify(setupFailure)})throw Error('PRIVATE_SENTINEL_owner@example.invalid');return async()=>{calls.push('hosting-only-publish');published=true;return {kind:'success'}}}};const code=await main(${JSON.stringify(args)},{log:x=>logs.push(x),hostingCapabilities});const firstCalls=[...calls];calls.length=0;const repeated=await main(${JSON.stringify(args)},{log:x=>logs.push(x),hostingCapabilities});console.log(JSON.stringify({code,repeated,calls,firstCalls,logs}));`);
+ const result=JSON.parse(execFileSync(process.execPath,[runner],{env:{},encoding:'utf8',stdio:['ignore','pipe','pipe'],timeout:30000}));assert.equal(result.code,setupFailure||tamperPrepared?1:0);assert.equal(result.repeated,1);assert.equal(result.firstCalls.filter(x=>x==='hosting-only-publish').length,setupFailure||tamperPrepared?0:1);assert.deepEqual(result.calls,[]);if(tamperPrepared){assert.deepEqual(result.firstCalls,[]);assert(result.logs.some(x=>x.startsWith('STOP: verify-hosting-source.')));}else if(setupFailure){assert(result.logs.some(x=>x.startsWith('STOP: check-hosting-tooling.')));assert(!JSON.stringify(result).includes('PRIVATE_SENTINEL'));assert(!JSON.stringify(result).includes('owner@example'));}else{assert(result.logs.some(x=>x.startsWith('END:')));assert(result.logs.some(x=>x.startsWith('HOSTING_UPDATED:')));}
+ if(tamperPrepared){for(let i=0;i<files.length;i++)assert.deepEqual(await readFile(files[i]),original[i]);assert.deepEqual(await readFile(join(out,'OPERATION-MANIFEST.json')),pending);await assert.rejects(lstat(join(out,'OPERATION-STATE.json')),{code:'ENOENT'});return;}
+ assert.equal(await readFile(join(out,'game/functions/node_modules/synthetic-runtime-canary'),'utf8'),'local runtime copy only');const {packet,review:value}=await readOperationPacket(out);assert.deepEqual(value,f.review);assert.equal((await json(join(out,'OPERATION-STATE.json'))).deploy.status,setupFailure?'new':'active');assert.equal(await selectVerifiedHostingOperation(f.packet.output,out),setupFailure?f.packet.output:out);
+ for(let i=0;i<files.length;i++)assert.deepEqual(await readFile(files[i]),original[i]);if(prepared){assert.deepEqual(await readFile(packet.manifestPath),pending);assert.equal((await lstat(join(out,HOSTING_UPDATE_FILES[0]))).mtimeMs,publicMtime);}
+}
+test('full fresh Hosting CLI initialization generates real source audit and reaches exactly one injected publication',async t=>fullMainHostingFixture(t,false));
+test('full prepared Hosting CLI initialization reuses bytes/dates, copies runtime and refuses a second run',async t=>fullMainHostingFixture(t,true));
+test('Hosting setup reports only a finite stage and suppresses private exception details',async t=>fullMainHostingFixture(t,true,true));
+test('prepared main rejects internally resealed UI bytes that differ from the pinned source',async t=>fullMainHostingFixture(t,true,false,true));
+
 test('Hosting prior requires exact active one-shot receipt and stays bound to unchanged predecessor evidence',async t=>{
  const f=await hostingUpdateFixture(t),path=join(f.prior.packet.output,ACTIVATION_RECOVERY_FILE),bytes=await readFile(path),base=JSON.parse(bytes);
  for(const change of [s=>s.deploy.status='failed',s=>s.stop.status='stopped',s=>s.events.pop(),s=>s.events[0].atMillis=NOW-1,s=>s.manifestDigest='f'.repeat(64),s=>s.recovery.originalJournalDigest='f'.repeat(64)]){const state=clone(base);change(state);await writeFile(path,JSON.stringify(state));await assert.rejects(readActiveHostingPrior(f.prior.packet.output));}
@@ -1455,7 +1497,7 @@ test('slow durable activation journal cannot bypass automatic fixed-start grace 
 {
 const finalPayload=JSON.parse(execFileSync('python3',['-I','-c',"import ast,json,pathlib,sys; t=ast.parse(pathlib.Path(sys.argv[1]).read_text()); print(json.dumps({n.targets[0].id:ast.literal_eval(n.value) for n in t.body if isinstance(n,ast.Assign) and n.targets[0].id.startswith('FINAL_')}))",join(ROOT,'scripts/start-floating-garden-trial-owner.py')],{encoding:'utf8',stdio:['ignore','pipe','pipe'],timeout:10000,maxBuffer:262144}));
 const test = (await import('node:test')).default;const assert = (await import('node:assert/strict')).default;
-const {resumeAfterReadiness,inspectOrStop,updateHostingOnly} = await import('data:text/javascript;base64,'+Buffer.from(finalPayload.FINAL_RESUME).toString('base64'));
+const {resumeAfterReadiness,inspectOrStop,updateHostingOnly,resumePreparedHosting} = await import('data:text/javascript;base64,'+Buffer.from(finalPayload.FINAL_RESUME).toString('base64'));
 const NOW=1800000000000,prior={packet:{output:'/old/operation'},review:{schemaVersion:1,startsAtMillis:NOW-1000,endsAtMillis:NOW-1000+604800000,testerUids:['PRIVATE_SYNTHETIC_A','PRIVATE_SYNTHETIC_B'],retainBuildArtifacts:true,allowInitialFunctionRecreate:true,approvePublicInvoker:true},predecessor:{journalDigest:'SYNTHETIC'}};
 function harness(){const calls=[],logs=[],writes=[];let nowCalls=0,execution;
  const cloud={preflight:async m=>calls.push('preflight:'+m),verifyResumeSource:async()=>{calls.push('ready');return{verified:true}}};
@@ -1471,6 +1513,7 @@ test('existing launch record and failed operation are never retried',async()=>{c
 test('inspect and stop never create a window or expose review',async()=>{for(const mode of ['--inspect','--stop','--activate-verified-hosting']){const h=harness();assert.equal(await inspectOrStop({...h.options,mode}),0);assert.equal(h.nowCalls,0);assert.equal(h.writes.length,0);assert.deepEqual(h.execution,[mode,'--operation','/fresh/operation','--tooling-dir','/old/tooling'])}await assert.rejects(inspectOrStop({mode:'--activate'}))});
 
 test('Hosting-only wrapper forwards exact original/new/tooling paths without reading a clock or review',async()=>{const h=harness();assert.equal(await updateHostingOnly({...h.options,source:'/new/source'}),0);assert.deepEqual(h.calls,['main']);assert.equal(h.nowCalls,0);assert.equal(h.writes.length,0);assert.deepEqual(h.execution,['--update-hosting-reviewed','--prior-operation','/fresh/operation','--out','/new/operation','--tooling-dir','/old/tooling']);assert(!JSON.stringify(h.execution).includes('PRIVATE'))});
+test('prepared Hosting wrapper forwards existing packet paths without preparing source or choosing dates',async()=>{const h=harness();assert.equal(await resumePreparedHosting({...h.options,source:'/temporary/fixed-source'}),0);assert.deepEqual(h.calls,['main']);assert.equal(h.nowCalls,0);assert.equal(h.writes.length,0);assert.deepEqual(h.execution,['--resume-hosting-prepared','--prior-operation','/fresh/operation','--operation','/garden-lobby-entry-reviewed-v1/operation','--tooling-dir','/old/tooling'])});
 test('stop and inspect select the latest verified packet; activation recovery always keeps the original',async()=>{for(const mode of ['--stop','--inspect','--activate-verified-hosting']){const h=harness();h.operator.selectVerifiedHostingOperation=async()=>{h.calls.push('select-latest');return '/latest/operation'};assert.equal(await inspectOrStop({...h.options,mode}),0);assert.equal(h.execution[2],mode==='--activate-verified-hosting'?'/fresh/operation':'/latest/operation');assert.equal(h.calls.includes('select-latest'),mode!=='--activate-verified-hosting');assert.equal(h.nowCalls,0);assert.equal(h.writes.length,0)}});
 
 test('final recovery source baseline pins the same56 unchanged files and exactly four replacements',async()=>{

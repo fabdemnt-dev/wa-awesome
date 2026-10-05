@@ -482,7 +482,38 @@ export async function verifyHostingUpdatePacket(packet, review, prior) {
   if (packet.output === prior.packet.output || packet.reviewDigest !== prior.packet.reviewDigest || !dataEqual(review, prior.review) ||
       !same(Object.keys(packet.manifest.files).sort(), Object.keys(prior.packet.manifest.files).sort())) stop();
   const changed = Object.keys(packet.manifest.files).filter((path) => packet.manifest.files[path] !== prior.packet.manifest.files[path]);
-  if (!changed.length || changed.some((path) => !HOSTING_UPDATE_FILES.includes(path))) stop();
+  const auditPath = 'game/SOURCE-SHA256.json';
+  if (!changed.some((path) => HOSTING_UPDATE_FILES.includes(path)) || changed.some((path) => path !== auditPath && !HOSTING_UPDATE_FILES.includes(path))) stop();
+  // The real generator records source hashes as well as copying public bytes.
+  // Authenticate the complete nested audit; it is not a third editable asset.
+  const beforeBytes = await regular(join(prior.packet.output, auditPath)), afterBytes = await regular(join(packet.output, auditPath));
+  const before = JSON.parse(beforeBytes), after = JSON.parse(afterBytes);
+  if (!beforeBytes.equals(Buffer.from(json(before))) || !afterBytes.equals(Buffer.from(json(after)))) stop();
+  if (!plain(before) || !plain(after) || !same(Object.keys(before).sort(), Object.keys(after).sort())) stop();
+  const approved = Object.fromEntries(HOSTING_UPDATE_FILES.map((path) => [path.slice('game/public/'.length), path]));
+  for (const [source, digest] of Object.entries(before)) {
+    if (!/^[a-f0-9]{64}$/.test(digest) || !/^[a-f0-9]{64}$/.test(after[source])) stop();
+    const publicPath = approved[source];
+    if (publicPath ? digest !== prior.packet.manifest.files[publicPath] || after[source] !== packet.manifest.files[publicPath] : after[source] !== digest) stop();
+  }
+  if (Object.keys(approved).some((source) => !Object.hasOwn(before, source))) stop();
+}
+export async function verifyPreparedHostingPacket(packet, review, prior) {
+  await verifyHostingUpdatePacket(packet, review, prior);
+  const files = new Set([...Object.keys(packet.manifest.files), 'private-review.json', 'OPERATION-MANIFEST.json']);
+  // A resumable preparation is exactly a generator output: no journal, lock,
+  // SDK directory, CLI cache, logs or other evidence of any attempted execution.
+  async function inventory(path, prefix = '') {
+    for (const name of await readdir(path)) {
+      const rel = prefix + name, full = join(path, name), info = await lstat(full);
+      if (info.isSymbolicLink()) stop();
+      if (info.isDirectory()) {
+        if (![...files].some((file) => file.startsWith(`${rel}/`))) stop();
+        await directory(full); await inventory(full, `${rel}/`);
+      } else if (!files.has(rel)) stop();
+    }
+  }
+  await inventory(packet.output);
 }
 function hostingUpdateShape(value) {
   return plain(value) && same(Object.keys(value).sort(), ['activationReceiptDigest', 'originalJournalDigest', 'priorManifestDigest', 'priorOutput', 'reviewDigest', 'schemaVersion']) &&
@@ -602,24 +633,34 @@ export function formatTrialJst(milliseconds) {
   return new Date(milliseconds + 9 * 3600000).toISOString().replace('T', ' ').replace('Z', ' JST');
 }
 export const PLAN = 'PLAN_ONLY: prepare and review exact seven-day private input before any execution. Target wa-awesome-garden-stg only: five Functions, dedicated Rules/Hosting and exactly two tester records. Public invoker, managed service identity calls and bounded CLI initial recreate need explicit approval. Retain artifacts; no automatic cleanup policy. Default mode makes no network, SDK, auth, install or cloud call.';
-export async function main(args = process.argv.slice(2), { log = console.log } = {}) {
+export async function main(args = process.argv.slice(2), { log = console.log, hostingCapabilities } = {}) {
   if (!args.length || args.length === 1 && args[0] === '--plan') { log(PLAN); return 0; }
-  let lock, packet, journal, prior, recoveryProof, hostingPrior;
+  let lock, packet, journal, prior, recoveryProof, hostingPrior, hostingSetupStage;
   try {
+    if (['--update-hosting-reviewed', '--resume-hosting-prepared'].includes(args[0])) hostingSetupStage = 'validate-hosting-environment';
     validateOperatorEnvironment(process.env, process.execArgv);
     for (const key of ['FIRESTORE_EMULATOR_HOST', 'FIREBASE_AUTH_EMULATOR_HOST', 'FIREBASE_DATABASE_EMULATOR_HOST', 'FIREBASE_STORAGE_EMULATOR_HOST', 'CLOUDSDK_AUTH_DISABLE_CREDENTIALS']) if (process.env[key]) stop();
-    const modes = ['--update-hosting-reviewed', '--run-reviewed', '--resume-reviewed', '--activate', '--activate-verified-hosting', '--stop', '--inspect'];
+    const modes = ['--resume-hosting-prepared', '--update-hosting-reviewed', '--run-reviewed', '--resume-reviewed', '--activate', '--activate-verified-hosting', '--stop', '--inspect'];
     if (!modes.includes(args[0])) stop();
-    if (args[0] === '--update-hosting-reviewed') {
-      if (args.length !== 7 || args[1] !== '--prior-operation' || args[3] !== '--out' || args[5] !== '--tooling-dir' ||
+    if (['--update-hosting-reviewed', '--resume-hosting-prepared'].includes(args[0])) {
+      const prepared = args[0] === '--resume-hosting-prepared';
+      if (args.length !== 7 || args[1] !== '--prior-operation' || args[3] !== (prepared ? '--operation' : '--out') || args[5] !== '--tooling-dir' ||
           ![args[2], args[4], args[6]].every((path) => path.startsWith('/'))) stop();
+      hostingSetupStage = 'read-hosting-prior';
       hostingPrior = await readActiveHostingPrior(args[2]);
+      hostingSetupStage = 'validate-hosting-window';
       if (Date.now() < hostingPrior.review.startsAtMillis || Date.now() >= hostingPrior.review.endsAtMillis) stop();
       const rel = relative(hostingPrior.packet.output, resolve(args[4]));
       if (rel === '' || rel !== '..' && !rel.startsWith(`..${sep}`) && !rel.startsWith(sep)) stop();
-      await prepareTrialOperation({ review: hostingPrior.review, output: args[4], repositoryRoot: ROOT });
+      hostingSetupStage = prepared ? 'read-hosting-packet' : 'prepare-hosting-packet';
+      if (!prepared) await prepareTrialOperation({ review: hostingPrior.review, output: args[4], repositoryRoot: ROOT });
       ({ packet } = await readOperationPacket(args[4]));
-      await verifyHostingUpdatePacket(packet, hostingPrior.review, hostingPrior);
+      hostingSetupStage = 'verify-hosting-audit';
+      await verifyPreparedHostingPacket(packet, hostingPrior.review, hostingPrior);
+      hostingSetupStage = 'verify-hosting-source';
+      for (const path of HOSTING_UPDATE_FILES) {
+        if (hash(await regular(join(ROOT, path.slice('game/public/'.length)))) !== packet.manifest.files[path]) stop();
+      }
     } else if (args[0] === '--run-reviewed') {
       if (args.length !== 7 || args[1] !== '--review-base64' || args[3] !== '--out' || args[5] !== '--tooling-dir' || !args[4].startsWith('/') || !args[6].startsWith('/')) stop();
       const review = parseReviewBase64(args[2]); if (!approvalReady(review)) stop();
@@ -645,7 +686,7 @@ export async function main(args = process.argv.slice(2), { log = console.log } =
       ({ packet } = await readOperationPacket(args[2]));
     }
     const { review } = await readOperationPacket(packet.output);
-    const mode = ({ '--update-hosting-reviewed': 'update-hosting', '--run-reviewed': 'deploy', '--resume-reviewed': 'resume', '--activate': 'activate', '--activate-verified-hosting': 'activate', '--stop': 'stop', '--inspect': 'inspect' })[args[0]];
+    const mode = ({ '--resume-hosting-prepared': 'update-hosting', '--update-hosting-reviewed': 'update-hosting', '--run-reviewed': 'deploy', '--resume-reviewed': 'resume', '--activate': 'activate', '--activate-verified-hosting': 'activate', '--stop': 'stop', '--inspect': 'inspect' })[args[0]];
     const recoveryRequested = args[0] === '--activate-verified-hosting';
     if (recoveryRequested) log(`END: ${formatTrialJst(review.endsAtMillis)}`);
     if (recoveryRequested && Date.now() < review.startsAtMillis) {
@@ -655,18 +696,27 @@ export async function main(args = process.argv.slice(2), { log = console.log } =
       log('STOP: the fixed trial deadline has passed; activation refused without changing the window.'); return 1;
     }
     if (mode !== 'inspect') {
+      if (hostingPrior) hostingSetupStage = 'lock-hosting-packet';
       lock = await open(join(packet.output, 'OPERATION.lock'), 'wx', 0o600);
       await lock.writeFile('This operation is in progress. Do not remove or rerun after an uncertain interruption.\n');
     }
     if (hostingPrior) {
+      hostingSetupStage = 'prepare-hosting-journal';
       journal = await createHostingUpdateJournal(packet, review, hostingPrior);
+      hostingSetupStage = 'copy-hosting-runtime';
       await installRuntime(packet, hostingPrior.proof.prior);
       const { createCloudAdapter } = await import('./floating-garden-trial-cloud-adapter.mjs');
-      const toolingDir = args.at(-1), oldCloud = createCloudAdapter({ packet: hostingPrior.packet, review, toolingDir }),
-        newCloud = createCloudAdapter({ packet, review, toolingDir });
-      const publish = await createHostingPublisher({ packet, toolingDir });
+      // Offline integration tests may inject provider factories; no CLI flag
+      // alters these capabilities, local guards, runtime copy or journaling.
+      hostingSetupStage = 'check-hosting-tooling';
+      const cloudFactory = hostingCapabilities?.createCloudAdapter ?? createCloudAdapter,
+        publisherFactory = hostingCapabilities?.createHostingPublisher ?? createHostingPublisher;
+      const toolingDir = args.at(-1), oldCloud = cloudFactory({ packet: hostingPrior.packet, review, toolingDir }),
+        newCloud = cloudFactory({ packet, review, toolingDir });
+      const publish = await publisherFactory({ packet, toolingDir });
       const checkLocal = () => verifyHostingUpdatePacket(packet, review, hostingPrior);
       log(`END: ${formatTrialJst(review.endsAtMillis)}`);
+      hostingSetupStage = 'run-hosting-update';
       const result = await operateHostingUpdate({ review, oldCloud, newCloud, publish, journal, checkLocal, log });
       await journal.flush(); log(`OPERATION_DIRECTORY: ${packet.output}`);
       return result.status === 'active' ? 0 : 1;
@@ -697,7 +747,8 @@ export async function main(args = process.argv.slice(2), { log = console.log } =
     return result.status === 'blocked' ? 1 : 0;
   } catch {
     if (journal) await journal.flush().catch(() => {});
-    log('STOP: local inputs, dependencies, lock or setup could not be verified. Do not rerun a mutation. No raw diagnostics or private input are displayed.');
+    log(hostingSetupStage ? `STOP: ${hostingSetupStage}. Local inputs or setup could not be verified. No retry; private diagnostics are suppressed.` :
+      'STOP: local inputs, dependencies, lock or setup could not be verified. Do not rerun a mutation. No raw diagnostics or private input are displayed.');
     return 1;
   } finally {
     if (lock) { await lock.close(); await unlink(join(packet.output, 'OPERATION.lock')).catch(() => {}); }
