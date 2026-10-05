@@ -39,7 +39,20 @@ function harness(options = {}) {
   const oldHosting = { kind: 'game', version: `sites/${P}/versions/old-version`, marker: `garden-trial-game-v1:${fixture.next.packet.manifestDigest}` };
   let channel = { name: `sites/${P}/channels/live`, release: { version: { name: oldHosting.version }, message: oldHosting.marker } };
   const baseline = { functions: [...functions.values()].map(fn => ({ function: clone(fn), run: {}, iam: {} })), rules: { release: clone(release), ruleset: {} }, hosting: oldHosting };
-  const response = body => ({ status: 200, body: clone(body) });
+  const response = body => {
+    const value = clone(body);
+    function aliasNames(item) {
+      if (!item || typeof item !== 'object') return;
+      if (typeof item.name === 'string' && item.name.startsWith(`sites/${P}/`)) {
+        if (options.hostingAlias?.liveRelease) item.name = item.name.replace(`sites/${P}/releases/`, `sites/${P}/channels/live/releases/`);
+        item.name = (options.hostingAlias?.prefix ?? '') + item.name;
+      }
+      for (const child of Object.values(item)) aliasNames(child);
+    }
+    if (options.hostingAlias) aliasNames(value);
+    options.hostingResponse?.(value);
+    return { status: 200, body: value };
+  };
   const request = async call => {
     calls.push({ ...call, body: Buffer.isBuffer(call.body) ? Buffer.from(call.body) : clone(call.body) }); events.push(call.method);
     assert.equal(call.redirect, 'error'); assert.equal(call.timeoutMillis, 30000);
@@ -379,4 +392,92 @@ test('Hosting binary upload accepts bounded opaque success body without inventin
   const request = createActiveUpdateRequest({ requestClient: { request: async () => { calls++; return { status: 200, data: Buffer.from('Opaque upload response, not JSON') }; } }, fetchImpl: async () => {} });
   assert.deepEqual(await request(bridgeCall({ url: `https://upload-firebasehosting.googleapis.com/upload/${VERSION}/files/${'a'.repeat(64)}`, body: Buffer.from('gzip'), headers: { 'Content-Type': 'application/octet-stream' } })), { status: 200, headers: {} });
   assert.equal(calls, 1);
+});
+const HOSTING_PREFIXES = ['', `projects/${P}/`, 'projects/120030709276/'];
+test('generated-packet bridge flow accepts only approved Hosting prefixes and both live release forms', async () => {
+  for (const prefix of HOSTING_PREFIXES) for (const liveRelease of [false, true]) {
+    const h = harness({ bridge: true, hostingAlias: { prefix, liveRelease } });
+    h.baseline.hosting.version = prefix + h.baseline.hosting.version;
+    for (const kind of ['functions', 'rules', 'hosting']) {
+      const result = await h.transport[kind](h.args); assert.equal(result.kind, 'success', `${prefix} ${liveRelease} ${kind}`);
+      if (kind === 'hosting') assert.deepEqual(result, { kind: 'success', versionName: VERSION, releaseName: `sites/${P}/${liveRelease ? 'channels/live/' : ''}releases/new-release` });
+    }
+    for (const call of h.calls.filter(c => c.url.startsWith(HOSTING))) {
+      assert.ok(call.url.startsWith(HOSTING + `sites/${P}/`)); assert.ok(!call.url.includes('/projects/'));
+    }
+    for (const call of h.calls.filter(c => c.url.startsWith('https://upload-firebasehosting.googleapis.com'))) assert.match(call.url, new RegExp(`^https://upload-firebasehosting\\.googleapis\\.com/upload/${VERSION}/files/[a-f0-9]{64}$`));
+  }
+});
+test('mixed aliases normalize independently at every Hosting response boundary', async () => {
+  let created = 0, finalized = 0, channels = 0, releases = 0;
+  const h = harness({ bridge: true, hostingResponse: value => {
+    if (value?.name === `sites/${P}/channels/live`) { channels++; value.name = 'projects/120030709276/' + value.name; value.release.version.name = `projects/${P}/` + value.release.version.name; }
+    else if (value?.name === VERSION && value.status === 'CREATED') { value.name = HOSTING_PREFIXES[++created] + value.name; }
+    else if (value?.name === VERSION && value.status === 'FINALIZED') { value.name = (finalized++ ? '' : `projects/${P}/`) + value.name; }
+    else if (value?.name === `sites/${P}/releases/new-release`) { releases++; value.name = `projects/120030709276/sites/${P}/channels/live/releases/new-release`; value.version.name = `projects/${P}/${VERSION}`; }
+  } });
+  assert.equal((await h.transport.hosting(h.args)).kind, 'success');
+  assert.equal(created, 2); assert.equal(finalized, 2); assert.equal(releases, 1); assert.ok(channels > 2);
+});
+test('readHostingVersion accepts exact approved response-style aliases but sends canonical site GET', async () => {
+  const h = harness({ bridge: true });
+  for (const prefix of HOSTING_PREFIXES) { const result = await h.transport.readHostingVersion(prefix + VERSION); assert.equal(result.name, VERSION); }
+  assert.deepEqual(h.calls.map(c => [c.method, c.url]), HOSTING_PREFIXES.map(() => ['GET', HOSTING + VERSION]));
+  for (const invalid of [
+    `projects/other-project/${VERSION}`, `projects/120030709277/${VERSION}`, `projects/-/${VERSION}`,
+    VERSION.replace(P, 'other-site'), VERSION + '/', VERSION + '/suffix', VERSION + '\n', VERSION + '\r\n',
+    VERSION.replace('/versions/', '/versions/%2F'), VERSION.replace('/versions/', '/channels/preview/versions/'), 'https://firebasehosting.googleapis.com/v1beta1/' + VERSION,
+  ]) assert.throws(() => h.transport.readHostingVersion(invalid));
+  assert.equal(h.calls.length, HOSTING_PREFIXES.length);
+});
+function alterHostingBoundary(field, replacement) {
+  let created = 0, finalized = 0, changed = false;
+  return { get changed() { return changed; }, change(value) {
+    if (changed) return;
+    const replace = (object, key) => { object[key] = typeof replacement === 'function' ? replacement(object[key]) : replacement; changed = true; };
+    if (value?.name === `sites/${P}/channels/live`) {
+      if (field === 'channel') replace(value, 'name');
+      if (field === 'baseline-version') replace(value.release.version, 'name');
+    } else if (value?.name === VERSION && value.status === 'CREATED') {
+      created++;
+      if (field === 'created' && created === 1 || field === 'created-inventory' && created === 2) replace(value, 'name');
+    } else if (value?.name === VERSION && value.status === 'FINALIZED') {
+      finalized++;
+      if (field === 'finalized' && finalized === 1 || field === 'finalized-inventory' && finalized === 2) replace(value, 'name');
+    } else if (value?.name === `sites/${P}/releases/new-release`) {
+      if (field === 'released-version') replace(value.version, 'name');
+      if (field === 'release') replace(value, 'name');
+    }
+  } };
+}
+test('foreign project/site and malformed aliases fail at each response boundary without a subsequent mutation', async () => {
+  const fields = ['channel', 'baseline-version', 'created', 'created-inventory', 'finalized', 'finalized-inventory', 'released-version', 'release'];
+  const replacements = [name => `projects/other-project/${name}`, name => `projects/120030709277/${name}`, name => `projects/-/${name}`, name => name.replace(P, 'other-site'), name => name + '\n', name => name + '/suffix', name => name.replace('sites/', 'sites%2F')];
+  for (const field of fields) for (const replacement of replacements) {
+    const alteration = alterHostingBoundary(field, replacement);
+    const h = harness({ bridge: true, hostingResponse: value => alteration.change(value) });
+    const result = await h.transport.hosting(h.args); assert.notEqual(result.kind, 'success', field); assert.equal(alteration.changed, true, field);
+    if (['channel', 'baseline-version'].includes(field)) assert.equal(h.calls.filter(c => c.method !== 'GET').length, 0, field);
+    if (field === 'created') assert.equal(h.calls.filter(c => c.method !== 'GET').length, 1);
+    if (field === 'created-inventory') assert.equal(h.calls.some(c => c.method === 'PATCH'), false);
+    if (['finalized', 'finalized-inventory'].includes(field)) assert.equal(h.calls.some(c => c.url.includes('/releases?')), false);
+    const before = h.calls.filter(c => c.method !== 'GET').length;
+    if (before > 0) { await h.transport.hosting(h.args); assert.equal(h.calls.filter(c => c.method !== 'GET').length, before, field); }
+  }
+});
+test('another version or non-live channel cannot use an otherwise approved project prefix', async () => {
+  for (const field of ['baseline-version', 'created-inventory', 'finalized', 'finalized-inventory', 'released-version']) {
+    const alteration = alterHostingBoundary(field, name => `projects/${P}/` + name.replace(/versions\/[^/]+$/, 'versions/another-version'));
+    const h = harness({ bridge: true, hostingResponse: value => alteration.change(value) });
+    assert.notEqual((await h.transport.hosting(h.args)).kind, 'success', field); assert.equal(alteration.changed, true);
+  }
+  for (const [field, value] of [['channel', `projects/${P}/sites/${P}/channels/preview`], ['release', `projects/120030709276/sites/${P}/channels/preview/releases/new-release`], ['release', `projects/${P}/sites/${P}/channels/live/releases/new-release/extra`]]) {
+    const alteration = alterHostingBoundary(field, value), h = harness({ bridge: true, hostingResponse: body => alteration.change(body) });
+    assert.notEqual((await h.transport.hosting(h.args)).kind, 'success', field); assert.equal(alteration.changed, true);
+  }
+});
+test('response prefix compatibility never allows a project-prefixed Hosting upload URL', async () => {
+  const h = harness({ bridge: true, hostingAlias: { prefix: `projects/${P}/`, liveRelease: true }, route: c => c.url.endsWith(':populateFiles') ? { status: 200, body: { uploadRequiredHashes: [Object.values(c.body.files)[0]], uploadUrl: `https://upload-firebasehosting.googleapis.com/upload/projects/${P}/${VERSION}/files` } } : undefined });
+  assert.equal((await h.transport.hosting(h.args)).kind, 'unknown');
+  assert.equal(h.calls.some(c => c.url.startsWith('https://upload-firebasehosting.googleapis.com')), false); assert.equal(h.calls.some(c => c.method === 'PATCH'), false);
 });

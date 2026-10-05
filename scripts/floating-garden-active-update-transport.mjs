@@ -2,8 +2,9 @@
 // default network client, resource creation fallback, IAM mutation or write retry.
 // A source-only Function PATCH preserves requested configuration; the provider
 // may still apply managed runtime patches. It does not pin a runtime image.
-// Production wiring is deliberately absent; the caller must supply a reviewed
-// durable journal and a fresh closed-gate/approval check in beforeMutation.
+// The separate active-update provider supplies execution wiring. Its approved
+// execution path must bind a durable journal and supply fresh closed-gate and
+// approval checks in beforeMutation; importing/constructing this module is inert.
 // Provider contracts (reviewed 2026-10-05):
 // https://cloud.google.com/functions/docs/reference/rest/v2/projects.locations.functions/generateUploadUrl
 // https://cloud.google.com/functions/docs/reference/rest/v2/projects.locations.functions/patch
@@ -20,7 +21,7 @@ import { readOperationPacket, verifyOperationPacket } from './operate-floating-g
 import { FUNCTION_NAMES } from './prepare-floating-garden-trial.mjs';
 
 export const TRANSPORT_SCOPE = Object.freeze({ project: 'wa-awesome-garden-stg', projectNumber: '120030709276', region: 'asia-northeast1', site: 'wa-awesome-garden-stg' });
-const { project, region, site } = TRANSPORT_SCOPE;
+const { project, projectNumber, region, site } = TRANSPORT_SCOPE;
 const CF = 'https://cloudfunctions.googleapis.com/v2/';
 const RULES = 'https://firebaserules.googleapis.com/v1/';
 const HOSTING = 'https://firebasehosting.googleapis.com/v1beta1/';
@@ -129,7 +130,17 @@ function uploadURL(raw, source) {
   need(url.hostname === 'storage.googleapis.com' && url.pathname === `/${source.bucket}/${source.object}` && url.search.length > 1, 'url');
   return url.href;
 }
-function versionName(name) { return dataName(name, new RegExp(`^sites/${site}/versions/[A-Za-z0-9_-]{1,128}$`)); }
+// Hosting has returned both site-scoped and approved project-prefixed resource
+// identities. Strip only this exact project's ID/number; never broaden a target
+// or copy a response prefix into an outgoing API/upload URL.
+function hostingName(value, suffix) {
+  const match = typeof value === 'string' && new RegExp(`^(?:projects/(?:${project}|${projectNumber})/)?(sites/${site}/${suffix})$`).exec(value);
+  // JavaScript's $ can match before a final newline; require the complete input.
+  need(match && match[0] === value, 'response'); return match[1];
+}
+function versionName(name) { return hostingName(name, 'versions/[A-Za-z0-9_-]{1,128}'); }
+function liveChannelName(name) { return hostingName(name, 'channels/live'); }
+function hostingReleaseName(name) { return hostingName(name, '(?:channels/live/)?releases/[A-Za-z0-9_-]{1,200}'); }
 function rulesetName(name) { return dataName(name, new RegExp(`^projects/${project}/rulesets/[A-Za-z0-9_-]{1,128}$`)); }
 function operationName(name) { return dataName(name, new RegExp(`^projects/${project}/locations/${region}/operations/[A-Za-z0-9_-]{1,200}$`)); }
 
@@ -158,7 +169,7 @@ export function createActiveUpdateTransport({ request, now, clock, wait, request
       need(isDeepStrictEqual(await send(RULES + releaseName), context.baseline.rules.release), 'drift');
     } else if (context.kind === 'hosting') {
       const channel = await send(HOSTING + `sites/${site}/channels/live`);
-      need(channel?.name === `sites/${site}/channels/live` && channel?.release?.version?.name === context.baseline.hosting.version && channel?.release?.message === context.baseline.hosting.marker, 'drift');
+      need(liveChannelName(channel?.name) === `sites/${site}/channels/live` && versionName(channel?.release?.version?.name) === versionName(context.baseline.hosting.version) && channel?.release?.message === context.baseline.hosting.marker, 'drift');
     }
   }
   function bind(payload) { const value = checkedPayload(payload); need(boundDigest === undefined || boundDigest === payload.manifestDigest, 'packet'); boundDigest = payload.manifestDigest; return value; }
@@ -259,7 +270,7 @@ export function createActiveUpdateTransport({ request, now, clock, wait, request
     lastStage = 'hosting-inventory';
     try {
       const version = await send(HOSTING + name);
-      need(version?.name === name && version?.status === expectedStatus && isDeepStrictEqual(version?.config, content.config), 'hosting-inventory');
+      need(versionName(version?.name) === name && version?.status === expectedStatus && isDeepStrictEqual(version?.config, content.config), 'hosting-inventory');
       for (const status of ['ACTIVE', 'EXPECTED']) {
         const seen = new Set(), tokens = new Set(); let token;
         for (let page = 0; ; page++) {
@@ -297,11 +308,16 @@ export function createActiveUpdateTransport({ request, now, clock, wait, request
       for (const hash of required) await send(`${base.href}/${hash}`, { method: 'POST', auth: 'google', stage: `hosting-file:${hash}`, headers: { 'Content-Type': 'application/octet-stream' }, body: Buffer.from(content.compressed[hash]) });
       await verifyHostingInventory(name, content, 'CREATED');
       const finalized = await send(HOSTING + name + '?updateMask=status', { method: 'PATCH', stage: 'hosting-finalize', body: { status: 'FINALIZED' } });
-      if (finalized?.name !== name || finalized?.status !== 'FINALIZED') { halted = true; throw failure('response', 'unknown'); }
+      try { need(versionName(finalized?.name) === name && finalized?.status === 'FINALIZED', 'response'); }
+      catch { halted = true; throw failure('response', 'unknown'); }
       await verifyHostingInventory(name, content, 'FINALIZED');
       const released = await send(HOSTING + `sites/${site}/releases?versionName=${name}`, { method: 'POST', stage: 'hosting-release', body: { message: `garden-trial-game-v1:${payload.manifestDigest}` } });
-      if (released?.version?.name !== name || released?.message !== `garden-trial-game-v1:${payload.manifestDigest}` || typeof released?.name !== 'string' || !new RegExp(`^sites/${site}/releases/[A-Za-z0-9_-]{1,200}$`).test(released.name)) { halted = true; throw failure('response', 'unknown'); }
-      return { versionName: name, releaseName: released.name };
+      let canonicalRelease;
+      try {
+        need(versionName(released?.version?.name) === name && released?.message === `garden-trial-game-v1:${payload.manifestDigest}`, 'response');
+        canonicalRelease = hostingReleaseName(released?.name);
+      } catch { halted = true; throw failure('response', 'unknown'); }
+      return { versionName: name, releaseName: canonicalRelease };
     });
   }
   async function facade(kind, args) {
