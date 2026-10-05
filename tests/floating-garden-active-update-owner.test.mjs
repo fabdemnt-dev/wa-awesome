@@ -125,6 +125,18 @@ test('intact target can be re-inspected without public downloads or private-file
   assert.equal(result.status, 'baseline-read-only'); assert.equal(result.preparedTargetReused, true); assert.equal(h.requests.length, count);
   assert.deepEqual(await snapshot(h.target), before); assert.equal(h.inspections.length, 2);
 });
+test('new immutable inspection generation leaves the prior preparation byte-identical', async t => {
+  const h = await fixture(t), prior = join(h.home, 'garden-active-update-41c44301490e');
+  assert.notEqual(prior, h.target);
+  await mkdir(prior, { mode: 0o700 });
+  await put(join(prior, 'PREPARATION.json'), JSON.stringify({ sourceCommit: '8829139a0cbebd2bf139969c6e6faf38d2c7dcab', retained: true }));
+  await put(join(prior, 'operation/private-review.json'), JSON.stringify(review));
+  await put(join(prior, 'source/scripts/floating-garden-active-update-provider.mjs'), 'globalThis.oldGardenPreparationExecuted = true;');
+  const before = await snapshot(prior), result = await h.run();
+  assert.equal(result.status, 'baseline-read-only'); assert.equal(result.preparedTargetReused, false);
+  assert.deepEqual(await snapshot(prior), before); assert.equal(globalThis.oldGardenPreparationExecuted, undefined);
+  assert.equal(h.inspections.length, 1); assert.equal(h.requests.length, 64);
+});
 test('original owner packet is selected when there is no verified Hosting update', async t => {
   const h = await fixture(t, { updated: false }); const result = await h.run(); assert.equal(result.status, 'baseline-read-only');
   assert.equal(JSON.parse(await readFile(join(h.target, 'PREPARATION.json'))).previousOutput, h.original.output);

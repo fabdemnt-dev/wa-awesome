@@ -11,9 +11,10 @@ import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 
-export const OWNER_SOURCE_COMMIT = '8829139a0cbebd2bf139969c6e6faf38d2c7dcab';
-export const OWNER_SOURCE_TREE = '63454b68c048fa12f4e12293f05175c025c5cad9';
-export const OWNER_PREPARATION_NAME = 'garden-active-update-41c44301490e';
+export const OWNER_SOURCE_COMMIT = 'b7dd16da4fdbb19e401423beb42a3da5c49e75d1';
+export const OWNER_SOURCE_TREE = 'ad707eca475b0477dccf4094a442dd31aede54fc';
+// A new immutable inspection generation never rewrites the prior preparation.
+export const OWNER_PREPARATION_NAME = 'garden-active-update-41c44301490e-iam-read-v2';
 export const OWNER_SOURCE_FILES = Object.freeze({
   "config/floating-garden-trial/deny-all.rules": "ed1e7c11f025d9464e80e4c4584711c474a0c9b0e07802618de8d02dddadec87",
   "config/floating-garden-trial/example.json": "4ad53f032150f09ba651901b7ea583c9698a1c0cdbf99fe775b82fd086e3995c",
@@ -72,7 +73,7 @@ export const OWNER_SOURCE_FILES = Object.freeze({
   "scripts/bootstrap-floating-garden-runtime.mjs": "007f7ccf0ea88b38f48f4001ac7ecc244ddc14d96649315f7654ac663313a39b",
   "scripts/deploy-floating-garden-connection-check.mjs": "ec1c39f951c3ce1f866c34628bd774089305936524c935f288ae89f78187be11",
   "scripts/deploy-floating-garden-connection-template.mjs": "5133a9c8659207b78c753cf89c4a9d3dddfeae78c8b4b903fd313253538ca92d",
-  "scripts/floating-garden-active-update-provider.mjs": "b97b1c95960506e1867c95b5f3dcc7438f4b486358657a4ba9dcb88ea3d0c804",
+  "scripts/floating-garden-active-update-provider.mjs": "8d4b6a2b1e558f1e4a3a0c77b4c852d301e622462725e1daed734cb634f4c252",
   "scripts/floating-garden-active-update-transport.mjs": "2d92b468ed74cba77210435f31b662c1c0a91c3fc53dd92854abd79ecd14e1c7",
   "scripts/floating-garden-active-update.mjs": "75bb394312e1b77eed1a03c95bf3218d2e4afcb197db336f653d5f236e33ea70",
   "scripts/floating-garden-trial-cloud-adapter.mjs": "3649aaf36ed7ad270c6e3143eb1e895a7d3371a5d1fe7ba6121b92ad374d658f",
