@@ -124,7 +124,7 @@ function run(fn) {
       scaling: { maxInstanceCount: 1 }, maxInstanceRequestConcurrency: 1, timeout: '30s', containers: [{ image: 'old-or-new-image', resources: { limits: { memory: '256Mi', cpu: '1' } } }] },
     traffic: [{ type: 'TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST', percent: 100 }], trafficStatuses: [{ revision, percent: 100 }] };
 }
-async function harness({ actualTransport = false, actualBridge = false, database } = {}) {
+async function harness({ actualTransport = false, actualBridge = false, database, iamPolicy } = {}) {
   const legacy = await legacyData(), { first, second } = legacy; const db = database || legacy.db;
   if (database) {
     const batch = database.batch();
@@ -168,7 +168,8 @@ async function harness({ actualTransport = false, actualBridge = false, database
     if (command === 'gcloud') {
       if (args[0] === 'config') result = {};
       else if (args[0] === 'projects' && args[1] === 'describe') result = { projectId: S.project, projectNumber: S.projectNumber, lifecycleState: 'ACTIVE' };
-      else if (args.includes('get-iam-policy')) result = policy();
+      else if (args.includes('get-iam-policy')) result = iamPolicy
+        ? iamPolicy(args[0] === 'iam' ? 'runtime' : args[0] === 'secrets' ? 'secret' : 'project', policy()) : policy();
       else if (args[0] === 'artifacts' || args[0] === 'services') result = [];
       else result = { name: args.slice(0, 3).join('-'), settingsRevision };
       return { exitCode: 0, stdout: JSON.stringify(result) };
@@ -269,6 +270,38 @@ test('actual provider read-only inspection verifies both legacy rooms and all fi
   assert(result.documentCount > 10); assert.equal(h.db.writes.length, 0); assert.equal(h.providerWrites.length, 0);
   assert(h.calls.some(c => c.url?.includes('&alt=media'))); assert(h.calls.some(c => c.url?.includes(':getIamPolicy')));
   assert(h.calls.every(c => !c.args?.includes('deploy')));
+});
+test('documented etag-only runtime policy passes real read-only provider inspection without writes', async () => {
+  const h = await harness({ iamPolicy: (name, value) => name === 'runtime' ? { etag: 'BwWKmjvelug=' } : value });
+  const result = await h.cloud.inspect();
+  assert.equal(result.kind, 'baseline'); assert.equal(result.createdRoomCount, 2);
+  assert.equal(h.db.writes.length, 0); assert.equal(h.providerWrites.length, 0); assert.equal(h.journalEntries.length, 0);
+});
+test('empty-runtime exception rejects malformed and broader shapes and never applies to project or secret', async () => {
+  for (const value of [null, [], false, 'invalid', {}, { etag: '' }, { etag: 1 }, { etag: null },
+    { etag: 'not base64!' }, { etag: 'BwWKmjvelug' }, { etag: 'AB==' }, { etag: 'BwWKmjvelug=', error: {} },
+    { etag: 'BwWKmjvelug=', version: 1 }, { etag: 'BwWKmjvelug=', bindings: null }, { bindings: {} }]) {
+    const h = await harness({ iamPolicy: (name, original) => name === 'runtime' ? value : original });
+    await assert.rejects(h.cloud.inspect(), error => activeUpdateReason(error) === 'iam-preservation');
+    assert.equal(h.db.writes.length, 0); assert.equal(h.providerWrites.length, 0); assert.equal(h.journalEntries.length, 0);
+  }
+  for (const target of ['project', 'secret']) {
+    const h = await harness({ iamPolicy: (name, value) => name === target ? { etag: 'BwWKmjvelug=' } : value });
+    await assert.rejects(h.cloud.inspect(), error => activeUpdateReason(error) === 'iam-preservation');
+    assert.equal(h.db.writes.length, 0); assert.equal(h.providerWrites.length, 0); assert.equal(h.journalEntries.length, 0);
+  }
+});
+test('etag-only runtime metadata remains in exact baseline and pre-pause preservation comparisons', async () => {
+  let reads = 0;
+  const h = await harness({ iamPolicy: (name, value) => name === 'runtime'
+    ? { etag: ++reads > 1 ? 'BwWKmjveluk=' : 'BwWKmjvelug=' } : value });
+  await assert.rejects(h.cloud.inspect(), error => activeUpdateReason(error) === 'provider-drift');
+  assert.equal(h.db.writes.length, 0); assert.equal(h.providerWrites.length, 0);
+  reads = 0;
+  const next = await harness({ iamPolicy: (name, value) => name === 'runtime'
+    ? { etag: ++reads > 2 ? 'BwWKmjveluk=' : 'BwWKmjvelug=' } : value });
+  const result = await next.run(); assert.equal(result.status, 'blocked'); assert.equal(result.reason, 'iam-preservation');
+  assert.equal(result.access, 'open'); assert.equal(next.db.writes.length, 0); assert.equal(next.providerWrites.length, 0);
 });
 test('full real-adapter staged path preserves nonzero usage, original data, dates, roster and extra fields', async () => {
   const h = await harness(), before = h.db.entries(); const result = await h.run();

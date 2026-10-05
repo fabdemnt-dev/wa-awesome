@@ -22,6 +22,17 @@ const MAX_BYTES = 16 * 1024 * 1024, MAX_DOCS = 10000;
 const copy = value => structuredClone(value);
 const omit = (value, keys) => Object.fromEntries(Object.entries(value || {}).filter(([key]) => !keys.includes(key)));
 
+function documentedEmptyRuntimePolicy(name, policy) {
+  // Google documents etag-only getIamPolicy responses for service accounts
+  // without direct grants. Accept only that exact runtime response shape;
+  // project/secret policies still require bindings and no JSON is normalized.
+  // https://docs.cloud.google.com/iam/docs/create-short-lived-credentials-delegated
+  return name === 'runtime' && policy !== null && typeof policy === 'object' &&
+    Object.getPrototypeOf(policy) === Object.prototype && Object.keys(policy).length === 1 &&
+    Object.hasOwn(policy, 'etag') && typeof policy.etag === 'string' && policy.etag.length > 0 &&
+    Buffer.from(policy.etag, 'base64').toString('base64') === policy.etag;
+}
+
 export function stableArtifactRepositories(repositories) {
   check(Array.isArray(repositories), 'provider-read');
   // Artifact Registry Repository.sizeBytes/createTime/updateTime are output-only.
@@ -135,7 +146,8 @@ export function createActiveUpdateProvider({ plan, toolingDir, runner = makeClou
       runtime: gcloud(['iam', 'service-accounts', 'get-iam-policy', RUNTIME_ACCOUNT]),
       secret: gcloud(['secrets', 'get-iam-policy', SECRET]),
     };
-    for (const policy of Object.values(iam)) check(policy && Array.isArray(policy.bindings), 'iam-preservation');
+    for (const [name, policy] of Object.entries(iam)) check(policy &&
+      (Array.isArray(policy.bindings) || documentedEmptyRuntimePolicy(name, policy)), 'iam-preservation');
     return { iam, runtime: gcloud(['iam', 'service-accounts', 'describe', RUNTIME_ACCOUNT]),
       secret: gcloud(['secrets', 'describe', SECRET]),
       secretVersion: gcloud(['secrets', 'versions', 'describe', '1', `--secret=${SECRET}`]),
