@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import { Session } from 'node:inspector/promises';
 import { executeOwnerActiveUpdate, main as executionMain, INSPECTION_ENTRY_COMMIT, INSPECTION_ENTRY_SHA256, EXECUTION_GUARD_NAME, EXECUTION_PREPARATION_NAME } from '../scripts/floating-garden-active-update-execute-owner.mjs';
 import { OWNER_SOURCE_COMMIT, OWNER_SOURCE_TREE, OWNER_SOURCE_FILES, OWNER_PREPARATION_NAME,
   inspectOwnerActiveUpdate, main as inspectMain } from '../scripts/floating-garden-active-update-owner.mjs';
@@ -257,7 +258,7 @@ async function harness({ ownerTooling } = {}) {
   };
 }
 
-import { diagnoseOwnerActiveUpdate, main, classifyDiagnosticFailure } from '../scripts/floating-garden-active-update-diagnose-owner.mjs';
+import { diagnoseOwnerActiveUpdate, loadVerifiedFailedUpdateContext, main, classifyDiagnosticFailure } from '../scripts/floating-garden-active-update-diagnose-owner.mjs';
 
 // A saved failure contains exactly the outputs produced before any issued step.
 async function failedFixture(t, options = {}) {
@@ -471,4 +472,117 @@ test('actual pinned provider/adapter/HTTP bridge: both passes, legacy second-rea
     privateOutputAbsent([result, h.logs]);
     for (const call of p.calls.filter(call => call.url)) assert.equal(call.method, 'GET');
   }
+});
+
+
+test('pure context loader preserves branded module identity without any provider construction, SDK execution or network', async t => {
+  const stages = [];
+  // Precise coverage observes the real immutable cached provider factory without
+  // replacing exports, modifying source pins or constructing a test provider.
+  const session = new Session(); session.connect();
+  let h, before, network, context, coverage;
+  try {
+    await session.post('Profiler.enable');
+    await session.post('Profiler.startPreciseCoverage', { callCount: true, detailed: true });
+    // Begin before the fixture imports its unique cached source module so V8
+    // includes its uncalled factory in the coverage report as a zero count.
+    h = await failedFixture(t); before = await snapshot(h.home);
+    network = t.mock.method(globalThis, 'fetch', async () => assert.fail('pure local verification must not fetch'));
+    context = await loadVerifiedFailedUpdateContext({ ...h.args, onStage: stage => stages.push(stage) });
+    assert.equal(await context.recheck(), true);
+    ({ result: coverage } = await session.post('Profiler.takePreciseCoverage'));
+  } finally { await session.post('Profiler.stopPreciseCoverage'); session.disconnect(); }
+  const providerUrl = pathToFileURL(join(h.source, 'scripts/floating-garden-active-update-provider.mjs')).href;
+  const provider = coverage.find(script => script.url === providerUrl);
+  const factory = provider?.functions.find(fn => fn.functionName === 'createActiveUpdateProvider');
+  assert(factory, 'precise coverage must observe the actual pinned provider factory');
+  assert(factory.ranges.every(range => range.count === 0), 'loader/recheck must never construct the provider');
+  assert.equal(network.mock.callCount(), 0); assert.deepEqual(h.calls, []);
+  assert.deepEqual(await snapshot(h.home), before);
+  assert.equal(Object.isFrozen(context), true); assert.equal(Object.isFrozen(context.plan), true);
+  assert.strictEqual(context.active, h.active); assert.strictEqual(context.adapter, h.adapter);
+  assert.strictEqual(context.provider, await import(providerUrl));
+  assert.equal(context.source, h.source); assert.equal(context.toolingDir, h.tooling);
+  const packets = context.active.activeUpdatePackets(context.plan);
+  assert.equal(packets.old.packet.output, h.selected.output); assert.equal(packets.next.packet.output, join(h.target, 'operation'));
+  assert.throws(() => context.active.activeUpdatePackets({ ...context.plan }));
+  assert.deepEqual(Object.keys(context).sort(), ['plan', 'active', 'adapter', 'provider', 'toolingDir', 'source',
+    'priorExecutionDigest', 'priorJournalDigest', 'preparationDigest', 'inspectorDigest', 'retainedFingerprint', 'recheck'].sort());
+  for (const [field, path] of [['priorExecutionDigest', h.executionPath], ['priorJournalDigest', h.journal],
+    ['preparationDigest', join(h.target, 'PREPARATION.json')], ['inspectorDigest', h.inspectorPath]]) {
+    assert.equal(context[field], hash(await readFile(path)));
+  }
+  const { priorExecutionDigest, priorJournalDigest, preparationDigest, inspectorDigest } = context;
+  assert.equal(context.retainedFingerprint, hash(JSON.stringify({ priorExecutionDigest, priorJournalDigest, preparationDigest, inspectorDigest,
+    oldManifestDigest: context.plan.oldManifestDigest, newManifestDigest: context.plan.newManifestDigest })));
+  privateOutputAbsent(context);
+  assert.deepEqual(stages, ['owner-paths', 'guard-verification', 'source-verification', 'operation-selection',
+    'preparation-binding', 'journal-verification', 'runtime-verification']);
+});
+
+test('context recheck rejects every changed retained evidence buffer and preserves cached brands on packet rejection', async t => {
+  const h = await failedFixture(t), context = await loadVerifiedFailedUpdateContext(h.args);
+  const files = [h.executionPath, h.inspectorPath, join(h.target, 'PREPARATION.json'), h.journal,
+    join(h.selected.output, 'private-review.json'), join(h.target, 'operation/OPERATION-MANIFEST.json'),
+    join(h.target, 'operation/game/firestore.rules'), join(h.source, 'scripts/floating-garden-active-update-provider.mjs')];
+  for (const path of files) {
+    const before = await readFile(path); await writeFile(path, Buffer.concat([before, Buffer.from(' ')]));
+    await assert.rejects(context.recheck());
+    await writeFile(path, before); assert.equal(await context.recheck(), true);
+  }
+  const path = join(h.target, 'operation/game/firestore.rules'), before = await readFile(path);
+  await writeFile(path, 'PRIVATE_RAW');
+  await assert.rejects(context.recheck(), error => {
+    assert.deepEqual(classifyDiagnosticFailure(error), { kind: 'active-update', reason: 'local-packet' }); return true;
+  });
+  await writeFile(path, before); assert.equal(await context.recheck(), true);
+  assert.deepEqual(h.calls, []);
+});
+
+test('context recheck revalidates layouts, selected operation, source permissions and runtime identity', async t => {
+  const h = await failedFixture(t), context = await loadVerifiedFailedUpdateContext(h.args);
+  for (const path of [h.guard, h.target, join(h.target, 'operation'), h.source]) {
+    const extra = join(path, 'unreviewed-extra'); await put(extra, 'PRIVATE_RAW');
+    await assert.rejects(context.recheck()); await rm(extra); assert.equal(await context.recheck(), true);
+  }
+  const selectedState = join(h.selected.output, 'OPERATION-STATE.json'), selectedBytes = await readFile(selectedState);
+  await writeFile(selectedState, '{}'); await assert.rejects(context.recheck());
+  await writeFile(selectedState, selectedBytes); assert.equal(await context.recheck(), true);
+  const sourceFile = join(h.source, 'scripts/floating-garden-active-update.mjs');
+  await chmod(sourceFile, 0o644); await assert.rejects(context.recheck());
+  await chmod(sourceFile, 0o600); assert.equal(await context.recheck(), true);
+  const sdk = join(h.target, 'operation/game/functions/node_modules/firebase-admin/package.json'), sdkBytes = await readFile(sdk);
+  await writeFile(sdk, '{"version":"99.0.0"}'); await assert.rejects(context.recheck());
+  await writeFile(sdk, sdkBytes); assert.equal(await context.recheck(), true); assert.deepEqual(h.calls, []);
+});
+
+test('context recheck enforces current fixed-window and environment including expiry during local reads', async t => {
+  const h = await failedFixture(t); let clock = NOW + 1;
+  const env = {}, args = [], context = await loadVerifiedFailedUpdateContext({ ...h.args, env, execArgv: args, now: () => clock });
+  for (clock of [END, START - 1, NaN, NOW - 1]) await assert.rejects(context.recheck());
+  clock = NOW + 1; assert.equal(await context.recheck(), true);
+  env.HTTPS_PROXY = 'PRIVATE_RAW'; await assert.rejects(context.recheck()); delete env.HTTPS_PROXY;
+  args.push('--inspect'); await assert.rejects(context.recheck()); args.length = 0;
+  assert.equal(await context.recheck(), true);
+  let nextClock = () => NOW + 1;
+  const expires = await loadVerifiedFailedUpdateContext({ ...h.args, now: () => nextClock() });
+  let reads = 0; nextClock = () => ++reads === 1 ? NOW + 1 : END;
+  await assert.rejects(expires.recheck()); assert.equal(reads, 2); assert.deepEqual(h.calls, []);
+});
+
+test('loader rejection retains active WeakMap classifications before returning any context', async t => {
+  const h = await failedFixture(t), stages = [];
+  // Mutate only a synthetic packet after the early packet checks so the actual
+  // pinned active module, rather than a forged property, brands the failure.
+  const onStage = stage => {
+    stages.push(stage);
+    if (stage === 'preparation-binding') {
+      execFileSync(process.execPath, ['-e', 'require("node:fs").writeFileSync(process.argv[1], "PRIVATE_RAW")',
+        join(h.target, 'operation/game/firestore.rules')]);
+    }
+  };
+  await assert.rejects(loadVerifiedFailedUpdateContext({ ...h.args, onStage }), error => {
+    assert.deepEqual(classifyDiagnosticFailure(error), { kind: 'active-update', reason: 'local-packet' }); return true;
+  });
+  assert.equal(stages.at(-1), 'preparation-binding'); assert.deepEqual(h.calls, []);
 });

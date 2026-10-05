@@ -112,6 +112,9 @@ function verifyJournal(bytes, plan, execution, now) {
 const GRPC_NAMES = Object.freeze(['OK', 'CANCELLED', 'UNKNOWN', 'INVALID_ARGUMENT', 'DEADLINE_EXCEEDED', 'NOT_FOUND',
   'ALREADY_EXISTS', 'PERMISSION_DENIED', 'RESOURCE_EXHAUSTED', 'FAILED_PRECONDITION', 'ABORTED', 'OUT_OF_RANGE', 'UNIMPLEMENTED', 'INTERNAL', 'UNAVAILABLE', 'DATA_LOSS', 'UNAUTHENTICATED']);
 const SYSTEM_CODES = new Set(['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EAI_AGAIN', 'ENOTFOUND', 'EPIPE']);
+// Retain the cached WeakMap brands even when local verification rejects before
+// the complete context can be returned. No paths, bytes or error text escape.
+const verifiedFailureModules = new WeakMap();
 function ownValue(value, key) {
   if (!value || typeof value !== 'object' || types.isProxy(value)) return undefined;
   const descriptor = Object.getOwnPropertyDescriptor(value, key);
@@ -120,6 +123,8 @@ function ownValue(value, key) {
 // Neither error messages/stacks nor provider properties are trusted diagnostic
 // strings. Legacy and current reasons originate only in verified WeakMap brands.
 export function classifyDiagnosticFailure(error, { active, adapter } = {}) {
+  const retained = verifiedFailureModules.get(error);
+  active ??= retained?.active; adapter ??= retained?.adapter;
   const legacy = adapter?.describeAdapterFailure(error);
   if (legacy && (legacy.reason !== 'unclassified' || Number.isInteger(legacy.httpStatus))) return {
     kind: 'legacy-adapter', reason: legacy.reason,
@@ -138,6 +143,100 @@ export function classifyDiagnosticFailure(error, { active, adapter } = {}) {
   }
   return { kind: 'unclassified' };
 }
+/** Verify retained owner evidence using local reads only; never construct a provider. */
+export async function loadVerifiedFailedUpdateContext({ home = homedir(), env = process.env, execArgv = process.execArgv,
+  now = Date.now, onStage = () => {} } = {}) {
+  let active, adapter;
+  const retainFailure = error => {
+    if (error && (typeof error === 'object' || typeof error === 'function') && !types.isProxy(error)) {
+      verifiedFailureModules.set(error, { active, adapter });
+    }
+    throw error;
+  };
+  try {
+    onStage('owner-paths'); environment(env, execArgv); await directory(home);
+    const clock = clockInWindow(now()), base = join(home, DIAGNOSTIC_PREPARATION_NAME), source = join(base, 'source');
+    const guard = join(home, DIAGNOSTIC_GUARD_NAME), executionPath = join(guard, 'EXECUTION.json'), inspectorPath = join(guard, 'read-only-owner.mjs');
+    const verifyGuard = async () => {
+      await directory(guard, true);
+      need(isDeepStrictEqual((await readdir(guard)).sort(), ['EXECUTION.json', 'read-only-owner.mjs']));
+    };
+    onStage('guard-verification'); await verifyGuard();
+    const executionBytes = await regularFile(executionPath, { limit: 16384 }), execution = verifyExecution(executionBytes, clock);
+    const inspectorBytes = await regularFile(inspectorPath); need(hash(inspectorBytes) === DIAGNOSTIC_INSPECTOR_SHA256);
+    // This saved 4f8de18 inspector is used for public constants ONLY. Calling its
+    // inspect entry would reject the journal and cannot authorize a retry.
+    const owner = await import(pathToFileURL(inspectorPath).href);
+    need(owner.OWNER_SOURCE_COMMIT === DIAGNOSTIC_SOURCE_COMMIT && owner.OWNER_SOURCE_TREE === DIAGNOSTIC_SOURCE_TREE && owner.OWNER_PREPARATION_NAME === DIAGNOSTIC_PREPARATION_NAME);
+    const verifyBase = async () => {
+      await directory(base, true);
+      need(isDeepStrictEqual((await readdir(base)).sort(), ['PREPARATION.json', 'operation', 'source']));
+    };
+    onStage('source-verification'); await verifyBase();
+    await inventory(source, owner.OWNER_SOURCE_FILES);
+    // No cached nonbuiltin source has been imported before full closure checks.
+    const load = path => import(pathToFileURL(join(source, 'scripts', path)).href);
+    const setup = await load('deploy-floating-garden-connection-template.mjs'); setup.validateEnvironment(env, execArgv);
+    const operator = await load('operate-floating-garden-trial.mjs');
+    active = await load('floating-garden-active-update.mjs'); adapter = await load('floating-garden-trial-cloud-adapter.mjs');
+    const provider = await load('floating-garden-active-update-provider.mjs');
+    onStage('operation-selection');
+    const original = join(home, 'garden-final-reviewed-v1'), updated = join(home, 'garden-lobby-entry-reviewed-v1');
+    const selectOperation = async () => {
+      need(await exists(original) || await exists(updated));
+      for (const path of [original, updated]) if (await exists(path)) { await directory(path, true); await directory(join(path, 'operation'), true); }
+      const selected = await operator.selectVerifiedHostingOperation(join(original, 'operation'), join(updated, 'operation'));
+      need([join(original, 'operation'), join(updated, 'operation')].includes(selected)); return selected;
+    };
+    const selected = await selectOperation(), output = join(base, 'operation');
+    const verifyOutput = async () => {
+      await directory(output, true);
+      need(isDeepStrictEqual((await readdir(output)).sort(), ['ACTIVE-UPDATE-JOURNAL.jsonl', 'OPERATION-MANIFEST.json', 'OPERATION-PLAN.json', 'game', 'private-review.json', 'stopped']));
+    };
+    await verifyOutput();
+    const previous = await operator.readOperationPacket(selected), next = await operator.readOperationPacket(output);
+    onStage('preparation-binding');
+    const markerPath = join(base, 'PREPARATION.json'), markerBytes = await regularFile(markerPath, { limit: 16384 }), marker = JSON.parse(markerBytes);
+    need(isDeepStrictEqual(marker, { schemaVersion: 1, sourceCommit: DIAGNOSTIC_SOURCE_COMMIT, sourceTree: DIAGNOSTIC_SOURCE_TREE,
+      previousOutput: previous.packet.output, previousManifestDigest: previous.packet.manifestDigest,
+      targetManifestDigest: next.packet.manifestDigest, reviewDigest: next.packet.reviewDigest }));
+    const plan = await active.prepareActiveUpdatePlan({ previousOutput: selected, nextOutput: output });
+    need(plan.project === 'wa-awesome-garden-stg' && plan.preservedTesterCount === 2 && plan.maxRooms === 20 &&
+      plan.startsAtMillis === START && plan.endsAtMillis === END && HEX.test(plan.oldManifestDigest) && HEX.test(plan.newManifestDigest) &&
+      plan.oldManifestDigest === previous.packet.manifestDigest && plan.newManifestDigest === next.packet.manifestDigest);
+    onStage('journal-verification');
+    const journalPath = join(output, 'ACTIVE-UPDATE-JOURNAL.jsonl'), journalBytes = await regularFile(journalPath, { limit: 16384 });
+    verifyJournal(journalBytes, plan, execution, clock);
+    onStage('runtime-verification'); await validateRuntime(next.packet);
+    const toolingDir = join(home, 'garden-trial-f0bc4eb0', 'tooling'); await directory(toolingDir);
+    // The byte buffers and private packets stay inside this closure. The public
+    // context holds only the existing branded plan, exact module identities,
+    // required local source/tooling paths and non-sensitive evidence digests.
+    const retained = [[executionPath, executionBytes], [inspectorPath, inspectorBytes], [markerPath, markerBytes], [journalPath, journalBytes]];
+    const recheck = async () => {
+      try {
+        environment(env, execArgv); const current = clockInWindow(now()); await directory(home);
+        await verifyGuard(); await verifyBase(); await verifyOutput();
+        for (const [path, before] of retained) need((await regularFile(path)).equals(before));
+        const retainedExecution = verifyExecution(executionBytes, current);
+        verifyJournal(journalBytes, plan, retainedExecution, current);
+        need(await selectOperation() === selected);
+        await active.recheckActiveUpdatePlan(plan);
+        await validateRuntime(next.packet); await directory(toolingDir);
+        await inventory(source, owner.OWNER_SOURCE_FILES);
+        // Do not authorize the next step after local reads cross the fixed end.
+        clockInWindow(now()); return true;
+      } catch (error) { return retainFailure(error); }
+    };
+    await recheck();
+    const priorExecutionDigest = hash(executionBytes), priorJournalDigest = hash(journalBytes),
+      preparationDigest = hash(markerBytes), inspectorDigest = hash(inspectorBytes);
+    const retainedFingerprint = hash(JSON.stringify({ priorExecutionDigest, priorJournalDigest, preparationDigest, inspectorDigest,
+      oldManifestDigest: plan.oldManifestDigest, newManifestDigest: plan.newManifestDigest }));
+    return Object.freeze({ plan, active, adapter, provider, toolingDir, source, priorExecutionDigest, priorJournalDigest,
+      preparationDigest, inspectorDigest, retainedFingerprint, recheck });
+  } catch (error) { return retainFailure(error); }
+}
 const notRun = () => ({ status: 'not-run' });
 /** Capability injection is for offline tests, unavailable from CLI flags. */
 export async function diagnoseOwnerActiveUpdate({ enabled = false, home = homedir(), env = process.env, execArgv = process.execArgv,
@@ -147,49 +246,9 @@ export async function diagnoseOwnerActiveUpdate({ enabled = false, home = homedi
     originalCause: 'unknown', cloudWrites: 0, automaticRetry: false, automaticRollback: false, executionRetryAuthorized: false };
   const finish = () => { log('DIAGNOSTIC_RESULT: ' + JSON.stringify(outcome)); return outcome; };
   try {
-    need(enabled === true); environment(env, execArgv); await directory(home);
-    const clock = clockInWindow(now()), base = join(home, DIAGNOSTIC_PREPARATION_NAME), source = join(base, 'source');
-    const guard = join(home, DIAGNOSTIC_GUARD_NAME), executionPath = join(guard, 'EXECUTION.json'), inspectorPath = join(guard, 'read-only-owner.mjs');
-    stage = 'guard-verification'; await directory(guard, true);
-    need(isDeepStrictEqual((await readdir(guard)).sort(), ['EXECUTION.json', 'read-only-owner.mjs']));
-    const executionBytes = await regularFile(executionPath, { limit: 16384 }), execution = verifyExecution(executionBytes, clock);
-    const inspectorBytes = await regularFile(inspectorPath); need(hash(inspectorBytes) === DIAGNOSTIC_INSPECTOR_SHA256);
-    // This saved 4f8de18 inspector is used for public constants ONLY. Calling its
-    // inspect entry would reject the journal and cannot authorize a retry.
-    const owner = await import(pathToFileURL(inspectorPath).href);
-    need(owner.OWNER_SOURCE_COMMIT === DIAGNOSTIC_SOURCE_COMMIT && owner.OWNER_SOURCE_TREE === DIAGNOSTIC_SOURCE_TREE && owner.OWNER_PREPARATION_NAME === DIAGNOSTIC_PREPARATION_NAME);
-    stage = 'source-verification'; await directory(base, true);
-    need(isDeepStrictEqual((await readdir(base)).sort(), ['PREPARATION.json', 'operation', 'source']));
-    await inventory(source, owner.OWNER_SOURCE_FILES);
-    // No cached nonbuiltin source has been imported before full closure checks.
-    const load = path => import(pathToFileURL(join(source, 'scripts', path)).href);
-    const setup = await load('deploy-floating-garden-connection-template.mjs'); setup.validateEnvironment(env, execArgv);
-    const operator = await load('operate-floating-garden-trial.mjs');
-    active = await load('floating-garden-active-update.mjs'); adapter = await load('floating-garden-trial-cloud-adapter.mjs');
-    const provider = await load('floating-garden-active-update-provider.mjs');
-    stage = 'operation-selection';
-    const original = join(home, 'garden-final-reviewed-v1'), updated = join(home, 'garden-lobby-entry-reviewed-v1');
-    need(await exists(original) || await exists(updated));
-    for (const path of [original, updated]) if (await exists(path)) { await directory(path, true); await directory(join(path, 'operation'), true); }
-    const selected = await operator.selectVerifiedHostingOperation(join(original, 'operation'), join(updated, 'operation'));
-    need([join(original, 'operation'), join(updated, 'operation')].includes(selected));
-    const output = join(base, 'operation'); await directory(output, true);
-    need(isDeepStrictEqual((await readdir(output)).sort(), ['ACTIVE-UPDATE-JOURNAL.jsonl', 'OPERATION-MANIFEST.json', 'OPERATION-PLAN.json', 'game', 'private-review.json', 'stopped']));
-    const previous = await operator.readOperationPacket(selected), next = await operator.readOperationPacket(output);
-    stage = 'preparation-binding';
-    const markerPath = join(base, 'PREPARATION.json'), markerBytes = await regularFile(markerPath, { limit: 16384 }), marker = JSON.parse(markerBytes);
-    need(isDeepStrictEqual(marker, { schemaVersion: 1, sourceCommit: DIAGNOSTIC_SOURCE_COMMIT, sourceTree: DIAGNOSTIC_SOURCE_TREE,
-      previousOutput: previous.packet.output, previousManifestDigest: previous.packet.manifestDigest,
-      targetManifestDigest: next.packet.manifestDigest, reviewDigest: next.packet.reviewDigest }));
-    const plan = await active.prepareActiveUpdatePlan({ previousOutput: selected, nextOutput: output });
-    need(plan.project === 'wa-awesome-garden-stg' && plan.preservedTesterCount === 2 && plan.maxRooms === 20 &&
-      plan.startsAtMillis === START && plan.endsAtMillis === END && HEX.test(plan.oldManifestDigest) && HEX.test(plan.newManifestDigest));
-    stage = 'journal-verification';
-    const journalPath = join(output, 'ACTIVE-UPDATE-JOURNAL.jsonl'), journalBytes = await regularFile(journalPath, { limit: 16384 });
-    verifyJournal(journalBytes, plan, execution, clock);
-    stage = 'runtime-verification'; await validateRuntime(next.packet);
-    const toolingDir = join(home, 'garden-trial-f0bc4eb0', 'tooling'); await directory(toolingDir);
-    await active.recheckActiveUpdatePlan(plan); await inventory(source, owner.OWNER_SOURCE_FILES);
+    need(enabled === true);
+    const context = await loadVerifiedFailedUpdateContext({ home, env, execArgv, now, onStage: value => { stage = value; } });
+    const { plan, provider, toolingDir } = context; ({ active, adapter } = context);
     stage = 'provider-construction';
     const cloud = (createProvider ?? provider.createActiveUpdateProvider)({ plan, toolingDir, env, execArgv, now });
     need(typeof cloud?.inspect === 'function' && typeof cloud?.readAccess === 'function');
@@ -206,8 +265,7 @@ export async function diagnoseOwnerActiveUpdate({ enabled = false, home = homedi
     try { const access = ownValue(await cloud.readAccess(), 'access'); if (['open', 'closed', 'unknown'].includes(access)) outcome.readAccess = access; }
     catch (error) { outcome.accessFailure = classifyDiagnosticFailure(error, { active, adapter }); }
     stage = 'local-recheck';
-    for (const [path, before] of [[executionPath, executionBytes], [inspectorPath, inspectorBytes], [markerPath, markerBytes], [journalPath, journalBytes]]) need((await regularFile(path)).equals(before));
-    await active.recheckActiveUpdatePlan(plan); await inventory(source, owner.OWNER_SOURCE_FILES);
+    await context.recheck();
     outcome.status = 'diagnosed'; outcome.stage = 'read-only-diagnosis'; outcome.savedStateUnchanged = true;
     outcome.finding = outcome.pass1.status === 'passed' && outcome.pass2.status === 'passed' ? 'not-reproduced' : 'current-read-failure';
     return finish();
