@@ -358,6 +358,61 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(self.fake.writes, [])
         self.assertEqual(self.state.data['stage'], 'owner_confirmation_expired')
 
+    def test_initial_function_failure_reports_no_mutations_only_for_this_attempt(self):
+        self.fake.fail_stage = 'function_metadata'
+        self.assertEqual(self.run_setup(), 2)
+        self.assertEqual(self.fake.writes, [])
+        self.assertEqual(self.state.data['phase'], 'initial_read')
+        self.assertEqual(self.state.data['mutation_attempts_this_attempt'], 0)
+        self.assertIsNone(self.state.data['federation_may_be_active'])
+        self.assertIn('Earlier attempts and existing cloud state are not established', self.output[-1])
+
+    def test_second_read_failure_still_records_no_mutations(self):
+        reads = 0
+        def stop(fake, args, stage, write):
+            nonlocal reads
+            if stage == 'function_metadata':
+                reads += 1
+                if reads == 2: raise m.Stop(stage, local_code='CLI_FORMAT', exit_code=1)
+        self.fake.mutate = stop
+        self.assertEqual(self.run_setup(), 2)
+        self.assertEqual(self.fake.writes, [])
+        self.assertEqual(self.state.data['phase'], 'confirmation_read')
+        self.assertEqual(self.state.data['mutation_attempts_this_attempt'], 0)
+        self.assertTrue(any('CLI_FORMAT_INVALID' in line for line in self.output))
+
+    def test_verification_failure_never_claims_zero_mutations(self):
+        def stop(fake, args, stage, write):
+            if stage == 'function_metadata' and fake.writes:
+                raise m.Stop(stage, local_code='CLI_FORMAT', exit_code=1)
+        self.fake.mutate = stop
+        self.assertEqual(self.run_setup(), 2)
+        self.assertEqual(self.state.data['phase'], 'verification')
+        self.assertEqual(self.state.data['mutation_attempts_this_attempt'], len(self.fake.writes))
+        self.assertGreater(self.state.data['mutation_attempts_this_attempt'], 0)
+        self.assertFalse(any('THIS_ATTEMPT_NO_MUTATIONS' in line for line in self.output))
+
+    def test_binding_preread_failure_does_not_mark_an_unattempted_mutation(self):
+        self.fake.fail_stage = 'binding_before'
+        self.assertEqual(self.run_setup(), 2)
+        self.assertIsNone(self.state.data['possibly_applied'])
+        self.assertEqual(self.state.data['mutation_attempts_this_attempt'], len(self.fake.writes))
+        self.assertFalse(any(stage == 'add_conditional_binding' for _, stage in self.fake.writes))
+
+    def test_resume_counters_do_not_erase_previous_attempt_uncertainty(self):
+        self.fake.fail_stage = 'create_deployer'
+        self.assertEqual(self.run_setup(), 2)
+        previous = copy.deepcopy(self.state.data)
+        self.assertGreater(previous['mutation_attempts_this_attempt'], 0)
+        self.assertIsNotNone(previous['possibly_applied'])
+        self.state = m.State(self.state.path.parent, resume=True)
+        self.fake.calls.clear()
+        self.fake.fail_stage = 'function_metadata'
+        self.assertEqual(self.run_setup(), 2)
+        self.assertEqual(self.state.data['mutation_attempts_this_attempt'], 0)
+        self.assertEqual(json.loads((self.state.path.parent / 'attempt-1-state.json').read_text()), previous)
+        self.assertEqual(self.state.data['completed_steps'], previous['completed_steps'])
+
 
 
     def test_new_account_waits_60_seconds_then_only_reads_until_visible(self):
@@ -506,6 +561,8 @@ class SetupTests(unittest.TestCase):
     def test_gcloud_local_failures_are_sanitized_and_specific(self):
         cases = [
             (subprocess.CompletedProcess([], 2, b'', b'unrecognized arguments: --no-quiet SYNTHETIC_PRIVATE'), 'CLI_ARGUMENT', 2),
+            (subprocess.CompletedProcess([], 1, b'', b'ERROR: (gcloud.functions.list) Unknown transform function buildConfig [SYNTHETIC_PRIVATE].'), 'CLI_FORMAT', 1),
+            (subprocess.CompletedProcess([], 1, b'', b'ERROR: Format must be one of json; received [SYNTHETIC_PRIVATE].'), 'CLI_FORMAT', 1),
             (subprocess.CompletedProcess([], 1, b'', b'SYNTHETIC_PRIVATE'), 'CLI_EXIT_NONZERO', 1),
             (subprocess.CompletedProcess([], 0, b'SYNTHETIC_PRIVATE', b''), 'NON_JSON_RESPONSE', 0),
             (FileNotFoundError('SYNTHETIC_PRIVATE'), 'CLI_MISSING', None),
@@ -550,6 +607,7 @@ class SetupTests(unittest.TestCase):
         inventory = [args for args, stage, _ in self.fake.calls if stage == 'function_metadata']
         self.assertEqual(len(inventory), 1)
         self.assertIn('--v2', inventory[0])
+        self.assertIn('--format=json(name,environment,state,buildConfig.serviceAccount,buildConfig.source,serviceConfig.serviceAccountEmail)', inventory[0])
         policies = [args for args, stage, _ in self.fake.calls if stage == 'function_policy']
         self.assertEqual(policies, [['functions', 'get-iam-policy', name, '--region=' + m.REGION] for name in m.FUNCTIONS])
         self.assertFalse(any('--gen2' in args for args in policies))
@@ -577,11 +635,12 @@ class SetupTests(unittest.TestCase):
 
 
 def verify_sdk_parser_and_prompts(sdk_root):
-    """Real SDK argument/concept parsing only; never CLI.Execute/Command.Run.
+    """Real SDK argument parsing, resource formatting and prompt rejection.
 
     Called separately by credential-free CI after the official pinned SDK is
     installed. A private empty configuration, network/process audit hook, and
     SDK dispatch/auth intercepts fail closed before any provider operation.
+    Never CLI.Execute/Command.Run; every resource used below is synthetic.
     """
     import socket
     import runpy
@@ -697,6 +756,54 @@ def verify_sdk_parser_and_prompts(sdk_root):
             finally:
                 properties.VALUES.PopInvocationValues()
                 named_configs.FLAG_OVERRIDE_STACK.Pop()
+        # argparse accepts --format as a string without compiling its resource
+        # projection. Exercise the real printer too: the original nested-field
+        # spelling was interpreted as a transform and failed only at display.
+        from googlecloudsdk.core.resource import resource_exceptions, resource_printer
+        from apitools.base.py import encoding
+        formats = {next(arg.split('=', 1)[1] for arg in argv if arg.startswith('--format=')) for argv in captured}
+        assert len(formats) == 4, 'review all changed output formats'
+        for argv in captured:
+            projection = next(arg.split('=', 1)[1] for arg in argv if arg.startswith('--format='))
+            resource_printer.Printer(projection, out=io.StringIO())
+        function_format = next(f for f in formats if 'buildConfig' in f)
+        expected_functions = Fake().functions
+        samples = copy.deepcopy(expected_functions)
+        for item in samples:
+            item['labels'] = {'synthetic-private': 'must-not-appear'}
+            item['buildConfig']['environmentVariables'] = {'SYNTHETIC_PRIVATE': 'must-not-appear'}
+            item['serviceConfig']['environmentVariables'] = {'SYNTHETIC_PRIVATE': 'must-not-appear'}
+        messages = apis.GetMessagesModule('cloudfunctions', 'v2')
+        typed = [encoding.JsonToMessage(messages.Function, json.dumps(item)) for item in samples]
+        for resources in (samples, typed):
+            out = io.StringIO()
+            resource_printer.Print(resources, function_format, out=out)
+            assert json.loads(out.getvalue()) == expected_functions, 'nested function/source shape changed'
+            assert 'SYNTHETIC_PRIVATE' not in out.getvalue() and 'must-not-appear' not in out.getvalue()
+        fixtures = {
+            'json': ({'synthetic': ['kept']}, {'synthetic': ['kept']}),
+            'json(name,state)': ({'name': 'synthetic-secret-metadata', 'state': 'ENABLED', 'SYNTHETIC_PRIVATE': 'omit'},
+                                 {'name': 'synthetic-secret-metadata', 'state': 'ENABLED'}),
+            'json(name,projectNumber,project_number)': ({'name': 'synthetic-bucket', 'project_number': m.NUMBER, 'SYNTHETIC_PRIVATE': 'omit'},
+                                                       {'name': 'synthetic-bucket', 'project_number': m.NUMBER}),
+        }
+        assert formats == {function_format, *fixtures}
+        for projection, (sample, expected) in fixtures.items():
+            out = io.StringIO()
+            resource_printer.Print(sample, projection, out=out, single=True)
+            assert json.loads(out.getvalue()) == expected
+        old_format = 'json(name,environment,state,buildConfig(serviceAccount,source),serviceConfig(serviceAccountEmail))'
+        consumed = []
+        def unseen():
+            consumed.append(True)
+            yield samples[0]
+        try:
+            resource_printer.Print(unseen(), old_format, out=io.StringIO())
+        except resource_exceptions.UnknownTransformError as error:
+            assert 'Unknown transform function buildConfig' in str(error)
+        else:
+            raise AssertionError('old invalid projection must fail the real SDK formatter')
+        assert not consumed, 'format fails before consuming list resources'
         # Regression: the exact old first read must be rejected by this same
         # real parser. A help-only probe would incorrectly accept the command.
         old_first = next(list(argv) for argv in captured if argv[:2] == ('config', 'list')) + ['--no-quiet']
@@ -723,6 +830,7 @@ def verify_sdk_parser_and_prompts(sdk_root):
                     assert console_io.PromptContinue(default=default, throw_if_unattended=True) is False
         assert not blocked
         print('SDK_PARSE_VERIFIED version=568.0.0 argvVariants=67 oldInvalidFlagRejected=true commandRuns=0 networkRequests=0 credentialAccess=0')
+        print('SDK_FORMAT_VERIFIED argvVariants=67 formats=4 dictAndProtoShape=true privateFieldsOmitted=true oldInvalidFormatRejected=true')
         print('SDK_PROMPT_VERIFIED repeatedNo=true eofDefaultYesReproduced=true ownerApprovalInputUntouched=true')
 
 
