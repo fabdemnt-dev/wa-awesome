@@ -10,6 +10,7 @@ import { createRequire } from 'node:module';
 import { inflateRawSync } from 'node:zlib';
 import { isDeepStrictEqual, stripVTControlCharacters, types } from 'node:util';
 import { fileURLToPath } from 'node:url';
+import { requireCiAuthPolicy } from './floating-garden-ci-auth-policy.mjs';
 import { FUNCTION_NAMES } from './prepare-floating-garden-trial.mjs';
 import { validateOperationReview, publicTrialConfig } from './prepare-floating-garden-trial-operation.mjs';
 import { PROJECT, PROJECT_NUMBER, ORIGIN, EMBEDDED as CONNECTION_PAYLOAD,
@@ -303,7 +304,7 @@ function checkedDirectory(dir) {
 function checkedFile(path) { const s = lstatSync(path); requireThat(s.isFile() && !s.isSymbolicLink() && s.nlink === 1 && s.size <= 4 * 1024 * 1024, 'local-file'); return readFileSync(path); }
 
 export function createCloudAdapter({ packet, review, toolingDir, prior, runner = makeCloudRunner(), requestClient,
-  db: injectedDb, now = Date.now, fetchImpl = fetch, env = process.env, execArgv = process.execArgv } = {}) {
+  db: injectedDb, now = Date.now, fetchImpl = fetch, env = process.env, execArgv = process.execArgv, environmentPolicy } = {}) {
   let firebase, auth, database = injectedDb, manifest, expectedSource, readyMode, localReady = false;
   let attemptedFunctions = false, attemptedRules = false, attemptedHosting = false, attemptedCreate = false;
   let priorProof, attemptedWindowReplacement = false, windowReplaced = false;
@@ -328,7 +329,8 @@ export function createCloudAdapter({ packet, review, toolingDir, prior, runner =
   const gcloud = (args) => parse(gcloudText([...args, '--format=json']));
   async function boundary(fn) { try { return await fn(); } catch (e) { if (adapterFailures.has(e)) throw e; throw safe('provider-or-local-check'); } }
   function localScope() {
-    checkedReview(); validateEnvironment(env, execArgv);
+    checkedReview();
+    (environmentPolicy === undefined ? { validateEnvironment } : requireCiAuthPolicy(environmentPolicy)).validateEnvironment(env, execArgv);
     for (const key of ['DEBUG', 'GRPC_TRACE', 'GRPC_VERBOSITY', 'GOOGLE_SDK_NODE_LOGGING']) requireThat(!env[key], 'diagnostic-environment');
     requireThat(Number(process.versions.node.split('.')[0]) >= 20, 'node-version');
     checkedDirectory(packet.output); checkedDirectory(packet.gameDir); checkedDirectory(packet.stoppedDir);
@@ -718,7 +720,7 @@ export function createCloudAdapter({ packet, review, toolingDir, prior, runner =
   }); }
   async function preflight(mode) { return boundary(async () => {
     requireThat(['deploy', 'resume', 'activate', 'inspect', 'stop'].includes(mode), 'preflight-mode'); localScope();
-    validateConfiguration(gcloud(['config', 'list', '--all']));
+    (environmentPolicy === undefined ? { validateConfiguration } : requireCiAuthPolicy(environmentPolicy)).validateConfiguration(gcloud(['config', 'list', '--all']));
     const project = gcloud(['projects', 'describe', PROJECT]);
     requireThat(project.projectId === PROJECT && String(project.projectNumber) === PROJECT_NUMBER && project.lifecycleState === 'ACTIVE', 'project-identity');
     // Stop is gate-first. Hosting, tooling, runtime and build failures must not
@@ -736,7 +738,7 @@ export function createCloudAdapter({ packet, review, toolingDir, prior, runner =
       // Share the existing ADC clients without creating another named Admin
       // app. This prior adapter is used only for exact readback verification.
       const old = createCloudAdapter({ packet: prior.packet, review: prior.review, toolingDir, runner,
-        requestClient: await client(), db: await getDb(), now, fetchImpl, env, execArgv });
+        requestClient: await client(), db: await getDb(), now, fetchImpl, env, execArgv, environmentPolicy });
       await old.preflight('stop'); await old.verifyResumeSource();
       const admin = await old.readAdmin(); requireThat(same(admin, stoppedRecords(prior.review)), 'resume-prior-admin');
       requireThat(sameDenyAllRules(await rulesState(), checkedFile(join(ROOT, 'config/floating-garden-trial/deny-all.rules')).toString()), 'rules-initial-deny-all');

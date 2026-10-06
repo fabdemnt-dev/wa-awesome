@@ -5,14 +5,18 @@ import { createRequire } from 'node:module';
 import { readFileSync, lstatSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import { createCloudAdapter, FIRESTORE_CLIENT_CONFIG, RUNTIME_ACCOUNT, makeCloudRunner } from './floating-garden-trial-cloud-adapter.mjs';
+import { createCloudAdapter, FIRESTORE_CLIENT_CONFIG, RUNTIME_ACCOUNT, makeCloudRunner, classifyDeployResult, RESUME_REQUIRED_APIS, normalizeFailureDiagnostic } from './floating-garden-trial-cloud-adapter.mjs';
 import { createActiveUpdateRequest, createActiveUpdateTransport } from './floating-garden-active-update-transport.mjs';
 import { FUNCTION_NAMES } from './prepare-floating-garden-trial.mjs';
+import { requireCiAuthPolicy } from './floating-garden-ci-auth-policy.mjs';
+import { validateCiFunctionConfiguration, stableCiFunctionConfiguration } from './floating-garden-ci-configuration.mjs';
 import { validateEnvironment } from './deploy-floating-garden-connection-template.mjs';
 import { ACTIVE_UPDATE_SCOPE as S, activeUpdatePackets, recheckActiveUpdatePlan, assertActiveRecords,
   toggleActiveRecords, assertPreservedRecords, requireActiveUpdate as check, activeUpdateFailure,
   activeUpdateReason, dataDigest, canonicalData } from './floating-garden-active-update.mjs';
 
+const ciDiagnostics = new WeakMap();
+export function ciProviderFailureDiagnostic(error) { return ciDiagnostics.get(error); }
 const ROOTS = Object.freeze(['floatingGardenTrial', 'floatingGardenTrialTesters', 'floatingGardenRooms',
   'floatingGardenActionRequests', 'floatingGardenInvites', 'floatingGardenRateLimits']);
 const GROUPS = Object.freeze(['members', 'serverGames']);
@@ -71,9 +75,9 @@ export function validateAppliedTraffic(proof) {
 }
 export function createActiveUpdateProvider({ plan, toolingDir, runner = makeCloudRunner(), requestClient,
   db: injectedDb, fetchImpl = fetch, now = Date.now, env = process.env, execArgv = process.execArgv,
-  transport } = {}) {
+  transport, environmentPolicy } = {}) {
   let db = injectedDb, client = requestClient, previous, next, oldAdapter, newAdapter, recordStep;
-  let initialised = false, attemptedPause = false, attemptedReopen = false;
+  let initialised = false, attemptedPause = false, attemptedReopen = false, ciClosed = false;
   let baseline, stopped, applied = [], settingsBefore, reopened = false, journalBound = false; const attemptedStages = new Set();
   const checkedNow = () => { const value = now(); check(Number.isSafeInteger(value) && value >= S.startsAtMillis && value < S.endsAtMillis, 'fixed-window'); return value; };
   function sdk() {
@@ -97,7 +101,8 @@ export function createActiveUpdateProvider({ plan, toolingDir, runner = makeClou
   async function initialize() {
     if (initialised) return;
     await recheckActiveUpdatePlan(plan); ({ old: previous, next } = activeUpdatePackets(plan));
-    validateEnvironment(env, execArgv);
+    if (environmentPolicy === undefined) validateEnvironment(env, execArgv);
+    else { requireCiAuthPolicy(environmentPolicy).validateEnvironment(env, execArgv); check(client && db, 'provider-read'); }
     if (!client || !db) {
       const req = sdk();
       if (!client) { const { GoogleAuth } = req('google-auth-library'); client = new GoogleAuth({ projectId: S.project, scopes: ['https://www.googleapis.com/auth/cloud-platform'] }); }
@@ -121,7 +126,7 @@ export function createActiveUpdateProvider({ plan, toolingDir, runner = makeClou
       }
       return result;
     };
-    const shared = { toolingDir, runner, requestClient: client, db, fetchImpl: checkedFetch, now, env, execArgv };
+    const shared = { toolingDir, runner, requestClient: client, db, fetchImpl: checkedFetch, now, env, execArgv, environmentPolicy };
     oldAdapter = createCloudAdapter({ ...previous, ...shared }); newAdapter = createCloudAdapter({ ...next, ...shared });
     await oldAdapter.preflight('inspect'); await newAdapter.preflight('inspect'); initialised = true;
   }
@@ -151,6 +156,9 @@ export function createActiveUpdateProvider({ plan, toolingDir, runner = makeClou
     return { iam, runtime: gcloud(['iam', 'service-accounts', 'describe', RUNTIME_ACCOUNT]),
       secret: gcloud(['secrets', 'describe', SECRET]),
       secretVersion: gcloud(['secrets', 'versions', 'describe', '1', `--secret=${SECRET}`]),
+      ...(environmentPolicy === undefined ? {} : { secretLatest: gcloud(['secrets', 'versions', 'describe', 'latest', `--secret=${SECRET}`]),
+        firebaseAdminSdk: await read(`https://firebase.googleapis.com/v1beta1/projects/${S.project}/adminSdkConfig`),
+        extensions: await read(`https://firebaseextensions.googleapis.com/v1beta/projects/${S.project}/instances?pageSize=100`) }),
       artifacts: stableArtifactRepositories(gcloud(['artifacts', 'repositories', 'list', `--location=${S.region}`])),
       apis: gcloud(['services', 'list', '--enabled']),
       auth: await read(`https://identitytoolkit.googleapis.com/admin/v2/projects/${S.project}/config`),
@@ -210,9 +218,9 @@ export function createActiveUpdateProvider({ plan, toolingDir, runner = makeClou
     const proof = { functions: functions.functions, rules: { release: rules.release, ruleset: rules.ruleset }, hosting: await adapter.readHosting() };
     validateAppliedTraffic(proof.functions); return proof;
   }
-  async function inspect() {
+  async function inspectState(active) {
     await initialize(); checkedNow();
-    const before = await readData(); assertActiveRecords(before.records, next.review, { active: true, now: checkedNow() });
+    const before = await readData(); assertActiveRecords(before.records, next.review, { active, now: checkedNow() });
     const proof = await evidence('previous'), settings = await readSettings();
     check(!settings.appCheckServices.nextPageToken, 'provider-read');
     const after = await readData();
@@ -220,9 +228,28 @@ export function createActiveUpdateProvider({ plan, toolingDir, runner = makeClou
     const again = await evidence('previous'); check(isDeepStrictEqual(proof, again), 'provider-drift');
     check(isDeepStrictEqual(settings, await readSettings()), 'provider-drift');
     baseline = { data: after, proof, settings }; settingsBefore = settings;
+    if (!active) stopped = after;
     return { kind: 'baseline', fingerprint: dataDigest(baseline), createdRoomCount: after.records.usage.createdRoomCount,
       roomCount: after.roomCount, documentCount: after.documentCount, runtimeImagePreserved: false };
   }
+  async function inspect() { check(!ciClosed, 'stage-order'); return inspectState(true); }
+  async function inspectClosed() {
+    check(environmentPolicy !== undefined && !baseline && !attemptedPause, 'stage-order');
+    requireCiAuthPolicy(environmentPolicy).validateEnvironment(env, execArgv); ciClosed = true;
+    const result = await inspectState(false);
+    check(result.createdRoomCount === 2 && result.roomCount === 2, 'data-preservation');
+    validateCiFunctionConfiguration(baseline.proof.functions, settingsBefore.firebaseAdminSdk);
+    check(Array.isArray(settingsBefore.apis) && RESUME_REQUIRED_APIS.every(api => settingsBefore.apis.some(a => a.config?.name === api)), 'provider-read');
+    const extensions = settingsBefore.extensions;
+    check(extensions && Object.getPrototypeOf(extensions) === Object.prototype && Object.keys(extensions).every(k => ['instances', 'nextPageToken'].includes(k)) && !extensions.nextPageToken && Array.isArray(extensions.instances ?? []) && (extensions.instances ?? []).length === 0, 'source-proof');
+    const latest = settingsBefore.secretLatest;
+    check(latest?.state === 'ENABLED' && [S.project, S.projectNumber].some(p => latest.name === `projects/${p}/secrets/${SECRET}/versions/1`) &&
+      isDeepStrictEqual(latest, settingsBefore.secretVersion), 'iam-preservation');
+    check(settingsBefore.iam.secret.bindings.some(b => b.role === 'roles/secretmanager.secretAccessor' && !b.condition &&
+      b.members?.includes(`serviceAccount:${RUNTIME_ACCOUNT}`)), 'iam-preservation');
+    return result;
+  }
+  const stableConfiguration = proof => ciClosed ? stableCiFunctionConfiguration(proof, stableFunctionConfiguration) : stableFunctionConfiguration(proof);
   async function assertSettingsUnchanged() {
     check(isDeepStrictEqual(settingsBefore, await readSettings()), 'iam-preservation');
   }
@@ -263,7 +290,7 @@ export function createActiveUpdateProvider({ plan, toolingDir, runner = makeClou
     recordStep = step => journal.providerStep(step); journalBound = true;
   }
   async function pause(expectedFingerprint) {
-    check(journalBound && typeof recordStep === 'function' && transport && ['functions', 'rules', 'hosting'].every(key => typeof transport[key] === 'function'), 'provider-writes-not-enabled');
+    check(!ciClosed && journalBound && typeof recordStep === 'function' && transport && ['functions', 'rules', 'hosting'].every(key => typeof transport[key] === 'function'), 'provider-writes-not-enabled');
     check(baseline && expectedFingerprint === dataDigest(baseline), 'admin-race');
     check(isDeepStrictEqual(baseline.proof, await evidence('previous')), 'provider-drift'); await assertSettingsUnchanged();
     return compareAndSet(false);
@@ -280,7 +307,7 @@ export function createActiveUpdateProvider({ plan, toolingDir, runner = makeClou
   // The transport is only used by the separately approved state machine. It
   // receives immutable exact packets and baseline evidence, never a broad CLI.
   async function update(kind) {
-    check(['functions', 'rules', 'hosting'][applied.length] === kind && transport && !attemptedStages.has(kind), 'stage-order');
+    check(!ciClosed && ['functions', 'rules', 'hosting'][applied.length] === kind && transport && !attemptedStages.has(kind), 'stage-order');
     attemptedStages.add(kind);
     await recheckActiveUpdatePlan(plan); await assertClosed(); await assertSettingsUnchanged();
     const result = await transport[kind]({ previous, next, baseline: copy(baseline.proof),
@@ -292,9 +319,44 @@ export function createActiveUpdateProvider({ plan, toolingDir, runner = makeClou
     if (result?.kind !== 'success') throw activeUpdateFailure(result?.kind === 'unknown' ? 'mutation-unknown' : 'mutation-failed', result);
     applied.push(kind); return { kind: 'success' };
   }
+  // Separate contract: one official CLI invocation per stage, with its own
+  // internal concurrency/retries. This is never a source-only REST operation.
+  async function deployCiStage(kind) {
+    check(ciClosed && journalBound && ['functions', 'rules', 'hosting'][applied.length] === kind && !attemptedStages.has(kind), 'stage-order');
+    requireCiAuthPolicy(environmentPolicy).validateEnvironment(env, execArgv);
+    await recheckActiveUpdatePlan(plan); await assertClosed(); await assertSettingsUnchanged();
+    if (!applied.length) check(isDeepStrictEqual(baseline.proof, await evidence('previous')), 'provider-drift');
+    else await verifyFunctions();
+    if (kind === 'hosting') await verifyRules();
+    const firebase = join(toolingDir, 'node_modules/firebase-tools/lib/bin/firebase.js');
+    const only = kind === 'functions' ? FUNCTION_NAMES.map(n => `functions:floating-garden-trial:${n}`).join(',') : kind === 'rules' ? 'firestore:rules' : `hosting:${S.project}`;
+    const config = kind === 'hosting' ? 'firebase.hosting-only.json' : 'firebase.trial.json';
+    const args = [firebase, 'deploy', '--only', only,
+      ...(kind === 'hosting' ? ['--message', `garden-trial-game-v1:${next.packet.manifestDigest}`] : []),
+      '--config', config, '--project', S.project, '--non-interactive', '--json'];
+    // Mark the attempt before the command. An uncertain exit never retries it.
+    attemptedStages.add(kind);
+    await recordStep({ stage: `official-cli-${kind}`, resourceKind: kind, index: 0 });
+    let raw; try { raw = runner(process.execPath, args, next.packet.gameDir); }
+    catch { raw = { exitCode: null, stdout: '', signal: true }; }
+    const result = classifyDeployResult(raw, { allowCleanupWarning: kind === 'functions' });
+    // Reconcile even when the CLI reports failure: cleanup can fail after the
+    // actual deployment. Full expected readback is necessary, never inferred.
+    try {
+      if (kind === 'functions') await verifyFunctions();
+      else if (kind === 'rules') await verifyRules();
+      else await verifyHosting();
+      if (!['success', 'cleanup-warning'].includes(result.kind)) throw activeUpdateFailure('mutation-unknown');
+    } catch (error) {
+      ciDiagnostics.set(error, Object.freeze({ kind: result.kind, diagnostic: normalizeFailureDiagnostic(result.diagnostic) }));
+      throw error;
+    }
+    applied.push(kind); return { kind: 'success', cliResult: result.kind };
+  }
   async function verifyFunctions() {
     const got = await newAdapter.verifyFunctions({ includeProof: true }); validateAppliedTraffic(got.functions);
-    const before = stableFunctionConfiguration(baseline.proof.functions), after = stableFunctionConfiguration(got.functions);
+    if (ciClosed) validateCiFunctionConfiguration(got.functions, settingsBefore.firebaseAdminSdk);
+    const before = stableConfiguration(baseline.proof.functions), after = stableConfiguration(got.functions);
     check(isDeepStrictEqual(before, after), 'iam-preservation'); await assertSettingsUnchanged(); await assertClosed(); return { kind: 'verified' };
   }
   async function verifyRules() { await newAdapter.verifyRules(); await assertClosed(); return { kind: 'verified' }; }
@@ -312,7 +374,7 @@ export function createActiveUpdateProvider({ plan, toolingDir, runner = makeClou
   async function verifyReopened() {
     check(reopened && stopped, 'stage-order'); const actual = await readData(); assertReopenedRecords(actual.records, stopped.records);
     const proof = await evidence('next');
-    check(isDeepStrictEqual(stableFunctionConfiguration(baseline.proof.functions), stableFunctionConfiguration(proof.functions)), 'iam-preservation');
+    check(isDeepStrictEqual(stableConfiguration(baseline.proof.functions), stableConfiguration(proof.functions)), 'iam-preservation');
     await assertSettingsUnchanged(); return { kind: 'verified' };
   }
   async function readAccess() {
@@ -326,7 +388,7 @@ export function createActiveUpdateProvider({ plan, toolingDir, runner = makeClou
     }
     catch { return { access: 'unknown' }; }
   }
-  return Object.freeze({ bindJournal, inspect, pause, assertClosed, updateFunctions: () => update('functions'), verifyFunctions,
+  return Object.freeze({ bindJournal, inspect, inspectClosed, deployCiStage, pause, assertClosed, updateFunctions: () => update('functions'), verifyFunctions,
     updateRules: () => update('rules'), verifyRules, updateHosting: () => update('hosting'), verifyHosting,
     verifyPreservation, reopen, verifyReopened, readAccess });
 }

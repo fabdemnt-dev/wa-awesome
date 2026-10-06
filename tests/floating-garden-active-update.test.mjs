@@ -13,12 +13,14 @@ import { gzipSync } from 'node:zlib';
 import { prepareTrialOperation } from '../scripts/prepare-floating-garden-trial-operation.mjs';
 import { readOperationPacket } from '../scripts/operate-floating-garden-trial.mjs';
 import { FUNCTION_NAMES } from '../scripts/prepare-floating-garden-trial.mjs';
-import { REGION, RUNTIME_ACCOUNT, FIRESTORE_CLIENT_CONFIG } from '../scripts/floating-garden-trial-cloud-adapter.mjs';
+import { REGION, RUNTIME_ACCOUNT, FIRESTORE_CLIENT_CONFIG, RESUME_REQUIRED_APIS, CLEANUP_WARNING } from '../scripts/floating-garden-trial-cloud-adapter.mjs';
 import { ACTIVE_UPDATE_SCOPE as S, prepareActiveUpdatePlan, activeUpdatePackets, recheckActiveUpdatePlan,
   assertActiveRecords, toggleActiveRecords, assertPreservedRecords, activeUpdateReason,
   executeActiveUpdate, createActiveUpdateJournal, proveOldInvocationIsolation, main, canonicalData } from '../scripts/floating-garden-active-update.mjs';
 import { createActiveUpdateTransport } from '../scripts/floating-garden-active-update-transport.mjs';
 import { createActiveUpdateProvider, stableFunctionConfiguration, stableArtifactRepositories } from '../scripts/floating-garden-active-update-provider.mjs';
+import { CI_CLIENT_SCOPE, createCiAuthPolicy } from '../scripts/floating-garden-ci-auth-policy.mjs';
+import { executeCiRelease, ciReleaseApproval } from '../scripts/floating-garden-ci-release.mjs';
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const require = createRequire(import.meta.url), archiver = require('archiver');
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -124,12 +126,16 @@ function run(fn) {
       scaling: { maxInstanceCount: 1 }, maxInstanceRequestConcurrency: 1, timeout: '30s', containers: [{ image: 'old-or-new-image', resources: { limits: { memory: '256Mi', cpu: '1' } } }] },
     traffic: [{ type: 'TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST', percent: 100 }], trafficStatuses: [{ revision, percent: 100 }] };
 }
-async function harness({ actualTransport = false, actualBridge = false, database, iamPolicy } = {}) {
+async function harness({ actualTransport = false, actualBridge = false, database, iamPolicy, ci = false, cliFault } = {}) {
   const legacy = await legacyData(), { first, second } = legacy; const db = database || legacy.db;
   if (database) {
     const batch = database.batch();
     for (const [path, data] of legacy.db.entries()) batch.set(database.doc(path), data);
     await batch.commit();
+  }
+  if (ci) {
+    db.set('floatingGardenTrial/config', { ...db.get('floatingGardenTrial/config'), enabled: false, testerUids: [] });
+    for (const uid of review.testerUids) db.set(`floatingGardenTrialTesters/${uid}`, { ...db.get(`floatingGardenTrialTesters/${uid}`), active: false });
   }
   const path = await mkdtemp(join(directory, 'provider-')), toolingDir = join(path, 'tooling');
   await mkdir(join(toolingDir, 'node_modules/firebase-tools/lib/bin'), { recursive: true });
@@ -138,7 +144,13 @@ async function harness({ actualTransport = false, actualBridge = false, database
   await writeFile(join(toolingDir, 'node_modules/firebase-tools/package.json'), '{"version":"14.27.0"}');
   await writeFile(join(toolingDir, 'node_modules/firebase-tools/lib/bin/firebase.js'), '// synthetic; never executed');
   const archives = { '123': await zip(oldPacket.packet), '124': await zip(newPacket.packet) };
-  const functions = FUNCTION_NAMES.map((_, i) => metadata(i));
+  const makeMetadata = (i, generation = '123') => {
+    const fn = metadata(i, generation); if (!ci) return fn;
+    fn.labels['deployment-tool'] = 'cli-firebase'; fn.labels['firebase-functions-hash'] = (generation === '123' ? 'a' : 'b').repeat(40);
+    fn.buildConfig.environmentVariables = { GOOGLE_NODE_RUN_SCRIPTS: '' };
+    fn.serviceConfig.environmentVariables = { EVENTARC_CLOUD_EVENT_SOURCE: `projects/${S.project}/locations/${S.region}/services/${FUNCTION_NAMES[i]}`, FIREBASE_CONFIG: JSON.stringify({ projectId: S.project, storageBucket: S.project + '.appspot.com' }), FUNCTION_TARGET: FUNCTION_NAMES[i], GCLOUD_PROJECT: S.project, LOG_EXECUTION_ID: 'true' }; return fn;
+  };
+  const functions = FUNCTION_NAMES.map((_, i) => makeMetadata(i));
   let rulesPhase = 'old', hostingPhase = 'old', settingsRevision = 1, time = NOW, override;
   const calls = [], providerWrites = [], journalEntries = [];
   const policy = () => ({ version: 3, etag: 'preserved', bindings: [{ role: 'roles/run.invoker', members: ['allUsers'] }, { role: 'roles/run.viewer', members: ['group:synthetic@example.invalid'], condition: { title: 'preserved', expression: 'true' } }], auditConfigs: [{ service: 'allServices', auditLogConfigs: [{ logType: 'ADMIN_READ' }] }] });
@@ -157,7 +169,9 @@ async function harness({ actualTransport = false, actualBridge = false, database
       data = url.includes('&alt=media') ? archives[generation] : url.includes('/o/') ? {
         bucket: `gcf-v2-sources-${S.projectNumber}-${REGION}`, name: `source-${generation}.zip`, generation, size: String(archives[generation].length),
       } : { name: `gcf-v2-sources-${S.projectNumber}-${REGION}`, projectNumber: S.projectNumber };
-    } else if (url.startsWith('https://identitytoolkit.googleapis.com/')) data = { name: `projects/${S.project}/config`, signIn: { anonymous: { enabled: true } }, settingsRevision };
+    } else if (ci && url.startsWith('https://firebaseextensions.googleapis.com/')) data = {};
+    else if (ci && url.startsWith('https://firebase.googleapis.com/')) data = { projectId: S.project, storageBucket: S.project + '.appspot.com' };
+    else if (url.startsWith('https://identitytoolkit.googleapis.com/')) data = { name: `projects/${S.project}/config`, signIn: { anonymous: { enabled: true } }, settingsRevision };
     else if (url.startsWith('https://firebaseappcheck.googleapis.com/')) data = url.includes('/services?') ? { services: [{ name: 'firestore', enforcementMode: 'ENFORCED' }] } : { siteKey: 'synthetic-preserved' };
     else assert.fail(`Unexpected synthetic URL ${url}`);
     return { status: 200, data: override ? override(url, data) : data };
@@ -170,12 +184,29 @@ async function harness({ actualTransport = false, actualBridge = false, database
       else if (args[0] === 'projects' && args[1] === 'describe') result = { projectId: S.project, projectNumber: S.projectNumber, lifecycleState: 'ACTIVE' };
       else if (args.includes('get-iam-policy')) result = iamPolicy
         ? iamPolicy(args[0] === 'iam' ? 'runtime' : args[0] === 'secrets' ? 'secret' : 'project', policy()) : policy();
-      else if (args[0] === 'artifacts' || args[0] === 'services') result = [];
+      else if (ci && args[0] === 'secrets' && args[1] === 'versions') result = { name: `projects/${S.projectNumber}/secrets/FLOATING_GARDEN_INVITE_HMAC_KEY/versions/1`, state: 'ENABLED' };
+      else if (args[0] === 'artifacts' || args[0] === 'services') result = ci && args[0] === 'services' ? RESUME_REQUIRED_APIS.map(name => ({ config: { name } })) : [];
       else result = { name: args.slice(0, 3).join('-'), settingsRevision };
+      if (ci && args[0] === 'secrets' && args[1] === 'get-iam-policy') result.bindings.push({ role: 'roles/secretmanager.secretAccessor', members: [`serviceAccount:${RUNTIME_ACCOUNT}`] });
       return { exitCode: 0, stdout: JSON.stringify(result) };
     }
     assert.equal(command, process.execPath);
     if (args.includes('--version')) return { exitCode: 0, stdout: '14.27.0' };
+    if (ci && args[1] === 'deploy') {
+      assert.equal(db.get('floatingGardenTrial/config').enabled, false);
+      assert(args.includes('--non-interactive') && args.includes('--json') && !args.includes('--force'));
+      assert.equal(args[args.indexOf('--project') + 1], S.project);
+      const only = args[args.indexOf('--only') + 1];
+      const kind = only.startsWith('functions:') ? 'functions' : only === 'firestore:rules' ? 'rules' : only === `hosting:${S.project}` ? 'hosting' : assert.fail('bad selector');
+      providerWrites.push(kind);
+      const fault = cliFault?.(kind, 'before'); if (fault) return fault;
+      if (kind === 'functions') {
+        assert.equal(only, FUNCTION_NAMES.map(n => `functions:floating-garden-trial:${n}`).join(','));
+        functions.splice(0, 5, ...FUNCTION_NAMES.map((_, i) => makeMetadata(i, '124')));
+      } else if (kind === 'rules') rulesPhase = 'new';
+      else { assert.equal(args[args.indexOf('--message') + 1], `garden-trial-game-v1:${newPacket.packet.manifestDigest}`); hostingPhase = 'new'; }
+      return cliFault?.(kind, 'after') || { exitCode: 0, stdout: JSON.stringify({ status: 'success', result: {} }) };
+    }
     if (args[1] === 'hosting:sites:list') result = { sites: [{ name: `projects/${S.project}/sites/${S.project}`, defaultUrl: S.origin }] };
     else { assert.equal(args[1], 'hosting:channel:list'); result = { channels: [{ name: `sites/${S.project}/channels/live`, url: S.origin,
       release: { type: 'DEPLOY', message: `garden-trial-game-v1:${choose(hostingPhase).manifestDigest}`,
@@ -243,10 +274,18 @@ async function harness({ actualTransport = false, actualBridge = false, database
       return new Response(result.body, { status: result.status, headers: result.headers });
     };
   }
-  const cloud = createActiveUpdateProvider({ plan, toolingDir, runner, requestClient, db, fetchImpl: providerFetch, now: () => time, env: {}, execArgv: [], transport, recordStep: async step => journalEntries.push(step) });
+  let env = {}, environmentPolicy;
+  if (ci) {
+    const authPath = join(path, 'gha-creds-0123456789abcdef.json'), C = CI_CLIENT_SCOPE;
+    await writeFile(authPath, JSON.stringify({ type: 'external_account', audience: C.audience, subject_token_type: 'urn:ietf:params:oauth:token-type:jwt', token_url: 'https://sts.googleapis.com/v1/token', service_account_impersonation_url: `https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${C.serviceAccount}:generateAccessToken`, credential_source: { url: 'https://pipelines.actions.githubusercontent.com/synthetic/oidc', headers: { Authorization: 'Bearer SYNTHETIC' }, format: { type: 'json', subject_token_field_name: 'value' } } }), { mode: 0o600 });
+    env = { CI: 'true', GITHUB_ACTIONS: 'true', GITHUB_EVENT_NAME: 'push', GITHUB_REPOSITORY_ID: C.repositoryId, GITHUB_REPOSITORY: C.repository, GITHUB_REPOSITORY_OWNER_ID: C.repositoryOwnerId, GITHUB_REF: C.ref, GITHUB_WORKFLOW_REF: `${C.repository}/${C.workflow}@${C.ref}`, GITHUB_WORKSPACE: path, GOOGLE_CLOUD_PROJECT: C.project, GOOGLE_APPLICATION_CREDENTIALS: authPath, GOOGLE_GHA_CREDS_PATH: authPath, CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: authPath, GITHUB_SHA: 'a'.repeat(40), GITHUB_WORKFLOW_SHA: 'a'.repeat(40), GITHUB_RUN_ID: '12345', GITHUB_RUN_NUMBER: '1', GITHUB_RUN_ATTEMPT: '1' };
+    environmentPolicy = createCiAuthPolicy({ env, now: () => time, execArgv: [] });
+  }
+  const cloud = createActiveUpdateProvider({ plan, toolingDir, runner, requestClient, db, fetchImpl: providerFetch, now: () => time, env, execArgv: [], transport, environmentPolicy });
   const journal = { providerStep: async step => journalEntries.push(step), issued: async stage => journalEntries.push({ issued: stage }), verified: async stage => journalEntries.push({ verified: stage }),
     finish: async () => journalEntries.push({ finished: true }), fail: async (stage, reason, access) => journalEntries.push({ stage, reason, access }) };
-  return { cloud, db, first, second, calls, functions, transport, providerWrites, journal, journalEntries,
+  return { cloud, db, first, second, calls, functions, transport, providerWrites, journal, journalEntries, env,
+    runCi: options => executeCiRelease({ plan, approval: ciReleaseApproval(env.GITHUB_SHA), cloud, journal, env, environmentPolicy, now: () => time, ...options }),
     setTime(value) { time = value; }, changeSettings() { settingsRevision++; }, setOverride(value) { override = value; },
     run: options => executeActiveUpdate({ plan, mode: 'apply', approval: approval(), cloud, journal, now: () => time, ...options }) };
 }
@@ -528,3 +567,71 @@ export function registerActiveUpdateEmulatorTests() {
   const patches = h.calls.filter(call => call.method === 'PATCH' && call.url?.includes('cloudfunctions.googleapis.com'));
   assert.equal(patches.length, 5); assert.equal(h.db.writes.length, 6);
  });
+
+
+test('CI actual-provider path starts closed, runs three pinned CLI stages, preserves data and opens with exactly three updates', async () => {
+  const h = await harness({ ci: true }), before = h.db.entries();
+  const result = await h.runCi(); assert.equal(result.status, 'npc-released', JSON.stringify(result));
+  assert.deepEqual(h.providerWrites, ['functions', 'rules', 'hosting']);
+  assert.equal(h.db.writes.length, 3); assert.equal(h.db.attempts.filter(a => !a.readOnly).length, 1);
+  assert(h.db.attempts.filter(a => !a.readOnly).every(a => a.maxAttempts === 1));
+  assert(h.db.writes.every(w => w.kind === 'update' && (w.path === 'floatingGardenTrial/config' || w.path.startsWith('floatingGardenTrialTesters/'))));
+  const retained = entries => entries.filter(([p]) => p !== 'floatingGardenTrial/config' && !p.startsWith('floatingGardenTrialTesters/'));
+  assert.deepEqual(retained(h.db.entries()), retained(before));
+  assert.equal(h.db.get('floatingGardenTrial/usage').createdRoomCount, 2);
+  assert.equal(h.db.get('floatingGardenTrial/config').endsAtMillis, S.endsAtMillis);
+  assert.deepEqual(h.db.get('floatingGardenTrial/config').testerUids, review.testerUids);
+  assert(h.journalEntries.some(e => e.stage === 'official-cli-functions'));
+  await assert.rejects(h.cloud.deployCiStage('functions'));
+});
+test('CI never pauses/reopens the old version and rejects open baseline, custom config, missing approval and reruns', async () => {
+  for (const change of [h => h.db.set('floatingGardenTrial/config', { ...h.db.get('floatingGardenTrial/config'), enabled: true, testerUids: [...review.testerUids] }),
+    h => h.functions[0].labels.custom = 'retain', h => h.functions[0].serviceConfig.environmentVariables.FIREBASE_CONFIG = JSON.stringify({ projectId: S.project, storageBucket: S.project + '.appspot.com', extra: 'retain' }), h => h.functions[0].buildConfig.environmentVariables.EXTRA = 'retain']) {
+    const h = await harness({ ci: true }); change(h); const r = await h.runCi();
+    assert.equal(r.status, 'blocked'); assert.equal(h.providerWrites.length, 0); assert.equal(h.db.writes.length, 0);
+  }
+  const h = await harness({ ci: true }); await assert.rejects(h.runCi({ approval: {} }));
+  h.env.GITHUB_RUN_ATTEMPT = '2'; await assert.rejects(h.runCi()); assert.equal(h.providerWrites.length, 0);
+});
+test('CI source-hash exception preserves all security/config fields, and CLI failures always receive readback but stay closed', async () => {
+  for (const failed of ['functions', 'rules', 'hosting']) {
+    const h = await harness({ ci: true, cliFault: (kind, when) => kind === failed && when === 'before' ? { exitCode: 1, stdout: JSON.stringify({ status: 'error', error: 'SYNTHETIC_SECRET_DO_NOT_PRINT' }) } : null });
+    const r = await h.runCi(); assert.equal(r.status, 'blocked'); assert.equal(r.access, 'closed');
+    assert.equal(h.providerWrites.filter(x => x === failed).length, 1); assert.equal(h.db.writes.length, 0);
+    assert(!JSON.stringify(r).includes('SYNTHETIC_SECRET'));
+  }
+  const h = await harness({ ci: true }); h.setOverride((url, value) => url.includes(':getIamPolicy') && h.providerWrites.length ? { ...value, auditConfigs: [] } : value);
+  const r = await h.runCi(); assert.equal(r.status, 'blocked'); assert.equal(r.access, 'closed'); assert.equal(h.db.writes.length, 0);
+});
+test('CI exact cleanup warning is accepted only after complete source/config readback', async () => {
+  const h = await harness({ ci: true, cliFault: (kind, when) => kind === 'functions' && when === 'after' ? { exitCode: 1, stdout: JSON.stringify({ status: 'error', error: CLEANUP_WARNING }) } : null });
+  assert.equal((await h.runCi()).status, 'npc-released');
+  const failed = await harness({ ci: true, cliFault: (kind, when) => kind === 'functions' && when === 'before' ? { exitCode: 1, stdout: JSON.stringify({ status: 'error', error: CLEANUP_WARNING }) } : null });
+  assert.equal((await failed.runCi()).status, 'blocked'); assert.equal(failed.db.writes.length, 0);
+});
+
+test('CI CAS uncertainty never writes a verified reopen journal entry or retries', async () => {
+  for (const phase of ['before', 'after']) {
+    const h = await harness({ ci: true }); h.db.setFault(({ phase: at }) => { if (phase === at) throw Error('SYNTHETIC_PRIVATE_CAS'); });
+    const r = await h.runCi(); assert.equal(r.status, 'blocked'); assert.equal(r.stage, 'reopen');
+    assert.equal(r.access, phase === 'before' ? 'closed' : 'open');
+    assert.equal(h.db.attempts.filter(a => !a.readOnly).length, 1);
+    assert(!h.journalEntries.some(e => e.verified === 'reopen')); assert(!JSON.stringify(r).includes('SYNTHETIC_PRIVATE'));
+  }
+});
+
+test('CI journal failure preserves actual failed phase and reconciled access', async () => {
+  const h = await harness({ ci: true });
+  const original = h.journal.verified;
+  h.journal.verified = async stage => { if (stage === 'reopen') throw Error('SYNTHETIC_PRIVATE_DISK'); return original(stage); };
+  h.journal.fail = async () => { throw Error('SYNTHETIC_PRIVATE_DISK'); };
+  const r = await h.runCi(); assert.equal(r.status, 'blocked'); assert.equal(r.stage, 'reopen'); assert.equal(r.access, 'open');
+  assert.equal(r.journalWriteFailed, true); assert.equal(h.db.writes.length, 3); assert(!JSON.stringify(r).includes('SYNTHETIC_PRIVATE'));
+});
+
+test('CI empty Extensions preflight prevents accidental dynamic-extension changes', async () => {
+  for (const metadata of [[], { error: 'SYNTHETIC_PRIVATE' }, { instances: [{ name: 'synthetic-existing' }] }, { nextPageToken: 'synthetic-more' }, { instances: {} }]) {
+    const h = await harness({ ci: true }); h.setOverride((url, value) => url.startsWith('https://firebaseextensions.googleapis.com/') ? metadata : value);
+    const r = await h.runCi(); assert.equal(r.status, 'blocked'); assert.equal(r.access, 'closed'); assert.deepEqual(h.providerWrites, []); assert.equal(h.db.writes.length, 0);
+  }
+});
