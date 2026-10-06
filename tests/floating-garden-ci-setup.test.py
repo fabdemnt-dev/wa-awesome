@@ -36,6 +36,7 @@ class Fake:
         self.release_run_number = '2'
         self.approved = False
         self.calls = []
+        self.config = {'core': {'account': 'owner@example.invalid'}}
         self.fail_stage = None
         self.mutate = None
         self.pool = None
@@ -53,6 +54,7 @@ class Fake:
         self.support = [{'name': p, 'customRolesSupportLevel': 'SUPPORTED'} for ps in m.CUSTOM.values() for p in ps]
         self.keys = []
         self.hmac_version = '1'
+        self.bucket = {'name': m.BUCKET, 'projectNumber': m.NUMBER}
         self.extra_provider = False
         self.ancestors = [{'type': 'project', 'id': m.NUMBER}]
         self.ancestor_policy = {'bindings': []}
@@ -97,14 +99,14 @@ class Fake:
         elif stage == 'create_disabled_pool_propagation': result = self.pool
         elif stage == 'create_disabled_provider_propagation': result = self.provider
         elif stage == 'create_custom_role_propagation': result = self.custom[args[3]]
-        elif stage == 'gcloud_config': result = {'core': {'account': 'owner@example.invalid'}}
+        elif stage == 'gcloud_config': result = self.config
         elif stage == 'owner_identity': result = [{'account': 'owner@example.invalid', 'status': 'ACTIVE'}]
         elif stage == 'project_identity': result = {'projectId': m.PROJECT, 'projectNumber': m.NUMBER, 'lifecycleState': 'ACTIVE'}
         elif stage == 'enabled_apis': result = [{'config': {'name': s}, 'state': 'ENABLED'} for s in self.services]
         elif stage == 'function_metadata': result = self.functions
         elif stage == 'source_bucket_policy': result = {'bindings': []}
         elif stage == 'function_policy': result = {'bindings': []}
-        elif stage == 'source_bucket_owner': result = {'name': m.BUCKET, 'project_number': m.NUMBER}
+        elif stage == 'source_bucket_owner': result = self.bucket
         elif stage.startswith('hmac_'): result = {'name': f'projects/{m.NUMBER}/secrets/{m.SECRET}/versions/{self.hmac_version}', 'state': 'ENABLED'}
         elif stage in ('project_policy', 'secret_policy', 'account_policy', 'pool_policy', 'binding_before', 'binding_after'):
             result = self.policies[self.target(args)]
@@ -215,6 +217,74 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(self.run_setup(), 2)
         self.assertEqual(self.state.data['stage'], 'source_bucket_mismatch')
         self.assertEqual(self.fake.writes, [])
+
+    def test_source_bucket_requires_raw_exact_owner_metadata(self):
+        for number in (m.NUMBER, int(m.NUMBER)):
+            with self.subTest(number_type=type(number).__name__):
+                self.fake = Fake()
+                self.fake.bucket['projectNumber'] = number
+                s = m.collect(self.fake)
+                self.assertEqual(s['bucket'], {'name': m.BUCKET, 'projectNumber': m.NUMBER})
+                argv = next(args for args, stage, _ in self.fake.calls if stage == 'source_bucket_owner')
+                self.assertEqual(argv, ['storage', 'buckets', 'describe', 'gs://' + m.BUCKET,
+                    '--raw', '--format=json(name,projectNumber)'])
+                self.assertEqual(self.fake.writes, [])
+
+    def test_source_bucket_absent_malformed_or_foreign_owner_blocks_before_confirmation(self):
+        cases = [
+            ([], 'source_bucket_metadata_shape'),
+            ({'projectNumber': m.NUMBER}, 'source_bucket_name_missing'),
+            ({'name': 'other', 'projectNumber': m.NUMBER}, 'source_bucket_name_mismatch'),
+            ({'name': m.BUCKET}, 'source_bucket_owner_missing'),
+            ({'name': m.BUCKET, 'project_number': m.NUMBER}, 'source_bucket_owner_missing'),
+            ({'name': m.BUCKET, 'projectNumber': None}, 'source_bucket_owner_missing'),
+            ({'name': m.BUCKET, 'projectNumber': '999999999999'}, 'source_bucket_owner_mismatch'),
+        ]
+        cases += [({'name': m.BUCKET, 'projectNumber': number}, 'source_bucket_owner_shape')
+                  for number in (True, False, int(m.NUMBER) * 1.0, '', '0', '0120030709276',
+                                 ' ' + m.NUMBER, m.NUMBER + '\n', [], {})]
+        for bucket, stage in cases:
+            with self.subTest(bucket=bucket):
+                self.fake = Fake()
+                self.fake.bucket = bucket
+                self.assertEqual(self.run_setup(confirm=lambda _: self.fail('must not ask approval')), 2)
+                self.assertEqual(self.state.data['stage'], stage)
+                self.assertEqual(self.state.data['phase'], 'initial_read')
+                self.assertEqual(self.state.data['mutation_attempts_this_attempt'], 0)
+                self.assertEqual(self.fake.writes, [])
+
+    def test_source_bucket_owner_drift_after_confirmation_stops_without_write(self):
+        def confirm(prompt):
+            self.fake.bucket['projectNumber'] = '999999999999'
+            return prompt.removeprefix('Type exactly ').removesuffix(': ')
+        self.assertEqual(self.run_setup(confirm), 2)
+        self.assertEqual(self.state.data['stage'], 'source_bucket_owner_mismatch')
+        self.assertEqual(self.state.data['phase'], 'confirmation_read')
+        self.assertEqual(self.fake.writes, [])
+
+    def test_storage_hmac_overrides_stop_before_owner_or_bucket_read(self):
+        for key in ('gs_xml_access_key_id', 'gs_xml_secret_access_key'):
+            with self.subTest(key=key):
+                self.fake = Fake()
+                self.fake.config['storage'] = {key: 'synthetic-private'}
+                self.assertEqual(self.run_setup(confirm=lambda _: self.fail('must not ask approval')), 2)
+                self.assertEqual(self.state.data['stage'], 'storage_auth_override')
+                self.assertEqual([stage for _, stage, _ in self.fake.calls], ['gcloud_config'])
+                self.assertNotIn('synthetic-private', '\n'.join(self.output))
+                with patch.dict(os.environ, {'CLOUDSDK_STORAGE_' + key.upper(): 'synthetic-private'}):
+                    with self.assertRaises(m.Stop): m.Gcloud()
+
+    def test_storage_json_api_is_pinned_without_changing_ambient_settings(self):
+        with patch.dict(os.environ, {'CLOUDSDK_STORAGE_PREFERRED_API': 'grpc_with_json_fallback',
+                                     'CLOUDSDK_STORAGE_USE_GRPC_IF_AVAILABLE': 'true',
+                                     'CLOUDSDK_FUNCTIONS_GEN2': 'false'}):
+            runner = m.Gcloud()
+            self.assertEqual(runner.env['CLOUDSDK_STORAGE_PREFERRED_API'], 'json')
+            self.assertEqual(runner.env['CLOUDSDK_STORAGE_USE_GRPC_IF_AVAILABLE'], 'false')
+            self.assertEqual(runner.env['CLOUDSDK_FUNCTIONS_GEN2'], 'true')
+            self.assertEqual(os.environ['CLOUDSDK_STORAGE_PREFERRED_API'], 'grpc_with_json_fallback')
+            self.assertEqual(os.environ['CLOUDSDK_STORAGE_USE_GRPC_IF_AVAILABLE'], 'true')
+            self.assertEqual(os.environ['CLOUDSDK_FUNCTIONS_GEN2'], 'false')
 
     def test_appspot_absent_never_granted_and_broad_role_blocks(self):
         s = m.collect(self.fake)
@@ -634,6 +704,130 @@ class SetupTests(unittest.TestCase):
         with self.assertRaises(m.Stop): m.State(link, resume=True)
 
 
+def verify_sdk_response_schemas():
+    """Real typed return schemas/displayer after the SDK safety guards are installed.
+
+    No Command.Run is called; this only renders synthetic return values through
+    the exact command display pipeline and checks helper plans and verification.
+    """
+    from apitools.base.py import encoding
+    from googlecloudsdk import gcloud_main
+    from googlecloudsdk.api_lib.util import apis
+    from googlecloudsdk.calliope import display
+    from googlecloudsdk.command_lib.storage.resources import full_resource_formatter, resource_util
+    from googlecloudsdk.api_lib.storage.gcs_json import metadata_util
+    from googlecloudsdk.core import log, properties
+    from googlecloudsdk.core.configurations import named_configs
+    from googlecloudsdk.core.resource import resource_printer
+
+    cli = gcloud_main.CreateCLI([])
+    modules = {k: apis.GetMessagesModule(*v) for k,v in {
+        'iam': ('iam','v1'), 'crm1': ('cloudresourcemanager','v1'),
+        'crm2': ('cloudresourcemanager','v2'), 'fn2': ('cloudfunctions','v2'),
+        'secret': ('secretmanager','v1'), 'storage': ('storage','v1'),
+        'service': ('serviceusage','v1')}.items()}
+    seen = {}
+
+    def typed(module, name, value):
+        return encoding.JsonToMessage(getattr(modules[module], name), json.dumps(value))
+
+    def stage_type(stage,args):
+        if stage == 'project_identity': return 'crm1','Project'
+        if stage == 'enabled_apis': return 'service','GoogleApiServiceusageV1Service'
+        if stage == 'function_metadata': return 'fn2','Function'
+        if stage == 'function_policy': return 'fn2','Policy'
+        if stage == 'source_bucket_policy': return 'storage','Policy'
+        if stage.startswith('hmac_'): return 'secret','SecretVersion'
+        if stage == 'project_policy': return 'crm1','Policy'
+        if stage == 'secret_policy': return 'secret','Policy'
+        if stage == 'ancestor_policy': return ('crm2' if args[0]=='resource-manager' else 'crm1'),'Policy'
+        if stage in ('account_inventory','account_metadata','create_deployer_propagation'): return 'iam','ServiceAccount'
+        if stage == 'deployer_keys': return 'iam','ServiceAccountKey'
+        if stage in ('custom_role_inventory','role_metadata','create_custom_role_propagation'): return 'iam','Role'
+        if stage == 'custom_permission_support': return 'iam','Permission'
+        if stage in ('pool_inventory','create_disabled_pool_propagation','enable_pool_last_propagation'): return 'iam','WorkloadIdentityPool'
+        if stage in ('provider_inventory','provider_metadata','create_disabled_provider_propagation','enable_provider_last_propagation'): return 'iam','WorkloadIdentityPoolProvider'
+        if stage in ('pool_policy','account_policy'): return 'iam','Policy'
+        if stage in ('binding_before','binding_after'):
+            return ('crm1' if args[0]=='projects' else 'secret' if args[0]=='secrets' else 'iam'),'Policy'
+        return None
+
+    def render(args, resources):
+        argv=[*args,'--verbosity=error',f'--billing-project={m.PROJECT}']
+        global_role=args[:3]==['iam','roles','describe'] and (args[3].startswith('roles/') or any(a.startswith('--organization=') for a in args))
+        if not global_role: argv.append(f'--project={m.PROJECT}')
+        if not any(a.startswith('--format=') for a in args): argv.append('--format=json')
+        named_configs.FLAG_OVERRIDE_STACK.PushFromArgs(argv)
+        properties.VALUES.PushInvocationValues()
+        try:
+            parsed=cli.top_element._parser.parse_args(argv)
+            if parsed.CONCEPT_ARGS is not None: parsed.CONCEPT_ARGS.ParseConcepts()
+            command=parsed._GetCommand()
+            instance=command._common_type(cli=cli,context={})
+            out=io.StringIO()
+            with patch.object(log,'out',out):
+                display.Displayer(instance,parsed,resources,display_info=command.ai.display_info).Display()
+            return json.loads(out.getvalue())
+        finally:
+            properties.VALUES.PopInvocationValues()
+            named_configs.FLAG_OVERRIDE_STACK.Pop()
+
+    class TypedFake(Fake):
+        def __init__(self, omit_defaults=False):
+            super().__init__()
+            self.omit_defaults=omit_defaults
+            self.ancestors += [{'type':'folder','id':'123'},{'type':'organization','id':'456'}]
+            # Exercise an existing custom role plus its describe/validation path.
+            name='gardenCiMetadataRead'
+            self.custom[name]={'name':m.role_name(name),'stage':'GA','includedPermissions':list(m.CUSTOM[name])}
+            self.accounts[m.APPSPOT]=account(m.APPSPOT)
+            self.policies[m.APPSPOT]={'version':3,'bindings':[]}
+            self.ancestor_policy={'version':3,'bindings':[binding('roles/viewer','user:unrelated@example.invalid',m.condition())]}
+        def __call__(self,args,stage,write=False):
+            value=super().__call__(args,stage,write)
+            if write: return value  # Only Fake's in-memory state changes.
+            if self.omit_defaults:
+                def scrub(v):
+                    if isinstance(v,list): return [scrub(x) for x in v]
+                    if isinstance(v,dict): return {k:scrub(x) for k,x in v.items() if x is not False and x != [] and not (k=='customRolesSupportLevel' and x=='SUPPORTED')}
+                    return v
+                value=scrub(value)
+            schema=stage_type(stage,args)
+            if schema:
+                resource=[typed(*schema,x) for x in value] if isinstance(value,list) else typed(*schema,value)
+            elif stage=='project_ancestors':
+                resource=typed('crm1','GetAncestryResponse',{'ancestor':[{'resourceId':x} for x in value]})
+            elif stage=='source_bucket_owner':
+                message=typed('storage','Bucket',value)
+                bucket=metadata_util.get_bucket_resource_from_metadata(message)
+                resource=resource_util.get_display_dict_for_resource(bucket,full_resource_formatter.BucketDisplayTitlesAndDefaults,display_raw_keys=True)
+            elif stage in ('owner_identity','gcloud_config'):
+                resource=value  # These are local SDK Python dictionaries, not API messages.
+            else: raise AssertionError('unmapped stage: '+stage)
+            result=render(args,resource)
+            seen.setdefault(stage,{'api_type':'.'.join(schema) if schema else 'transformed','shapes':set(),'calls':0})
+            seen[stage]['shapes'].add(type(result).__name__)
+            seen[stage]['calls']+=1
+            return result
+
+    for omit in (False,True):
+        fake=TypedFake(omit)
+        with tempfile.TemporaryDirectory(prefix='garden-schema-offline-') as folder:
+            state=m.State(Path(folder)/'state')
+            output=[]
+            result=m.execute(fake,state,confirm=lambda p:p.removeprefix('Type exactly ').removesuffix(': '),emit=output.append,now=lambda:m.EXPIRY-86400000,sleep=lambda _:None)
+            if result != 0:
+                print(json.dumps({'status':'FAIL','omitDefaults':omit,'state':state.data,'output':output[-2:]},indent=2))
+                raise AssertionError('Typed SDK pipeline stopped: '+state.data['stage'])
+            assert state.data['setup_verified'] is True
+            assert state.data['release_ready'] is False
+            # Reusing the exact typed resources must yield a zero-change plan.
+            assert m.make_plan(m.collect(fake))['actions']==[]
+
+    assert len(seen) == 33, 'review every changed read-stage schema'
+    print('SDK_RESPONSE_SCHEMAS_VERIFIED readStages=33 apiFamilies=7 fullDisplayer=true ancestorFlattening=true defaultOmission=true zeroChangePlan=true')
+
+
 def verify_sdk_parser_and_prompts(sdk_root):
     """Real SDK argument parsing, resource formatting and prompt rejection.
 
@@ -784,14 +978,47 @@ def verify_sdk_parser_and_prompts(sdk_root):
             'json': ({'synthetic': ['kept']}, {'synthetic': ['kept']}),
             'json(name,state)': ({'name': 'synthetic-secret-metadata', 'state': 'ENABLED', 'SYNTHETIC_PRIVATE': 'omit'},
                                  {'name': 'synthetic-secret-metadata', 'state': 'ENABLED'}),
-            'json(name,projectNumber,project_number)': ({'name': 'synthetic-bucket', 'project_number': m.NUMBER, 'SYNTHETIC_PRIVATE': 'omit'},
-                                                       {'name': 'synthetic-bucket', 'project_number': m.NUMBER}),
+            'json(name,projectNumber)': ({'name': 'synthetic-bucket', 'projectNumber': m.NUMBER, 'SYNTHETIC_PRIVATE': 'omit'},
+                                        {'name': 'synthetic-bucket', 'projectNumber': m.NUMBER}),
         }
         assert formats == {function_format, *fixtures}
         for projection, (sample, expected) in fixtures.items():
             out = io.StringIO()
             resource_printer.Print(sample, projection, out=out, single=True)
             assert json.loads(out.getvalue()) == expected
+        # Exercise the real provider-specific pipeline, not a hand-authored
+        # display dictionary: API message -> GCS resource -> describe display
+        # transform -> resource printer -> the helper's ownership predicate.
+        from googlecloudsdk.api_lib.storage.gcs_json import metadata_util
+        from googlecloudsdk.command_lib.storage.resources import full_resource_formatter, resource_util
+        storage_messages = apis.GetMessagesModule('storage', 'v1')
+        bucket_argv = next(argv for argv in captured if argv[:3] == ('storage', 'buckets', 'describe'))
+        assert '--raw' in bucket_argv
+        bucket_format = next(a.split('=', 1)[1] for a in bucket_argv if a.startswith('--format='))
+        old_bucket_format = 'json(name,projectNumber,project_number)'
+        for owner, expected_stage in ((int(m.NUMBER), None), (999999999999, 'source_bucket_owner_mismatch'),
+                                       (None, 'source_bucket_owner_missing')):
+            api_metadata = storage_messages.Bucket(name=m.BUCKET, projectNumber=owner,
+                labels=storage_messages.Bucket.LabelsValue(additionalProperties=[
+                    storage_messages.Bucket.LabelsValue.AdditionalProperty(key='synthetic-private', value='must-not-appear')]))
+            resource = metadata_util.get_bucket_resource_from_metadata(api_metadata)
+            assert resource.project_number == owner
+            standard_display = resource_util.get_display_dict_for_resource(resource,
+                full_resource_formatter.BucketDisplayTitlesAndDefaults, display_raw_keys=False)
+            old_output = io.StringIO()
+            resource_printer.Print(standard_display, old_bucket_format, out=old_output, single=True)
+            assert json.loads(old_output.getvalue()) == {'name': m.BUCKET}, 'old command always loses owner evidence'
+            raw_display = resource_util.get_display_dict_for_resource(resource,
+                full_resource_formatter.BucketDisplayTitlesAndDefaults, display_raw_keys=True)
+            output = io.StringIO()
+            resource_printer.Print(raw_display, bucket_format, out=output, single=True)
+            assert 'synthetic-private' not in output.getvalue() and 'must-not-appear' not in output.getvalue()
+            try:
+                identity = m.source_bucket_identity(json.loads(output.getvalue()))
+            except m.Stop as error:
+                assert expected_stage and error.stage == expected_stage
+            else:
+                assert expected_stage is None and identity == {'name': m.BUCKET, 'projectNumber': m.NUMBER}
         old_format = 'json(name,environment,state,buildConfig(serviceAccount,source),serviceConfig(serviceAccountEmail))'
         consumed = []
         def unseen():
@@ -828,9 +1055,27 @@ def verify_sdk_parser_and_prompts(sdk_root):
             with os.fdopen(os.dup(fd)) as stream, patch.object(sys, 'stdin', stream), contextlib.redirect_stderr(io.StringIO()):
                 for default in (True, False, True, False):
                     assert console_io.PromptContinue(default=default, throw_if_unattended=True) is False
+        # Verify actual SDK backend/generation selection against hostile parent
+        # defaults. Read class identities only; never instantiate any client.
+        from googlecloudsdk.api_lib.storage import api_factory
+        from googlecloudsdk.api_lib.storage.gcs_json import client as json_client
+        from googlecloudsdk.command_lib.storage import storage_url
+        from googlecloudsdk.command_lib.functions import flags as function_flags
+        with patch.dict(os.environ, {'CLOUDSDK_STORAGE_PREFERRED_API': 'grpc_with_json_fallback',
+                                     'CLOUDSDK_STORAGE_USE_GRPC_IF_AVAILABLE': 'true',
+                                     'CLOUDSDK_FUNCTIONS_GEN2': 'false'}):
+            runner = m.Gcloud()
+            with patch.dict(os.environ, runner.env, clear=True):
+                assert properties.VALUES.storage.preferred_api.Get() == 'json'
+                assert properties.VALUES.storage.use_grpc_if_available.GetBool() is False
+                assert api_factory._get_api_class(storage_url.ProviderPrefix.GCS, False) is json_client.JsonClient
+                assert function_flags.ShouldUseGen2() is True and function_flags.ShouldUseGen1() is False
+        verify_sdk_response_schemas()
         assert not blocked
         print('SDK_PARSE_VERIFIED version=568.0.0 argvVariants=67 oldInvalidFlagRejected=true commandRuns=0 networkRequests=0 credentialAccess=0')
         print('SDK_FORMAT_VERIFIED argvVariants=67 formats=4 dictAndProtoShape=true privateFieldsOmitted=true oldInvalidFormatRejected=true')
+        print('SDK_BUCKET_PIPELINE_VERIFIED rawApiResourceDisplayProjection=true standardDisplayDropsOwner=true exactOwnerRequired=true wrongAndMissingOwnerRejected=true')
+        print('SDK_API_SELECTION_VERIFIED storageJson=true functionsGen2=true parentSettingsUnchanged=true alternateStorageCredentialsRejected=true')
         print('SDK_PROMPT_VERIFIED repeatedNo=true eofDefaultYesReproduced=true ownerApprovalInputUntouched=true')
 
 
