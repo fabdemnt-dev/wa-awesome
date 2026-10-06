@@ -11,6 +11,8 @@ for the new plan hash. No --yes, credentials, login, installs, key generation,
 secret payload access, billing change, deployment or application-data writes.
 """
 import argparse
+import contextlib
+import threading
 import hashlib
 import json
 import os
@@ -99,10 +101,15 @@ PROVIDER_CODES = {'PERMISSION_DENIED', 'UNAUTHENTICATED', 'NOT_FOUND', 'ALREADY_
                   'INVALID_ARGUMENT', 'RESOURCE_EXHAUSTED', 'UNAVAILABLE'}
 
 
+LOCAL_CODES = {'UNKNOWN', 'CLI_ARGUMENT', 'CLI_MISSING', 'CLI_START_FAILED', 'CLI_TIMEOUT', 'CLI_EXIT_NONZERO', 'NON_JSON_RESPONSE'}
+
+
 class Stop(Exception):
-    def __init__(self, stage, code='UNKNOWN'):
+    def __init__(self, stage, code='UNKNOWN', local_code='UNKNOWN', exit_code=None):
         self.stage = stage
         self.code = code if code in PROVIDER_CODES else 'UNKNOWN'
+        self.local_code = local_code if local_code in LOCAL_CODES else 'UNKNOWN'
+        self.exit_code = exit_code if isinstance(exit_code, int) and 0 <= exit_code <= 255 else None
         super().__init__(f'{stage} provider_code={self.code}')
 
 
@@ -158,6 +165,37 @@ def expected_bindings(accounts):
     return bindings
 
 
+@contextlib.contextmanager
+def reject_sdk_prompts():
+    """A bounded kernel pipe continuously answers NO to subprocess prompts.
+
+    EOF can select an SDK prompt's default YES. Keep the write end open for the
+    entire read command, even if the producer encounters an error: an empty
+    pipe then blocks until the existing command timeout instead of accepting a
+    default. This never consumes or supplies the owner's own approval input.
+    """
+    reader, writer = os.pipe()
+    def produce():
+        try:
+            while True:
+                os.write(writer, b'n\n' * 128)
+        except OSError:
+            pass  # Parent retains writer until subprocess completion.
+    thread = threading.Thread(target=produce, daemon=True)
+    try:
+        thread.start()
+    except RuntimeError:
+        os.close(reader); os.close(writer)
+        raise Stop('local_prompt_guard') from None
+    try:
+        yield reader
+    finally:
+        os.close(reader)
+        thread.join(timeout=1)
+        os.close(writer)
+        need(not thread.is_alive(), 'local_prompt_guard')
+
+
 class Gcloud:
     """The sole process boundary. Instantiated only for explicit owner --setup.
 
@@ -195,24 +233,29 @@ class Gcloud:
         # --quiet is applied only after the explicit, hash-bound owner prompt.
         if write:
             command.append('--quiet')
-        else:
-            # Never accept an SDK API-enable/install/auth prompt during reads.
-            # stdin is DEVNULL; prompts must fail, never default to approval.
-            command.append('--no-quiet')
+        # There is no global --no-quiet argument. The explicit false prompt
+        # environment override plus a continuous NO stream protects reads.
         try:
-            p = subprocess.run(command, env=self.env, stdin=subprocess.DEVNULL,
-                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60, check=False)
-        except (OSError, subprocess.TimeoutExpired):
-            raise Stop(stage) from None
+            guard = contextlib.nullcontext(subprocess.DEVNULL) if write else reject_sdk_prompts()
+            with guard as input_fd:
+                p = subprocess.run(command, env=self.env, stdin=input_fd,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60, check=False)
+        except FileNotFoundError:
+            raise Stop(stage, local_code='CLI_MISSING') from None
+        except subprocess.TimeoutExpired:
+            raise Stop(stage, local_code='CLI_TIMEOUT') from None
+        except OSError:
+            raise Stop(stage, local_code='CLI_START_FAILED') from None
         if p.returncode:
             text = p.stderr[:262144].decode('utf-8', 'replace')
             code = next((c for c in sorted(PROVIDER_CODES) if re.search(r'\b' + c + r'\b', text)), 'UNKNOWN')
-            raise Stop(stage, code)
+            local = 'CLI_ARGUMENT' if re.search(r'unrecognized arguments:|unrecognized flag|Invalid choice:', text, re.IGNORECASE) else 'CLI_EXIT_NONZERO'
+            raise Stop(stage, code, local, p.returncode)
         need(len(p.stdout) <= 8 * 1024 * 1024, 'response_size')
         try:
             return json.loads(p.stdout or b'{}')
         except (ValueError, UnicodeError):
-            raise Stop(stage) from None
+            raise Stop(stage, local_code='NON_JSON_RESPONSE', exit_code=p.returncode) from None
 
 
 def read_role(run, name):
@@ -495,15 +538,30 @@ class State:
         previous = {}
         if resume:
             fd = os.open(self.path, os.O_RDONLY | os.O_NOFOLLOW)
-            with os.fdopen(fd) as f:
+            with os.fdopen(fd, 'rb') as f:
                 st = os.fstat(f.fileno())
                 need(stat.S_ISREG(st.st_mode) and st.st_nlink == 1 and st.st_uid == os.getuid() and
                      stat.S_IMODE(st.st_mode) == 0o600 and st.st_size < 65536, 'state_file')
-                previous = json.load(f)
+                previous_bytes = f.read()
+                previous = json.loads(previous_bytes)
             need(previous.get('kind') == 'garden-ci-owner-setup-v1' and previous.get('project') == PROJECT and
-                 previous.get('original_expiry') == EXPIRY, 'state_identity')
+                 previous.get('original_expiry') == EXPIRY and type(previous.get('attempt')) is int and 1 <= previous['attempt'] < 20, 'state_identity')
+            # Preserve the exact failed/partial attempt before the live state
+            # file is advanced. Never overwrite an existing history record.
+            archive = path / f"attempt-{previous['attempt']}-state.json"
+            try:
+                saved = os.open(archive, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            except FileExistsError:
+                saved = os.open(archive, os.O_RDONLY | os.O_NOFOLLOW)
+                with os.fdopen(saved, 'rb') as f:
+                    st = os.fstat(f.fileno())
+                    need(stat.S_ISREG(st.st_mode) and st.st_nlink == 1 and st.st_uid == os.getuid() and
+                         stat.S_IMODE(st.st_mode) == 0o600 and st.st_size < 65536 and f.read() == previous_bytes, 'state_history_conflict')
+            else:
+                with os.fdopen(saved, 'wb') as f:
+                    f.write(previous_bytes); f.flush(); os.fsync(f.fileno())
         self.data = {'kind': 'garden-ci-owner-setup-v1', 'project': PROJECT, 'original_expiry': EXPIRY,
-                     'stage': 'reading', 'provider_code': 'UNKNOWN', 'created_targets': previous.get('created_targets', []),
+                     'stage': 'reading', 'provider_code': 'UNKNOWN', 'local_code': 'UNKNOWN', 'exit_code': None, 'created_targets': previous.get('created_targets', []),
                      'completed_steps': previous.get('completed_steps', []), 'attempt': previous.get('attempt', 0) + 1,
                      'possibly_applied': None, 'setup_verified': False, 'release_ready': False,
                      'federation_may_be_active': None}
@@ -511,9 +569,11 @@ class State:
         self.save()
 
     def save(self):
-        fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+        fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
         with os.fdopen(fd, 'w') as f:
-            need(stat.S_ISREG(os.fstat(f.fileno()).st_mode) and os.fstat(f.fileno()).st_nlink == 1, 'state_file')
+            need(stat.S_ISREG(os.fstat(f.fileno()).st_mode) and os.fstat(f.fileno()).st_nlink == 1 and
+                 os.fstat(f.fileno()).st_uid == os.getuid() and stat.S_IMODE(os.fstat(f.fileno()).st_mode) == 0o600, 'state_file')
+            os.ftruncate(f.fileno(), 0)
             json.dump(self.data, f, indent=2)
             f.flush()
             os.fsync(f.fileno())
@@ -653,9 +713,11 @@ def execute(run, state, confirm=input, emit=print, now=lambda: time.time() * 100
         return 0
     except (Stop, EOFError, KeyboardInterrupt, KeyError, TypeError, ValueError, OSError) as e:
         stage, code = (e.stage, e.code) if isinstance(e, Stop) else ('owner_interrupted' if isinstance(e, (EOFError, KeyboardInterrupt)) else 'metadata_or_local_state_error', 'UNKNOWN')
-        state.data.update(stage=stage, provider_code=code)
+        local_code = e.local_code if isinstance(e, Stop) else 'UNKNOWN'
+        exit_code = e.exit_code if isinstance(e, Stop) else None
+        state.data.update(stage=stage, provider_code=code, local_code=local_code, exit_code=exit_code)
         state.save()
-        emit(f"SETUP_STOP stage={stage} provider_code={code} federation_may_be_active={state.data['federation_may_be_active']}. No automatic rollback or mutation retry. Review the redacted state; resume requires fresh reads and confirmation.")
+        emit(f"SETUP_STOP stage={stage} provider_code={code} local_code={local_code} exit_code={exit_code} federation_may_be_active={state.data['federation_may_be_active']}. No automatic rollback or mutation retry. Review the redacted state; resume requires fresh reads and confirmation.")
         return 2
     finally:
         run.approved = False
