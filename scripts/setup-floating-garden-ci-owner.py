@@ -43,15 +43,16 @@ APIS = ('iam.googleapis.com', 'cloudresourcemanager.googleapis.com',
         'iamcredentials.googleapis.com', 'sts.googleapis.com')
 PROJECT_ROLES = ('roles/cloudfunctions.developer', 'roles/firebasehosting.admin',
                  'roles/firebaserules.admin', 'roles/serviceusage.serviceUsageConsumer',
-                 'roles/serviceusage.apiKeysViewer')
+                 'roles/serviceusage.apiKeysViewer', 'roles/firebaseextensions.viewer')
 CUSTOM = {
     'gardenCiMetadataRead': ('resourcemanager.projects.getIamPolicy', 'cloudfunctions.functions.getIamPolicy',
-        'firebaseauth.configs.get', 'firebaseappcheck.recaptchaEnterpriseConfig.get', 'firebaseappcheck.services.get',
-        'firebaseextensions.instances.list'),
+        'firebaseauth.configs.get', 'firebaseappcheck.recaptchaEnterpriseConfig.get', 'firebaseappcheck.services.get'),
     'gardenCiSourceRead': ('storage.buckets.get', 'storage.objects.get'),
     'gardenCiGateUpdate': ('datastore.databases.getMetadata', 'datastore.databases.get',
         'datastore.entities.get', 'datastore.entities.list', 'datastore.entities.update'),
 }
+# Already required by the pinned release. Setup must not activate these APIs.
+REQUIRED_EXISTING_APIS = ('firebaseextensions.googleapis.com', 'cloudbilling.googleapis.com')
 COMMAND_TIMEOUT_SECONDS = 60
 PERMISSION_CATALOG_TIMEOUT_SECONDS = 600
 PERMISSION_CATALOG_LIMIT = 50000
@@ -69,6 +70,8 @@ DISCLOSURES = [
     'SETUP ONLY. This does not release or prove the garden is ready.',
     'Project predefined roles permit broad Garden product create/delete; these are NOT permissions limited to five functions.',
     'roles/serviceusage.apiKeysViewer permits API key STRING retrieval. The helper itself never retrieves key strings.',
+    'roles/firebaseextensions.viewer permits reading project Extensions instances and related metadata/configuration. Google does not fully enumerate its internal Extensions permissions in public role metadata; no Extensions install/update/delete role is requested.',
+    'Extensions and Cloud Billing APIs must already be enabled. Setup will not enable either API; the original four setup API choices are unchanged.',
     'Gate role permits database-wide existing-document updates in (default), NOT only three gate documents; no entity create/delete permission.',
     'Source role reads the verified source bucket and every object below its prefix.',
     'actAs on each listed existing runtime/build/appspot account permits acting with that account’s inspected roles.',
@@ -81,7 +84,7 @@ DISCLOSURES = [
     'Two full IAM permission-catalog scans protect the initial plan and post-confirmation plan. Each has a 10-minute limit and 30-second progress reports; 20 minutes is their combined upper bound, not an estimate or a total setup limit.',
     'After writes, verification reads the exact custom roles, IAM policies and federation settings rather than scanning the permission catalog again; no timed-out command is retried automatically.',
     'A new deployer account gets a 60-second propagation pause, then bounded read-only readiness checks; mutations are never blindly retried.',
-    'Firebase Admin 12.7 WIF compatibility fix is a separate release change. Firebase CLI generateServiceIdentity compatibility remains unverified.',
+    'Firebase Admin 12.7 WIF compatibility fix is a separate release change. The pinned CLI may generate Pub/Sub/Eventarc service identities using legacy Service Usage v1beta1; actual WIF and organization-policy compatibility remain unverified.',
 ]
 # Appspot is an extra impersonation surface. Unknown roles, custom roles, broad
 # basic roles and powerful administrative roles fail closed before any write.
@@ -406,6 +409,8 @@ def collect(run, include_permission_catalog=True):
     s['services'] = sorted(x['config']['name'] for x in bounded_list(
         run(['services', 'list', '--enabled', '--limit=1000'], 'enabled_apis'), 'enabled_apis')
         if x.get('state') == 'ENABLED')
+    for api in REQUIRED_EXISTING_APIS:
+        need(api in s['services'], 'required_existing_api_not_enabled:' + api)
     s['functions'] = bounded_list(run(function_inventory_args(), 'function_metadata'), 'function_metadata')
     aliases = {f'projects/{p}/locations/{REGION}/functions/{n}': f'projects/{PROJECT}/locations/{REGION}/functions/{n}'
                for p in (PROJECT, NUMBER) for n in FUNCTIONS}
@@ -525,8 +530,10 @@ def validate_permission_support(s):
         v = supports.get(p)
         # SUPPORTED is the API enum's default, so protobuf may omit it. A
         # returned permission record is required; a missing record is unknown.
-        need(v is not None and v.get('customRolesSupportLevel', 'SUPPORTED') == 'SUPPORTED' and
-             not v.get('onlyInPredefinedRoles') and not v.get('apiDisabled'), 'unsupported_or_unknown_custom_permission:' + p)
+        need(v is not None, 'custom_permission_missing:' + p)
+        need(v.get('customRolesSupportLevel', 'SUPPORTED') == 'SUPPORTED', 'custom_permission_not_supported:' + p)
+        need(not v.get('onlyInPredefinedRoles'), 'custom_permission_predefined_only:' + p)
+        need(not v.get('apiDisabled'), 'custom_permission_api_disabled:' + p)
 
 
 def validate_state(s):
@@ -899,7 +906,7 @@ def main(argv=None):
             'audience': 'default provider resource audience', 'attribute_mapping': MAPPING,
             'attribute_condition': ATTRIBUTE_CONDITION + " && assertion.workflow_sha == '<reviewed release commit>' && assertion.run_number == '<reviewed next run>'", 'project_roles': PROJECT_ROLES, 'custom_roles': CUSTOM,
             'new_binding_conditions': {'time': TIME_CONDITION, 'source': SOURCE_CONDITION, 'gate': GATE_CONDITION},
-            'only_enable_missing_apis': APIS, 'disclosures': DISCLOSURES,
+            'only_enable_missing_apis': APIS, 'required_existing_apis': REQUIRED_EXISTING_APIS, 'disclosures': DISCLOSURES,
             'next': 'Freshly authorized owner runs --setup; reads all metadata, reviews exact diff, types its hash, then setup and verification run in this session.'}, indent=2))
         return 0
     try:
