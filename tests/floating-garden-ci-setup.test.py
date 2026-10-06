@@ -449,6 +449,15 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(self.state.data['stage'], 'deleted_target_account')
         self.assertEqual(self.fake.writes, [])
 
+    def test_function_policy_reads_use_documented_flags_after_v2_identity_check(self):
+        m.collect(self.fake)
+        inventory = [args for args, stage, _ in self.fake.calls if stage == 'function_metadata']
+        self.assertEqual(len(inventory), 1)
+        self.assertIn('--v2', inventory[0])
+        policies = [args for args, stage, _ in self.fake.calls if stage == 'function_policy']
+        self.assertEqual(policies, [['functions', 'get-iam-policy', name, '--region=' + m.REGION] for name in m.FUNCTIONS])
+        self.assertFalse(any('--gen2' in args for args in policies))
+
     def test_exact_source_and_first_run_trust_is_mandatory(self):
         for bad in (None, '', 'MAIN', 'a' * 39, 'g' * 40):
             with self.assertRaises(m.Stop): m.release_condition(bad, '2')

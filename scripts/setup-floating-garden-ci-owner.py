@@ -270,7 +270,9 @@ def collect(run):
         need(re.fullmatch(r'[a-z][a-z0-9-]{4,28}[a-z0-9]@' + re.escape(PROJECT) + r'\.iam\.gserviceaccount\.com', email)
              or email in (f'{NUMBER}-compute@developer.gserviceaccount.com', f'{NUMBER}@cloudbuild.gserviceaccount.com', APPSPOT), 'actual_build_identity_invalid')
         build.add(email)
-    s['function_policies'] = {name: run(['functions', 'get-iam-policy', name, '--gen2', f'--region={REGION}'], 'function_policy') for name in FUNCTIONS}
+    # The v2 inventory above establishes each exact GEN_2 identity. This IAM
+    # read has no --gen2 flag in the official gcloud command schema.
+    s['function_policies'] = {name: run(['functions', 'get-iam-policy', name, f'--region={REGION}'], 'function_policy') for name in FUNCTIONS}
     s['functions'].sort(key=lambda f: f['name'])
     s['bucket'] = run(['storage', 'buckets', 'describe', f'gs://{BUCKET}', '--format=json(name,projectNumber,project_number)'], 'source_bucket_owner')
     need(s['bucket'].get('name') == BUCKET and str(s['bucket'].get('projectNumber', s['bucket'].get('project_number'))) == NUMBER, 'source_bucket_owner')

@@ -139,21 +139,40 @@ jobs:
           gcloud = shutil.which('gcloud')
           assert gcloud, 'official gcloud is required'
           allowed.update((gcloud, *args, '--help') for args in commands)
+          issues = []
           for command in sorted(allowed):
               assert command[-1] == '--help' and command.count('--help') == 1
               result = subprocess.run(list(command), shell=False, stdin=subprocess.DEVNULL,
                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=30, check=False)
-              assert result.returncode == 0, 'gcloud help failed; no live fallback is allowed'
+              depth = 2
+              if tuple(command[1:3]) in (('storage', 'buckets'), ('resource-manager', 'folders'),
+                  ('secrets', 'versions'), ('iam', 'roles'), ('iam', 'service-accounts'),
+                  ('iam', 'workload-identity-pools')):
+                  depth = 3
+              if tuple(command[1:4]) in (('iam', 'workload-identity-pools', 'providers'),
+                  ('iam', 'service-accounts', 'keys')):
+                  depth = 4
+              family = ' '.join(command[1:depth + 1])
+              assert re.fullmatch(r'[a-z -]+', family), 'unrecognized command family'
+              if result.returncode != 0:
+                  issues.append(f'{family}: help-exit={result.returncode}')
+                  continue
               help_text = re.sub(r'.\x08', '', result.stdout).replace('--[no-]', '--')
-              assert 'SYNOPSIS' in help_text, 'expected local command help'
+              if 'SYNOPSIS' not in help_text:
+                  issues.append(f'{family}: help-shape')
+                  continue
               for arg in command[1:-1]:
                   if not arg.startswith('--'):
                       continue
                   flag = arg.split('=', 1)[0]
                   if flag.startswith('--no-'):
                       flag = '--' + flag[5:]
-                  assert flag in help_text, f'flag not documented by installed SDK: {flag}'
+                  if flag not in help_text:
+                      issues.append(f'{family}: undocumented-flag={flag}')
           assert len(spawned) == len(allowed) and set(spawned) == allowed
+          for issue in sorted(set(issues)):
+              print('GCLOUD_HELP_ISSUE: ' + issue)
+          assert not issues, 'gcloud help compatibility failed; no operational fallback is allowed'
           print(f'Official gcloud local help: {len(spawned)} argv variants checked; no operational command executed.')
           print('Help checks command/flag availability only, not flag-value semantics, IAM, token exchange or live API compatibility.')
           PY
