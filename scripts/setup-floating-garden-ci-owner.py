@@ -52,6 +52,10 @@ CUSTOM = {
     'gardenCiGateUpdate': ('datastore.databases.getMetadata', 'datastore.databases.get',
         'datastore.entities.get', 'datastore.entities.list', 'datastore.entities.update'),
 }
+COMMAND_TIMEOUT_SECONDS = 60
+PERMISSION_CATALOG_TIMEOUT_SECONDS = 600
+PERMISSION_CATALOG_LIMIT = 50000
+PERMISSION_PROGRESS_SECONDS = 30
 MAPPING = {'google.subject': 'assertion.sub', **{f'attribute.{k}': f'assertion.{k}' for k in
     ('repository_id', 'repository_owner_id', 'ref', 'workflow_ref', 'event_name', 'environment')}}
 ATTRIBUTE_CONDITION = ' && '.join(f"assertion.{k} == '{v}'" for k, v in (
@@ -74,6 +78,8 @@ DISCLOSURES = [
     'All new IAM bindings expire at the ORIGINAL deadline; the deadline is never extended.',
     'New pool/provider stay disabled until verification; no automatic rollback, repair, undelete or destructive cleanup.',
     'Metadata verification does not prove IAM permission enforcement. Future CI must wait and recheck actual keyless access.',
+    'Two full IAM permission-catalog scans protect the initial plan and post-confirmation plan. Each has a 10-minute limit and 30-second progress reports; 20 minutes is their combined upper bound, not an estimate or a total setup limit.',
+    'After writes, verification reads the exact custom roles, IAM policies and federation settings rather than scanning the permission catalog again; no timed-out command is retried automatically.',
     'A new deployer account gets a 60-second propagation pause, then bounded read-only readiness checks; mutations are never blindly retried.',
     'Firebase Admin 12.7 WIF compatibility fix is a separate release change. Firebase CLI generateServiceIdentity compatibility remains unverified.',
 ]
@@ -165,6 +171,63 @@ def expected_bindings(accounts):
     return bindings
 
 
+def permission_query_args():
+    # SDK 568 uses 100 records per API page and has no --page-size/--limit.
+    # --filter is client-side, so it cannot reduce the requests. Keep the full
+    # count bound, but omit descriptions/titles which validation never uses.
+    return ['iam', 'list-testable-permissions',
+            f'//cloudresourcemanager.googleapis.com/projects/{PROJECT}',
+            '--format=json(name,customRolesSupportLevel,onlyInPredefinedRoles,apiDisabled)']
+
+
+def permission_support(run):
+    records = bounded_list(run(permission_query_args(), 'custom_permission_support'),
+                           'custom_permission_support', PERMISSION_CATALOG_LIMIT)
+    needed = {p for ps in CUSTOM.values() for p in ps}
+    found, seen = {}, set()
+    for record in records:
+        name = record.get('name')
+        need(isinstance(name, str) and name and name not in seen, 'custom_permission_catalog_identity')
+        seen.add(name)
+        if name not in needed:
+            continue
+        support = record.get('customRolesSupportLevel', 'SUPPORTED')
+        only_predefined, disabled = record.get('onlyInPredefinedRoles', False), record.get('apiDisabled', False)
+        need(support in ('SUPPORTED', 'TESTING', 'NOT_SUPPORTED') and
+             type(only_predefined) is bool and type(disabled) is bool, 'custom_permission_record_shape')
+        found[name] = {'name': name, 'customRolesSupportLevel': support,
+                       'onlyInPredefinedRoles': only_predefined, 'apiDisabled': disabled}
+    # Keep every required permission's evidence fresh on every collect. Ignore
+    # unrelated catalog metadata in the plan hash, never a missing target.
+    return [found[name] for name in sorted(found)]
+
+
+@contextlib.contextmanager
+def catalog_progress(emit, phase):
+    """Fixed, redacted progress only; no resource names or subprocess output."""
+    done = threading.Event()
+    started = time.monotonic()
+    need(phase in ('preflight', 'initial_plan', 'confirmation_read'), 'catalog_read_phase')
+    def report():
+        while not done.wait(PERMISSION_PROGRESS_SECONDS):
+            emit(f'READ_WAIT stage=custom_permission_support phase={phase} elapsed_seconds=' +
+                 str(int(time.monotonic() - started)) +
+                 f' timeout_seconds={PERMISSION_CATALOG_TIMEOUT_SECONDS} metadata_only=true')
+    thread = threading.Thread(target=report, daemon=True)
+    emit(f'READ_START stage=custom_permission_support phase={phase} timeout_seconds={PERMISSION_CATALOG_TIMEOUT_SECONDS} '
+         'metadata_only=true full_catalog_scan=true')
+    try:
+        thread.start()
+    except RuntimeError:
+        raise Stop('local_progress_guard') from None
+    try:
+        yield
+    finally:
+        done.set()
+        thread.join(timeout=1)
+        need(not thread.is_alive(), 'local_progress_guard')
+
+
 @contextlib.contextmanager
 def reject_sdk_prompts():
     """A bounded kernel pipe continuously answers NO to subprocess prompts.
@@ -202,7 +265,7 @@ class Gcloud:
     SDK normal read-only transport retries may occur; mutations are submitted
     once. No explicit mutation retry. stdout/stderr are private memory only.
     """
-    def __init__(self, release_sha=None, release_run_number=None):
+    def __init__(self, release_sha=None, release_run_number=None, emit=None):
         self.release_sha = release_sha
         self.release_run_number = release_run_number
         forbidden = ('CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE', 'CLOUDSDK_AUTH_IMPERSONATE_SERVICE_ACCOUNT',
@@ -222,6 +285,8 @@ class Gcloud:
                         CLOUDSDK_FUNCTIONS_GEN2='true')
         self.approved = False
         self.calls = 0
+        self.emit = emit or (lambda line: print(line, flush=True))
+        self.read_phase = 'preflight'
 
     def __call__(self, args, stage, write=False):
         need(not write or self.approved, 'write_without_owner_confirmation')
@@ -236,13 +301,16 @@ class Gcloud:
         # --quiet is applied only after the explicit, hash-bound owner prompt.
         if write:
             command.append('--quiet')
+        catalog = not write and stage == 'custom_permission_support' and args == permission_query_args()
+        timeout = PERMISSION_CATALOG_TIMEOUT_SECONDS if catalog else COMMAND_TIMEOUT_SECONDS
         # There is no global --no-quiet argument. The explicit false prompt
         # environment override plus a continuous NO stream protects reads.
         try:
             guard = contextlib.nullcontext(subprocess.DEVNULL) if write else reject_sdk_prompts()
-            with guard as input_fd:
+            progress = catalog_progress(self.emit, self.read_phase) if catalog else contextlib.nullcontext()
+            with progress, guard as input_fd:
                 p = subprocess.run(command, env=self.env, stdin=input_fd,
-                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60, check=False)
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout, check=False)
         except FileNotFoundError:
             raise Stop(stage, local_code='CLI_MISSING') from None
         except subprocess.TimeoutExpired:
@@ -295,7 +363,7 @@ def source_bucket_identity(value):
     return {'name': value['name'], 'projectNumber': str(number)}
 
 
-def collect(run):
+def collect(run, include_permission_catalog=True):
     """One bounded metadata pass. No secret access, auth/appcheck or data writes."""
     s = {'release_sha': run.release_sha, 'release_run_number': run.release_run_number}
     release_condition(s['release_sha'], s['release_run_number'])
@@ -395,8 +463,8 @@ def collect(run):
             need(not r.get('deleted'), 'deleted_custom_role')
             short = r['name'].split('/')[-1]
             s['custom'][short] = read_role(run, r['name'])
-    s['permission_support'] = bounded_list(run(['iam', 'list-testable-permissions',
-        f'//cloudresourcemanager.googleapis.com/projects/{PROJECT}'], 'custom_permission_support'), 'custom_permission_support', 50000)
+    if include_permission_catalog:
+        s['permission_support'] = permission_support(run)
     all_policies = [*s['policies'].values(), *s['ancestors'].values(), s['bucket_policy'], *s['function_policies'].values()]
     relevant_roles = set(PROJECT_ROLES)
     s['account_roles'] = {a: set() for a in targets}
@@ -432,7 +500,8 @@ def collect(run):
     return s
 
 
-def validate(s):
+def validate_permission_support(s):
+    """Capability evidence for the exact proposed custom-role permissions."""
     supports = {p.get('name'): p for p in s['permission_support']}
     for p in [p for ps in CUSTOM.values() for p in ps]:
         v = supports.get(p)
@@ -440,8 +509,16 @@ def validate(s):
         # returned permission record is required; a missing record is unknown.
         need(v is not None and v.get('customRolesSupportLevel', 'SUPPORTED') == 'SUPPORTED' and
              not v.get('onlyInPredefinedRoles') and not v.get('apiDisabled'), 'unsupported_or_unknown_custom_permission:' + p)
+
+
+def validate_state(s):
+    """Validate actual resources/grants, independently of the advisory catalog.
+
+    Post-write verification uses fresh role metadata and exact included
+    permissions; no old catalog is copied in or represented as a fresh read.
+    """
     for name, r in s['custom'].items():
-        need(not r.get('deleted') and r.get('stage') == 'GA' and
+        need(r.get('name') == role_name(name) and not r.get('deleted') and r.get('stage') == 'GA' and
              set(r.get('includedPermissions', [])) == set(CUSTOM[name]), 'custom_role_collision')
     for r in s['role_metadata'].values():
         need(not r.get('deleted') and r.get('stage') not in ('DISABLED', 'DEPRECATED') and
@@ -477,6 +554,11 @@ def validate(s):
             if member == MEMBER or pool_member or target == DEPLOYER:
                 need((target, role, cond, member) in allowed, 'broader_existing_target_binding')
     return expected
+
+
+def validate(s):
+    validate_permission_support(s)
+    return validate_state(s)
 
 
 def make_plan(s):
@@ -619,8 +701,12 @@ def verify_expected(run, before, expected, sleep):
     # Bounded READ-ONLY propagation checks. Never repeat a mutation on a timeout.
     last = None
     for attempt in range(3):
-        current = collect(run)
-        validate(current)
+        current = collect(run, include_permission_catalog=False)
+        validate_state(current)
+        # apiDisabled was checked in both pre-write catalog snapshots. Keep
+        # project-specific capability drift visible without rescanning the
+        # public catalog: setup may add APIs but must not lose existing ones.
+        need(set(before['services']) <= set(current['services']), 'existing_api_disabled')
         need(foundations(before) == foundations(current), 'foundation_changed')
         for target, old in before['policies'].items():
             need(policy_atoms(old) <= policy_atoms(current['policies'].get(target, {})), 'unrelated_iam_loss')
@@ -636,7 +722,10 @@ def verify_expected(run, before, expected, sleep):
 
 
 def wait_created(run, action, sleep):
-    """Read-only visibility checks, at most 7 reads/60 seconds per new object."""
+    """At most 7 reads (60s each) plus 60s polling pauses per new object.
+
+    A new deployer has an additional initial 60-second propagation pause.
+    """
     stage = action['stage']
     target = action['target']
     if stage == 'create_deployer':
@@ -684,6 +773,8 @@ def wait_enabled(run, action, sleep):
 def execute(run, state, confirm=input, emit=print, now=lambda: time.time() * 1000, sleep=time.sleep):
     try:
         need(now() < EXPIRY, 'original_deadline_expired')
+        run.read_phase = 'initial_plan'
+        emit('PREFLIGHT: two IAM catalog scans are required, one for the initial plan and one after owner confirmation. Each is bounded at 10 minutes with progress every 30 seconds. Their combined 20-minute bound is not an estimate or a limit for the entire setup.')
         before = collect(run)
         state.data['federation_may_be_active'] = bool(before['pool'] and not before['pool'].get('disabled', False) and before['provider'] and not before['provider'].get('disabled', False))
         plan = make_plan(before)
@@ -699,6 +790,7 @@ def execute(run, state, confirm=input, emit=print, now=lambda: time.time() * 100
         # Fresh read binds authorization to the same live metadata and diff.
         state.data['phase'] = 'confirmation_read'
         state.save()
+        run.read_phase = 'confirmation_read'
         fresh = collect(run)
         need(digest(make_plan(fresh)) == token, 'plan_changed_confirm_again')
         run.approved = True
