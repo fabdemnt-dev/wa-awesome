@@ -92,22 +92,25 @@ test('full CI materialization uses real old/new generators, original marker and 
   await assert.rejects(prepareCiReleaseFiles({ db, workDir: join(dir, 'run'), toolingDir: tooling, runner, now: () => NOW }));
   assert(!JSON.stringify(plan).includes('SYNTHETIC_'));
 });
-test('source-hash exception never removes unknown labels, IAM, config or missing-key distinctions', () => {
+test('gcloud preserves source-hash and every other label/configuration exactly', () => {
   const proof = [{ function: { labels: { 'firebase-functions-hash': 'a'.repeat(40) }, buildConfig: {}, serviceConfig: {} },
     run: { labels: { 'firebase-functions-hash': 'a'.repeat(40), custom: 'retain' }, template: { containers: [] } }, iam: { etag: 'preserve' } }];
   const original = structuredClone(proof), before = stableCiFunctionConfiguration(proof, stableFunctionConfiguration);
   const changed = structuredClone(proof); changed[0].function.labels['firebase-functions-hash'] = 'b'.repeat(40);
-  assert.deepEqual(before, stableCiFunctionConfiguration(changed, stableFunctionConfiguration)); assert.deepEqual(proof, original);
+  assert.notDeepEqual(before, stableCiFunctionConfiguration(changed, stableFunctionConfiguration)); assert.deepEqual(proof, original);
   for (const mutate of [p => delete p[0].function.labels['firebase-functions-hash'], p => p[0].run.labels.custom = 'changed', p => p[0].iam.etag = 'changed', p => p[0].function.unknown = 'extra']) {
     const p = structuredClone(proof); mutate(p); assert.notDeepEqual(before, stableCiFunctionConfiguration(p, stableFunctionConfiguration));
   }
-  const bad = structuredClone(proof); bad[0].function.labels['firebase-functions-hash'] = 'not-a-hash'; assert.throws(() => stableCiFunctionConfiguration(bad, stableFunctionConfiguration));
+  const bad = structuredClone(proof); bad[0].function.labels['firebase-functions-hash'] = 'not-a-hash'; assert.notDeepEqual(before, stableCiFunctionConfiguration(bad, stableFunctionConfiguration));
 });
 test('CI journal is fresh, private, fsynced, stage-limited and never a reusable owner record', async () => {
   const at = join(dir, 'journal'); await mkdir(at, { mode: 0o700 }); const journal = await createCiJournal(at, () => NOW);
   await journal.issued('closed-baseline'); await journal.verified('closed-baseline');
   await assert.rejects(journal.issued('closed-baseline')); await assert.rejects(journal.providerStep({ stage: 'private text', resourceKind: 'functions', index: 0 }));
   await journal.issued('functions'); await journal.providerStep({ stage: 'official-cli-functions', resourceKind: 'functions', index: 0 });
+  await assert.rejects(journal.providerStep({ stage: 'official-cli-functions', resourceKind: 'functions', index: 0 }));
+  await assert.rejects(journal.providerStep({ stage: 'official-cli-functions', resourceKind: 'functions', index: 2 }));
+  await journal.providerStep({ stage: 'official-cli-functions', resourceKind: 'functions', index: 1 });
   await journal.fail('functions', 'source-proof', 'closed');
   const p = join(at, 'CI-RELEASE-JOURNAL.jsonl'); assert.equal((await lstat(p)).mode & 0o777, 0o600);
   assert(!String(await readFile(p)).includes('private text')); await assert.rejects(createCiJournal(at));
@@ -120,7 +123,11 @@ test('future release workflow is single push, fixed target and credential-free t
   const job = deploy.jobs.release; assert.equal(job.environment, 'garden-trial'); assert.equal(job.permissions['id-token'], 'write');
   assert(job.if.includes('github.event.created == true') && job.if.includes("github.event.before == '0000000000000000000000000000000000000000'") && job.if.includes('github.run_attempt == 1'));
   const auth = job.steps.findIndex(s => s.uses?.startsWith('google-github-actions/auth@'));
-  assert(auth > 0); assert(job.steps.slice(auth + 1).every(s => !s.uses && !/npm\s|curl\s|pip\s/.test(s.run || '')));
+  assert(auth > 0);
+  assert(job.if.includes('github.run_number == 2'));
+  const realSdkTest = job.steps.findIndex(s => s.run?.includes('node tests/floating-garden-ci-gcloud-sdk.integration.mjs'));
+  assert(realSdkTest > 0 && realSdkTest < auth);
+  assert(job.steps.slice(0, auth).some(s => s.run?.includes('tests/floating-garden-ci-gcloud.test.mjs'))); assert(job.steps.slice(auth + 1).every(s => !s.uses && !/npm\s|curl\s|pip\s/.test(s.run || '')));
   assert(job.steps.every(s => !s.uses || /@[a-f0-9]{40}$/.test(s.uses)));
   assert(!JSON.stringify(deploy).includes('secrets.')); assert(!JSON.stringify(deploy).includes('upload-artifact'));
   const prep = yaml.parse(await readFile(join(ROOT, '.github/workflows/garden-ci-preparation-tests.yml'), 'utf8'));
@@ -133,11 +140,13 @@ test('future release workflow is single push, fixed target and credential-free t
     assert(initialization?.env.ISOLATED_GCLOUD.includes('${{ runner.temp }}'));
     assert(initialization.run.includes('$GITHUB_ENV') && initialization.run.includes('CLOUDSDK_CONFIG='));
   }
+  assert(prep.jobs['offline-preparation'].steps.some(s => s.run?.includes('node tests/floating-garden-ci-gcloud-sdk.integration.mjs')));
+  for (const path of ['scripts/floating-garden-ci-gcloud.mjs', 'tests/floating-garden-ci-gcloud.test.mjs', 'tests/floating-garden-ci-gcloud-sdk.test.py', 'tests/floating-garden-ci-gcloud-sdk.integration.mjs']) assert(prep.on.pull_request.paths.includes(path));
   assert(!JSON.stringify(prep).includes('google-github-actions/auth@')); assert(!JSON.stringify(prep).includes('id-token'));
 });
 test('approval contract discloses CLI effects and preserves original deadline and inventory', () => {
   const a = ciReleaseApproval('a'.repeat(40), '2'); assert.equal(a.expiresAtMillis, S.endsAtMillis);
   assert.equal(a.oldInventory, S.oldInventory); assert.equal(a.newInventory, S.newInventory);
-  assert.equal(a.standardCliInternalRetriesAndParallelism, true); assert.equal(a.serviceIdentityGeneration, true);
+  assert.equal(a.standardCliInternalRetriesAndParallelism, true); assert.equal(a.serviceIdentityGeneration, false); assert.equal(a.functionsDeployer, 'gcloud-568.0.0'); assert.equal(a.functionsSequential, true);
   assert.equal(a.runNumber, '2'); assert.equal(a.reopenSamePairOnce, true); assert.equal(a.exclusiveMaintenance, true);
 });

@@ -286,15 +286,32 @@ class SetupTests(unittest.TestCase):
             self.assertEqual(os.environ['CLOUDSDK_STORAGE_USE_GRPC_IF_AVAILABLE'], 'true')
             self.assertEqual(os.environ['CLOUDSDK_FUNCTIONS_GEN2'], 'false')
 
-    def test_appspot_absent_never_granted_and_broad_role_blocks(self):
+    def test_unused_appspot_editor_is_inspected_but_never_granted_or_changed(self):
         s = m.collect(self.fake)
         self.assertNotIn(m.APPSPOT, s['act_as'])
         self.fake.accounts[m.APPSPOT] = account(m.APPSPOT)
         self.fake.policies[m.APPSPOT] = {'bindings': []}
         self.fake.policies['project']['bindings'].append(binding('roles/editor', 'serviceAccount:' + m.APPSPOT))
+        before = copy.deepcopy(self.fake.policies[m.APPSPOT])
+        self.assertEqual(self.run_setup(), 0)
+        self.assertEqual(self.fake.policies[m.APPSPOT], before)
+        self.assertNotIn(m.APPSPOT, m.collect(self.fake)['act_as'])
+        self.assertFalse(any(m.APPSPOT in args for args, stage, write in self.fake.calls if write))
+
+    def test_appspot_actual_build_is_never_authorized(self):
+        self.fake.functions[0]['buildConfig']['serviceAccount'] = f'projects/{m.PROJECT}/serviceAccounts/{m.APPSPOT}'
         self.assertEqual(self.run_setup(), 2)
+        self.assertEqual(self.state.data['stage'], 'appspot_build_identity_not_authorized')
         self.assertEqual(self.fake.writes, [])
-        self.assertEqual(self.state.data['stage'], 'broad_act_as_account')
+
+    def test_existing_deployer_appspot_binding_is_not_silently_retained_or_removed(self):
+        self.fake.accounts[m.APPSPOT] = account(m.APPSPOT)
+        self.fake.policies[m.APPSPOT] = {'bindings': [binding('roles/iam.serviceAccountUser', m.MEMBER, m.condition())]}
+        before = copy.deepcopy(self.fake.policies[m.APPSPOT])
+        self.assertEqual(self.run_setup(), 2)
+        self.assertEqual(self.fake.policies[m.APPSPOT], before)
+        self.assertEqual(self.fake.writes, [])
+        self.assertEqual(self.state.data['stage'], 'broader_existing_target_binding')
 
     def test_permission_support_missing_unsupported_and_api_disabled_block(self):
         for change in ('missing', 'NOT_SUPPORTED', 'TESTING', 'disabled'):
@@ -310,10 +327,9 @@ class SetupTests(unittest.TestCase):
         del self.fake.support[0]['customRolesSupportLevel']
         self.assertTrue(m.make_plan(m.collect(self.fake)))  # documented protobuf enum default
 
-    def test_extensions_viewer_replaces_only_unlisted_custom_permission(self):
+    def test_gcloud_route_removes_only_unneeded_function_cli_roles(self):
         expected_roles = ('roles/cloudfunctions.developer', 'roles/firebasehosting.admin',
-            'roles/firebaserules.admin', 'roles/serviceusage.serviceUsageConsumer',
-            'roles/serviceusage.apiKeysViewer', 'roles/firebaseextensions.viewer')
+            'roles/firebaserules.admin', 'roles/serviceusage.serviceUsageConsumer')
         self.assertEqual(m.PROJECT_ROLES, expected_roles)
         self.assertEqual(m.CUSTOM, {
             'gardenCiMetadataRead': ('resourcemanager.projects.getIamPolicy',
@@ -326,14 +342,13 @@ class SetupTests(unittest.TestCase):
             'iamcredentials.googleapis.com', 'sts.googleapis.com'))
         plan = m.make_plan(m.collect(self.fake))
         viewer = [a for a in plan['actions'] if a['binding'] and a['binding'][0] == 'roles/firebaseextensions.viewer']
-        self.assertEqual(len(viewer), 1)
-        self.assertEqual(viewer[0]['target'], 'project')
-        self.assertEqual(viewer[0]['binding'], ['roles/firebaseextensions.viewer', m.packed(m.condition()), m.MEMBER])
+        self.assertEqual(viewer, [])
+        self.assertNotIn('roles/serviceusage.apiKeysViewer', m.packed(plan))
         self.assertEqual(m.TIME_CONDITION, "request.time < timestamp('2026-10-11T23:45:51.472Z')")
         self.assertEqual(m.EXPIRY, 1791762351472)
         self.assertNotIn('firebaseextensions.instances.list', m.packed(plan))
-        self.assertTrue(any('does not fully enumerate' in x for x in plan['disclosures']))
-        self.assertTrue(any(stage == 'role_metadata' and args[3] == 'roles/firebaseextensions.viewer'
+        self.assertTrue(any('without granting Storage writes' in x for x in plan['disclosures']))
+        self.assertFalse(any(stage == 'role_metadata' and args[3] == 'roles/firebaseextensions.viewer'
             for args, stage, _ in self.fake.calls))
         self.assertEqual(self.fake.writes, [])
 
@@ -342,7 +357,7 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(self.run_setup(), 0, self.output[-1])
         viewer = [args for args, stage in self.fake.writes if stage == 'add_conditional_binding'
             and '--role=roles/firebaseextensions.viewer' in args]
-        self.assertEqual(len(viewer), 1)
+        self.assertEqual(viewer, [])
         self.assertTrue(self.state.data['setup_verified'])
         for permissions in m.CUSTOM.values():
             self.assertNotIn('firebaseextensions.instances.list', permissions)
@@ -528,10 +543,10 @@ class SetupTests(unittest.TestCase):
         with self.assertRaises(KeyError): m.make_plan(resource_only)
 
     def test_post_write_existing_api_loss_stops_before_federation_enable(self):
-        self.fake.services.append('firestore.googleapis.com')
+        self.fake.services.append('cloudbilling.googleapis.com')
         def disable_existing_api(fake, args, stage, write):
-            if stage == 'enabled_apis' and fake.writes and 'firestore.googleapis.com' in fake.services:
-                fake.services.remove('firestore.googleapis.com')
+            if stage == 'enabled_apis' and fake.writes and 'cloudbilling.googleapis.com' in fake.services:
+                fake.services.remove('cloudbilling.googleapis.com')
         self.fake.mutate = disable_existing_api
         self.assertEqual(self.run_setup(), 2)
         self.assertEqual(self.state.data['stage'], 'existing_api_disabled')
@@ -756,7 +771,7 @@ class SetupTests(unittest.TestCase):
         self.assertLess(len(review.splitlines()), 70)
         self.assertNotIn('example.resources.get', review)
         self.assertNotIn('unrelated@example.invalid', review)
-        self.assertIn('roles/serviceusage.apiKeysViewer', review)
+        self.assertNotIn('roles/serviceusage.apiKeysViewer', review)
         self.assertIn('datastore.entities.update', review)
 
     def test_command_surface_is_setup_only_no_payload_or_deployment(self):
@@ -787,15 +802,14 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(self.run_setup(), 2)
         self.assertEqual(self.fake.writes, [])
 
-    def test_safe_existing_appspot_gets_only_scoped_actas(self):
+    def test_unused_appspot_never_gets_actas_even_when_narrow(self):
         self.fake.accounts[m.APPSPOT] = account(m.APPSPOT)
         self.fake.policies[m.APPSPOT] = {'bindings': []}
         self.fake.policies['project']['bindings'].append(binding('roles/logging.logWriter', 'serviceAccount:' + m.APPSPOT))
         self.assertEqual(self.run_setup(), 0)
         grants = self.fake.policies[m.APPSPOT]['bindings']
-        self.assertEqual(len(grants), 1)
-        self.assertEqual(grants[0]['role'], 'roles/iam.serviceAccountUser')
-        self.assertEqual(grants[0]['condition'], m.condition())
+        self.assertEqual(grants, [])
+        self.assertNotIn(m.APPSPOT, m.collect(self.fake)['act_as'])
 
     def test_deleted_deployer_policy_reference_blocks_recreation(self):
         self.fake.policies['project']['bindings'].append(binding('roles/viewer', 'deleted:serviceAccount:' + m.DEPLOYER + '?uid=12345'))
@@ -988,7 +1002,7 @@ class SetupTests(unittest.TestCase):
         self.assertIn("assertion.workflow_sha == '" + 'a' * 40 + "'", condition)
         self.assertIn("assertion.run_number == '2'", condition)
         self.assertIn("assertion.run_attempt == '1'", condition)
-        for bad in (None, '', '0', '-1', '1 OR true', 2):
+        for bad in (None, '', '0', '1', '3', '-1', '1 OR true', 2):
             with self.assertRaises(m.Stop): m.release_condition('a' * 40, bad)
         self.fake.release_sha = None
         self.assertEqual(self.run_setup(), 2)
@@ -1407,7 +1421,7 @@ def verify_sdk_parser_and_prompts(sdk_root):
             for args, stage, write in fake.calls:
                 current_write = write
                 runner(args, stage, write=write)
-        assert len(captured) == 69
+        assert len(captured) == 65
         for raw_argv, write in sorted(captured.items()):
             argv = list(raw_argv)
             # No --help and no argument removal: parse exactly what the real
@@ -1552,8 +1566,8 @@ def verify_sdk_parser_and_prompts(sdk_root):
         verify_sdk_permission_pagination()
         verify_sdk_function_inventory()
         assert not blocked
-        print('SDK_PARSE_VERIFIED version=568.0.0 argvVariants=69 oldInvalidFlagRejected=true operationalCommandRuns=0 networkRequests=0 credentialAccess=0')
-        print('SDK_FORMAT_VERIFIED argvVariants=69 formats=5 dictAndProtoShape=true privateFieldsOmitted=true oldInvalidFormatRejected=true')
+        print('SDK_PARSE_VERIFIED version=568.0.0 argvVariants=65 oldInvalidFlagRejected=true operationalCommandRuns=0 networkRequests=0 credentialAccess=0')
+        print('SDK_FORMAT_VERIFIED argvVariants=65 formats=5 dictAndProtoShape=true privateFieldsOmitted=true oldInvalidFormatRejected=true')
         print('SDK_BUCKET_PIPELINE_VERIFIED rawApiResourceDisplayProjection=true standardDisplayDropsOwner=true exactOwnerRequired=true wrongAndMissingOwnerRejected=true')
         print('SDK_API_SELECTION_VERIFIED storageJson=true functionsGen2=true parentSettingsUnchanged=true alternateStorageCredentialsRejected=true')
         print('SDK_PROMPT_VERIFIED repeatedNo=true eofDefaultYesReproduced=true ownerApprovalInputUntouched=true')

@@ -146,7 +146,8 @@ async function harness({ actualTransport = false, actualBridge = false, database
   const archives = { '123': await zip(oldPacket.packet), '124': await zip(newPacket.packet) };
   const makeMetadata = (i, generation = '123') => {
     const fn = metadata(i, generation); if (!ci) return fn;
-    fn.labels['deployment-tool'] = 'cli-firebase'; fn.labels['firebase-functions-hash'] = (generation === '123' ? 'a' : 'b').repeat(40);
+    fn.labels['deployment-tool'] = 'cli-firebase'; fn.labels['firebase-functions-hash'] = 'a'.repeat(40);
+    fn.buildConfig.serviceAccount = `projects/${S.project}/serviceAccounts/${S.projectNumber}-compute@developer.gserviceaccount.com`;
     fn.buildConfig.environmentVariables = { GOOGLE_NODE_RUN_SCRIPTS: '' };
     fn.serviceConfig.environmentVariables = { EVENTARC_CLOUD_EVENT_SOURCE: `projects/${S.project}/locations/${S.region}/services/${FUNCTION_NAMES[i]}`, FIREBASE_CONFIG: JSON.stringify({ projectId: S.project, storageBucket: S.project + '.appspot.com' }), FUNCTION_TARGET: FUNCTION_NAMES[i], GCLOUD_PROJECT: S.project, LOG_EXECUTION_ID: 'true' }; return fn;
   };
@@ -180,7 +181,20 @@ async function harness({ actualTransport = false, actualBridge = false, database
   const runner = (command, args) => {
     calls.push({ command, args }); let result;
     if (command === 'gcloud') {
-      if (args[0] === 'config') result = {};
+      if (ci && args[0] === 'functions' && args[1] === 'deploy') {
+        const index = FUNCTION_NAMES.indexOf(args[2]); assert(index >= 0);
+        assert.equal(db.get('floatingGardenTrial/config').enabled, false);
+        assert(args.includes('--gen2') && args.includes('--quiet') && args.includes('--format=json'));
+        assert(args.includes(`--run-service-account=${RUNTIME_ACCOUNT}`));
+        assert(args.includes(`--build-service-account=${functions[index].buildConfig.serviceAccount}`));
+        assert(!args.some(a => /allow-unauthenticated|stage-bucket|runtime=|entry-point|labels|secrets|env-vars/.test(a)));
+        providerWrites.push('functions');
+        const fault = cliFault?.('functions', 'before', index); if (fault) return fault;
+        functions[index] = makeMetadata(index, '124');
+        return cliFault?.('functions', 'after', index) || { exitCode: 0, stdout: JSON.stringify(functions[index]) };
+      }
+      if (args[0] === 'version') result = { 'Google Cloud SDK': '568.0.0' };
+      else if (args[0] === 'config') result = {};
       else if (args[0] === 'projects' && args[1] === 'describe') result = { projectId: S.project, projectNumber: S.projectNumber, lifecycleState: 'ACTIVE' };
       else if (args.includes('get-iam-policy')) result = iamPolicy
         ? iamPolicy(args[0] === 'iam' ? 'runtime' : args[0] === 'secrets' ? 'secret' : 'project', policy()) : policy();
@@ -572,7 +586,7 @@ export function registerActiveUpdateEmulatorTests() {
 test('CI actual-provider path starts closed, runs three pinned CLI stages, preserves data and opens with exactly three updates', async () => {
   const h = await harness({ ci: true }), before = h.db.entries();
   const result = await h.runCi(); assert.equal(result.status, 'npc-released', JSON.stringify(result));
-  assert.deepEqual(h.providerWrites, ['functions', 'rules', 'hosting']);
+  assert.deepEqual(h.providerWrites, [...Array(5).fill('functions'), 'rules', 'hosting']);
   assert.equal(h.db.writes.length, 3); assert.equal(h.db.attempts.filter(a => !a.readOnly).length, 1);
   assert(h.db.attempts.filter(a => !a.readOnly).every(a => a.maxAttempts === 1));
   assert(h.db.writes.every(w => w.kind === 'update' && (w.path === 'floatingGardenTrial/config' || w.path.startsWith('floatingGardenTrialTesters/'))));
@@ -586,14 +600,14 @@ test('CI actual-provider path starts closed, runs three pinned CLI stages, prese
 });
 test('CI never pauses/reopens the old version and rejects open baseline, custom config, missing approval and reruns', async () => {
   for (const change of [h => h.db.set('floatingGardenTrial/config', { ...h.db.get('floatingGardenTrial/config'), enabled: true, testerUids: [...review.testerUids] }),
-    h => h.functions[0].labels.custom = 'retain', h => h.functions[0].serviceConfig.environmentVariables.FIREBASE_CONFIG = JSON.stringify({ projectId: S.project, storageBucket: S.project + '.appspot.com', extra: 'retain' }), h => h.functions[0].buildConfig.environmentVariables.EXTRA = 'retain']) {
+    h => h.functions[0].labels.custom = 'retain', h => h.functions[0].serviceConfig.environmentVariables.FIREBASE_CONFIG = JSON.stringify({ projectId: 'wrong-project', storageBucket: S.project + '.appspot.com' }), h => h.functions[0].buildConfig.environmentVariables.EXTRA = 'retain']) {
     const h = await harness({ ci: true }); change(h); const r = await h.runCi();
     assert.equal(r.status, 'blocked'); assert.equal(h.providerWrites.length, 0); assert.equal(h.db.writes.length, 0);
   }
   const h = await harness({ ci: true }); await assert.rejects(h.runCi({ approval: {} }));
   h.env.GITHUB_RUN_ATTEMPT = '2'; await assert.rejects(h.runCi()); assert.equal(h.providerWrites.length, 0);
 });
-test('CI source-hash exception preserves all security/config fields, and CLI failures always receive readback but stay closed', async () => {
+test('CI exact label/configuration preservation keeps all security/config fields, and CLI failures always receive readback but stay closed', async () => {
   for (const failed of ['functions', 'rules', 'hosting']) {
     const h = await harness({ ci: true, cliFault: (kind, when) => kind === failed && when === 'before' ? { exitCode: 1, stdout: JSON.stringify({ status: 'error', error: 'SYNTHETIC_SECRET_DO_NOT_PRINT' }) } : null });
     const r = await h.runCi(); assert.equal(r.status, 'blocked'); assert.equal(r.access, 'closed');
@@ -603,9 +617,9 @@ test('CI source-hash exception preserves all security/config fields, and CLI fai
   const h = await harness({ ci: true }); h.setOverride((url, value) => url.includes(':getIamPolicy') && h.providerWrites.length ? { ...value, auditConfigs: [] } : value);
   const r = await h.runCi(); assert.equal(r.status, 'blocked'); assert.equal(r.access, 'closed'); assert.equal(h.db.writes.length, 0);
 });
-test('CI exact cleanup warning is accepted only after complete source/config readback', async () => {
+test('CI Firebase cleanup-warning text is never accepted for gcloud, even when source landed', async () => {
   const h = await harness({ ci: true, cliFault: (kind, when) => kind === 'functions' && when === 'after' ? { exitCode: 1, stdout: JSON.stringify({ status: 'error', error: CLEANUP_WARNING }) } : null });
-  assert.equal((await h.runCi()).status, 'npc-released');
+  assert.equal((await h.runCi()).status, 'blocked'); assert.equal(h.db.writes.length, 0);
   const failed = await harness({ ci: true, cliFault: (kind, when) => kind === 'functions' && when === 'before' ? { exitCode: 1, stdout: JSON.stringify({ status: 'error', error: CLEANUP_WARNING }) } : null });
   assert.equal((await failed.runCi()).status, 'blocked'); assert.equal(failed.db.writes.length, 0);
 });
@@ -629,11 +643,12 @@ test('CI journal failure preserves actual failed phase and reconciled access', a
   assert.equal(r.journalWriteFailed, true); assert.equal(h.db.writes.length, 3); assert(!JSON.stringify(r).includes('SYNTHETIC_PRIVATE'));
 });
 
-test('CI empty Extensions preflight prevents accidental dynamic-extension changes', async () => {
-  for (const metadata of [[], { error: 'SYNTHETIC_PRIVATE' }, { instances: [{ name: 'synthetic-existing' }] }, { nextPageToken: 'synthetic-more' }, { instances: {} }]) {
-    const h = await harness({ ci: true }); h.setOverride((url, value) => url.startsWith('https://firebaseextensions.googleapis.com/') ? metadata : value);
-    const r = await h.runCi(); assert.equal(r.status, 'blocked'); assert.equal(r.access, 'closed'); assert.deepEqual(h.providerWrites, []); assert.equal(h.db.writes.length, 0);
-  }
+test('CI gcloud/Rules/Hosting route never requests obsolete function-CLI metadata', async () => {
+  const h = await harness({ ci: true });
+  assert.equal((await h.runCi()).status, 'npc-released');
+  assert(!h.calls.some(c => /firebaseextensions|adminSdkConfig|apikeys|billingInfo/.test(c.url || '')));
+  const deploys = h.calls.filter(c => c.command === process.execPath && c.args?.[1] === 'deploy');
+  assert.equal(deploys.length, 2); assert(deploys.every(c => !c.args[c.args.indexOf('--only') + 1].startsWith('functions')));
 });
 
 test('CI release requires the exact approved run number and a newly-created release ref', async () => {
@@ -641,6 +656,7 @@ test('CI release requires the exact approved run number and a newly-created rele
     h => h.env.GARDEN_RELEASE_REF_CREATED = 'false',
     h => delete h.env.GARDEN_RELEASE_REF_CREATED,
     h => h.env.GITHUB_RUN_NUMBER = '0',
+    h => h.env.GITHUB_RUN_NUMBER = '3',
     h => h.env.GITHUB_RUN_NUMBER = 'not-a-number',
   ]) {
     const h = await harness({ ci: true }); mutate(h); await assert.rejects(h.runCi());
@@ -649,4 +665,34 @@ test('CI release requires the exact approved run number and a newly-created rele
   const h = await harness({ ci: true });
   await assert.rejects(h.runCi({ approval: ciReleaseApproval(h.env.GITHUB_SHA, '3') }));
   assert.equal(h.calls.length, 0); assert.equal(h.providerWrites.length, 0); assert.equal(h.db.writes.length, 0);
+});
+
+test('CI every partial Functions interruption stops once, reconciles, and leaves gate/data closed', async () => {
+  for (let index = 0; index < FUNCTION_NAMES.length; index++) for (const when of ['before', 'after']) {
+    const h = await harness({ ci: true, cliFault: (kind, at, i) => kind === 'functions' && i === index && at === when
+      ? { exitCode: null, signal: true, timedOut: index % 2 === 0, stdout: 'SYNTHETIC_PRIVATE_DIAGNOSTIC' } : null });
+    const before = h.db.entries(), result = await h.runCi();
+    assert.equal(result.status, 'blocked'); assert.equal(result.stage, 'functions'); assert.equal(result.access, 'closed');
+    assert.equal(h.providerWrites.length, index + 1); assert(h.providerWrites.every(k => k === 'functions'));
+    assert.deepEqual(h.db.entries(), before); assert.equal(h.db.writes.length, 0);
+    assert.equal(h.functions.filter(fn => fn.buildConfig.sourceProvenance.resolvedStorageSource.generation === '124').length, index + (when === 'after' ? 1 : 0));
+    const attempts = h.journalEntries.filter(e => e.stage === 'official-cli-functions');
+    assert.deepEqual(attempts.map(e => e.index), Array.from({ length: index + 1 }, (_, i) => i));
+    assert(!JSON.stringify(result).includes('SYNTHETIC_PRIVATE'));
+    await assert.rejects(h.cloud.deployCiStage('functions'));
+  }
+});
+test('CI pre-reopen configuration drift is rejected after each exact function and never reaches next stage', async () => {
+  for (const mutate of [fn => fn.labels['firebase-functions-hash'] = 'b'.repeat(40),
+    fn => fn.buildConfig.serviceAccount = `projects/${S.project}/serviceAccounts/${S.projectNumber}@cloudbuild.gserviceaccount.com`,
+    fn => fn.serviceConfig.environmentVariables.LOG_EXECUTION_ID = 'false',
+    fn => fn.serviceConfig.secretEnvironmentVariables[0].version = '2',
+    fn => fn.buildConfig.environmentVariables.GOOGLE_NODE_RUN_SCRIPTS = 'build']) {
+    let h; h = await harness({ ci: true, cliFault: (kind, when, i) => {
+      if (kind === 'functions' && when === 'after' && i === 0) mutate(h.functions[0]);
+      return null;
+    } });
+    const result = await h.runCi(); assert.equal(result.status, 'blocked'); assert.equal(result.access, 'closed');
+    assert.deepEqual(h.providerWrites, ['functions']); assert.equal(h.db.writes.length, 0);
+  }
 });

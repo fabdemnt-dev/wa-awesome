@@ -63,7 +63,8 @@ test('commands are exact five named selectors, dedicated rules and dedicated hos
   const expected = (config, only) => ({ cwd: 'packet/game', argv: ['firebase', '--config', config, '--project',
     'wa-awesome-garden-stg', 'deploy', '--only', only] });
   assert.deepEqual(summary.commandsNotExecuted, {
-    functions: expected('firebase.trial.json', names.map(name => `functions:floating-garden-trial:${name}`).join(',')),
+    functions: { driver: 'floating-garden-ci-release.mjs', cli: 'gcloud', version: '568.0.0',
+      existingFunctionNames: names, sequential: true, identitiesFromVerifiedBaseline: true },
     rules: expected('firebase.trial.json', 'firestore:rules'),
     hosting: expected('firebase.hosting-only.json', 'hosting:wa-awesome-garden-stg'),
   });
