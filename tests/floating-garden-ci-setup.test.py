@@ -179,8 +179,8 @@ class SetupTests(unittest.TestCase):
         serialized = json.dumps(self.state.data)
         self.assertNotIn('owner@example', serialized)
         self.assertNotIn('unrelated@example', serialized)
-        self.assertIn('ACTAS ' + BUILD + '; inspected roles: roles/editor', self.output[0])
-        self.assertIn('indirect', self.output[0])
+        self.assertTrue(any('ACTAS ' + BUILD + '; inspected roles: roles/editor' in line for line in self.output))
+        self.assertTrue(any('indirect' in line for line in self.output))
         self.assertNotIn('roles/editor', [a for args, _ in self.fake.writes for a in args])
 
     def test_no_write_before_exact_confirmation(self):
@@ -309,6 +309,122 @@ class SetupTests(unittest.TestCase):
         self.fake = Fake()
         del self.fake.support[0]['customRolesSupportLevel']
         self.assertTrue(m.make_plan(m.collect(self.fake)))  # documented protobuf enum default
+
+    def test_permission_catalog_keeps_late_records_and_bounds_full_inventory(self):
+        self.fake.support = [{'name': f'unrelated.resources.read{i}'} for i in range(14987)] + self.fake.support
+        support = m.permission_support(self.fake)
+        self.assertEqual(len(support), 13)
+        self.assertEqual({p['name'] for p in support}, {p for ps in m.CUSTOM.values() for p in ps})
+        self.assertEqual(self.fake.calls[-1][0], m.permission_query_args())
+        self.assertFalse(any(a.startswith(('--filter=', '--limit=', '--page-size=')) for a in self.fake.calls[-1][0]))
+        self.fake.support = [{'name': f'unrelated.resources.read{i}'} for i in range(m.PERMISSION_CATALOG_LIMIT)]
+        with self.assertRaises(m.Stop) as caught: m.permission_support(self.fake)
+        self.assertEqual(caught.exception.stage, 'custom_permission_support')
+
+    def test_permission_catalog_duplicate_names_and_malformed_target_flags_fail_closed(self):
+        for change in ('duplicate', 'null_name', 'null_support', 'unknown_support', 'string_disabled', 'numeric_predefined'):
+            with self.subTest(change=change):
+                self.fake = Fake()
+                if change == 'duplicate': self.fake.support.append(copy.deepcopy(self.fake.support[0]))
+                elif change == 'null_name': self.fake.support.append({'name': None})
+                elif change == 'null_support': self.fake.support[0]['customRolesSupportLevel'] = None
+                elif change == 'unknown_support': self.fake.support[0]['customRolesSupportLevel'] = 'NEW_UNKNOWN'
+                elif change == 'string_disabled': self.fake.support[0]['apiDisabled'] = 'false'
+                else: self.fake.support[0]['onlyInPredefinedRoles'] = 0
+                self.assertEqual(self.run_setup(), 2)
+                self.assertEqual(self.fake.writes, [])
+
+    def test_permission_evidence_is_fresh_each_pass_and_unrelated_text_is_not_plan_scope(self):
+        before = m.make_plan(m.collect(self.fake))
+        self.fake.support.reverse()
+        self.fake.support.append({'name': 'unrelated.resources.read', 'description': 'unrelated text'})
+        self.fake.support[0]['description'] = 'unused descriptive text'
+        self.assertEqual(before, m.make_plan(m.collect(self.fake)))
+        calls = 0
+        def change_on_confirmation(fake, args, stage, write):
+            nonlocal calls
+            if stage == 'custom_permission_support':
+                calls += 1
+                if calls == 2: fake.support[0]['apiDisabled'] = True
+        self.fake.mutate = change_on_confirmation
+        self.assertEqual(self.run_setup(), 2)
+        self.assertEqual(calls, 2)
+        self.assertEqual(self.fake.writes, [])
+        self.assertTrue(self.state.data['stage'].startswith('unsupported_or_unknown_custom_permission:'))
+
+    def test_permission_catalog_timeout_never_retries_or_accepts_partial_evidence(self):
+        for fail_pass in (1, 2):
+            with self.subTest(fail_pass=fail_pass):
+                self.fake = Fake()
+                calls = 0
+                def timeout_on_pass(fake, args, stage, write):
+                    nonlocal calls
+                    if stage == 'custom_permission_support':
+                        calls += 1
+                        if calls == fail_pass:
+                            raise m.Stop(stage, local_code='CLI_TIMEOUT')
+                self.fake.mutate = timeout_on_pass
+                self.state = m.State(Path(self.temp.name) / f'timeout-{fail_pass}')
+                self.assertEqual(self.run_setup(), 2)
+                self.assertEqual(calls, fail_pass)
+                self.assertFalse(self.state.data['setup_verified'])
+                self.assertEqual(self.state.data['local_code'], 'CLI_TIMEOUT')
+                self.assertEqual(self.fake.writes, [])
+
+    def test_two_fresh_catalog_scans_even_when_all_verification_passes_repeat(self):
+        class SlowVisibility(Fake):
+            inventories = 0
+            def __call__(fake, args, stage, write=False):
+                result = super().__call__(args, stage, write)
+                if stage == 'custom_role_inventory':
+                    fake.inventories += 1
+                    if fake.inventories in (3, 4, 6, 7, 9, 10):
+                        return result[1:]  # Two incomplete read-only passes before visibility.
+                return result
+        self.fake = SlowVisibility()
+        self.assertEqual(self.run_setup(), 0, self.output[-1])
+        self.assertEqual(self.fake.inventories, 11)
+        self.assertEqual(sum(stage == 'custom_permission_support' for _, stage, _ in self.fake.calls), 2)
+        self.assertTrue(self.state.data['setup_verified'])
+        # An already matching setup still freshly validates capability twice.
+        self.fake.calls = []
+        self.state = m.State(Path(self.temp.name) / 'matching-live')
+        self.assertEqual(self.run_setup(), 0, self.output[-1])
+        self.assertEqual(sum(stage == 'custom_permission_support' for _, stage, _ in self.fake.calls), 2)
+        self.assertEqual(self.fake.writes, [])
+
+    def test_post_write_resource_verification_has_no_cached_catalog_and_detects_role_drift(self):
+        for change in ('name', 'permissions', 'stage', 'deleted'):
+            with self.subTest(change=change):
+                self.fake = Fake()
+                self.state = m.State(Path(self.temp.name) / ('role-drift-' + change))
+                def drift(fake, args, stage, write):
+                    if stage == 'custom_role_inventory' and fake.custom:
+                        role = fake.custom['gardenCiMetadataRead']
+                        if change == 'name': role['name'] = m.role_name('foreign')
+                        elif change == 'permissions': role['includedPermissions'].append('iam.roles.update')
+                        elif change == 'stage': role['stage'] = 'DISABLED'
+                        else: role['deleted'] = True
+                self.fake.mutate = drift
+                self.assertEqual(self.run_setup(), 2)
+                self.assertEqual(sum(stage == 'custom_permission_support' for _, stage, _ in self.fake.calls), 2)
+                self.assertFalse(self.state.data['setup_verified'])
+                self.assertNotIn('enable_provider_last', [stage for _, stage in self.fake.writes])
+        self.fake = Fake()
+        resource_only = m.collect(self.fake, include_permission_catalog=False)
+        self.assertNotIn('permission_support', resource_only)
+        with self.assertRaises(KeyError): m.make_plan(resource_only)
+
+    def test_post_write_existing_api_loss_stops_before_federation_enable(self):
+        self.fake.services.append('firestore.googleapis.com')
+        def disable_existing_api(fake, args, stage, write):
+            if stage == 'enabled_apis' and fake.writes and 'firestore.googleapis.com' in fake.services:
+                fake.services.remove('firestore.googleapis.com')
+        self.fake.mutate = disable_existing_api
+        self.assertEqual(self.run_setup(), 2)
+        self.assertEqual(self.state.data['stage'], 'existing_api_disabled')
+        self.assertEqual(sum(stage == 'custom_permission_support' for _, stage, _ in self.fake.calls), 2)
+        self.assertNotIn('enable_provider_last', [stage for _, stage in self.fake.writes])
 
     def test_hmac_latest_must_be_original_enabled_version_one(self):
         self.fake.hmac_version = '2'
@@ -628,6 +744,40 @@ class SetupTests(unittest.TestCase):
         if before_fds is not None:
             self.assertEqual(len(list(descriptors.iterdir())), before_fds)
 
+    def test_catalog_budget_is_exact_read_only_and_other_commands_stay_at_sixty(self):
+        for args, stage, write, expected in (
+                (m.permission_query_args(), 'custom_permission_support', False, 600),
+                (m.permission_query_args(), 'different_stage', False, 60),
+                (['config', 'list'], 'custom_permission_support', False, 60),
+                (m.permission_query_args(), 'custom_permission_support', True, 60)):
+            with self.subTest(stage=stage, write=write):
+                output = []
+                runner = m.Gcloud(emit=output.append)
+                runner.approved = write
+                with patch.object(m.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, b'[]', b'')) as dispatch:
+                    runner(args, stage, write=write)
+                    dispatch.assert_called_once()
+                    self.assertEqual(dispatch.call_args.kwargs['timeout'], expected)
+                self.assertEqual(bool(output), expected == 600)
+
+    def test_catalog_progress_is_periodic_redacted_and_cleaned_up_on_timeout(self):
+        import threading
+        import time
+        output = []
+        before = set(threading.enumerate())
+        def delayed(command, **kwargs):
+            time.sleep(0.03)
+            raise subprocess.TimeoutExpired(command, kwargs['timeout'], output=b'SYNTHETIC_PRIVATE')
+        with patch.object(m, 'PERMISSION_PROGRESS_SECONDS', 0.005), patch.object(m.subprocess, 'run', side_effect=delayed) as dispatch:
+            with self.assertRaises(m.Stop) as caught:
+                m.Gcloud(emit=output.append)(m.permission_query_args(), 'custom_permission_support')
+        self.assertEqual(caught.exception.local_code, 'CLI_TIMEOUT')
+        dispatch.assert_called_once()
+        self.assertTrue(any(x.startswith('READ_START') for x in output))
+        self.assertTrue(any(x.startswith('READ_WAIT') for x in output))
+        self.assertNotIn('SYNTHETIC_PRIVATE', '\n'.join(output))
+        self.assertEqual(set(threading.enumerate()), before)
+
     def test_gcloud_local_failures_are_sanitized_and_specific(self):
         cases = [
             (subprocess.CompletedProcess([], 2, b'', b'unrecognized arguments: --no-quiet SYNTHETIC_PRIVATE'), 'CLI_ARGUMENT', 2),
@@ -828,13 +978,139 @@ def verify_sdk_response_schemas():
     print('SDK_RESPONSE_SCHEMAS_VERIFIED readStages=33 apiFamilies=7 fullDisplayer=true ancestorFlattening=true defaultOmission=true zeroChangePlan=true')
 
 
+def verify_sdk_permission_pagination():
+    """Execute only the catalog command body with a synthetic client factory.
+
+    Called after the shared network/auth/subprocess/CLI dispatch guards. Real
+    SDK paging and rendering are exercised without any provider operations.
+    """
+    from types import SimpleNamespace
+    from googlecloudsdk import gcloud_main
+    from googlecloudsdk.api_lib.util import apis
+    from googlecloudsdk.api_lib.iam import util
+    from googlecloudsdk.calliope import display
+    from googlecloudsdk.core import log, properties
+    from googlecloudsdk.core.configurations import named_configs
+    from apitools.base.py import encoding
+    helper = m
+    cli = gcloud_main.CreateCLI([])
+    messages = apis.GetMessagesModule('iam', 'v1')
+    names = sorted({p for values in m.CUSTOM.values() for p in values})
+    assert len(names) == 13
+    projection = m.permission_query_args()[-1].split('=', 1)[1]
+    class SyntheticService:
+        def __init__(self, values, fail_offset=None):
+            self.values = values
+            self.requests = []
+            self.simulated_seconds = 0
+            self.fail_offset = fail_offset
+
+        def QueryTestablePermissions(self, request, global_params=None):
+            assert request.fullResourceName == '//cloudresourcemanager.googleapis.com/projects/' + helper.PROJECT
+            assert request.pageSize == 100
+            assert global_params is None
+            offset = int(request.pageToken or '0')
+            if offset == self.fail_offset:
+                raise RuntimeError('synthetic late-page failure')
+            self.simulated_seconds += 1
+            self.requests.append({'pageSize': request.pageSize, 'offset': offset})
+            limit = offset + request.pageSize
+            page = [encoding.JsonToMessage(messages.Permission, json.dumps(value))
+                    for value in self.values[offset:limit]]
+            return messages.QueryTestablePermissionsResponse(
+                permissions=page,
+                nextPageToken=str(limit) if limit < len(self.values) else None)
+
+    def render(values, fail_offset=None):
+        service = SyntheticService(values, fail_offset)
+        argv = ['iam', 'list-testable-permissions',
+                '//cloudresourcemanager.googleapis.com/projects/' + helper.PROJECT,
+                '--format=' + projection,
+                '--project=' + helper.PROJECT, '--verbosity=error']
+        named_configs.FLAG_OVERRIDE_STACK.PushFromArgs(argv)
+        properties.VALUES.PushInvocationValues()
+        try:
+            parsed = cli.top_element._parser.parse_args(argv)
+            command = parsed._GetCommand()
+            instance = command._common_type(cli=cli, context={})
+            output = io.StringIO()
+            # The real command Run is safe only because its client factory is
+            # replaced with the in-memory service; all lower escape hatches fail.
+            with patch.object(util, 'GetClientAndMessages', return_value=(SimpleNamespace(permissions=service), messages)), patch.object(log, 'out', output):
+                resources = instance.Run(parsed)
+                display.Displayer(instance, parsed, resources, display_info=command.ai.display_info).Display()
+            return json.loads(output.getvalue()), service.requests, service.simulated_seconds
+        finally:
+            properties.VALUES.PopInvocationValues()
+            named_configs.FLAG_OVERRIDE_STACK.Pop()
+
+    def valid(records):
+        records = helper.permission_support(lambda args, stage: records)
+        state = {'permission_support': records, 'custom': {}, 'role_metadata': {},
+                 'account_roles': {}, 'build_accounts': [], 'provider': None,
+                 'act_as': [], 'policies': {}, 'bucket_policy': {}, 'function_policies': {}}
+        try:
+            helper.validate_permission_support(state)
+        except helper.Stop:
+            return False
+        return True
+
+    noise = [{'name': 'synthetic.unrelated.p' + str(i), 'description': 'do-not-retain'} for i in range(14984)]
+    decoys = [{'name': names[0] + '.extra'}, {'name': 'prefix.' + names[0]}, {'name': names[0].upper()}]
+    needed = [{'name': name, 'customRolesSupportLevel': 'SUPPORTED',
+               'onlyInPredefinedRoles': False, 'apiDisabled': False,
+               'description': 'do-not-retain', 'title': 'do-not-retain'} for name in names]
+
+    cases = 0
+    records, requests, simulated_seconds = render(noise + decoys + needed)
+    assert len(requests) == 150 and [r['offset'] for r in requests] == list(range(0, 15000, 100))
+    assert 60 < simulated_seconds <= 600
+    assert len(records) == 15000
+    helper.bounded_list(records, 'catalog', 50000)
+    assert sorted(p['name'] for p in records if p['name'] in names) == names
+    assert all(set(p) <= {'name', 'customRolesSupportLevel', 'onlyInPredefinedRoles', 'apiDisabled'} for p in records)
+    assert valid(records)
+    assert len(helper.permission_support(lambda args, stage: records)) == 13
+    cases += 1
+    # Projection cannot stop pagination, even after every wanted record.
+    records, requests, simulated_seconds = render(needed + noise + decoys)
+    assert len(requests) == 150 and len(records) == 15000
+    assert sorted(p['name'] for p in records if p['name'] in names) == names
+    cases += 1
+    # Missing support enum is protobuf's documented SUPPORTED=0 default.
+    records, requests, simulated_seconds = render(noise + [{'name': name} for name in names])
+    assert valid(records)
+    cases += 1
+    records, requests, simulated_seconds = render(noise + needed[:-1])
+    assert not valid(records)
+    cases += 1
+    for field, value in [('customRolesSupportLevel', 'NOT_SUPPORTED'),
+                         ('customRolesSupportLevel', 'TESTING'),
+                         ('apiDisabled', True), ('onlyInPredefinedRoles', True)]:
+        changed = [dict(record) for record in needed]
+        changed[-1][field] = value
+        records, requests, simulated_seconds = render(noise + changed)
+        assert not valid(records), (field, value)
+        assert len(requests) == 150
+        cases += 1
+    try:
+        render(noise + decoys + needed, fail_offset=14900)
+    except RuntimeError as error:
+        assert str(error) == 'synthetic late-page failure'
+    else:
+        raise AssertionError('Late page failure must not become partial successful output')
+    cases += 1
+    print('SDK_PERMISSION_PAGINATION_VERIFIED cases=9 records=15000 pages=150 pageSize=100 simulatedSeconds=150 realDisplayer=true lateRequiredRecords=true lateFailurePropagates=true cloudCalls=0')
+
+
 def verify_sdk_parser_and_prompts(sdk_root):
     """Real SDK argument parsing, resource formatting and prompt rejection.
 
     Called separately by credential-free CI after the official pinned SDK is
     installed. A private empty configuration, network/process audit hook, and
     SDK dispatch/auth intercepts fail closed before any provider operation.
-    Never CLI.Execute/Command.Run; every resource used below is synthetic.
+    Never CLI.Execute/backend dispatch. Only the permission command body runs
+    against a synthetic client; every resource used below is synthetic.
     """
     import socket
     import runpy
@@ -956,7 +1232,7 @@ def verify_sdk_parser_and_prompts(sdk_root):
         from googlecloudsdk.core.resource import resource_exceptions, resource_printer
         from apitools.base.py import encoding
         formats = {next(arg.split('=', 1)[1] for arg in argv if arg.startswith('--format=')) for argv in captured}
-        assert len(formats) == 4, 'review all changed output formats'
+        assert len(formats) == 5, 'review all changed output formats'
         for argv in captured:
             projection = next(arg.split('=', 1)[1] for arg in argv if arg.startswith('--format='))
             resource_printer.Printer(projection, out=io.StringIO())
@@ -980,6 +1256,11 @@ def verify_sdk_parser_and_prompts(sdk_root):
                                  {'name': 'synthetic-secret-metadata', 'state': 'ENABLED'}),
             'json(name,projectNumber)': ({'name': 'synthetic-bucket', 'projectNumber': m.NUMBER, 'SYNTHETIC_PRIVATE': 'omit'},
                                         {'name': 'synthetic-bucket', 'projectNumber': m.NUMBER}),
+            'json(name,customRolesSupportLevel,onlyInPredefinedRoles,apiDisabled)': (
+                {'name': 'synthetic.resources.get', 'customRolesSupportLevel': 'NOT_SUPPORTED',
+                 'onlyInPredefinedRoles': True, 'apiDisabled': True, 'description': 'SYNTHETIC_PRIVATE'},
+                {'name': 'synthetic.resources.get', 'customRolesSupportLevel': 'NOT_SUPPORTED',
+                 'onlyInPredefinedRoles': True, 'apiDisabled': True}),
         }
         assert formats == {function_format, *fixtures}
         for projection, (sample, expected) in fixtures.items():
@@ -1071,9 +1352,10 @@ def verify_sdk_parser_and_prompts(sdk_root):
                 assert api_factory._get_api_class(storage_url.ProviderPrefix.GCS, False) is json_client.JsonClient
                 assert function_flags.ShouldUseGen2() is True and function_flags.ShouldUseGen1() is False
         verify_sdk_response_schemas()
+        verify_sdk_permission_pagination()
         assert not blocked
-        print('SDK_PARSE_VERIFIED version=568.0.0 argvVariants=67 oldInvalidFlagRejected=true commandRuns=0 networkRequests=0 credentialAccess=0')
-        print('SDK_FORMAT_VERIFIED argvVariants=67 formats=4 dictAndProtoShape=true privateFieldsOmitted=true oldInvalidFormatRejected=true')
+        print('SDK_PARSE_VERIFIED version=568.0.0 argvVariants=67 oldInvalidFlagRejected=true operationalCommandRuns=0 networkRequests=0 credentialAccess=0')
+        print('SDK_FORMAT_VERIFIED argvVariants=67 formats=5 dictAndProtoShape=true privateFieldsOmitted=true oldInvalidFormatRejected=true')
         print('SDK_BUCKET_PIPELINE_VERIFIED rawApiResourceDisplayProjection=true standardDisplayDropsOwner=true exactOwnerRequired=true wrongAndMissingOwnerRejected=true')
         print('SDK_API_SELECTION_VERIFIED storageJson=true functionsGen2=true parentSettingsUnchanged=true alternateStorageCredentialsRejected=true')
         print('SDK_PROMPT_VERIFIED repeatedNo=true eofDefaultYesReproduced=true ownerApprovalInputUntouched=true')
