@@ -101,7 +101,7 @@ PROVIDER_CODES = {'PERMISSION_DENIED', 'UNAUTHENTICATED', 'NOT_FOUND', 'ALREADY_
                   'INVALID_ARGUMENT', 'RESOURCE_EXHAUSTED', 'UNAVAILABLE'}
 
 
-LOCAL_CODES = {'UNKNOWN', 'CLI_ARGUMENT', 'CLI_MISSING', 'CLI_START_FAILED', 'CLI_TIMEOUT', 'CLI_EXIT_NONZERO', 'NON_JSON_RESPONSE'}
+LOCAL_CODES = {'UNKNOWN', 'CLI_ARGUMENT', 'CLI_FORMAT', 'CLI_MISSING', 'CLI_START_FAILED', 'CLI_TIMEOUT', 'CLI_EXIT_NONZERO', 'NON_JSON_RESPONSE'}
 
 
 class Stop(Exception):
@@ -249,7 +249,14 @@ class Gcloud:
         if p.returncode:
             text = p.stderr[:262144].decode('utf-8', 'replace')
             code = next((c for c in sorted(PROVIDER_CODES) if re.search(r'\b' + c + r'\b', text)), 'UNKNOWN')
-            local = 'CLI_ARGUMENT' if re.search(r'unrecognized arguments:|unrecognized flag|Invalid choice:', text, re.IGNORECASE) else 'CLI_EXIT_NONZERO'
+            # Classify fixed SDK error phrases only. Never expose stderr, which
+            # can contain account identities, resource bodies or credentials.
+            if re.search(r'Unknown transform function |Format must be one of ', text):
+                local = 'CLI_FORMAT'
+            elif re.search(r'unrecognized arguments:|unrecognized flag|Invalid choice:', text, re.IGNORECASE):
+                local = 'CLI_ARGUMENT'
+            else:
+                local = 'CLI_EXIT_NONZERO'
             raise Stop(stage, code, local, p.returncode)
         need(len(p.stdout) <= 8 * 1024 * 1024, 'response_size')
         try:
@@ -293,7 +300,7 @@ def collect(run):
         run(['services', 'list', '--enabled', '--limit=1000'], 'enabled_apis'), 'enabled_apis')
         if x.get('state') == 'ENABLED')
     s['functions'] = bounded_list(run(['functions', 'list', '--v2', f'--regions={REGION}', '--limit=1000',
-        '--format=json(name,environment,state,buildConfig(serviceAccount,source),serviceConfig(serviceAccountEmail))'], 'function_metadata'), 'function_metadata')
+        '--format=json(name,environment,state,buildConfig.serviceAccount,buildConfig.source,serviceConfig.serviceAccountEmail)'], 'function_metadata'), 'function_metadata')
     aliases = {f'projects/{p}/locations/{REGION}/functions/{n}': f'projects/{PROJECT}/locations/{REGION}/functions/{n}'
                for p in (PROJECT, NUMBER) for n in FUNCTIONS}
     need(len(s['functions']) == 5 and all(f.get('name') in aliases for f in s['functions']), 'exact_five_functions')
@@ -564,6 +571,7 @@ class State:
                      'stage': 'reading', 'provider_code': 'UNKNOWN', 'local_code': 'UNKNOWN', 'exit_code': None, 'created_targets': previous.get('created_targets', []),
                      'completed_steps': previous.get('completed_steps', []), 'attempt': previous.get('attempt', 0) + 1,
                      'possibly_applied': None, 'setup_verified': False, 'release_ready': False,
+                     'phase': 'initial_read', 'mutation_attempts_this_attempt': 0,
                      'federation_may_be_active': None}
         need(self.data['attempt'] <= 20 and len(self.data['completed_steps']) < 256, 'state_attempt_limit')
         self.save()
@@ -657,7 +665,7 @@ def execute(run, state, confirm=input, emit=print, now=lambda: time.time() * 100
         state.data['federation_may_be_active'] = bool(before['pool'] and not before['pool'].get('disabled', False) and before['provider'] and not before['provider'].get('disabled', False))
         plan = make_plan(before)
         token = digest(plan)
-        state.data.update(stage='owner_confirmation', plan_hash=token)
+        state.data.update(stage='owner_confirmation', phase='owner_confirmation', plan_hash=token)
         state.save()
         emit(render_plan(plan, token))
         emit('No cloud writes yet. Review every grant and change above. No release is included.')
@@ -666,10 +674,12 @@ def execute(run, state, confirm=input, emit=print, now=lambda: time.time() * 100
         need(confirm('Type exactly ' + phrase + ': ') == phrase, 'owner_confirmation_declined')
         need(now() < EXPIRY and now() - started <= 300000, 'owner_confirmation_expired')
         # Fresh read binds authorization to the same live metadata and diff.
+        state.data['phase'] = 'confirmation_read'
+        state.save()
         fresh = collect(run)
         need(digest(make_plan(fresh)) == token, 'plan_changed_confirm_again')
         run.approved = True
-        state.data['stage'] = 'applying'
+        state.data.update(stage='applying', phase='applying')
         state.save()
         expected = validate(before)
         ordinary = [a for a in plan['actions'] if not a['stage'].endswith('_last')]
@@ -677,9 +687,13 @@ def execute(run, state, confirm=input, emit=print, now=lambda: time.time() * 100
         for action in ordinary:
             need(now() < EXPIRY, 'original_deadline_expired')
             stage, target = action['stage'], action['target']
-            state.data.update(stage=stage, possibly_applied={'stage': stage, 'target': target})
-            state.save()
             previous_policy = run(policy_command(target, 'get-iam-policy'), 'binding_before') if action['binding'] else None
+            # Save the uncertainty marker before dispatch, after any read-only
+            # precondition. This counter is per invocation and deliberately
+            # conservative: a failed launch may not have reached the provider.
+            state.data.update(stage=stage, possibly_applied={'stage': stage, 'target': target},
+                              mutation_attempts_this_attempt=state.data['mutation_attempts_this_attempt'] + 1)
+            state.save()
             run(action['args'], stage, write=True)
             if action['create']:
                 state.data['created_targets'].append(target)
@@ -693,21 +707,26 @@ def execute(run, state, confirm=input, emit=print, now=lambda: time.time() * 100
                 need(policy_atoms(previous_policy) <= policy_atoms(after) and
                      tuple(action['binding']) in policy_atoms(after), 'binding_verification')
                 need(previous_policy.get('auditConfigs', []) == after.get('auditConfigs', []), 'audit_policy_changed')
+        state.data['phase'] = 'verification'
+        state.save()
         verified = verify_expected(run, before, expected, sleep)
         for action in enables:
             need(now() < EXPIRY, 'original_deadline_expired')
             # If another actor enabled federation prematurely, do not continue.
             need(verified['pool'].get('disabled', False) or verified['provider'].get('disabled', False), 'federation_enabled_early')
-            state.data.update(stage=action['stage'], possibly_applied={'stage': action['stage'], 'target': action['target']}, federation_may_be_active=True)
+            state.data.update(stage=action['stage'], phase='enabling', possibly_applied={'stage': action['stage'], 'target': action['target']}, federation_may_be_active=True,
+                              mutation_attempts_this_attempt=state.data['mutation_attempts_this_attempt'] + 1)
             state.save()
             run(action['args'], action['stage'], write=True)
             state.data['completed_steps'].append({'stage': action['stage'], 'target': action['target']})
             state.data['possibly_applied'] = None
             state.save()
             wait_enabled(run, action, sleep)
+            state.data['phase'] = 'verification'
+            state.save()
             verified = verify_expected(run, before, expected, sleep)
         need(verified['pool'].get('disabled', False) is False and verified['provider'].get('disabled', False) is False, 'federation_enable_not_observed')
-        state.data.update(stage='setup_verified', setup_verified=True)
+        state.data.update(stage='setup_verified', phase='verified', setup_verified=True)
         state.save()
         emit('SETUP_VERIFIED release_ready=false. This verified setup metadata only; no deployment or credential exchange was tested.')
         return 0
@@ -717,7 +736,11 @@ def execute(run, state, confirm=input, emit=print, now=lambda: time.time() * 100
         exit_code = e.exit_code if isinstance(e, Stop) else None
         state.data.update(stage=stage, provider_code=code, local_code=local_code, exit_code=exit_code)
         state.save()
-        emit(f"SETUP_STOP stage={stage} provider_code={code} local_code={local_code} exit_code={exit_code} federation_may_be_active={state.data['federation_may_be_active']}. No automatic rollback or mutation retry. Review the redacted state; resume requires fresh reads and confirmation.")
+        emit(f"SETUP_STOP stage={stage} phase={state.data['phase']} provider_code={code} local_code={local_code} exit_code={exit_code} mutation_attempts_this_attempt={state.data['mutation_attempts_this_attempt']} federation_may_be_active={state.data['federation_may_be_active']}. No automatic rollback or mutation retry. Review the redacted state; resume requires fresh reads and confirmation.")
+        if state.data['mutation_attempts_this_attempt'] == 0:
+            emit('THIS_ATTEMPT_NO_MUTATIONS: no helper mutation was attempted in this invocation. Earlier attempts and existing cloud state are not established by this result.')
+        if local_code == 'CLI_FORMAT':
+            emit('CLI_FORMAT_INVALID: the SDK rejected an output format. Do not repeat this helper unchanged; its format must be corrected and tested offline.')
         return 2
     finally:
         run.approved = False
