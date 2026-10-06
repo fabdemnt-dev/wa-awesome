@@ -79,8 +79,9 @@ jobs:
           PY
       # This official installer internally runs "gcloud auth list" against the
       # fresh empty config. It does not log in, exchange a token or select a project.
-      # Every owner-helper compatibility invocation below is strictly --help-only.
-      - name: Install official gcloud for local command-help checks only
+      # The command-help processes below are --help-only; the separate real
+      # argument-parser probe blocks all SDK dispatch, auth, network and processes.
+      - name: Install official gcloud for offline compatibility checks
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
         with:
           version: '568.0.0'
@@ -176,3 +177,11 @@ jobs:
           print(f'Official gcloud local help: {len(spawned)} argv variants checked; no operational command executed.')
           print('Help checks command/flag availability only, not flag-value semantics, IAM, token exchange or live API compatibility.')
           PY
+      - name: Parse every real helper argument and reject SDK prompts without any cloud dispatch
+        run: |
+          python3 -I - <<'PYCODE'
+          import pathlib, runpy, shutil
+          sdk = pathlib.Path(shutil.which('gcloud')).resolve().parent.parent
+          checks = runpy.run_path('tests/floating-garden-ci-setup.test.py', run_name='garden_fixture')
+          checks['verify_sdk_parser_and_prompts'](sdk)
+          PYCODE
