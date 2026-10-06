@@ -14,6 +14,10 @@ on:
       - '.github/workflows/deploy-floating-garden-trial.yml'
       - 'scripts/floating-garden-ci-auth-policy.mjs'
       - 'scripts/floating-garden-ci-configuration.mjs'
+      - 'scripts/floating-garden-ci-gcloud.mjs'
+      - 'tests/floating-garden-ci-gcloud.test.mjs'
+      - 'tests/floating-garden-ci-gcloud-sdk.test.py'
+      - 'tests/floating-garden-ci-gcloud-sdk.integration.mjs'
       - 'scripts/floating-garden-ci-release.mjs'
       - 'tests/floating-garden-ci-auth-policy.test.mjs'
       - 'tests/floating-garden-ci-release.test.mjs'
@@ -61,7 +65,7 @@ jobs:
           npm ci --ignore-scripts --no-audit --no-fund
           npm ci --prefix functions/floating-garden-trial --ignore-scripts --no-audit --no-fund
       - name: Test real pinned SDK initialization with network and subprocesses denied
-        run: node --test tests/floating-garden-ci-clients.test.mjs tests/floating-garden-ci-auth-policy.test.mjs tests/floating-garden-ci-release.test.mjs tests/floating-garden-active-update.test.mjs
+        run: node --test tests/floating-garden-ci-clients.test.mjs tests/floating-garden-ci-auth-policy.test.mjs tests/floating-garden-ci-release.test.mjs tests/floating-garden-ci-gcloud.test.mjs tests/floating-garden-active-update.test.mjs
       - name: Require a fresh credential-free gcloud configuration
         run: |
           python3 -I - <<'PY'
@@ -86,6 +90,10 @@ jobs:
         with:
           version: '568.0.0'
           cache: false
+      - name: Verify actual gcloud update requests and exact NPC ZIP without cloud access
+        run: |
+          export GARDEN_TEST_GCLOUD_SDK_ROOT="$(python3 -I -c 'import pathlib,shutil; print(pathlib.Path(shutil.which("gcloud")).resolve().parent.parent)')"
+          node tests/floating-garden-ci-gcloud-sdk.integration.mjs
       - name: Check owner-helper command and flag availability without cloud requests
         run: |
           python3 -I - <<'PY'
