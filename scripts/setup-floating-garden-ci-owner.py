@@ -208,6 +208,7 @@ class Gcloud:
         forbidden = ('CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE', 'CLOUDSDK_AUTH_IMPERSONATE_SERVICE_ACCOUNT',
                      'CLOUDSDK_AUTH_ACCESS_TOKEN', 'CLOUDSDK_AUTH_ACCESS_TOKEN_FILE',
                      'CLOUDSDK_AUTH_LOGIN_CONFIG_FILE', 'GOOGLE_APPLICATION_CREDENTIALS',
+                     'CLOUDSDK_STORAGE_GS_XML_ACCESS_KEY_ID', 'CLOUDSDK_STORAGE_GS_XML_SECRET_ACCESS_KEY',
                      'CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE')
         need(not any(os.environ.get(k) for k in forbidden) and
              not any(v and k.startswith('CLOUDSDK_API_ENDPOINT_OVERRIDES_') for k, v in os.environ.items()) and
@@ -216,7 +217,9 @@ class Gcloud:
              'credential_or_endpoint_override')
         self.env = dict(os.environ, CLOUDSDK_CORE_DISABLE_PROMPTS='false', CLOUDSDK_CORE_DISABLE_FILE_LOGGING='true',
                         CLOUDSDK_CORE_LOG_HTTP='false', CLOUDSDK_CORE_DISABLE_USAGE_REPORTING='true',
-                        CLOUDSDK_COMPONENT_MANAGER_DISABLE_UPDATE_CHECK='true', CLOUDSDK_CORE_PROJECT=PROJECT)
+                        CLOUDSDK_COMPONENT_MANAGER_DISABLE_UPDATE_CHECK='true', CLOUDSDK_CORE_PROJECT=PROJECT,
+                        CLOUDSDK_STORAGE_PREFERRED_API='json', CLOUDSDK_STORAGE_USE_GRPC_IF_AVAILABLE='false',
+                        CLOUDSDK_FUNCTIONS_GEN2='true')
         self.approved = False
         self.calls = 0
 
@@ -279,12 +282,29 @@ def read_role(run, name):
     return run(['iam', 'roles', 'describe', parts[3], '--organization=' + parts[1]], 'role_metadata')
 
 
+def source_bucket_identity(value):
+    """Require ownership evidence from raw Storage API metadata, never a name guess."""
+    need(isinstance(value, dict), 'source_bucket_metadata_shape')
+    need(isinstance(value.get('name'), str) and value['name'], 'source_bucket_name_missing')
+    need(value['name'] == BUCKET, 'source_bucket_name_mismatch')
+    number = value.get('projectNumber')
+    need(number is not None, 'source_bucket_owner_missing')
+    need(type(number) in (int, str) and re.fullmatch(r'[1-9][0-9]*', str(number)),
+         'source_bucket_owner_shape')
+    need(str(number) == NUMBER, 'source_bucket_owner_mismatch')
+    return {'name': value['name'], 'projectNumber': str(number)}
+
+
 def collect(run):
     """One bounded metadata pass. No secret access, auth/appcheck or data writes."""
     s = {'release_sha': run.release_sha, 'release_run_number': run.release_run_number}
     release_condition(s['release_sha'], s['release_run_number'])
     config = run(['config', 'list'], 'gcloud_config')
     auth, core = config.get('auth', {}), config.get('core', {})
+    # Legacy Storage HMAC settings select an alternate principal/API even when
+    # gcloud's active owner is correct. Do not use them or alter stored settings.
+    need(not any(config.get('storage', {}).get(k) for k in ('gs_xml_access_key_id', 'gs_xml_secret_access_key')),
+         'storage_auth_override')
     need(not any(auth.get(k) for k in ('credential_file_override', 'impersonate_service_account', 'access_token_file', 'access_token', 'login_config_file')) and
          not any(config.get('api_endpoint_overrides', {}).values()) and not core.get('custom_ca_certs_file') and
          all(str(section.get(k, 'false')).lower() in ('false', '0', '') for section, k in
@@ -320,12 +340,15 @@ def collect(run):
         need(re.fullmatch(r'[a-z][a-z0-9-]{4,28}[a-z0-9]@' + re.escape(PROJECT) + r'\.iam\.gserviceaccount\.com', email)
              or email in (f'{NUMBER}-compute@developer.gserviceaccount.com', f'{NUMBER}@cloudbuild.gserviceaccount.com', APPSPOT), 'actual_build_identity_invalid')
         build.add(email)
-    # The v2 inventory above establishes each exact GEN_2 identity. This IAM
-    # read has no --gen2 flag in the official gcloud command schema.
+    # The v2 inventory establishes exact GEN_2 identities. The subprocess env
+    # pins the same generation, regardless of the owner's stored CLI default.
     s['function_policies'] = {name: run(['functions', 'get-iam-policy', name, f'--region={REGION}'], 'function_policy') for name in FUNCTIONS}
     s['functions'].sort(key=lambda f: f['name'])
-    s['bucket'] = run(['storage', 'buckets', 'describe', f'gs://{BUCKET}', '--format=json(name,projectNumber,project_number)'], 'source_bucket_owner')
-    need(s['bucket'].get('name') == BUCKET and str(s['bucket'].get('projectNumber', s['bucket'].get('project_number'))) == NUMBER, 'source_bucket_owner')
+    # The SDK's standardized bucket display omits the owning project even
+    # when the API returned it. --raw preserves API fields before projection;
+    # only the exact name and owner number enter helper memory/state hashing.
+    s['bucket'] = source_bucket_identity(run(['storage', 'buckets', 'describe', f'gs://{BUCKET}',
+        '--raw', '--format=json(name,projectNumber)'], 'source_bucket_owner'))
     for version in ('1', 'latest'):
         v = run(['secrets', 'versions', 'describe', version, '--secret=' + SECRET,
                  '--format=json(name,state)'], 'hmac_' + version + '_metadata')
