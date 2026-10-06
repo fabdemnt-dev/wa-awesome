@@ -180,6 +180,21 @@ def permission_query_args():
             '--format=json(name,customRolesSupportLevel,onlyInPredefinedRoles,apiDisabled)']
 
 
+def function_inventory_args():
+    return ['functions', 'list', '--v2', f'--regions={REGION}', '--limit=1000',
+            '--format=json(name,environment,state,buildConfig.serviceAccount,buildConfig.source,serviceConfig.serviceAccountEmail)']
+
+
+def validate_function_inventory_diagnostics(stderr):
+    # SDK568 flattens ListFunctionsResponse and emits unreachable only as a
+    # warning. An otherwise plausible five-function list is not complete
+    # evidence when that warning is present. Never expose raw diagnostics.
+    need(len(stderr) <= 262144, 'function_inventory_diagnostics_size')
+    text = stderr.decode('utf-8', 'replace')
+    need(not re.search(r'The following regions were fully or partially unreachable\s+for query:', text),
+         'function_inventory_incomplete')
+
+
 def permission_support(run):
     records = bounded_list(run(permission_query_args(), 'custom_permission_support'),
                            'custom_permission_support', PERMISSION_CATALOG_LIMIT)
@@ -292,7 +307,9 @@ class Gcloud:
         need(not write or self.approved, 'write_without_owner_confirmation')
         self.calls += 1
         need(self.calls <= 2000, 'command_budget')
-        command = ['gcloud', *args, '--verbosity=error', f'--billing-project={PROJECT}']
+        function_inventory = not write and stage == 'function_metadata' and args == function_inventory_args()
+        verbosity = 'warning' if function_inventory else 'error'
+        command = ['gcloud', *args, '--verbosity=' + verbosity, f'--billing-project={PROJECT}']
         global_role = args[:3] == ['iam', 'roles', 'describe'] and (args[3].startswith('roles/') or any(a.startswith('--organization=') for a in args))
         if not global_role:
             command.append(f'--project={PROJECT}')
@@ -329,6 +346,8 @@ class Gcloud:
             else:
                 local = 'CLI_EXIT_NONZERO'
             raise Stop(stage, code, local, p.returncode)
+        if function_inventory:
+            validate_function_inventory_diagnostics(p.stderr)
         need(len(p.stdout) <= 8 * 1024 * 1024, 'response_size')
         try:
             return json.loads(p.stdout or b'{}')
@@ -387,8 +406,7 @@ def collect(run, include_permission_catalog=True):
     s['services'] = sorted(x['config']['name'] for x in bounded_list(
         run(['services', 'list', '--enabled', '--limit=1000'], 'enabled_apis'), 'enabled_apis')
         if x.get('state') == 'ENABLED')
-    s['functions'] = bounded_list(run(['functions', 'list', '--v2', f'--regions={REGION}', '--limit=1000',
-        '--format=json(name,environment,state,buildConfig.serviceAccount,buildConfig.source,serviceConfig.serviceAccountEmail)'], 'function_metadata'), 'function_metadata')
+    s['functions'] = bounded_list(run(function_inventory_args(), 'function_metadata'), 'function_metadata')
     aliases = {f'projects/{p}/locations/{REGION}/functions/{n}': f'projects/{PROJECT}/locations/{REGION}/functions/{n}'
                for p in (PROJECT, NUMBER) for n in FUNCTIONS}
     need(len(s['functions']) == 5 and all(f.get('name') in aliases for f in s['functions']), 'exact_five_functions')
