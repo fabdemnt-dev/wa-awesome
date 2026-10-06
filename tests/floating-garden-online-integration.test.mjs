@@ -370,13 +370,14 @@ for (const npcCount of [1, 2]) test(`real Auth/Callable/Firestore: two humans + 
     assert.equal(snapshot.room.rulesVersion, 'floating-garden-online-npc-1');
     assert.equal(snapshot.room.playerCount, 2 + npcCount);
     assert.equal((await roomRef(created.roomId).collection('members').get()).size, 2);
-    let count = 0, batches = 0;
+    let count = 0, batches = 0, lastSubmission;
     while (snapshot.room.status !== 'finished') {
       assert.ok(++count < 400);
       const match = snapshot.room.match, legal = legalActions(match);
       assert.ok(getDecision(match).seat < 2);
       const action = ['self', 'pass-invite', 'meditate', 'pass-final'].map((type) => legal.find((candidate) => candidate.type === type)).find(Boolean) || legal[0];
       const payload = wireAction(snapshot, action), before = snapshot.room;
+      lastSubmission = { seat: action.seat, payload };
       if (count % 19 === 0) {
         const copies = await Promise.all([seats[action.seat].call('SubmitAction', payload), seats[action.seat].call('SubmitAction', payload)]);
         assert.deepEqual(copies[0], copies[1]); snapshot = copies[0];
@@ -390,13 +391,24 @@ for (const npcCount of [1, 2]) test(`real Auth/Callable/Firestore: two humans + 
       const received = await Promise.all(watchers.map((watcher) => watcher.wait(snapshot.room.revision)));
       received.forEach((room) => assert.deepEqual(room, snapshot.room));
       if (count % 23 === 0) {
-        await rejected(seats[action.seat].call('SubmitAction', { ...payload, requestId: requestId() }), 'failed-precondition', 'stale-revision');
+        // This accepted human/NPC batch may have just finished the match.
+        const reason = snapshot.room.status === 'finished' ? 'match-finished' : 'stale-revision';
+        await rejected(seats[action.seat].call('SubmitAction', { ...payload, requestId: requestId() }), 'failed-precondition', reason);
         assert.deepEqual((await seats[1].call('GetSnapshot', { roomId: created.roomId })).room, snapshot.room);
       }
     }
     assert.ok(batches > 0); assert.equal(snapshot.room.scores.length, 2 + npcCount);
     assert.ok(snapshot.room.match.players.every((player) => player.garden.filter(Boolean).length === 16));
-    const game = (await roomRef(created.roomId).collection('serverGames').doc(snapshot.room.gameId).get()).data();
+    const gameRef = roomRef(created.roomId).collection('serverGames').doc(snapshot.room.gameId);
+    const game = (await gameRef.get()).data();
+    const finishedRoom = (await roomRef(created.roomId).get()).data();
+    const afterFinishId = requestId(), lastPlayer = seats[lastSubmission.seat];
+    await rejected(lastPlayer.call('SubmitAction', { ...lastSubmission.payload, requestId: afterFinishId }),
+      'failed-precondition', 'match-finished');
+    assert.deepEqual((await roomRef(created.roomId).get()).data(), finishedRoom, 'finished room is unchanged');
+    assert.deepEqual((await gameRef.get()).data(), game, 'finished server game is unchanged');
+    assert.equal((await receiptRef(lastPlayer.auth.currentUser.uid, afterFinishId).get()).exists, false,
+      'rejected after-finish action does not create a receipt');
     let replay = game.initialState;
     for (const command of game.commands) replay = applyMatchAction(replay, command);
     assert.deepEqual(replay, game.state); assert.equal(assertMatchInvariants(replay), true);
