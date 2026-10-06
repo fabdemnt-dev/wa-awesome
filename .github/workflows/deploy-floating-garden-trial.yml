@@ -20,7 +20,9 @@ jobs:
       github.repository_owner_id == '312340196' &&
       github.event_name == 'push' &&
       github.ref == 'refs/heads/release/garden-trial' &&
-      github.run_number == 1 && github.run_attempt == 1
+      github.event.created == true &&
+      github.event.before == '0000000000000000000000000000000000000000' &&
+      github.run_attempt == 1
     runs-on: ubuntu-latest
     timeout-minutes: 55
     environment: garden-trial
@@ -28,14 +30,18 @@ jobs:
       contents: read
       id-token: write
     env:
-      CLOUDSDK_CONFIG: ${{ runner.temp }}/garden-release-gcloud
       CLOUDSDK_CORE_DISABLE_USAGE_REPORTING: 'true'
       CLOUDSDK_CORE_DISABLE_FILE_LOGGING: 'true'
       CLOUDSDK_CORE_LOG_HTTP: 'false'
       CLOUDSDK_COMPONENT_MANAGER_DISABLE_UPDATE_CHECK: 'true'
       CLOUDSDK_PAGER: ''
       TERM: dumb
+      GARDEN_RELEASE_REF_CREATED: ${{ github.event.created }}
     steps:
+      - name: Set isolated gcloud directory before SDK use
+        env:
+          ISOLATED_GCLOUD: ${{ runner.temp }}/garden-release-gcloud
+        run: printf 'CLOUDSDK_CONFIG=%s\n' "$ISOLATED_GCLOUD" >> "$GITHUB_ENV"
       - name: Reject debug mode before authentication or dependency work
         env:
           RUNNER_DEBUG_ENABLED: ${{ runner.debug == '1' }}
@@ -84,7 +90,7 @@ jobs:
           // not independent permission; the separately approved release-ref
           // publication is the action that starts this single release job.
           await writeFile(process.env.RUNNER_TEMP + '/garden-release-approval.json',
-            JSON.stringify(ciReleaseApproval(process.env.GITHUB_SHA)), { flag: 'wx', mode: 0o600 });
+            JSON.stringify(ciReleaseApproval(process.env.GITHUB_SHA, process.env.GITHUB_RUN_NUMBER)), { flag: 'wx', mode: 0o600 });
           JS
       - name: Authenticate only as the separately configured Garden identity
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093

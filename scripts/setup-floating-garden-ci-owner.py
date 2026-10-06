@@ -5,7 +5,7 @@ Local review: python3 scripts/setup-floating-garden-ci-owner.py --plan
 Owner execution (requires fresh authorization outside this helper):
   python3 scripts/setup-floating-garden-ci-owner.py --setup \
     --project wa-awesome-garden-stg --project-number 120030709276 \
-    --original-expiry 1791762351472 --approved-release-sha REVIEWED_40_HEX_COMMIT --state-dir "$HOME/garden-ci-owner-setup-20261006"
+    --original-expiry 1791762351472 --approved-release-sha REVIEWED_40_HEX_COMMIT --approved-release-run-number EXPECTED_NEXT_RUN --state-dir "$HOME/garden-ci-owner-setup-20261006"
 A retry uses the SAME --state-dir and --resume; it always reads afresh and asks
 for the new plan hash. No --yes, credentials, login, installs, key generation,
 secret payload access, billing change, deployment or application-data writes.
@@ -55,7 +55,7 @@ MAPPING = {'google.subject': 'assertion.sub', **{f'attribute.{k}': f'assertion.{
 ATTRIBUTE_CONDITION = ' && '.join(f"assertion.{k} == '{v}'" for k, v in (
     ('repository_id', '1321198654'), ('repository_owner_id', '312340196'),
     ('ref', REF), ('workflow_ref', WORKFLOW), ('event_name', 'push'), ('environment', 'garden-trial'),
-    ('run_number', '1'), ('run_attempt', '1')))
+    ('run_attempt', '1')))
 TIME_CONDITION = f"request.time < timestamp('{DEADLINE}')"
 SOURCE_CONDITION = TIME_CONDITION + f" && (resource.name == 'projects/_/buckets/{BUCKET}' || resource.name.startsWith('projects/_/buckets/{BUCKET}/objects/'))"
 GATE_CONDITION = TIME_CONDITION + f" && resource.name == 'projects/{PROJECT}/databases/(default)'"
@@ -81,9 +81,10 @@ APPSPOT_ALLOWED_ROLES = {'roles/logging.logWriter', 'roles/monitoring.metricWrit
                          'roles/cloudtrace.agent', 'roles/datastore.user'}
 
 
-def release_condition(release_sha):
+def release_condition(release_sha, release_run_number):
     need(isinstance(release_sha, str) and re.fullmatch(r'[a-f0-9]{40}', release_sha), 'reviewed_release_commit_required')
-    return ATTRIBUTE_CONDITION + " && assertion.workflow_sha == '" + release_sha + "'"
+    need(isinstance(release_run_number, str) and re.fullmatch(r'[1-9][0-9]{0,8}', release_run_number), 'reviewed_release_run_required')
+    return ATTRIBUTE_CONDITION + " && assertion.workflow_sha == '" + release_sha + "' && assertion.run_number == '" + release_run_number + "'"
 
 
 def packed(value):
@@ -163,8 +164,9 @@ class Gcloud:
     SDK normal read-only transport retries may occur; mutations are submitted
     once. No explicit mutation retry. stdout/stderr are private memory only.
     """
-    def __init__(self, release_sha=None):
+    def __init__(self, release_sha=None, release_run_number=None):
         self.release_sha = release_sha
+        self.release_run_number = release_run_number
         forbidden = ('CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE', 'CLOUDSDK_AUTH_IMPERSONATE_SERVICE_ACCOUNT',
                      'CLOUDSDK_AUTH_ACCESS_TOKEN', 'CLOUDSDK_AUTH_ACCESS_TOKEN_FILE',
                      'CLOUDSDK_AUTH_LOGIN_CONFIG_FILE', 'GOOGLE_APPLICATION_CREDENTIALS',
@@ -229,8 +231,8 @@ def read_role(run, name):
 
 def collect(run):
     """One bounded metadata pass. No secret access, auth/appcheck or data writes."""
-    s = {'release_sha': run.release_sha}
-    release_condition(s['release_sha'])
+    s = {'release_sha': run.release_sha, 'release_run_number': run.release_run_number}
+    release_condition(s['release_sha'], s['release_run_number'])
     config = run(['config', 'list'], 'gcloud_config')
     auth, core = config.get('auth', {}), config.get('core', {})
     need(not any(auth.get(k) for k in ('credential_file_override', 'impersonate_service_account', 'access_token_file', 'access_token', 'login_config_file')) and
@@ -389,7 +391,7 @@ def validate(s):
         need(p.get('name') == PROVIDER_NAME and p.get('state') == 'ACTIVE' and p.get('oidc', {}).get('issuerUri') ==
              'https://token.actions.githubusercontent.com' and not p['oidc'].get('allowedAudiences') and
              not p['oidc'].get('jwksJson') and p.get('attributeMapping') == MAPPING and
-             p.get('attributeCondition') == release_condition(s['release_sha']), 'provider_collision')
+             p.get('attributeCondition') == release_condition(s['release_sha'], s['release_run_number']), 'provider_collision')
     expected = expected_bindings(s['act_as'])
     allowed = {(target, role, packed(c), member) for target, role, member, c in expected}
     checked_policies = {**s['policies'], 'source_bucket': s['bucket_policy'],
@@ -418,7 +420,7 @@ def make_plan(s):
             '--location=global', '--workload-identity-pool=' + POOL, '--disabled',
             '--issuer-uri=https://token.actions.githubusercontent.com',
             '--attribute-mapping=' + ','.join(k + '=' + v for k, v in MAPPING.items()),
-            '--attribute-condition=' + release_condition(s['release_sha'])], PROVIDER_NAME, True)
+            '--attribute-condition=' + release_condition(s['release_sha'], s['release_run_number'])], PROVIDER_NAME, True)
     if DEPLOYER not in s['accounts']:
         add('create_deployer', ['iam', 'service-accounts', 'create', 'garden-github-deployer',
             '--display-name=Garden GitHub deployer'], DEPLOYER, True)
@@ -439,7 +441,7 @@ def make_plan(s):
     if not s['pool'] or s['pool'].get('disabled', False):
         add('enable_pool_last', ['iam', 'workload-identity-pools', 'update', POOL, '--location=global', '--no-disabled'], POOL_NAME)
     return {'project': PROJECT, 'number': NUMBER, 'original_expiry': EXPIRY, 'deadline': DEADLINE,
-            'release_sha': s['release_sha'], 'attribute_condition': release_condition(s['release_sha']),
+            'release_sha': s['release_sha'], 'release_run_number': s['release_run_number'], 'attribute_condition': release_condition(s['release_sha'], s['release_run_number']),
             'disclosures': DISCLOSURES, 'act_as_accounts': s['act_as'], 'inspected_account_roles': s['account_roles'],
             'build_account_indirect_scope': {a: {r: {
                 'permission_count': len(s['role_metadata'][r]['includedPermissions']),
@@ -516,7 +518,7 @@ class State:
 
 
 def foundations(s):
-    return {k: s[k] for k in ('owner_hash', 'project', 'functions', 'function_policies', 'release_sha', 'bucket', 'bucket_policy', 'hmac_1', 'hmac_latest',
+    return {k: s[k] for k in ('owner_hash', 'project', 'functions', 'function_policies', 'release_sha', 'release_run_number', 'bucket', 'bucket_policy', 'hmac_1', 'hmac_latest',
                               'act_as', 'build_accounts', 'ancestors', 'account_roles', 'role_metadata')}
 
 
@@ -667,6 +669,7 @@ def main(argv=None):
     parser.add_argument('--original-expiry', type=int)
     parser.add_argument('--state-dir')
     parser.add_argument('--approved-release-sha')
+    parser.add_argument('--approved-release-run-number')
     parser.add_argument('--resume', action='store_true')
     args = parser.parse_args(argv)
     if not args.setup:
@@ -674,7 +677,7 @@ def main(argv=None):
             'original_expiry': EXPIRY, 'deadline': DEADLINE, 'deployer': DEPLOYER,
             'pool': POOL_NAME, 'provider': PROVIDER_NAME, 'issuer': 'https://token.actions.githubusercontent.com',
             'audience': 'default provider resource audience', 'attribute_mapping': MAPPING,
-            'attribute_condition': ATTRIBUTE_CONDITION + " && assertion.workflow_sha == '<reviewed release commit>'", 'project_roles': PROJECT_ROLES, 'custom_roles': CUSTOM,
+            'attribute_condition': ATTRIBUTE_CONDITION + " && assertion.workflow_sha == '<reviewed release commit>' && assertion.run_number == '<reviewed next run>'", 'project_roles': PROJECT_ROLES, 'custom_roles': CUSTOM,
             'new_binding_conditions': {'time': TIME_CONDITION, 'source': SOURCE_CONDITION, 'gate': GATE_CONDITION},
             'only_enable_missing_apis': APIS, 'disclosures': DISCLOSURES,
             'next': 'Freshly authorized owner runs --setup; reads all metadata, reviews exact diff, types its hash, then setup and verification run in this session.'}, indent=2))
@@ -683,8 +686,8 @@ def main(argv=None):
         need(args.project == PROJECT and args.project_number == NUMBER and args.original_expiry == EXPIRY and
              args.state_dir and sys.stdin.isatty(), 'explicit_fixed_scope_and_interactive_owner_required')
         need(time.time() * 1000 < EXPIRY, 'original_deadline_expired')
-        release_condition(args.approved_release_sha)
-        runner = Gcloud(args.approved_release_sha)
+        release_condition(args.approved_release_sha, args.approved_release_run_number)
+        runner = Gcloud(args.approved_release_sha, args.approved_release_run_number)
         state = State(args.state_dir, args.resume)
         return execute(runner, state)
     except (Stop, OSError, ValueError) as e:

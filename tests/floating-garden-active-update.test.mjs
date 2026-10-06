@@ -278,14 +278,14 @@ async function harness({ actualTransport = false, actualBridge = false, database
   if (ci) {
     const authPath = join(path, 'gha-creds-0123456789abcdef.json'), C = CI_CLIENT_SCOPE;
     await writeFile(authPath, JSON.stringify({ type: 'external_account', audience: C.audience, subject_token_type: 'urn:ietf:params:oauth:token-type:jwt', token_url: 'https://sts.googleapis.com/v1/token', service_account_impersonation_url: `https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${C.serviceAccount}:generateAccessToken`, credential_source: { url: 'https://pipelines.actions.githubusercontent.com/synthetic/oidc', headers: { Authorization: 'Bearer SYNTHETIC' }, format: { type: 'json', subject_token_field_name: 'value' } } }), { mode: 0o600 });
-    env = { CI: 'true', GITHUB_ACTIONS: 'true', GITHUB_EVENT_NAME: 'push', GITHUB_REPOSITORY_ID: C.repositoryId, GITHUB_REPOSITORY: C.repository, GITHUB_REPOSITORY_OWNER_ID: C.repositoryOwnerId, GITHUB_REF: C.ref, GITHUB_WORKFLOW_REF: `${C.repository}/${C.workflow}@${C.ref}`, GITHUB_WORKSPACE: path, GOOGLE_CLOUD_PROJECT: C.project, GOOGLE_APPLICATION_CREDENTIALS: authPath, GOOGLE_GHA_CREDS_PATH: authPath, CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: authPath, GITHUB_SHA: 'a'.repeat(40), GITHUB_WORKFLOW_SHA: 'a'.repeat(40), GITHUB_RUN_ID: '12345', GITHUB_RUN_NUMBER: '1', GITHUB_RUN_ATTEMPT: '1' };
+    env = { CI: 'true', GITHUB_ACTIONS: 'true', GITHUB_EVENT_NAME: 'push', GITHUB_REPOSITORY_ID: C.repositoryId, GITHUB_REPOSITORY: C.repository, GITHUB_REPOSITORY_OWNER_ID: C.repositoryOwnerId, GITHUB_REF: C.ref, GITHUB_WORKFLOW_REF: `${C.repository}/${C.workflow}@${C.ref}`, GITHUB_WORKSPACE: path, GOOGLE_CLOUD_PROJECT: C.project, GOOGLE_APPLICATION_CREDENTIALS: authPath, GOOGLE_GHA_CREDS_PATH: authPath, CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: authPath, GITHUB_SHA: 'a'.repeat(40), GITHUB_WORKFLOW_SHA: 'a'.repeat(40), GITHUB_RUN_ID: '12345', GITHUB_RUN_NUMBER: '2', GITHUB_RUN_ATTEMPT: '1', GARDEN_RELEASE_REF_CREATED: 'true' };
     environmentPolicy = createCiAuthPolicy({ env, now: () => time, execArgv: [] });
   }
   const cloud = createActiveUpdateProvider({ plan, toolingDir, runner, requestClient, db, fetchImpl: providerFetch, now: () => time, env, execArgv: [], transport, environmentPolicy });
   const journal = { providerStep: async step => journalEntries.push(step), issued: async stage => journalEntries.push({ issued: stage }), verified: async stage => journalEntries.push({ verified: stage }),
     finish: async () => journalEntries.push({ finished: true }), fail: async (stage, reason, access) => journalEntries.push({ stage, reason, access }) };
   return { cloud, db, first, second, calls, functions, transport, providerWrites, journal, journalEntries, env,
-    runCi: options => executeCiRelease({ plan, approval: ciReleaseApproval(env.GITHUB_SHA), cloud, journal, env, environmentPolicy, now: () => time, ...options }),
+    runCi: options => executeCiRelease({ plan, approval: ciReleaseApproval(env.GITHUB_SHA, env.GITHUB_RUN_NUMBER), cloud, journal, env, environmentPolicy, now: () => time, ...options }),
     setTime(value) { time = value; }, changeSettings() { settingsRevision++; }, setOverride(value) { override = value; },
     run: options => executeActiveUpdate({ plan, mode: 'apply', approval: approval(), cloud, journal, now: () => time, ...options }) };
 }
@@ -634,4 +634,19 @@ test('CI empty Extensions preflight prevents accidental dynamic-extension change
     const h = await harness({ ci: true }); h.setOverride((url, value) => url.startsWith('https://firebaseextensions.googleapis.com/') ? metadata : value);
     const r = await h.runCi(); assert.equal(r.status, 'blocked'); assert.equal(r.access, 'closed'); assert.deepEqual(h.providerWrites, []); assert.equal(h.db.writes.length, 0);
   }
+});
+
+test('CI release requires the exact approved run number and a newly-created release ref', async () => {
+  for (const mutate of [
+    h => h.env.GARDEN_RELEASE_REF_CREATED = 'false',
+    h => delete h.env.GARDEN_RELEASE_REF_CREATED,
+    h => h.env.GITHUB_RUN_NUMBER = '0',
+    h => h.env.GITHUB_RUN_NUMBER = 'not-a-number',
+  ]) {
+    const h = await harness({ ci: true }); mutate(h); await assert.rejects(h.runCi());
+    assert.equal(h.calls.length, 0); assert.equal(h.providerWrites.length, 0); assert.equal(h.db.writes.length, 0);
+  }
+  const h = await harness({ ci: true });
+  await assert.rejects(h.runCi({ approval: ciReleaseApproval(h.env.GITHUB_SHA, '3') }));
+  assert.equal(h.calls.length, 0); assert.equal(h.providerWrites.length, 0); assert.equal(h.db.writes.length, 0);
 });

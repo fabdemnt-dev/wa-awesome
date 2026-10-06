@@ -32,6 +32,7 @@ def binding(role, member, cond=None):
 class Fake:
     def __init__(self):
         self.release_sha = 'a' * 40
+        self.release_run_number = '2'
         self.approved = False
         self.calls = []
         self.fail_stage = None
@@ -72,7 +73,7 @@ class Fake:
                 self.pool = {'name': m.POOL_NAME, 'state': 'ACTIVE', 'disabled': True}
             elif stage == 'create_disabled_provider':
                 self.provider = {'name': m.PROVIDER_NAME, 'state': 'ACTIVE', 'disabled': True,
-                    'attributeMapping': copy.deepcopy(m.MAPPING), 'attributeCondition': m.release_condition('a' * 40),
+                    'attributeMapping': copy.deepcopy(m.MAPPING), 'attributeCondition': m.release_condition('a' * 40, '2'),
                     'oidc': {'issuerUri': 'https://token.actions.githubusercontent.com'}}
             elif stage == 'create_deployer': self.accounts[m.DEPLOYER] = account(m.DEPLOYER)
             elif stage == 'create_custom_role':
@@ -255,7 +256,7 @@ class SetupTests(unittest.TestCase):
     def test_no_fork_default_audience_exact_environment_and_workflow(self):
         self.assertEqual(m.MAPPING['attribute.environment'], 'assertion.environment')
         for value in ('1321198654', '312340196', m.REF, m.WORKFLOW, 'push', 'garden-trial'):
-            self.assertIn(value, m.release_condition('a' * 40))
+            self.assertIn(value, m.release_condition('a' * 40, '2'))
         plan = m.make_plan(m.collect(self.fake))
         provider = next(a for a in plan['actions'] if a['stage'] == 'create_disabled_provider')
         self.assertFalse(any(a.startswith('--allowed-audiences') for a in provider['args']))
@@ -280,7 +281,7 @@ class SetupTests(unittest.TestCase):
         self.fake.provider['attributeCondition'] = 'true'
         self.assertEqual(self.run_setup(), 2)
         self.assertEqual(self.fake.writes, [])
-        self.fake.provider['attributeCondition'] = m.release_condition('a' * 40)
+        self.fake.provider['attributeCondition'] = m.release_condition('a' * 40, '2')
         self.fake.keys = [{'name': 'existing-user-key'}]
         self.assertEqual(self.run_setup(), 2)
         self.assertEqual(self.fake.writes, [])
@@ -450,11 +451,13 @@ class SetupTests(unittest.TestCase):
 
     def test_exact_source_and_first_run_trust_is_mandatory(self):
         for bad in (None, '', 'MAIN', 'a' * 39, 'g' * 40):
-            with self.assertRaises(m.Stop): m.release_condition(bad)
-        condition = m.release_condition('a' * 40)
+            with self.assertRaises(m.Stop): m.release_condition(bad, '2')
+        condition = m.release_condition('a' * 40, '2')
         self.assertIn("assertion.workflow_sha == '" + 'a' * 40 + "'", condition)
-        self.assertIn("assertion.run_number == '1'", condition)
+        self.assertIn("assertion.run_number == '2'", condition)
         self.assertIn("assertion.run_attempt == '1'", condition)
+        for bad in (None, '', '0', '-1', '1 OR true', 2):
+            with self.assertRaises(m.Stop): m.release_condition('a' * 40, bad)
         self.fake.release_sha = None
         self.assertEqual(self.run_setup(), 2)
         self.assertEqual(self.fake.writes, [])

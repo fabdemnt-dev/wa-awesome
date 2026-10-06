@@ -22,8 +22,8 @@ const json = value => JSON.stringify(value, null, 2) + '\n';
 const failures = new WeakMap();
 function need(condition, code) { if (!condition) { const e = new Error('CI release blocked'); failures.set(e, code); throw e; } }
 const STAGES = ['closed-baseline', 'functions', 'rules', 'hosting', 'preservation', 'reopen', 'reopened'];
-export function ciReleaseApproval(sourceCommit) {
-  return { schemaVersion: 1, repository: 'fabdemnt-dev/wa-awesome', sourceCommit,
+export function ciReleaseApproval(sourceCommit, runNumber) {
+  return { schemaVersion: 1, repository: 'fabdemnt-dev/wa-awesome', sourceCommit, runNumber,
     oldInventory: S.oldInventory, newInventory: S.newInventory, expiresAtMillis: S.endsAtMillis,
     existingClosedTrial: true, fiveFunctionsRulesHosting: true, standardCliInternalRetriesAndParallelism: true,
     serviceIdentityGeneration: true, preserveExistingIamAndData: true, reopenSamePairOnce: true,
@@ -32,8 +32,8 @@ export function ciReleaseApproval(sourceCommit) {
 function context(env, approval, policy, now) {
   requireCiAuthPolicy(policy).validateEnvironment(env, []);
   need(/^[a-f0-9]{40}$/.test(env.GITHUB_SHA || '') && env.GITHUB_WORKFLOW_SHA === env.GITHUB_SHA &&
-    /^[1-9][0-9]*$/.test(env.GITHUB_RUN_ID || '') && env.GITHUB_RUN_ATTEMPT === '1' && env.GITHUB_RUN_NUMBER === '1', 'ci-context');
-  need(isDeepStrictEqual(approval, ciReleaseApproval(env.GITHUB_SHA)), 'release-approval');
+    /^[1-9][0-9]*$/.test(env.GITHUB_RUN_ID || '') && env.GITHUB_RUN_ATTEMPT === '1' && /^[1-9][0-9]*$/.test(env.GITHUB_RUN_NUMBER || '') && env.GARDEN_RELEASE_REF_CREATED === 'true', 'ci-context');
+  need(isDeepStrictEqual(approval, ciReleaseApproval(env.GITHUB_SHA, env.GITHUB_RUN_NUMBER)), 'release-approval');
   need(Number.isSafeInteger(now()) && now() >= S.startsAtMillis && now() < S.endsAtMillis, 'fixed-window');
 }
 export async function executeCiRelease({ plan, approval, cloud, journal, env, environmentPolicy, now = Date.now }) {

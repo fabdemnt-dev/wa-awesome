@@ -29,7 +29,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      CLOUDSDK_CONFIG: ${{ runner.temp }}/garden-ci-empty-gcloud
       CLOUDSDK_CORE_DISABLE_PROMPTS: 'true'
       CLOUDSDK_CORE_DISABLE_USAGE_REPORTING: 'true'
       CLOUDSDK_CORE_DISABLE_FILE_LOGGING: 'true'
@@ -39,6 +38,10 @@ jobs:
       CLOUDSDK_PAGER: ''
       TERM: dumb
     steps:
+      - name: Set isolated gcloud directory before SDK use
+        env:
+          ISOLATED_GCLOUD: ${{ runner.temp }}/garden-ci-empty-gcloud
+        run: printf 'CLOUDSDK_CONFIG=%s\n' "$ISOLATED_GCLOUD" >> "$GITHUB_ENV"
       - name: Checkout preparation code without persisted credentials
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:

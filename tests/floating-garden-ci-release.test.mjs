@@ -118,18 +118,26 @@ test('future release workflow is single push, fixed target and credential-free t
   assert.deepEqual(deploy.on, { push: { branches: ['release/garden-trial'] } });
   assert.equal(deploy.concurrency['cancel-in-progress'], false); assert.deepEqual(deploy.permissions, { contents: 'read' });
   const job = deploy.jobs.release; assert.equal(job.environment, 'garden-trial'); assert.equal(job.permissions['id-token'], 'write');
-  assert(job.if.includes('github.run_number == 1') && job.if.includes('github.run_attempt == 1'));
+  assert(job.if.includes('github.event.created == true') && job.if.includes("github.event.before == '0000000000000000000000000000000000000000'") && job.if.includes('github.run_attempt == 1'));
   const auth = job.steps.findIndex(s => s.uses?.startsWith('google-github-actions/auth@'));
   assert(auth > 0); assert(job.steps.slice(auth + 1).every(s => !s.uses && !/npm\s|curl\s|pip\s/.test(s.run || '')));
   assert(job.steps.every(s => !s.uses || /@[a-f0-9]{40}$/.test(s.uses)));
   assert(!JSON.stringify(deploy).includes('secrets.')); assert(!JSON.stringify(deploy).includes('upload-artifact'));
   const prep = yaml.parse(await readFile(join(ROOT, '.github/workflows/garden-ci-preparation-tests.yml'), 'utf8'));
   assert.deepEqual(Object.keys(prep.on), ['pull_request']); assert.deepEqual(prep.permissions, { contents: 'read' });
+  // GitHub job-level env is evaluated before runner assignment. YAML parsing
+  // alone misses this schema error; only step env may use runner.temp.
+  for (const workflow of [deploy, prep]) for (const j of Object.values(workflow.jobs)) {
+    assert(!JSON.stringify(j.env || {}).includes('runner.'), 'runner context forbidden in job env');
+    const initialization = j.steps.find(s => s.env?.ISOLATED_GCLOUD);
+    assert(initialization?.env.ISOLATED_GCLOUD.includes('${{ runner.temp }}'));
+    assert(initialization.run.includes('$GITHUB_ENV') && initialization.run.includes('CLOUDSDK_CONFIG='));
+  }
   assert(!JSON.stringify(prep).includes('google-github-actions/auth@')); assert(!JSON.stringify(prep).includes('id-token'));
 });
 test('approval contract discloses CLI effects and preserves original deadline and inventory', () => {
-  const a = ciReleaseApproval('a'.repeat(40)); assert.equal(a.expiresAtMillis, S.endsAtMillis);
+  const a = ciReleaseApproval('a'.repeat(40), '2'); assert.equal(a.expiresAtMillis, S.endsAtMillis);
   assert.equal(a.oldInventory, S.oldInventory); assert.equal(a.newInventory, S.newInventory);
   assert.equal(a.standardCliInternalRetriesAndParallelism, true); assert.equal(a.serviceIdentityGeneration, true);
-  assert.equal(a.reopenSamePairOnce, true); assert.equal(a.exclusiveMaintenance, true);
+  assert.equal(a.runNumber, '2'); assert.equal(a.reopenSamePairOnce, true); assert.equal(a.exclusiveMaintenance, true);
 });
