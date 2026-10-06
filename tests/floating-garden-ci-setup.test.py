@@ -46,7 +46,7 @@ class Fake:
         self.policies = {t: {'version': 3, 'bindings': []} for t in ('project', 'secret', 'pool', m.RUNTIME, BUILD, m.DEPLOYER)}
         self.policies['project']['bindings'] = [binding('roles/editor', 'serviceAccount:' + BUILD),
                                                binding('roles/viewer', 'user:unrelated@example.invalid')]
-        self.services = list(m.APIS[:2])
+        self.services = list(m.APIS[:2]) + list(m.REQUIRED_EXISTING_APIS)
         self.functions = [{'name': f'projects/{m.PROJECT}/locations/{m.REGION}/functions/{name}',
             'environment': 'GEN_2', 'state': 'ACTIVE', 'serviceConfig': {'serviceAccountEmail': m.RUNTIME},
             'buildConfig': {'serviceAccount': f'projects/{m.PROJECT}/serviceAccounts/{BUILD}',
@@ -305,15 +305,127 @@ class SetupTests(unittest.TestCase):
                 else: self.fake.support[0]['customRolesSupportLevel'] = change
                 self.assertEqual(self.run_setup(), 2)
                 self.assertEqual(self.fake.writes, [])
-                self.assertTrue(self.state.data['stage'].startswith('unsupported_or_unknown_custom_permission:'))
+                self.assertTrue(self.state.data['stage'].startswith('custom_permission_'))
         self.fake = Fake()
         del self.fake.support[0]['customRolesSupportLevel']
         self.assertTrue(m.make_plan(m.collect(self.fake)))  # documented protobuf enum default
 
+    def test_extensions_viewer_replaces_only_unlisted_custom_permission(self):
+        expected_roles = ('roles/cloudfunctions.developer', 'roles/firebasehosting.admin',
+            'roles/firebaserules.admin', 'roles/serviceusage.serviceUsageConsumer',
+            'roles/serviceusage.apiKeysViewer', 'roles/firebaseextensions.viewer')
+        self.assertEqual(m.PROJECT_ROLES, expected_roles)
+        self.assertEqual(m.CUSTOM, {
+            'gardenCiMetadataRead': ('resourcemanager.projects.getIamPolicy',
+                'cloudfunctions.functions.getIamPolicy', 'firebaseauth.configs.get',
+                'firebaseappcheck.recaptchaEnterpriseConfig.get', 'firebaseappcheck.services.get'),
+            'gardenCiSourceRead': ('storage.buckets.get', 'storage.objects.get'),
+            'gardenCiGateUpdate': ('datastore.databases.getMetadata', 'datastore.databases.get',
+                'datastore.entities.get', 'datastore.entities.list', 'datastore.entities.update')})
+        self.assertEqual(m.APIS, ('iam.googleapis.com', 'cloudresourcemanager.googleapis.com',
+            'iamcredentials.googleapis.com', 'sts.googleapis.com'))
+        plan = m.make_plan(m.collect(self.fake))
+        viewer = [a for a in plan['actions'] if a['binding'] and a['binding'][0] == 'roles/firebaseextensions.viewer']
+        self.assertEqual(len(viewer), 1)
+        self.assertEqual(viewer[0]['target'], 'project')
+        self.assertEqual(viewer[0]['binding'], ['roles/firebaseextensions.viewer', m.packed(m.condition()), m.MEMBER])
+        self.assertEqual(m.TIME_CONDITION, "request.time < timestamp('2026-10-11T23:45:51.472Z')")
+        self.assertEqual(m.EXPIRY, 1791762351472)
+        self.assertNotIn('firebaseextensions.instances.list', m.packed(plan))
+        self.assertTrue(any('does not fully enumerate' in x for x in plan['disclosures']))
+        self.assertTrue(any(stage == 'role_metadata' and args[3] == 'roles/firebaseextensions.viewer'
+            for args, stage, _ in self.fake.calls))
+        self.assertEqual(self.fake.writes, [])
+
+    def test_extensions_hidden_permission_absence_does_not_bypass_other_custom_checks(self):
+        self.assertNotIn('firebaseextensions.instances.list', [p['name'] for p in self.fake.support])
+        self.assertEqual(self.run_setup(), 0, self.output[-1])
+        viewer = [args for args, stage in self.fake.writes if stage == 'add_conditional_binding'
+            and '--role=roles/firebaseextensions.viewer' in args]
+        self.assertEqual(len(viewer), 1)
+        self.assertTrue(self.state.data['setup_verified'])
+        for permissions in m.CUSTOM.values():
+            self.assertNotIn('firebaseextensions.instances.list', permissions)
+
+    def test_required_existing_apis_stop_before_catalog_confirmation_or_cloud_write(self):
+        for api in m.REQUIRED_EXISTING_APIS:
+            with self.subTest(api=api):
+                self.fake = Fake()
+                self.fake.services.remove(api)
+                self.assertEqual(self.run_setup(confirm=lambda _: self.fail('must not ask approval')), 2)
+                self.assertEqual(self.state.data['stage'], 'required_existing_api_not_enabled:' + api)
+                self.assertEqual(self.fake.writes, [])
+                self.assertNotIn('custom_permission_support', [stage for _, stage, _ in self.fake.calls])
+                self.assertEqual(self.state.data['mutation_attempts_this_attempt'], 0)
+                self.assertFalse(self.state.data['setup_verified'])
+
+    def test_required_existing_api_loss_after_confirmation_stops_without_writes(self):
+        for api in m.REQUIRED_EXISTING_APIS:
+            with self.subTest(api=api):
+                self.fake = Fake()
+                def confirm(prompt):
+                    self.fake.services.remove(api)
+                    return prompt.removeprefix('Type exactly ').removesuffix(': ')
+                self.assertEqual(self.run_setup(confirm=confirm), 2)
+                self.assertEqual(self.state.data['stage'], 'required_existing_api_not_enabled:' + api)
+                self.assertEqual(self.state.data['phase'], 'confirmation_read')
+                self.assertEqual(self.fake.writes, [])
+
+    def test_required_existing_api_loss_after_writes_never_enables_federation(self):
+        for api in m.REQUIRED_EXISTING_APIS:
+            with self.subTest(api=api):
+                self.fake = Fake()
+                def disable(fake, args, stage, write):
+                    if stage == 'enabled_apis' and fake.writes and api in fake.services:
+                        fake.services.remove(api)
+                self.fake.mutate = disable
+                self.assertEqual(self.run_setup(), 2)
+                self.assertEqual(self.state.data['stage'], 'required_existing_api_not_enabled:' + api)
+                self.assertGreater(self.state.data['mutation_attempts_this_attempt'], 0)
+                self.assertNotIn('enable_provider_last', [stage for _, stage in self.fake.writes])
+                self.assertFalse(self.state.data['setup_verified'])
+
+    def test_permission_support_stop_reasons_are_distinct_and_redacted(self):
+        cases = [('missing', 'custom_permission_missing'), ('NOT_SUPPORTED', 'custom_permission_not_supported'),
+                 ('TESTING', 'custom_permission_not_supported'), ('predefined', 'custom_permission_predefined_only'),
+                 ('disabled', 'custom_permission_api_disabled')]
+        for change, reason in cases:
+            with self.subTest(change=change):
+                self.fake = Fake()
+                permission = self.fake.support[0]['name']
+                if change == 'missing': self.fake.support.pop(0)
+                elif change == 'predefined': self.fake.support[0]['onlyInPredefinedRoles'] = True
+                elif change == 'disabled': self.fake.support[0]['apiDisabled'] = True
+                else: self.fake.support[0]['customRolesSupportLevel'] = change
+                self.assertEqual(self.run_setup(), 2)
+                self.assertEqual(self.state.data['stage'], reason + ':' + permission)
+                self.assertEqual(self.state.data['provider_code'], 'UNKNOWN')
+                self.assertEqual(self.fake.writes, [])
+
+    def test_legacy_custom_extensions_role_collision_stops_without_repair(self):
+        self.fake.custom['gardenCiMetadataRead'] = {'name': m.role_name('gardenCiMetadataRead'), 'stage': 'GA',
+            'includedPermissions': [*m.CUSTOM['gardenCiMetadataRead'], 'firebaseextensions.instances.list']}
+        self.assertEqual(self.run_setup(), 2)
+        self.assertEqual(self.state.data['stage'], 'custom_role_collision')
+        self.assertEqual(self.fake.writes, [])
+
+    def test_viewer_predefined_metadata_need_not_expose_hidden_permission(self):
+        class PublicRoleMetadata(Fake):
+            def __call__(fake, args, stage, write=False):
+                value = super().__call__(args, stage, write)
+                if stage == 'role_metadata' and args[3] == 'roles/firebaseextensions.viewer':
+                    return {'name': args[3], 'stage': 'BETA', 'includedPermissions':
+                        ['firebase.clients.get', 'firebase.clients.list', 'firebase.projects.get',
+                         'resourcemanager.projects.get', 'resourcemanager.projects.list']}
+                return value
+        self.fake = PublicRoleMetadata()
+        self.assertEqual(self.run_setup(), 0, self.output[-1])
+        self.assertFalse(self.state.data['release_ready'])
+
     def test_permission_catalog_keeps_late_records_and_bounds_full_inventory(self):
-        self.fake.support = [{'name': f'unrelated.resources.read{i}'} for i in range(14987)] + self.fake.support
+        self.fake.support = [{'name': f'unrelated.resources.read{i}'} for i in range(14988)] + self.fake.support
         support = m.permission_support(self.fake)
-        self.assertEqual(len(support), 13)
+        self.assertEqual(len(support), 12)
         self.assertEqual({p['name'] for p in support}, {p for ps in m.CUSTOM.values() for p in ps})
         self.assertEqual(self.fake.calls[-1][0], m.permission_query_args())
         self.assertFalse(any(a.startswith(('--filter=', '--limit=', '--page-size=')) for a in self.fake.calls[-1][0]))
@@ -350,7 +462,7 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(self.run_setup(), 2)
         self.assertEqual(calls, 2)
         self.assertEqual(self.fake.writes, [])
-        self.assertTrue(self.state.data['stage'].startswith('unsupported_or_unknown_custom_permission:'))
+        self.assertTrue(self.state.data['stage'].startswith('custom_permission_'))
 
     def test_permission_catalog_timeout_never_retries_or_accepts_partial_evidence(self):
         for fail_pass in (1, 2):
@@ -1033,7 +1145,7 @@ def verify_sdk_permission_pagination():
     cli = gcloud_main.CreateCLI([])
     messages = apis.GetMessagesModule('iam', 'v1')
     names = sorted({p for values in m.CUSTOM.values() for p in values})
-    assert len(names) == 13
+    assert len(names) == 12
     projection = m.permission_query_args()[-1].split('=', 1)[1]
     class SyntheticService:
         def __init__(self, values, fail_offset=None):
@@ -1092,7 +1204,7 @@ def verify_sdk_permission_pagination():
             return False
         return True
 
-    noise = [{'name': 'synthetic.unrelated.p' + str(i), 'description': 'do-not-retain'} for i in range(14984)]
+    noise = [{'name': 'synthetic.unrelated.p' + str(i), 'description': 'do-not-retain'} for i in range(15000 - len(names) - 3)]
     decoys = [{'name': names[0] + '.extra'}, {'name': 'prefix.' + names[0]}, {'name': names[0].upper()}]
     needed = [{'name': name, 'customRolesSupportLevel': 'SUPPORTED',
                'onlyInPredefinedRoles': False, 'apiDisabled': False,
@@ -1107,7 +1219,7 @@ def verify_sdk_permission_pagination():
     assert sorted(p['name'] for p in records if p['name'] in names) == names
     assert all(set(p) <= {'name', 'customRolesSupportLevel', 'onlyInPredefinedRoles', 'apiDisabled'} for p in records)
     assert valid(records)
-    assert len(helper.permission_support(lambda args, stage: records)) == 13
+    assert len(helper.permission_support(lambda args, stage: records)) == 12
     cases += 1
     # Projection cannot stop pagination, even after every wanted record.
     records, requests, simulated_seconds = render(needed + noise + decoys)
@@ -1295,7 +1407,7 @@ def verify_sdk_parser_and_prompts(sdk_root):
             for args, stage, write in fake.calls:
                 current_write = write
                 runner(args, stage, write=write)
-        assert len(captured) == 67
+        assert len(captured) == 69
         for raw_argv, write in sorted(captured.items()):
             argv = list(raw_argv)
             # No --help and no argument removal: parse exactly what the real
@@ -1440,8 +1552,8 @@ def verify_sdk_parser_and_prompts(sdk_root):
         verify_sdk_permission_pagination()
         verify_sdk_function_inventory()
         assert not blocked
-        print('SDK_PARSE_VERIFIED version=568.0.0 argvVariants=67 oldInvalidFlagRejected=true operationalCommandRuns=0 networkRequests=0 credentialAccess=0')
-        print('SDK_FORMAT_VERIFIED argvVariants=67 formats=5 dictAndProtoShape=true privateFieldsOmitted=true oldInvalidFormatRejected=true')
+        print('SDK_PARSE_VERIFIED version=568.0.0 argvVariants=69 oldInvalidFlagRejected=true operationalCommandRuns=0 networkRequests=0 credentialAccess=0')
+        print('SDK_FORMAT_VERIFIED argvVariants=69 formats=5 dictAndProtoShape=true privateFieldsOmitted=true oldInvalidFormatRejected=true')
         print('SDK_BUCKET_PIPELINE_VERIFIED rawApiResourceDisplayProjection=true standardDisplayDropsOwner=true exactOwnerRequired=true wrongAndMissingOwnerRejected=true')
         print('SDK_API_SELECTION_VERIFIED storageJson=true functionsGen2=true parentSettingsUnchanged=true alternateStorageCredentialsRejected=true')
         print('SDK_PROMPT_VERIFIED repeatedNo=true eofDefaultYesReproduced=true ownerApprovalInputUntouched=true')
