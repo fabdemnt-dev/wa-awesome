@@ -7,6 +7,7 @@ import importlib.util
 import io
 import json
 import os
+import subprocess
 import sys
 sys.dont_write_bytecode = True
 from pathlib import Path
@@ -449,6 +450,101 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(self.state.data['stage'], 'deleted_target_account')
         self.assertEqual(self.fake.writes, [])
 
+    def test_gcloud_reads_reject_all_yes_no_prompts_without_eof_defaults(self):
+        seen = []
+        def read(command, **kwargs):
+            self.assertNotIn('--no-quiet', command)
+            self.assertNotIn('--quiet', command)
+            self.assertEqual(kwargs['env']['CLOUDSDK_CORE_DISABLE_PROMPTS'], 'false')
+            self.assertNotEqual(kwargs['stdin'], subprocess.DEVNULL)
+            # The real pipe supplies more than one decline and never borrows
+            # the owner stdin used by the final exact approval prompt.
+            with os.fdopen(os.dup(kwargs['stdin'])) as input_stream:
+                self.assertEqual([input_stream.readline() for _ in range(8)], ['n\n'] * 8)
+            seen.append(command)
+            return subprocess.CompletedProcess(command, 0, b'{}', b'')
+        with patch.object(m.subprocess, 'run', side_effect=read):
+            self.assertEqual(m.Gcloud()(['config', 'list'], 'gcloud_config'), {})
+        self.assertEqual(len(seen), 1)
+
+    def test_read_prompt_producer_failure_cannot_become_default_accepting_eof(self):
+        import select
+        # Even a failed producer must leave the writer open while the command
+        # runs. The reader blocks rather than observing EOF/default-YES.
+        with patch.object(m.os, 'write', side_effect=OSError('synthetic producer fault')):
+            with m.reject_sdk_prompts() as fd:
+                self.assertEqual(select.select([fd], [], [], 0.01)[0], [])
+
+    def test_gcloud_write_requires_own_approval_then_dispatches_once(self):
+        runner = m.Gcloud()
+        with patch.object(m.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, b'{}', b'')) as dispatch:
+            with self.assertRaises(m.Stop):
+                runner(['services', 'enable', 'iam.googleapis.com'], 'enable_apis', write=True)
+            dispatch.assert_not_called()
+            runner.approved = True
+            self.assertEqual(runner(['services', 'enable', 'iam.googleapis.com'], 'enable_apis', write=True), {})
+            dispatch.assert_called_once()
+            command = dispatch.call_args.args[0]
+            self.assertEqual(command.count('--quiet'), 1)
+            self.assertNotIn('--no-quiet', command)
+            self.assertEqual(dispatch.call_args.kwargs['stdin'], subprocess.DEVNULL)
+
+    def test_gcloud_timeout_cleans_up_read_prompt_pipe_and_thread(self):
+        import threading
+        before_threads = set(threading.enumerate())
+        descriptors = Path('/proc/self/fd')
+        before_fds = len(list(descriptors.iterdir())) if descriptors.exists() else None
+        with patch.object(m.subprocess, 'run', side_effect=subprocess.TimeoutExpired('synthetic', 60)):
+            for _ in range(20):
+                with self.assertRaises(m.Stop) as caught:
+                    m.Gcloud()(['config', 'list'], 'gcloud_config')
+                self.assertEqual(caught.exception.local_code, 'CLI_TIMEOUT')
+        self.assertEqual(set(threading.enumerate()), before_threads)
+        if before_fds is not None:
+            self.assertEqual(len(list(descriptors.iterdir())), before_fds)
+
+    def test_gcloud_local_failures_are_sanitized_and_specific(self):
+        cases = [
+            (subprocess.CompletedProcess([], 2, b'', b'unrecognized arguments: --no-quiet SYNTHETIC_PRIVATE'), 'CLI_ARGUMENT', 2),
+            (subprocess.CompletedProcess([], 1, b'', b'SYNTHETIC_PRIVATE'), 'CLI_EXIT_NONZERO', 1),
+            (subprocess.CompletedProcess([], 0, b'SYNTHETIC_PRIVATE', b''), 'NON_JSON_RESPONSE', 0),
+            (FileNotFoundError('SYNTHETIC_PRIVATE'), 'CLI_MISSING', None),
+            (subprocess.TimeoutExpired('SYNTHETIC_PRIVATE', 60), 'CLI_TIMEOUT', None),
+        ]
+        for failure, code, exit_code in cases:
+            with self.subTest(code=code), patch.object(m.subprocess, 'run',
+                **({'side_effect': failure} if isinstance(failure, Exception) else {'return_value': failure})):
+                with self.assertRaises(m.Stop) as caught:
+                    m.Gcloud()(['config', 'list'], 'gcloud_config')
+                self.assertEqual(caught.exception.local_code, code)
+                self.assertEqual(caught.exception.exit_code, exit_code)
+                self.assertNotIn('SYNTHETIC_PRIVATE', str(caught.exception))
+
+    def test_resume_archives_original_failure_bytes_and_rejects_history_overwrite(self):
+        self.state.data.update(stage='gcloud_config', provider_code='UNKNOWN')
+        self.state.save()
+        # A record with CRLF must be retained without newline translation.
+        previous = self.state.path.read_bytes().replace(b'\n', b'\r\n')
+        self.state.path.write_bytes(previous)
+        resumed = m.State(self.state.path.parent, resume=True)
+        history = self.state.path.parent / 'attempt-1-state.json'
+        self.assertEqual(history.read_bytes(), previous)
+        self.assertEqual(os.stat(history).st_mode & 0o777, 0o600)
+        self.assertEqual(resumed.data['attempt'], 2)
+        self.state.path.write_bytes(previous)
+        # Semantically identical JSON with different bytes must also block.
+        history.write_bytes(previous.replace(b'\r\n', b'\n'))
+        with self.assertRaises(m.Stop): m.State(self.state.path.parent, resume=True)
+        self.assertEqual(self.state.path.read_bytes(), previous)
+        self.assertEqual(history.read_bytes(), previous.replace(b'\r\n', b'\n'))
+
+    def test_state_hardlink_is_rejected_before_truncation(self):
+        other = self.state.path.parent / 'other.json'
+        os.link(self.state.path, other)
+        before = other.read_bytes()
+        with self.assertRaises(m.Stop): self.state.save()
+        self.assertEqual(other.read_bytes(), before)
+
     def test_function_policy_reads_use_documented_flags_after_v2_identity_check(self):
         m.collect(self.fake)
         inventory = [args for args, stage, _ in self.fake.calls if stage == 'function_metadata']
@@ -478,6 +574,156 @@ class SetupTests(unittest.TestCase):
         link = Path(self.temp.name) / 'alias'
         link.symlink_to(self.state.path.parent)
         with self.assertRaises(m.Stop): m.State(link, resume=True)
+
+
+def verify_sdk_parser_and_prompts(sdk_root):
+    """Real SDK argument/concept parsing only; never CLI.Execute/Command.Run.
+
+    Called separately by credential-free CI after the official pinned SDK is
+    installed. A private empty configuration, network/process audit hook, and
+    SDK dispatch/auth intercepts fail closed before any provider operation.
+    """
+    import socket
+    import runpy
+    sdk_root = Path(sdk_root).resolve()
+    assert (sdk_root / 'VERSION').read_text().strip() == '568.0.0'
+    with tempfile.TemporaryDirectory(prefix='garden-sdk-parser-') as folder:
+        folder = Path(folder)
+        (folder / 'config').mkdir(mode=0o700)
+        os.environ.clear()
+        os.environ.update(HOME=str(folder), PATH='/usr/bin:/bin', COLUMNS='80', LINES='24',
+            CLOUDSDK_CONFIG=str(folder / 'config'), CLOUDSDK_AUTH_DISABLE_CREDENTIALS='true',
+            CLOUDSDK_CORE_CHECK_GCE_METADATA='false', CLOUDSDK_CORE_DISABLE_PROMPTS='false',
+            CLOUDSDK_CORE_DISABLE_FILE_LOGGING='true', CLOUDSDK_CORE_LOG_HTTP='false',
+            CLOUDSDK_CORE_DISABLE_USAGE_REPORTING='true', CLOUDSDK_COMPONENT_MANAGER_DISABLE_UPDATE_CHECK='true',
+            CLOUDSDK_CORE_PROJECT=m.PROJECT, CLOUDSDK_PYTHON_SITEPACKAGES='0')
+        blocked = []
+        class UnsafeAction(BaseException): pass
+        def fail(*args, **kwargs):
+            blocked.append('forbidden-sdk-dispatch')
+            raise UnsafeAction('forbidden-sdk-dispatch')
+        def audit(event, args):
+            if (event.startswith('socket.') and event != 'socket.gethostname') or event in (
+                'subprocess.Popen', 'os.system', 'os.posix_spawn', 'os.spawn', 'os.exec'):
+                blocked.append(event)
+                raise UnsafeAction(event)
+        sys.addaudithook(audit)
+        # Avoid an unrelated urllib3 import-time IPv6 loopback probe.
+        socket.has_ipv6 = False
+        runpy.run_path(str(sdk_root / 'lib/gcloud.py'), run_name='gcloud_bootstrap')
+        # The fixture imported Python's argparse before the SDK bootstrap. A
+        # real gcloud subprocess starts with its bundled fork instead; load
+        # that exact parser, without modifying either implementation.
+        sys.modules.pop('argparse', None)
+        import argparse as sdk_argparse
+        assert Path(sdk_argparse.__file__).resolve() == sdk_root / 'lib/third_party/argparse/__init__.py'
+        from googlecloudsdk import gcloud_main
+        from googlecloudsdk.calliope import backend
+        from googlecloudsdk.core import properties
+        from googlecloudsdk.core.configurations import named_configs
+        from googlecloudsdk.core.updater import update_manager
+        backend.Command.Run = fail
+        update_manager.UpdateManager.EnsureInstalledAndRestart = fail
+        update_manager.UpdateManager.Install = fail
+        cli = gcloud_main.CreateCLI([])
+        from googlecloudsdk.calliope import cli as cli_module
+        from googlecloudsdk.api_lib.util import apis, apis_internal
+        from apitools.base.py import base_api, http_wrapper
+        from googlecloudsdk.core.credentials import store as credential_store, transports
+        from googlecloudsdk.command_lib import info_holder
+        from googlecloudsdk.core.console import console_io
+        import google.auth
+        import google.auth._default
+        backend.Command.Run = fail
+        cli_module.CLI.Execute = fail
+        gcloud_main.main = fail
+        update_manager.UpdateManager.EnsureInstalledAndRestart = fail
+        update_manager.UpdateManager.Install = fail
+        original_client = apis_internal._GetClientInstance
+        def local_client(api_name, api_version, no_http=False, *args, **kwargs):
+            if no_http is not True:
+                fail()
+            return original_client(api_name, api_version, no_http, *args, **kwargs)
+        apis_internal._GetClientInstance = local_client
+        apis.GetGapicClientInstance = fail
+        base_api.BaseApiService._RunMethod = fail
+        base_api.BaseApiClient._SetCredentials = fail
+        http_wrapper.MakeRequest = fail
+        for name in ('AvailableAccounts', 'GetAccessToken', 'GetAccessTokenIfEnabled',
+            'GetFreshAccessToken', 'GetFreshAccessTokenIfEnabled', 'LoadFreshCredential',
+            'LoadIfEnabled', 'Load', 'Refresh', 'RefreshIfExpireWithinWindow', 'RefreshIfAlmostExpire'):
+            setattr(credential_store, name, fail)
+        transports.GetApitoolsTransport = fail
+        google.auth.default = fail
+        google.auth._default.default = fail
+        # Storage imports otherwise run local git/ssh version probes, unrelated
+        # to parser behavior. No subprocess is permitted in this test.
+        info_holder.ToolsInfo._GetVersion = lambda self, command: 'OFFLINE PARSER TEST'
+        fake = Fake()
+        fake.ancestors += [{'type': 'folder', 'id': '123'}, {'type': 'organization', 'id': '456'}]
+        with patch.object(subprocess, 'run', side_effect=fail):
+            assert m.execute(fake, m.State(folder / 'state'),
+                confirm=lambda p: p.removeprefix('Type exactly ').removesuffix(': '),
+                emit=lambda _: None, now=lambda: m.EXPIRY - 86400000, sleep=lambda _: None) == 0
+            m.read_role(fake, 'organizations/456/roles/synthetic')
+        captured = {}
+        current_write = False
+        def capture(command, **kwargs):
+            assert command[0] == 'gcloud' and not kwargs.get('shell', False)
+            assert kwargs['env']['CLOUDSDK_CORE_DISABLE_PROMPTS'] == 'false'
+            if not current_write:
+                assert kwargs['stdin'] != subprocess.DEVNULL
+            captured[tuple(command[1:])] = current_write
+            return subprocess.CompletedProcess(command, 0, b'{}', b'')
+        with patch.object(subprocess, 'run', side_effect=capture):
+            runner = m.Gcloud()
+            runner.approved = True
+            for args, stage, write in fake.calls:
+                current_write = write
+                runner(args, stage, write=write)
+        assert len(captured) == 67
+        for raw_argv, write in sorted(captured.items()):
+            argv = list(raw_argv)
+            # No --help and no argument removal: parse exactly what the real
+            # helper would submit, including every resource/condition value.
+            assert '--help' not in argv and '--no-quiet' not in argv
+            named_configs.FLAG_OVERRIDE_STACK.PushFromArgs(argv)
+            properties.VALUES.PushInvocationValues()
+            try:
+                parsed = cli.top_element._parser.parse_args(list(argv))
+                if parsed.CONCEPT_ARGS is not None:
+                    parsed.CONCEPT_ARGS.ParseConcepts()
+                assert properties.VALUES.core.disable_prompts.GetBool() is write
+            finally:
+                properties.VALUES.PopInvocationValues()
+                named_configs.FLAG_OVERRIDE_STACK.Pop()
+        # Regression: the exact old first read must be rejected by this same
+        # real parser. A help-only probe would incorrectly accept the command.
+        old_first = next(list(argv) for argv in captured if argv[:2] == ('config', 'list')) + ['--no-quiet']
+        named_configs.FLAG_OVERRIDE_STACK.PushFromArgs(old_first)
+        properties.VALUES.PushInvocationValues()
+        try:
+            with contextlib.redirect_stderr(io.StringIO()):
+                try:
+                    cli.top_element._parser.parse_args(old_first)
+                except SystemExit as error:
+                    assert error.code == 2
+                else:
+                    raise AssertionError('old invalid flag must fail actual argument parsing')
+        finally:
+            properties.VALUES.PopInvocationValues()
+            named_configs.FLAG_OVERRIDE_STACK.Pop()
+        # Actual SDK prompt routine: EOF's default-YES behavior is reproduced,
+        # and the read-command pipe declines repeatedly for either default.
+        with patch.object(sys, 'stdin', io.StringIO('')), contextlib.redirect_stderr(io.StringIO()):
+            assert console_io.PromptContinue(default=True) is True
+        with m.reject_sdk_prompts() as fd:
+            with os.fdopen(os.dup(fd)) as stream, patch.object(sys, 'stdin', stream), contextlib.redirect_stderr(io.StringIO()):
+                for default in (True, False, True, False):
+                    assert console_io.PromptContinue(default=default, throw_if_unattended=True) is False
+        assert not blocked
+        print('SDK_PARSE_VERIFIED version=568.0.0 argvVariants=67 oldInvalidFlagRejected=true commandRuns=0 networkRequests=0 credentialAccess=0')
+        print('SDK_PROMPT_VERIFIED repeatedNo=true eofDefaultYesReproduced=true ownerApprovalInputUntouched=true')
 
 
 if __name__ == '__main__':
