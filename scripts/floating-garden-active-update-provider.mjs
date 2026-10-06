@@ -2,14 +2,15 @@
 // The orchestration module owns authorization and ordering. No existing initial
 // deployment/resume/activate guard is relaxed or reused for active-trial writes.
 import { createRequire } from 'node:module';
-import { readFileSync, lstatSync, realpathSync } from 'node:fs';
+import { readFileSync, writeFileSync, lstatSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import { createCloudAdapter, FIRESTORE_CLIENT_CONFIG, RUNTIME_ACCOUNT, makeCloudRunner, classifyDeployResult, RESUME_REQUIRED_APIS, normalizeFailureDiagnostic } from './floating-garden-trial-cloud-adapter.mjs';
+import { createCloudAdapter, FIRESTORE_CLIENT_CONFIG, RUNTIME_ACCOUNT, makeCloudRunner, classifyDeployResult, REQUIRED_APIS, normalizeFailureDiagnostic } from './floating-garden-trial-cloud-adapter.mjs';
 import { createActiveUpdateRequest, createActiveUpdateTransport } from './floating-garden-active-update-transport.mjs';
 import { FUNCTION_NAMES } from './prepare-floating-garden-trial.mjs';
 import { requireCiAuthPolicy } from './floating-garden-ci-auth-policy.mjs';
 import { validateCiFunctionConfiguration, stableCiFunctionConfiguration } from './floating-garden-ci-configuration.mjs';
+import { ciFunctionDeployArguments, classifyCiFunctionDeploy, GCLOUD_FUNCTIONS_VERSION, GCLOUD_SOURCE_IGNORE } from './floating-garden-ci-gcloud.mjs';
 import { validateEnvironment } from './deploy-floating-garden-connection-template.mjs';
 import { ACTIVE_UPDATE_SCOPE as S, activeUpdatePackets, recheckActiveUpdatePlan, assertActiveRecords,
   toggleActiveRecords, assertPreservedRecords, requireActiveUpdate as check, activeUpdateFailure,
@@ -156,9 +157,7 @@ export function createActiveUpdateProvider({ plan, toolingDir, runner = makeClou
     return { iam, runtime: gcloud(['iam', 'service-accounts', 'describe', RUNTIME_ACCOUNT]),
       secret: gcloud(['secrets', 'describe', SECRET]),
       secretVersion: gcloud(['secrets', 'versions', 'describe', '1', `--secret=${SECRET}`]),
-      ...(environmentPolicy === undefined ? {} : { secretLatest: gcloud(['secrets', 'versions', 'describe', 'latest', `--secret=${SECRET}`]),
-        firebaseAdminSdk: await read(`https://firebase.googleapis.com/v1beta1/projects/${S.project}/adminSdkConfig`),
-        extensions: await read(`https://firebaseextensions.googleapis.com/v1beta/projects/${S.project}/instances?pageSize=100`) }),
+      ...(environmentPolicy === undefined ? {} : { secretLatest: gcloud(['secrets', 'versions', 'describe', 'latest', `--secret=${SECRET}`]) }),
       artifacts: stableArtifactRepositories(gcloud(['artifacts', 'repositories', 'list', `--location=${S.region}`])),
       apis: gcloud(['services', 'list', '--enabled']),
       auth: await read(`https://identitytoolkit.googleapis.com/admin/v2/projects/${S.project}/config`),
@@ -238,10 +237,8 @@ export function createActiveUpdateProvider({ plan, toolingDir, runner = makeClou
     requireCiAuthPolicy(environmentPolicy).validateEnvironment(env, execArgv); ciClosed = true;
     const result = await inspectState(false);
     check(result.createdRoomCount === 2 && result.roomCount === 2, 'data-preservation');
-    validateCiFunctionConfiguration(baseline.proof.functions, settingsBefore.firebaseAdminSdk);
-    check(Array.isArray(settingsBefore.apis) && RESUME_REQUIRED_APIS.every(api => settingsBefore.apis.some(a => a.config?.name === api)), 'provider-read');
-    const extensions = settingsBefore.extensions;
-    check(extensions && Object.getPrototypeOf(extensions) === Object.prototype && Object.keys(extensions).every(k => ['instances', 'nextPageToken'].includes(k)) && !extensions.nextPageToken && Array.isArray(extensions.instances ?? []) && (extensions.instances ?? []).length === 0, 'source-proof');
+    validateCiFunctionConfiguration(baseline.proof.functions);
+    check(Array.isArray(settingsBefore.apis) && REQUIRED_APIS.every(api => settingsBefore.apis.some(a => a.config?.name === api)), 'provider-read');
     const latest = settingsBefore.secretLatest;
     check(latest?.state === 'ENABLED' && [S.project, S.projectNumber].some(p => latest.name === `projects/${p}/secrets/${SECRET}/versions/1`) &&
       isDeepStrictEqual(latest, settingsBefore.secretVersion), 'iam-preservation');
@@ -302,7 +299,8 @@ export function createActiveUpdateProvider({ plan, toolingDir, runner = makeClou
     if (completed.length) proof.push(...(await newAdapter.verifyFunctions({ includeProof: true, functionNames: completed })).functions);
     proof.sort((a, b) => FUNCTION_NAMES.indexOf(a.function.buildConfig.entryPoint) - FUNCTION_NAMES.indexOf(b.function.buildConfig.entryPoint));
     validateAppliedTraffic(proof);
-    check(isDeepStrictEqual(stableFunctionConfiguration(baseline.proof.functions), stableFunctionConfiguration(proof)), 'iam-preservation');
+    if (ciClosed) validateCiFunctionConfiguration(proof);
+    check(isDeepStrictEqual(stableConfiguration(baseline.proof.functions), stableConfiguration(proof)), 'iam-preservation');
   }
   // The transport is only used by the separately approved state machine. It
   // receives immutable exact packets and baseline evidence, never a broad CLI.
@@ -319,8 +317,41 @@ export function createActiveUpdateProvider({ plan, toolingDir, runner = makeClou
     if (result?.kind !== 'success') throw activeUpdateFailure(result?.kind === 'unknown' ? 'mutation-unknown' : 'mutation-failed', result);
     applied.push(kind); return { kind: 'success' };
   }
-  // Separate contract: one official CLI invocation per stage, with its own
-  // internal concurrency/retries. This is never a source-only REST operation.
+  async function deployCiFunctions() {
+    check(gcloud(['version'])['Google Cloud SDK'] === GCLOUD_FUNCTIONS_VERSION, 'tooling');
+    const ignoreFile = join(toolingDir, 'garden-functions.gcloudignore');
+    // Outside the uploaded source tree; never generate or upload .gcloudignore.
+    writeFileSync(ignoreFile, GCLOUD_SOURCE_IGNORE, { flag: 'wx', mode: 0o600 });
+    const completed = [];
+    for (const [index, name] of FUNCTION_NAMES.entries()) {
+      requireCiAuthPolicy(environmentPolicy).validateEnvironment(env, execArgv);
+      await recheckActiveUpdatePlan(plan); await assertClosed(); await assertSettingsUnchanged();
+      await verifyMixedFunctions(completed);
+      const fn = baseline.proof.functions.find(p => p.function.buildConfig.entryPoint === name).function;
+      const args = ciFunctionDeployArguments(fn, join(next.packet.gameDir, 'functions'), ignoreFile);
+      const file = lstatSync(ignoreFile);
+      check(file.isFile() && !file.isSymbolicLink() && file.nlink === 1 && !(file.mode & 0o077) &&
+        readFileSync(ignoreFile, 'utf8') === GCLOUD_SOURCE_IGNORE, 'local-packet');
+      await recordStep({ stage: 'official-cli-functions', resourceKind: 'functions', index });
+      let raw; try { raw = runner('gcloud', args, next.packet.gameDir); }
+      catch { raw = { exitCode: null, stdout: '', signal: true }; }
+      const result = classifyCiFunctionDeploy(raw, fn);
+      // Always reconcile, but a failed/interrupted command remains blocked even
+      // if the source landed. No next function, Rules, Hosting or gate write.
+      try {
+        await verifyMixedFunctions([...completed, name]); await assertSettingsUnchanged(); await assertClosed();
+        check(result.kind === 'success', 'mutation-unknown');
+      } catch (error) {
+        ciDiagnostics.set(error, Object.freeze({ kind: result.kind, diagnostic: normalizeFailureDiagnostic() }));
+        throw error;
+      }
+      completed.push(name);
+    }
+    await verifyFunctions(); applied.push('functions'); return { kind: 'success', cliResult: 'success' };
+  }
+  // Five sequential official gcloud updates; one Firebase Rules/Hosting command
+  // apiece. Each SDK retains its own internal retry/poll behavior.
+
   async function deployCiStage(kind) {
     check(ciClosed && journalBound && ['functions', 'rules', 'hosting'][applied.length] === kind && !attemptedStages.has(kind), 'stage-order');
     requireCiAuthPolicy(environmentPolicy).validateEnvironment(env, execArgv);
@@ -328,23 +359,24 @@ export function createActiveUpdateProvider({ plan, toolingDir, runner = makeClou
     if (!applied.length) check(isDeepStrictEqual(baseline.proof, await evidence('previous')), 'provider-drift');
     else await verifyFunctions();
     if (kind === 'hosting') await verifyRules();
+    // Mark the whole stage before any attempt. A partial stage cannot resume.
+    attemptedStages.add(kind);
+    if (kind === 'functions') return deployCiFunctions();
     const firebase = join(toolingDir, 'node_modules/firebase-tools/lib/bin/firebase.js');
-    const only = kind === 'functions' ? FUNCTION_NAMES.map(n => `functions:floating-garden-trial:${n}`).join(',') : kind === 'rules' ? 'firestore:rules' : `hosting:${S.project}`;
+    const only = kind === 'rules' ? 'firestore:rules' : `hosting:${S.project}`;
     const config = kind === 'hosting' ? 'firebase.hosting-only.json' : 'firebase.trial.json';
     const args = [firebase, 'deploy', '--only', only,
       ...(kind === 'hosting' ? ['--message', `garden-trial-game-v1:${next.packet.manifestDigest}`] : []),
       '--config', config, '--project', S.project, '--non-interactive', '--json'];
     // Mark the attempt before the command. An uncertain exit never retries it.
-    attemptedStages.add(kind);
     await recordStep({ stage: `official-cli-${kind}`, resourceKind: kind, index: 0 });
     let raw; try { raw = runner(process.execPath, args, next.packet.gameDir); }
     catch { raw = { exitCode: null, stdout: '', signal: true }; }
-    const result = classifyDeployResult(raw, { allowCleanupWarning: kind === 'functions' });
+    const result = classifyDeployResult(raw);
     // Reconcile even when the CLI reports failure: cleanup can fail after the
     // actual deployment. Full expected readback is necessary, never inferred.
     try {
-      if (kind === 'functions') await verifyFunctions();
-      else if (kind === 'rules') await verifyRules();
+      if (kind === 'rules') await verifyRules();
       else await verifyHosting();
       if (!['success', 'cleanup-warning'].includes(result.kind)) throw activeUpdateFailure('mutation-unknown');
     } catch (error) {
@@ -355,7 +387,7 @@ export function createActiveUpdateProvider({ plan, toolingDir, runner = makeClou
   }
   async function verifyFunctions() {
     const got = await newAdapter.verifyFunctions({ includeProof: true }); validateAppliedTraffic(got.functions);
-    if (ciClosed) validateCiFunctionConfiguration(got.functions, settingsBefore.firebaseAdminSdk);
+    if (ciClosed) validateCiFunctionConfiguration(got.functions);
     const before = stableConfiguration(baseline.proof.functions), after = stableConfiguration(got.functions);
     check(isDeepStrictEqual(before, after), 'iam-preservation'); await assertSettingsUnchanged(); await assertClosed(); return { kind: 'verified' };
   }

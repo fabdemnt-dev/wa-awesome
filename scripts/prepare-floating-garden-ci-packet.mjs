@@ -63,7 +63,8 @@ function commands() {
   const command = (config, only) => ({ cwd: 'packet/game',
     argv: ['firebase', '--config', config, '--project', S.project, 'deploy', '--only', only] });
   return {
-    functions: command('firebase.trial.json', FUNCTION_NAMES.map(name => `functions:floating-garden-trial:${name}`).join(',')),
+    functions: { driver: 'floating-garden-ci-release.mjs', cli: 'gcloud', version: '568.0.0',
+      existingFunctionNames: [...FUNCTION_NAMES], sequential: true, identitiesFromVerifiedBaseline: true },
     rules: command('firebase.trial.json', 'firestore:rules'),
     hosting: command('firebase.hosting-only.json', `hosting:${S.project}`),
   };

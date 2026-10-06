@@ -228,7 +228,13 @@ export function validateInvokerPolicy(policy) {
 // Strict bounded ZIP reader. No extraction, filesystem traversal, duplicate names,
 // symlinks, ZIP64, encrypted entries, non-file entries, or extra source files.
 // Compare every uncompressed byte against the checked local source inventory.
-export function validateSourceArchive(input, expected) {
+export function validateSourceArchive(input, expected, { allowDirectoryEntries = false } = {}) {
+  requireThat(typeof allowDirectoryEntries === 'boolean', 'source-archive-directory');
+  const directories = new Set();
+  if (allowDirectoryEntries) for (const name of Object.keys(expected || {})) {
+    const parts = name.split('/');
+    for (let i = 1; i < parts.length; i++) directories.add(parts.slice(0, i).join('/') + '/');
+  }
   const b = Buffer.from(input);
   requireThat(b.length >= 22 && b.length <= MAX_BYTES && plain(expected) && Object.keys(expected).length > 0, 'source-archive-size');
   let end = -1;
@@ -236,18 +242,25 @@ export function validateSourceArchive(input, expected) {
   requireThat(end >= 0, 'source-archive-directory');
   const count = b.readUInt16LE(end + 10), length = b.readUInt32LE(end + 12), offset = b.readUInt32LE(end + 16);
   requireThat(!b.readUInt16LE(end + 4) && !b.readUInt16LE(end + 6) && b.readUInt16LE(end + 8) === count &&
-    count === Object.keys(expected).length && count <= 128 && offset + length === end, 'source-archive-directory');
-  const seen = new Set(), extents = []; let at = offset, total = 0;
+    count >= Object.keys(expected).length && count <= Object.keys(expected).length + directories.size && count <= (allowDirectoryEntries ? 256 : 128) && offset + length === end, 'source-archive-directory');
+  const seen = new Set(), filesSeen = new Set(), extents = []; let at = offset, total = 0;
   for (let n = 0; n < count; n++) {
     requireThat(at + 46 <= end && b.readUInt32LE(at) === 0x02014b50, 'source-archive-entry');
     const flags = b.readUInt16LE(at + 8), method = b.readUInt16LE(at + 10), crc = b.readUInt32LE(at + 16);
     const packed = b.readUInt32LE(at + 20), size = b.readUInt32LE(at + 24), nl = b.readUInt16LE(at + 28), el = b.readUInt16LE(at + 30), cl = b.readUInt16LE(at + 32);
     const mode = (b.readUInt32LE(at + 38) >>> 16) & 0xf000, local = b.readUInt32LE(at + 42);
     requireThat(at + 46 + nl + el + cl <= end && !(flags & ~0x808) && [0, 8].includes(method) &&
-      !b.readUInt16LE(at + 34) && [0, 0x8000].includes(mode) && !(b.readUInt32LE(at + 38) & 0x10), 'source-archive-entry');
+      !b.readUInt16LE(at + 34), 'source-archive-entry');
     const nameBytes = b.subarray(at + 46, at + 46 + nl), name = nameBytes.toString('utf8');
-    requireThat(/^[A-Za-z0-9_./-]+$/.test(name) && !name.startsWith('/') && !name.split('/').some((s) => !s || s === '.' || s === '..') &&
-      !seen.has(name) && Object.hasOwn(expected, name) && Buffer.from(name).equals(nameBytes), 'source-archive-path');
+    const directory = allowDirectoryEntries && name.endsWith('/'), path = directory ? name.slice(0, -1) : name;
+    // The official gcloud zipper emits directory ancestors. Accept only exact
+    // canonical ancestors of manifest files, with directory attributes and no
+    // payload. Symlinks, unknown/empty directories and missing files still fail.
+    requireThat(directory ? directories.has(name) && mode === 0x4000 && Boolean(b.readUInt32LE(at + 38) & 0x10) &&
+      flags === 0 && method === 0 && size === 0 && packed === 0 && crc === 0 :
+      [0, 0x8000].includes(mode) && !(b.readUInt32LE(at + 38) & 0x10), 'source-archive-entry');
+    requireThat(/^[A-Za-z0-9_./-]+$/.test(path) && !path.startsWith('/') && !path.split('/').some((s) => !s || s === '.' || s === '..') &&
+      !seen.has(name) && (directory || Object.hasOwn(expected, name)) && Buffer.from(name).equals(nameBytes), 'source-archive-path');
     requireThat(size <= 4 * 1024 * 1024 && (total += size) <= MAX_BYTES && local + 30 <= offset && b.readUInt32LE(local) === 0x04034b50 &&
       b.readUInt16LE(local + 6) === flags && b.readUInt16LE(local + 8) === method, 'source-archive-local-entry');
     const lnl = b.readUInt16LE(local + 26), lel = b.readUInt16LE(local + 28), start = local + 30 + lnl + lel;
@@ -256,7 +269,7 @@ export function validateSourceArchive(input, expected) {
     let bytes;
     try { bytes = method === 0 ? b.subarray(start, start + packed) : inflateRawSync(b.subarray(start, start + packed), { maxOutputLength: 4 * 1024 * 1024 }); }
     catch { throw safe('source-archive-compression'); }
-    requireThat(bytes.length === size && bytes.equals(Buffer.from(expected[name])), 'source-archive-bytes');
+    requireThat(bytes.length === size && bytes.equals(directory ? Buffer.alloc(0) : Buffer.from(expected[name])), 'source-archive-bytes');
     // CRC is also checked, rather than trusting two matching forged ZIP headers.
     let actual = 0xffffffff;
     for (const byte of bytes) { actual ^= byte; for (let bit = 0; bit < 8; bit++) actual = (actual >>> 1) ^ ((actual & 1) ? 0xedb88320 : 0); }
@@ -268,11 +281,12 @@ export function validateSourceArchive(input, expected) {
       requireThat(last + 12 <= offset && b.readUInt32LE(last) === crc && b.readUInt32LE(last + 4) === packed && b.readUInt32LE(last + 8) === size, 'source-archive-descriptor');
       last += 12;
     }
-    extents.push([local, last]); seen.add(name); at += 46 + nl + el + cl;
+    extents.push([local, last]); seen.add(name); if (!directory) filesSeen.add(name); at += 46 + nl + el + cl;
   }
   extents.sort((a, c) => a[0] - c[0]);
   requireThat(at === end && extents[0][0] === 0 && extents.at(-1)[1] === offset && extents.every((e, i) => i === 0 || extents[i - 1][1] === e[0]), 'source-archive-overlap');
-  return { verified: true, fileCount: seen.size };
+  requireThat(filesSeen.size === Object.keys(expected).length, 'source-archive-directory');
+  return { verified: true, fileCount: filesSeen.size };
 }
 
 export function makeCloudRunner({ exec = execFileSync, env = process.env } = {}) {
@@ -664,7 +678,7 @@ export function createCloudAdapter({ packet, review, toolingDir, prior, runner =
         const object = await request(objectUrl);
         requireThat(object.bucket === source.bucket && object.name === source.object && String(object.generation) === source.generation &&
           /^[1-9][0-9]*$/.test(String(object.size)) && Number(object.size) <= MAX_BYTES, 'source-object-identity');
-        validateSourceArchive(await request(`${objectUrl}&alt=media`, { bytes: true }), expectedSource); proven.add(key);
+        validateSourceArchive(await request(`${objectUrl}&alt=media`, { bytes: true }), expectedSource, { allowDirectoryEntries: environmentPolicy !== undefined }); proven.add(key);
       }
     }
     requireThat(same(functions, await functionsList()), 'functions-concurrent-change');

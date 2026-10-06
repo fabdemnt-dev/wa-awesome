@@ -42,8 +42,7 @@ FUNCTIONS = ('floatingGardenCreateRoom', 'floatingGardenJoinRoom', 'floatingGard
 APIS = ('iam.googleapis.com', 'cloudresourcemanager.googleapis.com',
         'iamcredentials.googleapis.com', 'sts.googleapis.com')
 PROJECT_ROLES = ('roles/cloudfunctions.developer', 'roles/firebasehosting.admin',
-                 'roles/firebaserules.admin', 'roles/serviceusage.serviceUsageConsumer',
-                 'roles/serviceusage.apiKeysViewer', 'roles/firebaseextensions.viewer')
+                 'roles/firebaserules.admin', 'roles/serviceusage.serviceUsageConsumer')
 CUSTOM = {
     'gardenCiMetadataRead': ('resourcemanager.projects.getIamPolicy', 'cloudfunctions.functions.getIamPolicy',
         'firebaseauth.configs.get', 'firebaseappcheck.recaptchaEnterpriseConfig.get', 'firebaseappcheck.services.get'),
@@ -51,8 +50,12 @@ CUSTOM = {
     'gardenCiGateUpdate': ('datastore.databases.getMetadata', 'datastore.databases.get',
         'datastore.entities.get', 'datastore.entities.list', 'datastore.entities.update'),
 }
-# Already required by the pinned release. Setup must not activate these APIs.
-REQUIRED_EXISTING_APIS = ('firebaseextensions.googleapis.com', 'cloudbilling.googleapis.com')
+# Already required by the release. Setup never enables deployment-product APIs.
+REQUIRED_EXISTING_APIS = ('cloudfunctions.googleapis.com', 'run.googleapis.com',
+    'cloudbuild.googleapis.com', 'artifactregistry.googleapis.com', 'storage.googleapis.com',
+    'firebasehosting.googleapis.com', 'firebaserules.googleapis.com', 'firestore.googleapis.com',
+    'firebase.googleapis.com', 'secretmanager.googleapis.com', 'identitytoolkit.googleapis.com',
+    'firebaseappcheck.googleapis.com', 'serviceusage.googleapis.com')
 COMMAND_TIMEOUT_SECONDS = 60
 PERMISSION_CATALOG_TIMEOUT_SECONDS = 600
 PERMISSION_CATALOG_LIMIT = 50000
@@ -69,12 +72,10 @@ GATE_CONDITION = TIME_CONDITION + f" && resource.name == 'projects/{PROJECT}/dat
 DISCLOSURES = [
     'SETUP ONLY. This does not release or prove the garden is ready.',
     'Project predefined roles permit broad Garden product create/delete; these are NOT permissions limited to five functions.',
-    'roles/serviceusage.apiKeysViewer permits API key STRING retrieval. The helper itself never retrieves key strings.',
-    'roles/firebaseextensions.viewer permits reading project Extensions instances and related metadata/configuration. Google does not fully enumerate its internal Extensions permissions in public role metadata; no Extensions install/update/delete role is requested.',
-    'Extensions and Cloud Billing APIs must already be enabled. Setup will not enable either API; the original four setup API choices are unchanged.',
+    'Deployment-product APIs must already be enabled. API-key, Extensions and Cloud Billing reads/roles are not needed by this route; no existing API is disabled. The original four setup API choices are unchanged.',
     'Gate role permits database-wide existing-document updates in (default), NOT only three gate documents; no entity create/delete permission.',
     'Source role reads the verified source bucket and every object below its prefix.',
-    'actAs on each listed existing runtime/build/appspot account permits acting with that account’s inspected roles.',
+    'actAs on each listed existing runtime/build account permits acting with that account’s inspected roles. No Appspot actAs binding is proposed.',
     'Actual build accounts can already hold Editor or other broad roles. actAs permits indirect use of those privileges; no such role is added or removed.',
     'Inspected policies are this project and visible ancestors/resources. Other existing grants to an actAs account elsewhere are not globally inventoried.',
     'The future release job must declare GitHub environment garden-trial. Its existence/protection is not verified or changed here.',
@@ -84,17 +85,13 @@ DISCLOSURES = [
     'Two full IAM permission-catalog scans protect the initial plan and post-confirmation plan. Each has a 10-minute limit and 30-second progress reports; 20 minutes is their combined upper bound, not an estimate or a total setup limit.',
     'After writes, verification reads the exact custom roles, IAM policies and federation settings rather than scanning the permission catalog again; no timed-out command is retried automatically.',
     'A new deployer account gets a 60-second propagation pause, then bounded read-only readiness checks; mutations are never blindly retried.',
-    'Firebase Admin 12.7 WIF compatibility fix is a separate release change. The pinned CLI may generate Pub/Sub/Eventarc service identities using legacy Service Usage v1beta1; actual WIF and organization-policy compatibility remain unverified.',
+    'Official gcloud 568 deploys only five existing Functions with their exact runtime/build identities. Source upload uses a Functions-generated signed URL, without granting Storage writes. Firebase 14.27 deploys only exact Rules/Hosting. Actual WIF and organization-policy compatibility remain unverified.',
 ]
-# Appspot is an extra impersonation surface. Unknown roles, custom roles, broad
-# basic roles and powerful administrative roles fail closed before any write.
-APPSPOT_ALLOWED_ROLES = {'roles/logging.logWriter', 'roles/monitoring.metricWriter',
-                         'roles/cloudtrace.agent', 'roles/datastore.user'}
 
 
 def release_condition(release_sha, release_run_number):
     need(isinstance(release_sha, str) and re.fullmatch(r'[a-f0-9]{40}', release_sha), 'reviewed_release_commit_required')
-    need(isinstance(release_run_number, str) and re.fullmatch(r'[1-9][0-9]{0,8}', release_run_number), 'reviewed_release_run_required')
+    need(release_run_number == '2', 'reviewed_release_run_required')
     return ATTRIBUTE_CONDITION + " && assertion.workflow_sha == '" + release_sha + "' && assertion.run_number == '" + release_run_number + "'"
 
 
@@ -462,14 +459,16 @@ def collect(run, include_permission_catalog=True):
     accounts = bounded_list(run(['iam', 'service-accounts', 'list', '--limit=1000'], 'account_inventory'), 'account_inventory')
     need(len({a.get('email') for a in accounts}) == len(accounts), 'account_inventory')
     by_email = {a.get('email'): a for a in accounts}
+    # gcloud uses only the actual runtime/build identities. Never add Appspot
+    # merely because it exists (Firebase CLI required that unrelated actAs).
+    need(APPSPOT not in build, 'appspot_build_identity_not_authorized')
     targets = build | {RUNTIME}
-    if APPSPOT in by_email:
-        targets.add(APPSPOT)
+    inspected = targets | ({APPSPOT} if APPSPOT in by_email else set())
     need(DEPLOYER not in targets, 'deployer_is_existing_build_account')
     s['build_accounts'] = sorted(build)
     s['act_as'] = sorted(targets)
     s['accounts'] = {}
-    for email in sorted(targets | ({DEPLOYER} if DEPLOYER in by_email else set())):
+    for email in sorted(inspected | ({DEPLOYER} if DEPLOYER in by_email else set())):
         a = run(['iam', 'service-accounts', 'describe', email], 'account_metadata')
         need(a.get('email') == email and a.get('projectId') == PROJECT and a.get('uniqueId') and
              not a.get('disabled') and not a.get('deleted'), 'account_identity_or_disabled')
@@ -561,8 +560,6 @@ def validate_state(s):
                          p in ('resourcemanager.projects.setIamPolicy', 'iam.serviceAccounts.setIamPolicy',
                                'iam.serviceAccounts.getAccessToken', 'iam.serviceAccounts.signJwt',
                                'iam.serviceAccounts.signBlob') for p in permissions), 'powerful_act_as_account')
-            if email == APPSPOT:
-                need(r in APPSPOT_ALLOWED_ROLES, 'appspot_role_scope_uncertain')
     p = s['provider']
     if p:
         need(p.get('name') == PROVIDER_NAME and p.get('state') == 'ACTIVE' and p.get('oidc', {}).get('issuerUri') ==
@@ -631,7 +628,7 @@ def make_plan(s):
                 'broad_basic_role': r in ('roles/editor', 'roles/owner')}
                 for r in s['account_roles'][a]} for a in s['build_accounts']},
             'project_role_ids': PROJECT_ROLES, 'custom_role_permissions': CUSTOM,
-            'appspot_present': APPSPOT in s['accounts'], 'actions': actions, 'metadata_hash': digest(s)}
+            'appspot_present': APPSPOT in s['accounts'], 'appspot_act_as': False, 'functions_deployer': 'gcloud-568.0.0', 'actions': actions, 'metadata_hash': digest(s)}
 
 
 def render_plan(plan, token):
@@ -904,7 +901,7 @@ def main(argv=None):
             'original_expiry': EXPIRY, 'deadline': DEADLINE, 'deployer': DEPLOYER,
             'pool': POOL_NAME, 'provider': PROVIDER_NAME, 'issuer': 'https://token.actions.githubusercontent.com',
             'audience': 'default provider resource audience', 'attribute_mapping': MAPPING,
-            'attribute_condition': ATTRIBUTE_CONDITION + " && assertion.workflow_sha == '<reviewed release commit>' && assertion.run_number == '<reviewed next run>'", 'project_roles': PROJECT_ROLES, 'custom_roles': CUSTOM,
+            'attribute_condition': ATTRIBUTE_CONDITION + " && assertion.workflow_sha == '<reviewed release commit>' && assertion.run_number == '2'", 'project_roles': PROJECT_ROLES, 'custom_roles': CUSTOM,
             'new_binding_conditions': {'time': TIME_CONDITION, 'source': SOURCE_CONDITION, 'gate': GATE_CONDITION},
             'only_enable_missing_apis': APIS, 'required_existing_apis': REQUIRED_EXISTING_APIS, 'disclosures': DISCLOSURES,
             'next': 'Freshly authorized owner runs --setup; reads all metadata, reviews exact diff, types its hash, then setup and verification run in this session.'}, indent=2))

@@ -1,13 +1,12 @@
-// CLI 14.27.0 compatibility contract. No generic unknown-field normalization.
-// Only the generated source-hash label may change; every other configured field
-// remains in the existing provider's strict full-object preservation comparison.
+// Existing Firebase configuration accepted by the gcloud 568 update contract.
+// No label/configuration normalization: every configured field is preserved.
 import { isDeepStrictEqual } from 'node:util';
 import { ACTIVE_UPDATE_SCOPE as S, requireActiveUpdate as need } from './floating-garden-active-update.mjs';
 import { FUNCTION_NAMES } from './prepare-floating-garden-trial.mjs';
 const HASH = 'firebase-functions-hash';
 const hash = value => typeof value === 'string' && /^[a-f0-9]{40}$/.test(value);
 const sorted = object => Object.keys(object || {}).sort();
-export function validateCiFunctionConfiguration(proof, firebaseAdminSdk) {
+export function validateCiFunctionConfiguration(proof) {
   need(Array.isArray(proof) && proof.length === 5, 'source-proof');
   for (const { function: fn } of proof) {
     const name = fn.buildConfig?.entryPoint;
@@ -22,10 +21,9 @@ export function validateCiFunctionConfiguration(proof, firebaseAdminSdk) {
       env.FUNCTION_TARGET === name && env.GCLOUD_PROJECT === S.project && env.LOG_EXECUTION_ID === 'true' &&
       env.EVENTARC_CLOUD_EVENT_SOURCE === `projects/${S.project}/locations/${S.region}/services/${name}`, 'iam-preservation');
     let config; try { config = JSON.parse(env.FIREBASE_CONFIG); } catch { need(false, 'iam-preservation'); }
-    need(config && firebaseAdminSdk && env.FIREBASE_CONFIG === JSON.stringify(firebaseAdminSdk) && config.projectId === S.project && typeof config.storageBucket === 'string' &&
+    need(config && Object.getPrototypeOf(config) === Object.prototype && config.projectId === S.project && typeof config.storageBucket === 'string' &&
       [S.project + '.appspot.com', S.project + '.firebasestorage.app'].includes(config.storageBucket), 'iam-preservation');
-    // Omitted SDK 6.6 options clear VPC/ingress rather than preserving custom
-    // values. Stop before CLI when the current setup would be overwritten.
+    // Keep the previously reviewed ingress and VPC baseline unchanged.
     need(service.ingressSettings === 'ALLOW_ALL' && !service.vpcConnector && !service.vpcConnectorEgressSettings,
       'iam-preservation');
   }
@@ -33,13 +31,7 @@ export function validateCiFunctionConfiguration(proof, firebaseAdminSdk) {
 }
 export function stableCiFunctionConfiguration(proof, stable) {
   need(typeof stable === 'function', 'source-proof');
-  const copied = structuredClone(proof);
-  for (const item of copied) for (const object of [item.function, item.run, item.run?.template]) {
-    if (Object.hasOwn(object?.labels || {}, HASH)) {
-      need(hash(object.labels[HASH]), 'iam-preservation');
-      // Retain the key: absent versus present is still a mismatch.
-      object.labels[HASH] = 'verified-cli-source-hash';
-    }
-  }
-  return stable(copied);
+  // gcloud omits label flags. Even Firebase's old source-hash label must stay
+  // byte-for-byte unchanged; independent source ZIP readback proves new code.
+  return stable(proof);
 }

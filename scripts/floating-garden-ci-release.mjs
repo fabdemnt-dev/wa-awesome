@@ -26,13 +26,13 @@ export function ciReleaseApproval(sourceCommit, runNumber) {
   return { schemaVersion: 1, repository: 'fabdemnt-dev/wa-awesome', sourceCommit, runNumber,
     oldInventory: S.oldInventory, newInventory: S.newInventory, expiresAtMillis: S.endsAtMillis,
     existingClosedTrial: true, fiveFunctionsRulesHosting: true, standardCliInternalRetriesAndParallelism: true,
-    serviceIdentityGeneration: true, preserveExistingIamAndData: true, reopenSamePairOnce: true,
+    functionsDeployer: 'gcloud-568.0.0', functionsSequential: true, serviceIdentityGeneration: false, preserveExistingIamAndData: true, reopenSamePairOnce: true,
     noAutomaticRetryOrRollback: true, exclusiveMaintenance: true };
 }
 function context(env, approval, policy, now) {
   requireCiAuthPolicy(policy).validateEnvironment(env, []);
   need(/^[a-f0-9]{40}$/.test(env.GITHUB_SHA || '') && env.GITHUB_WORKFLOW_SHA === env.GITHUB_SHA &&
-    /^[1-9][0-9]*$/.test(env.GITHUB_RUN_ID || '') && env.GITHUB_RUN_ATTEMPT === '1' && /^[1-9][0-9]*$/.test(env.GITHUB_RUN_NUMBER || '') && env.GARDEN_RELEASE_REF_CREATED === 'true', 'ci-context');
+    /^[1-9][0-9]*$/.test(env.GITHUB_RUN_ID || '') && env.GITHUB_RUN_ATTEMPT === '1' && env.GITHUB_RUN_NUMBER === '2' && env.GARDEN_RELEASE_REF_CREATED === 'true', 'ci-context');
   need(isDeepStrictEqual(approval, ciReleaseApproval(env.GITHUB_SHA, env.GITHUB_RUN_NUMBER)), 'release-approval');
   need(Number.isSafeInteger(now()) && now() >= S.startsAtMillis && now() < S.endsAtMillis, 'fixed-window');
 }
@@ -81,13 +81,19 @@ async function privatePath(path, file = false) {
 }
 export async function createCiJournal(directory, now = Date.now) {
   await privatePath(directory); const file = await open(join(directory, 'CI-RELEASE-JOURNAL.jsonl'), 'wx', 0o600);
-  let terminal = false; const issued = new Set();
+  let terminal = false; const issued = new Set(), providerIssued = new Map();
   const append = async value => { need(!terminal, 'journal'); await file.writeFile(JSON.stringify({ atMillis: now(), ...value }) + '\n'); await file.sync(); };
   await append({ event: 'created', originalExpiry: S.endsAtMillis });
   return {
     async issued(stage) { need(STAGES.includes(stage) && !issued.has(stage), 'journal'); issued.add(stage); await append({ event: 'issued', stage }); },
     async verified(stage) { need(issued.has(stage), 'journal'); await append({ event: 'verified', stage }); },
-    async providerStep(s) { need(['functions', 'rules', 'hosting'].includes(s.resourceKind) && s.stage === `official-cli-${s.resourceKind}` && s.index === 0, 'journal'); await append({ event: 'cli-invocation-issued', stage: s.resourceKind }); },
+    async providerStep(s) {
+      need(['functions', 'rules', 'hosting'].includes(s.resourceKind) && issued.has(s.resourceKind) &&
+        s.stage === `official-cli-${s.resourceKind}` && s.index === (providerIssued.get(s.resourceKind) || 0) &&
+        Number.isSafeInteger(s.index) && s.index >= 0 && s.index < (s.resourceKind === 'functions' ? 5 : 1), 'journal');
+      providerIssued.set(s.resourceKind, s.index + 1);
+      await append({ event: 'cli-invocation-issued', stage: s.resourceKind, index: s.index });
+    },
     async finish() { await append({ event: 'finished' }); terminal = true; await file.close(); },
     async fail(stage, reason, access) { await append({ event: 'blocked', stage, reason, access }); terminal = true; await file.close(); },
   };
