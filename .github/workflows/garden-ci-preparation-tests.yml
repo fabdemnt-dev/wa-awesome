@@ -177,7 +177,7 @@ jobs:
           print(f'Official gcloud local help: {len(spawned)} argv variants checked; no operational command executed.')
           print('Help checks command/flag availability only, not flag-value semantics, IAM, token exchange or live API compatibility.')
           PY
-      - name: Parse every real helper argument and reject SDK prompts without any cloud dispatch
+      - name: Parse every helper argument, verify SDK output formats, and reject prompts offline
         run: |
           python3 -I - <<'PYCODE'
           import pathlib, runpy, shutil
