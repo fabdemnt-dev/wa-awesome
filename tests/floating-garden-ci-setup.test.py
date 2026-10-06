@@ -708,6 +708,43 @@ class SetupTests(unittest.TestCase):
             self.assertEqual(m.Gcloud()(['config', 'list'], 'gcloud_config'), {})
         self.assertEqual(len(seen), 1)
 
+    def test_partial_function_inventory_warns_and_stops_even_with_all_five_names(self):
+        warning = b'WARNING: The following regions were fully or partially unreachable for query: SYNTHETIC_PRIVATE\n'
+        runner = m.Gcloud(emit=lambda _: None)
+        with patch.object(m.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, json.dumps(self.fake.functions).encode(), warning)) as dispatch:
+            with self.assertRaises(m.Stop) as caught:
+                runner(m.function_inventory_args(), 'function_metadata')
+            self.assertEqual(caught.exception.stage, 'function_inventory_incomplete')
+            self.assertNotIn('SYNTHETIC_PRIVATE', str(caught.exception))
+            self.assertIn('--verbosity=warning', dispatch.call_args.args[0])
+            self.assertEqual(dispatch.call_args.kwargs['timeout'], 60)
+            dispatch.assert_called_once()
+        with self.assertRaises(m.Stop) as caught:
+            m.validate_function_inventory_diagnostics(b'x' * 262145)
+        self.assertEqual(caught.exception.stage, 'function_inventory_diagnostics_size')
+
+    def test_incomplete_function_inventory_never_reaches_owner_approval_or_writes(self):
+        def incomplete(fake, args, stage, write):
+            if stage == 'function_metadata':
+                m.validate_function_inventory_diagnostics(b'WARNING: The following regions were fully or partially unreachable\nfor query: synthetic')
+        self.fake.mutate = incomplete
+        self.assertEqual(self.run_setup(confirm=lambda _: self.fail('incomplete inventory cannot be approved')), 2)
+        self.assertEqual(self.state.data['stage'], 'function_inventory_incomplete')
+        self.assertEqual(self.fake.writes, [])
+
+    def test_function_inventory_warning_verbosity_is_exact_and_normal_result_passes(self):
+        for args, stage, write, expected in (
+                (m.function_inventory_args(), 'function_metadata', False, 'warning'),
+                (m.function_inventory_args(), 'different_stage', False, 'error'),
+                (['functions', 'list', '--v2'], 'function_metadata', False, 'error'),
+                (m.function_inventory_args(), 'function_metadata', True, 'error')):
+            with self.subTest(stage=stage, write=write):
+                runner = m.Gcloud(emit=lambda _: None)
+                runner.approved = write
+                with patch.object(m.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, b'[]', b'WARNING: unrelated synthetic notice')) as dispatch:
+                    self.assertEqual(runner(args, stage, write=write), [])
+                    self.assertIn('--verbosity=' + expected, dispatch.call_args.args[0])
+
     def test_read_prompt_producer_failure_cannot_become_default_accepting_eof(self):
         import select
         # Even a failed producer must leave the writer open while the command
@@ -1103,6 +1140,54 @@ def verify_sdk_permission_pagination():
     print('SDK_PERMISSION_PAGINATION_VERIFIED cases=9 records=15000 pages=150 pageSize=100 simulatedSeconds=150 realDisplayer=true lateRequiredRecords=true lateFailurePropagates=true cloudCalls=0')
 
 
+def verify_sdk_function_inventory():
+    """Actual SDK pagination/logging for a synthetic partial-region response."""
+    import logging
+    from types import SimpleNamespace
+    from apitools.base.py import encoding
+    from googlecloudsdk.api_lib.util import apis
+    from googlecloudsdk.command_lib.functions.v2.list import command
+    from googlecloudsdk.core import log
+    messages = apis.GetMessagesModule('cloudfunctions', 'v2')
+    expected = Fake().functions
+    typed = [encoding.JsonToMessage(messages.Function, json.dumps(f)) for f in expected]
+    class SyntheticFunctions:
+        def __init__(self, partial):
+            self.partial = partial
+            self.calls = 0
+        def List(self, request, global_params=None):
+            self.calls += 1
+            assert request.parent == f'projects/{m.PROJECT}/locations/{m.REGION}'
+            assert request.pageSize == 100 and not request.pageToken
+            return messages.ListFunctionsResponse(functions=typed,
+                unreachable=[m.REGION] if self.partial else [])
+    previous = log.GetVerbosity()
+    try:
+        for partial, verbosity in ((False, logging.WARNING), (True, logging.ERROR), (True, logging.WARNING)):
+            service = SyntheticFunctions(partial)
+            errors = io.StringIO()
+            log.SetVerbosity(verbosity)
+            with patch.object(log._log_manager.stderr_handler, 'stream', errors):
+                values = list(command._YieldFromLocations([m.REGION], m.PROJECT, 1000,
+                    messages, SimpleNamespace(projects_locations_functions=service), None))
+            assert service.calls == 1 and len(values) == 5
+            diagnostics = errors.getvalue().encode()
+            if partial and verbosity == logging.WARNING:
+                assert b'The following regions were fully or partially unreachable' in diagnostics
+                try:
+                    m.validate_function_inventory_diagnostics(diagnostics)
+                except m.Stop as error:
+                    assert error.stage == 'function_inventory_incomplete'
+                else:
+                    raise AssertionError('Partial inventory must fail despite five returned functions')
+            else:
+                assert not diagnostics
+                m.validate_function_inventory_diagnostics(diagnostics)
+    finally:
+        log.SetVerbosity(previous)
+    print('SDK_FUNCTION_INVENTORY_VERIFIED completePass=true partialWarningRejected=true oldSuppressionReproduced=true cloudCalls=0')
+
+
 def verify_sdk_parser_and_prompts(sdk_root):
     """Real SDK argument parsing, resource formatting and prompt rejection.
 
@@ -1353,6 +1438,7 @@ def verify_sdk_parser_and_prompts(sdk_root):
                 assert function_flags.ShouldUseGen2() is True and function_flags.ShouldUseGen1() is False
         verify_sdk_response_schemas()
         verify_sdk_permission_pagination()
+        verify_sdk_function_inventory()
         assert not blocked
         print('SDK_PARSE_VERIFIED version=568.0.0 argvVariants=67 oldInvalidFlagRejected=true operationalCommandRuns=0 networkRequests=0 credentialAccess=0')
         print('SDK_FORMAT_VERIFIED argvVariants=67 formats=5 dictAndProtoShape=true privateFieldsOmitted=true oldInvalidFormatRejected=true')
