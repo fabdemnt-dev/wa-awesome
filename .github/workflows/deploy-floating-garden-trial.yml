@@ -21,12 +21,12 @@ jobs:
       github.event_name == 'push' &&
       github.ref == 'refs/heads/release/garden-trial' &&
       github.event.created == false &&
-      github.event.before == '74027567a8761e78423c8df0e744abc8d5633a8b' &&
+      github.event.before == '95ec4e69e4b566df91a37a4107e1a1fd94478ebf' &&
       github.event.after == github.sha &&
       github.workflow_sha == github.sha &&
       github.sha != github.event.before &&
       github.run_attempt == 1 &&
-      github.run_number == 3
+      github.run_number == 4
     runs-on: ubuntu-latest
     timeout-minutes: 55
     environment: garden-trial
