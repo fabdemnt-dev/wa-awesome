@@ -121,22 +121,23 @@ test('future release workflow is single push, fixed target and credential-free t
   assert.deepEqual(deploy.on, { push: { branches: ['release/garden-trial'] } });
   assert.equal(deploy.concurrency['cancel-in-progress'], false); assert.deepEqual(deploy.permissions, { contents: 'read' });
   const job = deploy.jobs.release; assert.equal(job.environment, 'garden-trial'); assert.equal(job.permissions['id-token'], 'write');
-  assert(job.if.includes('github.event.created == false') && job.if.includes("github.event.before == '95ec4e69e4b566df91a37a4107e1a1fd94478ebf'") && job.if.includes('github.run_attempt == 1'));
+  assert(job.if.includes('github.event.created == false') && job.if.includes("github.event.before == '69ef07b9356470fbd3a643638baeec12bdd5680c'") && job.if.includes('github.run_attempt == 1'));
   const auth = job.steps.findIndex(s => s.uses?.startsWith('google-github-actions/auth@'));
   assert(auth > 0);
-  assert(job.if.includes('github.run_number == 4'));
+  assert(job.if.includes('github.run_number == 5'));
   assert(job.if.includes('github.event.after == github.sha') && job.if.includes('github.workflow_sha == github.sha') && job.if.includes('github.sha != github.event.before'));
-  assert.deepEqual(CI_RELEASE_RECOVERY, { before: '95ec4e69e4b566df91a37a4107e1a1fd94478ebf', runNumber: '4' });
+  assert.deepEqual(CI_RELEASE_RECOVERY, { before: '69ef07b9356470fbd3a643638baeec12bdd5680c', runNumber: '5' });
   // This fixed workflow guard uses the shared JS/GitHub boolean-expression
   // subset. Exercise it as well as checking its required exact clauses.
   const allows = new Function('github', `return (${job.if});`);
   const approved = { repository_id: '1321198654', repository_owner_id: '312340196', event_name: 'push',
     ref: 'refs/heads/release/garden-trial', event: { created: false, before: CI_RELEASE_RECOVERY.before, after: 'a'.repeat(40) },
-    sha: 'a'.repeat(40), workflow_sha: 'a'.repeat(40), run_attempt: 1, run_number: 4 };
+    sha: 'a'.repeat(40), workflow_sha: 'a'.repeat(40), run_attempt: 1, run_number: 5 };
   assert.equal(allows(approved), true);
   for (const mutate of [
-    g => g.run_number = 3, g => g.run_number = 5, g => g.run_attempt = 2,
+    g => g.run_number = 3, g => g.run_number = 4, g => g.run_number = 6, g => g.run_attempt = 2,
     g => g.event.before = '74027567a8761e78423c8df0e744abc8d5633a8b',
+    g => g.event.before = '95ec4e69e4b566df91a37a4107e1a1fd94478ebf',
     g => g.event.before = 'b'.repeat(40), g => g.event.before = '0'.repeat(40),
     g => g.event.created = true, g => g.event.after = 'b'.repeat(40),
     g => g.workflow_sha = 'b'.repeat(40),
@@ -172,10 +173,10 @@ test('future release workflow is single push, fixed target and credential-free t
   assert(!JSON.stringify(prep).includes('google-github-actions/auth@')); assert(!JSON.stringify(prep).includes('id-token'));
 });
 test('approval contract discloses CLI effects and preserves original deadline and inventory', () => {
-  const a = ciReleaseApproval('a'.repeat(40), '4'); assert.equal(a.expiresAtMillis, S.endsAtMillis);
+  const a = ciReleaseApproval('a'.repeat(40), '5'); assert.equal(a.expiresAtMillis, S.endsAtMillis);
   assert.equal(a.oldInventory, S.oldInventory); assert.equal(a.newInventory, S.newInventory);
   assert.equal(a.standardCliInternalRetriesAndParallelism, true); assert.equal(a.serviceIdentityGeneration, false); assert.equal(a.functionsDeployer, 'gcloud-568.0.0'); assert.equal(a.functionsSequential, true);
-  assert.equal(a.runNumber, '4'); assert.equal(a.schemaVersion, 2); assert.equal(a.previousSourceCommit, CI_RELEASE_RECOVERY.before); assert.equal(a.releaseRefCreated, false); assert.equal(a.reopenSamePairOnce, true); assert.equal(a.exclusiveMaintenance, true);
+  assert.equal(a.runNumber, '5'); assert.equal(a.schemaVersion, 2); assert.equal(a.previousSourceCommit, CI_RELEASE_RECOVERY.before); assert.equal(a.releaseRefCreated, false); assert.equal(a.reopenSamePairOnce, true); assert.equal(a.exclusiveMaintenance, true);
 });
 
 const hostingPrefixes = [`sites/${S.project}`, `projects/${S.project}/sites/${S.project}`, `projects/${S.projectNumber}/sites/${S.project}`];
