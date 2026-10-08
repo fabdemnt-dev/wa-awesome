@@ -43,6 +43,21 @@ m, b, f = renewal.m, renewal.b, renewal.f
 NEW_SHA = 'a' * 40  # Synthetic fixture only; never a released or approved commit.
 
 
+def blocked_socket_class(forbid):
+    """Keep socket's class interface for optional SDK TLS adapter imports."""
+    class OfflineSocket(socket.socket):
+        def __new__(cls, *args, **kwargs):
+            forbid()
+
+        def connect(self, *args, **kwargs):
+            forbid()
+
+        def connect_ex(self, *args, **kwargs):
+            forbid()
+
+    return OfflineSocket
+
+
 def fixture():
     result = renewal.Fake()
     result.version = {'Google Cloud SDK': SDK_VERSION}
@@ -77,6 +92,19 @@ def captured_reads():
 
 
 class ManifestTests(unittest.TestCase):
+    def test_socket_guard_preserves_class_interface_without_constructing(self):
+        class Denied(BaseException):
+            pass
+        def forbid():
+            raise Denied()
+        guarded = blocked_socket_class(forbid)
+        self.assertTrue(issubclass(guarded, socket.socket))
+        self.assertIs(guarded.makefile, socket.socket.makefile)
+        for operation in (guarded, lambda: guarded.connect(None, ('127.0.0.1', 1)),
+                          lambda: guarded.connect_ex(None, ('127.0.0.1', 1))):
+            with self.assertRaises(Denied):
+                operation()
+
     def test_real_collector_reaches_all_optional_read_branches(self):
         source = captured_reads()
         stages = {stage for _, stage, _ in source.calls}
@@ -160,9 +188,40 @@ def verify_sdk(sdk_root):
         info_holder.ToolsInfo._GetVersion = lambda self, command: 'OFFLINE SDK TEST'
         subprocess.Popen = forbid
         subprocess.run = forbid
-        socket.socket = forbid
+        original_socket = socket.socket
+        socket.socket = blocked_socket_class(forbid)
         socket.create_connection = forbid
+        assert issubclass(socket.socket, original_socket)
+        assert socket.socket.makefile is original_socket.makefile
+        # Check both guards independently: constructor/connect overrides keep
+        # SDK imports compatible, while the audit hook also blocks retained
+        # original aliases, the raw C socket constructor, DNS and connect events.
+        import _socket
+        guard_probes = 0
+        for operation in (socket.socket, original_socket, _socket.socket,
+                          lambda: socket.create_connection(('127.0.0.1', 1)),
+                          lambda: socket.socket.connect(None, ('127.0.0.1', 1)),
+                          lambda: socket.socket.connect_ex(None, ('127.0.0.1', 1)),
+                          lambda: socket.getaddrinfo('localhost', 1),
+                          lambda: sys.audit('socket.connect', None, ('127.0.0.1', 1))):
+            before = len(blocked)
+            try:
+                operation()
+            except UnsafeAction:
+                pass
+            else:
+                raise AssertionError('Offline socket guard allowed an operation')
+            assert len(blocked) == before + 1
+            blocked.pop()  # Remove only this explicitly expected guard probe.
+            guard_probes += 1
         from googlecloudsdk.api_lib.storage import api_factory
+        # Ubuntu CI may provide pyOpenSSL. Import the actual optional adapter
+        # when available, rather than skipping or replacing its implementation.
+        pyopenssl_imported = importlib.util.find_spec('OpenSSL') is not None
+        if pyopenssl_imported:
+            from urllib3.contrib import pyopenssl
+            assert pyopenssl.socket_cls is socket.socket
+            assert pyopenssl.WrappedSocket.makefile is original_socket.makefile
 
         class HTTP:
             def __init__(self, args, stage, value, partial=False, late_error=False, omit_defaults=False, error_code=None):
@@ -483,6 +542,8 @@ def verify_sdk(sdk_root):
             'expiry_policy_v3_services': ['project', 'folder', 'organization', 'secret', 'serviceAccount', 'storageBucket'],
             'functions_and_pool_policy_v3_requested': False,
             'ancestor_policy_version_3': True, 'iam_storage_shapes_and_default_omission': True,
+            'socket_class_interface_preserved': True, 'blocked_socket_guard_probes': guard_probes,
+            'optional_pyopenssl_imported': pyopenssl_imported,
             'live_credential_or_cloud_calls': 0, 'subprocesses': 0}))
 
 
