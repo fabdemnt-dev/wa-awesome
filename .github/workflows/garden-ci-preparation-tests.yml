@@ -10,6 +10,7 @@ on:
       - 'scripts/setup-floating-garden-ci-owner.py'
       - 'scripts/renew-floating-garden-ci-trust-owner.py'
       - 'tests/floating-garden-ci-trust-renewal.test.py'
+      - 'tests/floating-garden-ci-owner-sdk.test.py'
       - 'docs/floating-garden-ci-trust-renewal.md'
       - 'tests/floating-garden-ci-setup.test.py'
       - 'scripts/floating-garden-ci-clients.mjs'
@@ -200,3 +201,54 @@ jobs:
           checks = runpy.run_path('tests/floating-garden-ci-setup.test.py', run_name='garden_fixture')
           checks['verify_sdk_parser_and_prompts'](sdk)
           PYCODE
+
+  offline-owner-sdk-587:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDSDK_CORE_DISABLE_PROMPTS: 'true'
+      CLOUDSDK_CORE_DISABLE_USAGE_REPORTING: 'true'
+      CLOUDSDK_CORE_DISABLE_FILE_LOGGING: 'true'
+      CLOUDSDK_CORE_LOG_HTTP: 'false'
+      CLOUDSDK_COMPONENT_MANAGER_DISABLE_UPDATE_CHECK: 'true'
+      CLOUDSDK_AUTH_DISABLE_CREDENTIALS: 'true'
+      CLOUDSDK_PAGER: ''
+      TERM: dumb
+    steps:
+      - name: Set isolated owner SDK configuration
+        env:
+          ISOLATED_GCLOUD: ${{ runner.temp }}/garden-owner-sdk-587-empty-gcloud
+        run: printf 'CLOUDSDK_CONFIG=%s\n' "$ISOLATED_GCLOUD" >> "$GITHUB_ENV"
+      - name: Checkout without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Require fresh credential-free owner SDK configuration
+        run: |
+          python3 -I - <<'PY'
+          import os
+          from pathlib import Path
+          forbidden = ('GOOGLE_APPLICATION_CREDENTIALS', 'GOOGLE_GHA_CREDS_PATH',
+                       'CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE', 'CLOUDSDK_AUTH_ACCESS_TOKEN',
+                       'CLOUDSDK_AUTH_ACCESS_TOKEN_FILE', 'CLOUDSDK_AUTH_IMPERSONATE_SERVICE_ACCOUNT',
+                       'CLOUDSDK_AUTH_LOGIN_CONFIG_FILE', 'ACTIONS_ID_TOKEN_REQUEST_TOKEN',
+                       'ACTIONS_ID_TOKEN_REQUEST_URL')
+          assert not any(os.environ.get(key) for key in forbidden), 'credentials/OIDC forbidden'
+          assert not any(value and key.startswith('CLOUDSDK_API_ENDPOINT_OVERRIDES_')
+                         for key, value in os.environ.items()), 'endpoint overrides forbidden'
+          Path(os.environ['CLOUDSDK_CONFIG']).mkdir(mode=0o700, exist_ok=False)
+          PY
+      # Separate ephemeral CI SDK only; never installs/changes the owner's SDK.
+      # setup-gcloud performs local auth inventory of the fresh empty config.
+      - name: Install exact official owner SDK for offline qualification
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+        with:
+          version: '587.0.0'
+          cache: false
+      - name: Qualify owner reads and condition-only renewal without cloud access
+        run: |
+          SDK_ROOT="$(python3 -I -c 'import pathlib,shutil; print(pathlib.Path(shutil.which("gcloud")).resolve().parent.parent)')"
+          python3 -I tests/floating-garden-ci-trust-renewal.test.py
+          python3 -I tests/floating-garden-ci-owner-sdk.test.py
+          python3 -I tests/floating-garden-ci-owner-sdk.test.py --sdk-root "$SDK_ROOT"
+          python3 -I tests/floating-garden-ci-trust-renewal.test.py --sdk-root "$SDK_ROOT"
