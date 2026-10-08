@@ -734,12 +734,44 @@ test('Run traffic accepts observed single 100-percent LATEST with absent or empt
   }
 });
 
-test('Run traffic preserves exact explicit-revision acceptance without short/full normalization', () => {
-  const run = runService(metadata()), revision = run.latestReadyRevision;
-  for (const type of [undefined, 'TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION', 'TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST']) {
-    assert.equal(validateRunService({ ...run, trafficStatuses: [{ ...(type === undefined ? {} : { type }), percent: 100, revision }] }, run.name, revision), true);
-    assert.throws(() => validateRunService({ ...run, trafficStatuses: [{ ...(type === undefined ? {} : { type }), percent: 100, revision: revision.split('/').at(-1) }] }, run.name, revision), (error) => error.code === 'run-latest-traffic');
+test('Run traffic binds full or short explicit latest revision to the exact Service for all five functions', () => {
+  for (let i = 0; i < FUNCTION_NAMES.length; i++) {
+    const run = runService(metadata(i)), revision = run.latestReadyRevision;
+    for (const type of [undefined, 'TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION', 'TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST']) {
+      for (const value of [revision, revision.split('/').at(-1)]) {
+        assert.equal(validateRunService({ ...run, trafficStatuses: [{ ...(type === undefined ? {} : { type }), percent: 100, revision: value }] }, run.name, revision), true);
+      }
+    }
   }
+});
+
+test('Run short revision identity never crosses Service, project or region and never normalizes arbitrary text', () => {
+  const run = runService(metadata()), revision = run.latestReadyRevision, id = revision.split('/').at(-1);
+  const wrong = [id + '-other', id.toUpperCase(), ` ${id}`, `${id} `, `${id}\n`, `../${id}`, `./${id}`,
+    `${id}/`, `${id}%2F`, `${id}%00`, `${id}_`, `${id}.`, 'a'.repeat(64), '-', 'a-', 0, null, false, {}, [],
+    revision.replace('/services/', '/services/other-'), revision.replace('/locations/asia-northeast1/', '/locations/us-central1/'),
+    revision.replace(`projects/${PROJECT}/`, 'projects/wrong-project/'),
+    revision.replace(`projects/${PROJECT}/`, 'projects/120030709276/'),
+    `https://run.googleapis.com/v2/${revision}`, `${run.name}/revisions/../revisions/${id}`];
+  for (const value of wrong) for (const type of [undefined, 'TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST', 'TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION']) {
+    assert.throws(() => validateRunService({ ...run, trafficStatuses: [{ ...(type === undefined ? {} : { type }), percent: 100, revision: value }] }, run.name, revision), error => error.code === 'run-latest-traffic');
+  }
+});
+
+test('Run short revision equivalence cannot bypass readiness, Function identity or traffic constraints', () => {
+  const run = runService(metadata()), revision = run.latestReadyRevision, id = revision.split('/').at(-1);
+  const target = { type: 'TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST', percent: 100, revision: id };
+  const actual = { ...run, trafficStatuses: [target] };
+  for (const mutation of [{ reconciling: true }, { observedGeneration: '999' }, { latestCreatedRevision: revision + '-other' },
+    { terminalCondition: { type: 'Ready', state: 'CONDITION_FAILED' } }]) {
+    assert.throws(() => validateRunService({ ...actual, ...mutation }, run.name, revision));
+  }
+  assert.throws(() => validateRunService(actual, run.name, revision + '-other'));
+  for (const value of [
+    [{ ...target, percent: 99 }], [{ ...target, percent: '100' }], [{ ...target, percent: true }],
+    [target, { ...target, percent: 0 }], [{ ...target, type: 'UNKNOWN' }],
+    [{ ...target, type: 'TRAFFIC_TARGET_ALLOCATION_TYPE_UNSPECIFIED' }],
+  ]) assert.throws(() => validateRunService({ ...run, trafficStatuses: value }, run.name, revision), error => error.code === 'run-latest-traffic');
 });
 
 test('Run traffic rejects conflicts, splits, malformed percentages and unknown allocation types', () => {
@@ -787,6 +819,14 @@ test('Run LATEST traffic does not bypass exact function revision, readiness, gen
 test('full injected Functions proof accepts the observed LATEST representation on all five Run services', async (t) => {
   const h = await providerHarness(t, { response: (url, data) => url.startsWith('https://run.googleapis.com/') && !url.includes(':getIamPolicy') ?
     { ...data, trafficStatuses: [{ type: 'TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST', percent: 100 }] } : data });
+  assert.deepEqual(await h.cloud.verifyFunctions(), { verified: true });
+  assert.equal(h.requests.filter(({ url }) => url.startsWith('https://run.googleapis.com/') && !url.includes(':getIamPolicy')).length, 5);
+  assert(h.cli.every(({ args }) => !args.includes('deploy')));
+});
+
+test('full injected Functions proof accepts observed short LATEST revision IDs on all five exact services', async (t) => {
+  const h = await providerHarness(t, { response: (url, data) => url.startsWith('https://run.googleapis.com/') && !url.includes(':getIamPolicy') ?
+    { ...data, trafficStatuses: [{ type: 'TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST', percent: 100, revision: data.latestReadyRevision.split('/').at(-1) }] } : data });
   assert.deepEqual(await h.cloud.verifyFunctions(), { verified: true });
   assert.equal(h.requests.filter(({ url }) => url.startsWith('https://run.googleapis.com/') && !url.includes(':getIamPolicy')).length, 5);
   assert(h.cli.every(({ args }) => !args.includes('deploy')));
@@ -1329,12 +1369,24 @@ const diagnosticSource = execFileSync('python3', ['-I', '-c',
   join(ROOT,'scripts/start-floating-garden-trial-owner.py')], {encoding:'utf8',stdio:['ignore','pipe','pipe'],timeout:10000,maxBuffer:65536});
 const { classifyLog, summarizeFunctions, summarizeJournal, validateTokyoInventory, inspect, patchLegacyTrafficAdapter, prepareReadOnlyAdapter } =
   await import('data:text/javascript;base64,'+Buffer.from(JSON.parse(diagnosticSource)).toString('base64'));
-test('read-only compatibility predicate is byte-identical to the ordinary validator',async()=>{
- const diag=JSON.parse(diagnosticSource),adapter=await readFile(join(ROOT,'scripts/floating-garden-trial-cloud-adapter.mjs'),'utf8');
- const line=diag.split('\n').find(x=>x.startsWith('const CORRECT_TRAFFIC_CHECK = '));
- const embedded=JSON.parse(line.slice('const CORRECT_TRAFFIC_CHECK = '.length,-1));
- const from=adapter.indexOf('  const traffic = service.trafficStatuses;');
- assert.equal(embedded,adapter.slice(from,adapter.indexOf('  return true;\n}',from)));
+test('historical read-only compatibility helper and predicate retain their exact pins and behavior',async()=>{
+ const diag=JSON.parse(diagnosticSource),owner=await readFile(join(ROOT,'scripts/start-floating-garden-trial-owner.py'));
+ assert.equal(createHash('sha256').update(owner).digest('hex'),'ed06f8a738b549670382b9ac3e87388b8892de0364978cf6c86a3c8e9c99fb50');
+ const readConst=name=>JSON.parse(diag.split('\n').find(x=>x.startsWith(`const ${name} = `)).slice(`const ${name} = `.length,-1));
+ const embedded=readConst('CORRECT_TRAFFIC_CHECK');
+ assert.equal(createHash('sha256').update(embedded).digest('hex'),'91e889cb89a6e008ca6b1acd30372c55b7836e8ca959e4ea17f146cb352adb67');
+ assert(diag.includes('b769a758fc34679d0428bb4712b13e8cb4413faf3d7e79499b2ab21379fefc6e'));
+ assert(diag.includes('bc8549cea2bbedc8fdd2400b127c7c02bad19fb2412e1711ec86cff4f3e3f724'));
+ const historicalCheck=new Function('service','requireThat','plain',embedded+'return true;');
+ const requireHistorical=(ok,code)=>{if(!ok)throw new Error(code);};
+ const isPlain=value=>value!==null&&typeof value==='object'&&!Array.isArray(value);
+ for(let i=0;i<FUNCTION_NAMES.length;i++){
+  const revision=`projects/wa-awesome-garden-stg/locations/asia-northeast1/services/garden-fn-${i}/revisions/garden-fn-${i}-00001-abc`;
+  const run={latestReadyRevision:revision,trafficStatuses:[{revision,percent:100}]};
+  assert.equal(historicalCheck(run,requireHistorical,isPlain),true);
+  assert.equal(historicalCheck({...run,trafficStatuses:[{type:'TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST',percent:100}]},requireHistorical,isPlain),true);
+  assert.throws(()=>historicalCheck({...run,trafficStatuses:[{type:'TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST',percent:100,revision:revision.split('/').at(-1)}]},requireHistorical,isPlain),/run-latest-traffic/);
+ }
  assert.equal(diag.split("const corrected=source.replace(LEGACY_TRAFFIC_CHECK,CORRECT_TRAFFIC_CHECK);").length,2);
 });
 test('read-only compatibility patch rejects unpinned source rather than broad replacement',()=>{
