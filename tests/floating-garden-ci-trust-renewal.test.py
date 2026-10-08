@@ -41,7 +41,7 @@ NEW_SHA = 'a' * 40  # Synthetic test input, never an approved/released commit.
 class Fake(f.Fake):
     def __init__(self):
         super().__init__()
-        self.release_sha, self.release_run_number = m.OLD_SHA, '2'
+        self.release_sha, self.release_run_number = m.VALIDATION_SHA, '2'
         self.services = list(b.APIS) + list(b.REQUIRED_EXISTING_APIS)
         self.accounts[b.DEPLOYER] = f.account(b.DEPLOYER)
         self.pool = {'name': b.POOL_NAME, 'state': 'ACTIVE', 'displayName': 'Garden GitHub'}
@@ -104,6 +104,71 @@ class RenewalTests(unittest.TestCase):
         if stage:
             self.assertEqual(self.state.data['stage'], stage)
 
+    def test_run4_contract_binds_verified_run3_and_preserves_setup_dependency(self):
+        self.assertEqual(m.OLD_SHA, '95ec4e69e4b566df91a37a4107e1a1fd94478ebf')
+        self.assertEqual((m.OLD_RUN, m.NEW_RUN), ('3', '4'))
+        self.assertEqual(m.VALIDATION_SHA, '74027567a8761e78423c8df0e744abc8d5633a8b')
+        self.assertEqual(m.hashlib.sha256((ROOT / 'scripts/setup-floating-garden-ci-owner.py').read_bytes()).hexdigest(),
+                         '8a4c2a4a4fc2725b19ec2159766559bed120e11e9c8605933661b11dddef77b5')
+        old, new = m.OLD_CONDITION.split(' && '), m.new_condition(NEW_SHA).split(' && ')
+        self.assertEqual(len(old), 9)
+        self.assertEqual(len(new), 9)
+        self.assertEqual(old[:7], new[:7])
+        self.assertEqual(old[-2:], [f"assertion.workflow_sha == '{m.OLD_SHA}'", "assertion.run_number == '3'"])
+        self.assertEqual(new[-2:], [f"assertion.workflow_sha == '{NEW_SHA}'", "assertion.run_number == '4'"])
+        self.assertEqual(self.state.data['kind'], 'garden-run-4-trust-renewal-v1')
+        self.assertEqual(b.EXPIRY, 1791762351472)
+
+    def test_live_condition_verified_before_only_legacy_condition_projection(self):
+        for condition in (m.OLD_CONDITION, m.new_condition(NEW_SHA)):
+            self.fake.provider['attributeCondition'] = condition
+            before = m.collect(self.fake, NEW_SHA)
+            retained = copy.deepcopy(before)
+            with patch.object(b, 'validate_state', wraps=b.validate_state) as validator:
+                self.assertIn(m.validate_snapshot(before, NEW_SHA), ('original', 'intended'))
+            expected = copy.deepcopy(before)
+            expected['provider']['attributeCondition'] = m.VALIDATION_CONDITION
+            self.assertEqual(validator.call_args.args[0], expected)
+            self.assertEqual(before, retained)
+            self.assertEqual(before['provider']['attributeCondition'], condition)
+            plan = m.make_plan(before, NEW_SHA)
+            self.assertEqual(plan['from_condition'], condition)
+            self.assertEqual(plan['to_condition'], m.new_condition(NEW_SHA))
+            self.assertEqual(plan['kind'], 'garden-run-4-trust-renewal-v1')
+        before['provider']['attributeCondition'] = m.VALIDATION_CONDITION
+        with patch.object(b, 'validate_state', side_effect=AssertionError('Must reject LIVE drift first')):
+            with self.assertRaises(b.Stop): m.validate_snapshot(before, NEW_SHA)
+
+    def test_validation_projection_never_masks_context_or_other_fields(self):
+        before = m.collect(self.fake, NEW_SHA)
+        for key, value in (('release_sha', m.OLD_SHA), ('release_run_number', '3')):
+            changed = copy.deepcopy(before); changed[key] = value
+            with self.assertRaises(b.Stop) as error: m.validate_snapshot(changed, NEW_SHA)
+            self.assertEqual(error.exception.stage, 'immutable_validation_context_required')
+        changed = copy.deepcopy(before)
+        changed['provider']['oidc']['issuerUri'] = 'https://unexpected.invalid'
+        with self.assertRaises(b.Stop): m.validate_snapshot(changed, NEW_SHA)
+        changed = copy.deepcopy(before)
+        changed['policies']['project']['bindings'].append(f.binding('roles/owner', b.MEMBER))
+        with self.assertRaises(b.Stop): m.validate_snapshot(changed, NEW_SHA)
+
+    def test_existing_cloud_shell_credential_discovery_is_not_overridden(self):
+        with patch.dict(os.environ, {}, clear=True):
+            run = m.ReadOnlyGcloud()
+            self.assertNotIn('CLOUDSDK_CORE_CHECK_GCE_METADATA', run.env)
+        for value in ('true', 'false'):
+            with patch.dict(os.environ, {'CLOUDSDK_CORE_CHECK_GCE_METADATA': value}, clear=True):
+                self.assertEqual(m.ReadOnlyGcloud().env['CLOUDSDK_CORE_CHECK_GCE_METADATA'], value)
+
+    def test_run3_journal_is_never_reused_or_overwritten(self):
+        old = Path(self.temp.name) / 'old-run3'; old.mkdir(mode=0o700)
+        file = old / 'status-0000.json'
+        source = '{"kind":"garden-run-3-trust-renewal-v1","mutation_attempts":1}'
+        file.write_text(source); file.chmod(0o600)
+        with self.assertRaises(b.Stop): m.State(old)
+        self.assertEqual(file.read_text(), source)
+        self.assertEqual(len(list(old.iterdir())), 1)
+
     def test_sdk_version_must_match_offline_contract(self):
         self.fake.version = {'Google Cloud SDK': '999.0.0'}
         self.stopped_without_write('reviewed_owner_sdk_required')
@@ -146,7 +211,7 @@ class RenewalTests(unittest.TestCase):
                 except SystemExit as error:
                     self.assertEqual(error.code, 2)
         full = ['--renew', '--project', b.PROJECT, '--project-number', b.NUMBER, '--original-expiry',
-                str(b.EXPIRY), '--approved-release-sha', NEW_SHA, '--approved-release-run-number', '3',
+                str(b.EXPIRY), '--approved-release-sha', NEW_SHA, '--approved-release-run-number', '4',
                 '--state-dir', str(Path(self.temp.name) / 'other')]
         with patch.object(sys.stdin, 'isatty', return_value=False), contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(m.main(full), 2)
@@ -156,7 +221,7 @@ class RenewalTests(unittest.TestCase):
         for sha in (None, '', 'a' * 39, 'A' * 40, 'g' * 40, m.OLD_SHA, "' || true", 'a' * 40 + '\n'):
             with self.subTest(sha=sha), self.assertRaises(b.Stop):
                 m.new_condition(sha)
-        for run in ('2', '4', '', None, 3, '03'):
+        for run in ('2', '3', '5', '', None, 4, '04'):
             with self.subTest(run=run), self.assertRaises(b.Stop):
                 m.new_condition(NEW_SHA, run)
 
@@ -207,8 +272,12 @@ class RenewalTests(unittest.TestCase):
         self.assertTrue(self.state.data['trust_metadata_verified'])
 
     def test_wrong_condition_always_fails_instead_of_repair(self):
-        variants = [m.OLD_CONDITION.replace(m.OLD_SHA, 'b' * 40),
-                    m.new_condition('b' * 40), m.new_condition(NEW_SHA).replace("'3'", "'4'"),
+        variants = [m.VALIDATION_CONDITION,
+                    m.OLD_CONDITION.replace("run_number == '3'", "run_number == '2'"),
+                    m.OLD_CONDITION.replace("run_number == '3'", "run_number == '4'"),
+                    m.OLD_CONDITION.replace(m.OLD_SHA, m.VALIDATION_SHA),
+                    m.OLD_CONDITION.replace(m.OLD_SHA, 'b' * 40),
+                    m.new_condition('b' * 40), m.new_condition(NEW_SHA).replace("run_number == '4'", "run_number == '5'"),
                     m.OLD_CONDITION.replace("run_attempt == '1'", "run_attempt == '2'"),
                     m.OLD_CONDITION + ' || true', m.OLD_CONDITION + ' ',
                     m.OLD_CONDITION.replace('1321198654', '999'),
@@ -538,7 +607,7 @@ class AuditTests(unittest.TestCase):
     def test_audit_cli_no_tty_no_journal_no_writer(self):
         args = ['--audit', '--project', b.PROJECT, '--project-number', b.NUMBER,
                 '--original-expiry', str(b.EXPIRY), '--approved-release-sha', NEW_SHA,
-                '--approved-release-run-number', '3']
+                '--approved-release-run-number', '4']
         with patch.object(m, 'ReadOnlyGcloud', return_value=self.fake), \
              patch.object(sys.stdin, 'isatty', side_effect=AssertionError('Audit does not require input')), \
              patch.object(m.time, 'time', return_value=(b.EXPIRY - 86400000) / 1000), \
