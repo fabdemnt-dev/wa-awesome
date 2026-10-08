@@ -8,6 +8,9 @@ on:
       - 'scripts/prepare-floating-garden-ci-packet.mjs'
       - 'tests/floating-garden-ci-packet.test.mjs'
       - 'scripts/setup-floating-garden-ci-owner.py'
+      - 'scripts/renew-floating-garden-ci-trust-owner.py'
+      - 'tests/floating-garden-ci-trust-renewal.test.py'
+      - 'docs/floating-garden-ci-trust-renewal.md'
       - 'tests/floating-garden-ci-setup.test.py'
       - 'scripts/floating-garden-ci-clients.mjs'
       - 'tests/floating-garden-ci-clients.test.mjs'
@@ -24,6 +27,7 @@ on:
       - 'scripts/floating-garden-active-update-provider.mjs'
       - 'scripts/floating-garden-trial-cloud-adapter.mjs'
       - 'tests/floating-garden-active-update.test.mjs'
+      - 'tests/floating-garden-trial-operation.test.mjs'
 
 permissions:
   contents: read
@@ -57,7 +61,9 @@ jobs:
           node-version: '22'
           package-manager-cache: false
       - name: Test owner setup using only the in-memory fake
-        run: python3 -I tests/floating-garden-ci-setup.test.py
+        run: |
+          python3 -I tests/floating-garden-ci-setup.test.py
+          python3 -I tests/floating-garden-ci-trust-renewal.test.py
       - name: Test synthetic packet preparation without SDKs or cloud calls
         run: node --test tests/floating-garden-ci-packet.test.mjs
       - name: Install locked SDK dependencies without lifecycle scripts
@@ -65,7 +71,7 @@ jobs:
           npm ci --ignore-scripts --no-audit --no-fund
           npm ci --prefix functions/floating-garden-trial --ignore-scripts --no-audit --no-fund
       - name: Test real pinned SDK initialization with network and subprocesses denied
-        run: node --test tests/floating-garden-ci-clients.test.mjs tests/floating-garden-ci-auth-policy.test.mjs tests/floating-garden-ci-release.test.mjs tests/floating-garden-ci-gcloud.test.mjs tests/floating-garden-active-update.test.mjs
+        run: node --test tests/floating-garden-ci-clients.test.mjs tests/floating-garden-ci-auth-policy.test.mjs tests/floating-garden-ci-release.test.mjs tests/floating-garden-ci-gcloud.test.mjs tests/floating-garden-active-update.test.mjs tests/floating-garden-trial-operation.test.mjs
       - name: Require a fresh credential-free gcloud configuration
         run: |
           python3 -I - <<'PY'
@@ -94,6 +100,7 @@ jobs:
         run: |
           export GARDEN_TEST_GCLOUD_SDK_ROOT="$(python3 -I -c 'import pathlib,shutil; print(pathlib.Path(shutil.which("gcloud")).resolve().parent.parent)')"
           node tests/floating-garden-ci-gcloud-sdk.integration.mjs
+          python3 -I tests/floating-garden-ci-trust-renewal.test.py --sdk-root "$GARDEN_TEST_GCLOUD_SDK_ROOT"
       - name: Check owner-helper command and flag availability without cloud requests
         run: |
           python3 -I - <<'PY'

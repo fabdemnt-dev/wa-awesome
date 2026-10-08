@@ -1,7 +1,7 @@
 name: First Garden NPC release
 
-# Publication on another preparation/PR branch does not deploy. Creating this
-# exact release ref is a separate, explicitly approved action after owner setup.
+# Publication on another preparation/PR branch does not deploy. Fast-forwarding this
+# exact release ref update is separately approved after narrow owner trust renewal.
 on:
   push:
     branches: [release/garden-trial]
@@ -20,10 +20,13 @@ jobs:
       github.repository_owner_id == '312340196' &&
       github.event_name == 'push' &&
       github.ref == 'refs/heads/release/garden-trial' &&
-      github.event.created == true &&
-      github.event.before == '0000000000000000000000000000000000000000' &&
+      github.event.created == false &&
+      github.event.before == '74027567a8761e78423c8df0e744abc8d5633a8b' &&
+      github.event.after == github.sha &&
+      github.workflow_sha == github.sha &&
+      github.sha != github.event.before &&
       github.run_attempt == 1 &&
-      github.run_number == 2
+      github.run_number == 3
     runs-on: ubuntu-latest
     timeout-minutes: 55
     environment: garden-trial
@@ -38,6 +41,8 @@ jobs:
       CLOUDSDK_PAGER: ''
       TERM: dumb
       GARDEN_RELEASE_REF_CREATED: ${{ github.event.created }}
+      GARDEN_RELEASE_EVENT_BEFORE: ${{ github.event.before }}
+      GARDEN_RELEASE_EVENT_AFTER: ${{ github.event.after }}
     steps:
       - name: Set isolated gcloud directory before SDK use
         env:
@@ -76,7 +81,8 @@ jobs:
       - name: Run local release and regression tests before authentication
         run: |
           python3 -I tests/floating-garden-ci-setup.test.py
-          node --test tests/floating-garden-ci-packet.test.mjs tests/floating-garden-ci-auth-policy.test.mjs tests/floating-garden-ci-clients.test.mjs tests/floating-garden-ci-release.test.mjs tests/floating-garden-ci-gcloud.test.mjs tests/floating-garden-active-update.test.mjs
+          python3 -I tests/floating-garden-ci-trust-renewal.test.py
+          node --test tests/floating-garden-ci-packet.test.mjs tests/floating-garden-ci-auth-policy.test.mjs tests/floating-garden-ci-clients.test.mjs tests/floating-garden-ci-release.test.mjs tests/floating-garden-ci-gcloud.test.mjs tests/floating-garden-active-update.test.mjs tests/floating-garden-trial-operation.test.mjs
       - name: Install official gcloud without logging in
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
         with:
@@ -86,6 +92,7 @@ jobs:
         run: |
           export GARDEN_TEST_GCLOUD_SDK_ROOT="$(python3 -I -c 'import pathlib,shutil; print(pathlib.Path(shutil.which("gcloud")).resolve().parent.parent)')"
           node tests/floating-garden-ci-gcloud-sdk.integration.mjs
+          python3 -I tests/floating-garden-ci-trust-renewal.test.py --sdk-root "$GARDEN_TEST_GCLOUD_SDK_ROOT"
       - name: Create private run-bound release acknowledgement
         run: |
           node --input-type=module - <<'JS'
