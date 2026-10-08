@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Owner-operated run-4 trust renewal, not setup or release. Default: offline plan.
+"""Owner-operated run-5 trust renewal, not setup or release. Default: offline plan.
 
 The owner must separately approve the reviewed new commit and this exact trust
 change. --renew requires a TTY and a fresh hash-bound approval; no --yes/resume.
@@ -20,9 +20,9 @@ import sys
 import time
 
 BASE_SHA256 = '8a4c2a4a4fc2725b19ec2159766559bed120e11e9c8605933661b11dddef77b5'
-OLD_SHA = '95ec4e69e4b566df91a37a4107e1a1fd94478ebf'
-OLD_RUN = '3'
-NEW_RUN = '4'
+OLD_SHA = '69ef07b9356470fbd3a643638baeec12bdd5680c'
+OLD_RUN = '4'
+NEW_RUN = '5'
 # Immutable setup validation still uses its original run-2 synthetic projection.
 VALIDATION_SHA = '74027567a8761e78423c8df0e744abc8d5633a8b'
 REVIEWED_OWNER_SDKS = ('568.0.0', '587.0.0')
@@ -43,15 +43,15 @@ def load_base():
 base = load_base()
 need, Stop, digest, packed = base.need, base.Stop, base.digest, base.packed
 VALIDATION_CONDITION = base.release_condition(VALIDATION_SHA, '2')
-# Live trust must be exactly the separately verified previous run-3 condition.
+# Live trust must be exactly the separately verified previous run-4 condition.
 OLD_CONDITION = base.ATTRIBUTE_CONDITION + f" && assertion.workflow_sha == '{OLD_SHA}' && assertion.run_number == '{OLD_RUN}'"
 
 
 def new_condition(sha, run_number=NEW_RUN):
     need(isinstance(sha, str) and re.fullmatch(r'[a-f0-9]{40}', sha) and sha != OLD_SHA,
          'reviewed_new_release_commit_required')
-    need(run_number == NEW_RUN, 'reviewed_run_4_required')
-    return base.ATTRIBUTE_CONDITION + f" && assertion.workflow_sha == '{sha}' && assertion.run_number == '4'"
+    need(run_number == NEW_RUN, 'reviewed_run_5_required')
+    return base.ATTRIBUTE_CONDITION + f" && assertion.workflow_sha == '{sha}' && assertion.run_number == '5'"
 
 
 def update_args(sha):
@@ -129,7 +129,7 @@ class ReadOnlyGcloud(base.Gcloud):
 
 
 class RenewalGcloud(ReadOnlyGcloud):
-    """One narrowly allowlisted run-4 helper mutation; no setup, retry or rollback.
+    """One narrowly allowlisted run-5 helper mutation; no setup, retry or rollback.
 
     Stock SDK HTTP transport retries are independent of helper command retries.
     Even the approved update uses the continuous NO prompt guard, not --quiet,
@@ -176,8 +176,8 @@ def strict_federation(s, sha):
 
 def validate_snapshot(s, sha):
     status = strict_federation(s, sha)
-    # strict_federation above has already checked the exact LIVE old95/run3 or
-    # approved-new/run4 condition. Keep the hash-pinned setup dependency intact:
+    # strict_federation above has already checked the exact LIVE old69/run4 or
+    # approved-new/run5 condition. Keep the hash-pinned setup dependency intact:
     # project only that checked condition to its original740/run2 validation
     # representation. Never rewrite the live snapshot or mask any other field.
     need(s.get('release_sha') == VALIDATION_SHA and s.get('release_run_number') == '2',
@@ -200,7 +200,7 @@ def collect(run, sha):
 
 def make_plan(snapshot, sha):
     status = validate_snapshot(snapshot, sha)
-    return {'kind': 'garden-run-4-trust-renewal-v1', 'project': base.PROJECT,
+    return {'kind': 'garden-run-5-trust-renewal-v1', 'project': base.PROJECT,
             'number': base.NUMBER, 'provider': base.PROVIDER_NAME,
             'original_expiry': base.EXPIRY, 'deadline': base.DEADLINE,
             'from_condition': snapshot['provider']['attributeCondition'],
@@ -218,7 +218,7 @@ class State:
         except OSError:
             raise Stop('fresh_private_state_directory_required') from None
         self.path = path
-        self.data = {'kind': 'garden-run-4-trust-renewal-v1', 'project': base.PROJECT,
+        self.data = {'kind': 'garden-run-5-trust-renewal-v1', 'project': base.PROJECT,
                      'original_expiry': base.EXPIRY, 'stage': 'initial_read',
                      'mutation_attempts': 0, 'possibly_applied': False,
                      'trust_metadata_verified': False, 'release_ready': False}
@@ -364,8 +364,8 @@ def main(argv=None):
     try:
         if not args.renew and not args.audit:
             sha = args.approved_release_sha
-            condition = new_condition(sha, args.approved_release_run_number or NEW_RUN) if sha else '<requires reviewed NEW 40-hex commit; run 4 only>'
-            need(args.approved_release_run_number in (None, NEW_RUN), 'reviewed_run_4_required')
+            condition = new_condition(sha, args.approved_release_run_number or NEW_RUN) if sha else '<requires reviewed NEW 40-hex commit; run 5 only>'
+            need(args.approved_release_run_number in (None, NEW_RUN), 'reviewed_run_5_required')
             print(json.dumps({'mode': 'offline-plan', 'cloud_calls': 0, 'provider': base.PROVIDER_NAME,
                               'original_expiry': base.EXPIRY, 'deadline': base.DEADLINE,
                               'old_condition': OLD_CONDITION, 'new_condition': condition,
