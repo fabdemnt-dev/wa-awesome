@@ -1,6 +1,6 @@
-# Run-3 provider trust renewal (owner only)
+# Read-only trust audit and run-3 renewal (owner only)
 
-This is a prepared local recovery step, **not evidence of an executed renewal,
+This is prepared owner tooling, **not evidence of an executed audit or renewal,
 published commit, successful token exchange, deployment, or Garden readiness**.
 The new reviewed release commit is not known yet. Do not substitute the old SHA,
 a branch name, an abbreviated SHA, or the synthetic SHA used by tests.
@@ -25,23 +25,34 @@ role, or extend an expiry to work around that rejection.
 
 ## Before running
 
-1. Obtain explicit owner approval for this exact trust change and the reviewed
-   new commit. Code preparation or publication alone does not approve this
-   security change. Separately verify that the next intended workflow run is
-   run 3 / attempt 1 and that it will execute exactly that reviewed commit.
+1. For `--audit`, review the source commit and request the read-only check.
+   An audit neither approves nor performs a trust change. For `--renew`, obtain
+   separate explicit owner approval for the exact trust change and reviewed
+   release commit. Source preparation, publication, and a successful audit do
+   not approve that security change or a release. Before renewal, separately
+   verify the next intended workflow run is run 3 / attempt 1 at that commit.
 2. Download/check out both scripts from that exact commit, preserving their
    sibling paths. Use the authenticated repository's commit-specific download
    or a detached Git worktree for the reviewed full SHA. Do not use a moving
    branch download, `curl | python`, or execute a partially downloaded file.
    Compare local bytes with that commit's repository blobs before execution.
    Record the verified commit and both SHA-256 values for owner review.
+   The new tooling commit is only a potential future release commit after its
+   exact-head checks and separate review/authorization. Do not run new helper
+   bytes while labeling an older release SHA as their reviewed source. For the
+   flow below, both script blobs and the supplied candidate SHA must identify
+   the same reviewed full commit. A later commit requires a fresh review.
 3. The unchanged setup dependency must have SHA-256
    `8a4c2a4a4fc2725b19ec2159766559bed120e11e9c8605933661b11dddef77b5`.
    The renewal helper checks that hash before importing its metadata-only
    collector/validator and guarded process runner. Importing it does not run
    setup. No permission catalog scan or setup mutation planner is used.
-4. Use the already installed official **gcloud 568.0.0**, with the existing
-   signed-in owner. The helper does not install, log in, create credentials,
+4. Use the already installed official **gcloud 568.0.0 or exactly 587.0.0**,
+   with the existing signed-in owner. Other versions are rejected; there is no
+   minimum-version bypass. Do not downgrade, install, or change the owner SDK
+   for this flow. Owner-tool qualification for 587 does not qualify deployment
+   with that SDK: the separate deployment workflow remains pinned to 568.0.0.
+   The helper does not install, log in, create credentials,
    impersonate, print tokens, or access secret payloads. Invalid identity,
    endpoint/credential overrides, incomplete metadata, unexpected federation,
    missing original grants, or changed expiry stop execution.
@@ -49,7 +60,7 @@ role, or extend an expiry to work around that rejection.
    operation. IAM provider PATCH has no compare-and-swap/etag precondition.
    Fresh revalidation minimizes the race but cannot eliminate concurrent edits.
 
-## Plan and owner execution
+## Offline plan, then read-only audit
 
 Default mode and `--plan` are completely offline and make no cloud calls:
 
@@ -57,10 +68,56 @@ Default mode and `--plan` are completely offline and make no cloud calls:
 python3 -I scripts/renew-floating-garden-ci-trust-owner.py --plan
 ```
 
-After replacing `REVIEWED_NEW_40_HEX_COMMIT` with the independently verified
-commit, the separately authorized owner can run the following in their terminal.
-The placeholder is intentionally invalid. Choose a new private state directory
-for each attempt; existing state is never overwritten.
+After verifying both sibling scripts from the same reviewed full commit, replace
+`REVIEWED_NEW_40_HEX_COMMIT` with that candidate commit. The placeholder is
+intentionally invalid. The existing `--approved-release-sha` flag selects the
+exact condition to inspect; supplying it in audit mode does not approve a write.
+
+```sh
+python3 -I scripts/renew-floating-garden-ci-trust-owner.py --audit \
+  --project wa-awesome-garden-stg \
+  --project-number 120030709276 \
+  --original-expiry 1791762351472 \
+  --approved-release-sha REVIEWED_NEW_40_HEX_COMMIT \
+  --approved-release-run-number 3
+```
+
+`--audit` uses a separate read-only command boundary. It has no renewal writer,
+confirmation prompt, setup planner, local raw snapshot files, or state directory.
+It does not enable APIs, repair drift, log in, create credentials, change IAM,
+access secret payloads, or deploy. As with ordinary signed-in metadata reads,
+the existing SDK may refresh the owner's existing authentication session; this
+is not an authentication/setup flow initiated by the helper.
+
+The audit uses the **same complete baseline collector and validator** as renewal:
+fixed project/number, existing APIs, exact five Functions and runtime/build
+identities, raw source bucket ownership and policy, HMAC version metadata,
+project/ancestor/resource IAM, accounts/keys, exact custom-role permissions,
+original-expiry bindings, pool/provider, strict mapping/issuer/audience and
+exact original or intended claim condition. It does two complete matching reads,
+including pagination/incomplete-inventory checks; missing grants or any rejected
+drift stops rather than being repaired. It does not scan the setup permission
+catalog. Each SDK read still feeds NO to unexpected prompts.
+
+Success prints only `TRUST_AUDIT_VERIFIED`, fixed scope/version/expiry, whether the
+condition is `original` or `intended`, a snapshot digest, two matching reads,
+`cloud_writes: 0`, and `release_ready: false`. No account identities or raw IAM
+JSON are printed or saved. A stop prints a bounded diagnostic stage, not stderr.
+An audit proves inspected metadata at those reads, not token exchange, future
+immutability, live deploy permissions, or Garden readiness. Inspection uses the
+actual SDK-rendered policy representation; some inherited IAM commands do not
+explicitly request policy version 3. Offline coverage does not establish
+exhaustive visibility of conditional fields for those APIs. Required original
+conditional grants must still match the strict validator or the audit stops.
+Keep private renewal
+journals out of chat; only share the bounded audit result if troubleshooting.
+
+## Separately approved renewal
+
+The audit command above never advances automatically to this step. A new,
+explicitly authorized owner invocation is required. Use the same reviewed
+commit and choose a new private state directory; existing history is never
+overwritten.
 
 ```sh
 python3 -I scripts/renew-floating-garden-ci-trust-owner.py --renew \
@@ -85,7 +142,7 @@ feed NO to unexpected SDK prompts, including API-enablement prompts.
 
 The stock SDK may retry HTTP transport failures internally. The helper does
 not retry a mutation command, roll back, or repair other state. The SDK contract
-test captures `updateMask=attributeCondition`; SDK 568 also serializes its
+tests capture `updateMask=attributeCondition`; SDK 568 and 587 also serialize their
 default `disabled:false`, but that field is excluded from the update mask and
 is not applied. This follows the [provider PATCH update-mask contract](https://cloud.google.com/iam/docs/reference/rest/v1/projects.locations.workloadIdentityPools.providers/patch)
 and the [official update-oidc command](https://cloud.google.com/sdk/gcloud/reference/iam/workload-identity-pools/providers/update-oidc).
@@ -119,7 +176,21 @@ python3 -I tests/floating-garden-ci-trust-renewal.test.py \
 The first suite forbids real processes and networking and tests exact-scope
 changes, original-expiry IAM guards, backups, no-op behavior, stale approvals,
 interrupted/uncertain outcomes, unexpected settings, and prompt rejection. The
-optional SDK-568 suite uses the real parser, request builder and serialization
+optional exact-SDK-568/587 renewal suite uses the real parser, request builder
+and serialization
 against a synthetic HTTP transport. It blocks credentials, real network,
-subprocesses and installation. Neither suite proves live permissions or token
-exchange, and neither mutates cloud resources.
+subprocesses and installation. The dedicated owner SDK 587 suite additionally
+exercises every inherited read
+command through the real parser/request builder and output rendering, including
+paginated Functions and unreachable-region diagnostics, ancestor/resource IAM,
+service-account keys, and raw Storage ownership metadata. Local config/account
+inventory seams use synthetic data; no credentials are opened or refreshed.
+
+```sh
+python3 -I tests/floating-garden-ci-owner-sdk.test.py \
+  --sdk-root /path/to/already-installed/google-cloud-sdk-587
+```
+
+CI runs the deployment proof on 568 separately from the owner-read and renewal
+proofs on exactly 587. These are synthetic offline contract checks, not evidence
+of live permissions or token exchange, and they do not mutate cloud resources.
