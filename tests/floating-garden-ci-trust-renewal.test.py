@@ -3,7 +3,7 @@
 
 python3 -I tests/floating-garden-ci-trust-renewal.test.py
 python3 -I tests/floating-garden-ci-trust-renewal.test.py --sdk-root /trusted/google-cloud-sdk
-The optional SDK 568 contract test executes its real parser/request builder with
+The optional exact SDK 568/587 contract test executes its real parser/request builder with
 an in-memory HTTP transport and independently blocks processes and networking.
 """
 import contextlib
@@ -106,8 +106,15 @@ class RenewalTests(unittest.TestCase):
 
     def test_sdk_version_must_match_offline_contract(self):
         self.fake.version = {'Google Cloud SDK': '999.0.0'}
-        self.stopped_without_write('reviewed_sdk_568_required')
+        self.stopped_without_write('reviewed_owner_sdk_required')
         self.assertEqual(len(self.fake.calls), 1)
+
+    def test_exact_587_owner_renewal_keeps_same_single_write(self):
+        self.fake.version = {'Google Cloud SDK': '587.0.0'}
+        self.assertEqual(self.run_renewal(), 0)
+        self.assertEqual(self.fake.writes, [(m.update_args(NEW_SHA), 'renew_provider_condition')])
+        self.assertTrue(self.state.data['trust_metadata_verified'])
+        self.assertFalse(self.state.data['release_ready'])
 
     def test_final_journal_failure_never_reports_completed_or_clears_uncertainty(self):
         original = self.state.save
@@ -406,12 +413,157 @@ class RenewalTests(unittest.TestCase):
                 m.RenewalGcloud(NEW_SHA)
 
 
+class AuditTests(unittest.TestCase):
+    def setUp(self):
+        self.fake, self.output = Fake(), []
+        self.fake.version = {'Google Cloud SDK': '587.0.0'}
+        for target, attr in ((subprocess, 'run'), (subprocess, 'Popen'), (socket, 'socket'),
+                             (socket, 'create_connection'), (m, 'RenewalGcloud'), (m, 'execute'),
+                             (m, 'State'), (b, 'execute'), (b, 'make_plan')):
+            guard = patch.object(target, attr, side_effect=AssertionError('Audit cannot write, plan setup, or run real processes/network'))
+            guard.start(); self.addCleanup(guard.stop)
+
+    def run_audit(self, now=None):
+        return m.audit(self.fake, NEW_SHA, emit=self.output.append,
+                       now=now or (lambda: b.EXPIRY - 86400000))
+
+    def test_audit_original_and_intended_two_complete_reads_redacted(self):
+        for intended in (False, True):
+            self.fake = Fake(); self.fake.version = {'Google Cloud SDK': '587.0.0'}
+            if intended: self.fake.provider['attributeCondition'] = m.new_condition(NEW_SHA)
+            self.assertEqual(self.run_audit(), 0, self.output)
+            self.assertEqual(self.fake.writes, [])
+            self.assertFalse(self.fake.approved)
+            self.assertEqual(sum(stage == 'provider_metadata' for _, stage, _ in self.fake.calls), 2)
+            value = json.loads(self.output[-1])
+            self.assertEqual(value['condition_state'], 'intended' if intended else 'original')
+            self.assertEqual(value['cloud_writes'], 0)
+            self.assertFalse(value['release_ready'])
+            self.assertEqual(value['owner_sdk'], '587.0.0')
+            self.assertNotIn('owner@example', self.output[-1])
+            self.assertNotIn('bindings', self.output[-1])
+            self.assertNotIn('attributeCondition', self.output[-1])
+            self.assertLess(len(self.output[-1]), 700)
+            self.assertTrue(all(m.read_allowed(args, stage) for args, stage, _ in self.fake.calls))
+
+    def test_exact_version_allowlist_for_audit_and_writer_preflight(self):
+        for version in ('568.0.0', '587.0.0'):
+            self.fake.version = {'Google Cloud SDK': version}
+            self.assertEqual(self.run_audit(), 0)
+        for version in ('567.0.0', '569.0.0', '586.0.0', '588.0.0', '587.0.1', '587', 587, None):
+            self.fake = Fake(); self.fake.version = {'Google Cloud SDK': version}
+            self.assertEqual(self.run_audit(), 2)
+            self.assertEqual(len(self.fake.calls), 1)
+            self.assertEqual(self.fake.writes, [])
+
+    def test_every_baseline_drift_is_rejected_without_repair(self):
+        cases = [lambda x: x.provider['oidc'].update(allowedAudiences=['other']),
+                 lambda x: x.provider['attributeMapping'].update(extra='assertion.extra'),
+                 lambda x: x.provider.update(attributeCondition=m.new_condition('b' * 40)),
+                 lambda x: x.provider.update(disabled=True),
+                 lambda x: x.pool.update(displayName='drift'),
+                 lambda x: x.services.remove(b.APIS[0]),
+                 lambda x: x.services.remove(b.REQUIRED_EXISTING_APIS[0]),
+                 lambda x: x.custom.pop(next(iter(x.custom))),
+                 lambda x: x.custom[next(iter(x.custom))]['includedPermissions'].append('iam.roles.update'),
+                 lambda x: x.accounts.pop(b.DEPLOYER),
+                 lambda x: x.keys.append({'name': 'synthetic-key'}),
+                 lambda x: x.accounts[b.RUNTIME].update(disabled=True),
+                 lambda x: x.policies[b.DEPLOYER].update(bindings=[]),
+                 lambda x: x.policies['project']['bindings'].append(f.binding('roles/owner', b.MEMBER)),
+                 lambda x: x.policies[b.DEPLOYER]['bindings'][0]['condition'].update(expression='true'),
+                 lambda x: x.bucket.update(projectNumber='999'),
+                 lambda x: x.bucket.pop('projectNumber'),
+                 lambda x: x.functions.pop(),
+                 lambda x: x.functions[0]['serviceConfig'].update(serviceAccountEmail=b.DEPLOYER),
+                 lambda x: x.functions[0]['buildConfig']['source']['storageSource'].update(bucket='foreign'),
+                 lambda x: setattr(x, 'hmac_version', '2'),
+                 lambda x: x.config.update(auth={'impersonate_service_account': 'synthetic'})]
+        for mutate in cases:
+            with self.subTest(mutate=mutate):
+                self.fake = Fake(); mutate(self.fake)
+                self.assertEqual(self.run_audit(), 2)
+                self.assertEqual(self.fake.writes, [])
+                self.assertFalse(self.fake.approved)
+                self.assertNotIn('TRUST_AUDIT_VERIFIED', self.output[-1])
+
+    def test_incomplete_read_or_intervening_drift_stops(self):
+        for stage in ('function_metadata', 'source_bucket_owner', 'project_policy', 'role_metadata', 'provider_metadata'):
+            self.fake = Fake(); self.fake.fail_stage = stage
+            self.assertEqual(self.run_audit(), 2)
+            self.assertEqual(self.fake.writes, [])
+        self.fake = Fake()
+        count = [0]
+        def mutate(fake, args, stage, write):
+            if stage == 'provider_metadata':
+                count[0] += 1
+                if count[0] == 2: fake.provider['attributeCondition'] = m.new_condition(NEW_SHA)
+        self.fake.mutate = mutate
+        self.assertEqual(self.run_audit(), 2)
+        self.assertIn('state_changed_during_audit', self.output[-1])
+        self.assertEqual(self.fake.writes, [])
+
+    def test_expiry_checked_before_and_after_reads(self):
+        self.assertEqual(self.run_audit(now=lambda: b.EXPIRY), 2)
+        self.assertEqual(self.fake.calls, [])
+        moments = iter([b.EXPIRY - 1, b.EXPIRY])
+        self.assertEqual(self.run_audit(now=lambda: next(moments)), 2)
+        self.assertEqual(self.fake.writes, [])
+
+    def test_malformed_nested_metadata_stops_with_bounded_diagnostic(self):
+        for malformed in ([], {'auth': []}, {'storage': []}):
+            self.fake = Fake(); self.fake.config = malformed
+            self.assertEqual(self.run_audit(), 2)
+            self.assertEqual(self.fake.writes, [])
+            self.assertEqual(self.output[-1], 'TRUST_AUDIT_STOP stage=metadata_or_local_state_error cloud_writes=0 release_ready=false.')
+
+    def test_read_runner_cannot_dispatch_writer_even_mislabeled(self):
+        with patch.dict(os.environ, {}, clear=True): run = m.ReadOnlyGcloud()
+        run.approved = True  # This never enables the read-only boundary.
+        attempts = [(m.update_args(NEW_SHA), 'renew_provider_condition'),
+                    (m.update_args(NEW_SHA), 'provider_metadata'),
+                    (['services', 'enable', 'iam.googleapis.com'], 'enabled_apis'),
+                    (['auth', 'login'], 'owner_identity'),
+                    (['secrets', 'versions', 'access', 'latest', '--secret=' + b.SECRET], 'hmac_latest_metadata'),
+                    (['config', 'set', 'project', b.PROJECT], 'gcloud_config'),
+                    (['version', '--quiet'], 'gcloud_version'),
+                    (['iam', 'roles', 'describe', 'roles/owner', '--impersonate-service-account=x'], 'role_metadata')]
+        for args, stage in attempts:
+            for write in (False, True):
+                with self.subTest(args=args, write=write), self.assertRaises(b.Stop):
+                    run(args, stage, write=write)
+        with self.assertRaises(b.Stop): run(['version'], 'gcloud_version', write=True)
+        self.assertEqual(run.calls, 0)
+
+    def test_audit_cli_no_tty_no_journal_no_writer(self):
+        args = ['--audit', '--project', b.PROJECT, '--project-number', b.NUMBER,
+                '--original-expiry', str(b.EXPIRY), '--approved-release-sha', NEW_SHA,
+                '--approved-release-run-number', '3']
+        with patch.object(m, 'ReadOnlyGcloud', return_value=self.fake), \
+             patch.object(sys.stdin, 'isatty', side_effect=AssertionError('Audit does not require input')), \
+             patch.object(m.time, 'time', return_value=(b.EXPIRY - 86400000) / 1000), \
+             contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(m.main(args), 0)
+            self.assertEqual(m.main(args + ['--state-dir', '/unused']), 2)
+        self.assertIn('TRUST_AUDIT_VERIFIED', output.getvalue())
+        self.assertIn('audit_has_no_state_directory', output.getvalue())
+        self.assertEqual(self.fake.writes, [])
+
+    def test_cli_requires_exact_scope_and_target_no_audit_bypass(self):
+        for args in (['--audit'], ['--audit', '--renew'], ['--audit', '--plan'],
+                     ['--audit', '--yes'], ['--audit', '--resume']):
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                try: self.assertEqual(m.main(args), 2)
+                except SystemExit as error: self.assertEqual(error.code, 2)
+
+
 def verify_sdk(sdk_root):
     """Execute real SDK command; replace only its HTTP boundary."""
     import runpy
     from urllib.parse import parse_qs, urlsplit
     sdk_root = sdk_root.resolve()
-    assert (sdk_root / 'VERSION').read_text().strip() == '568.0.0'
+    sdk_version = (sdk_root / 'VERSION').read_text().strip()
+    assert sdk_version in ('568.0.0', '587.0.0')
     class UnsafeAction(BaseException):
         pass
     def forbid(*args, **kwargs):
@@ -543,7 +695,7 @@ def verify_sdk(sdk_root):
             run(transient)
         patches = [call for call in transient.calls if call[0] == 'PATCH']
         assert len(patches) == 2 and patches[0] == patches[1]
-        print(json.dumps({'sdk': '568.0.0', 'offline': True, 'cases': 3,
+        print(json.dumps({'sdk': sdk_version, 'offline': True, 'cases': 3,
                           'stock_sdk_transient_patch_retries_observed': 1,
                           'update_mask': 'attributeCondition', 'other_writes': 0,
                           'live_credential_or_cloud_calls': 0}))
