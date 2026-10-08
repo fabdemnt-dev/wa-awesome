@@ -17,7 +17,12 @@ export function validateCiFunctionConfiguration(proof) {
       labels['firebase-functions-codebase'] === 'floating-garden-trial', 'iam-preservation');
     need(isDeepStrictEqual(fn.buildConfig.environmentVariables, { GOOGLE_NODE_RUN_SCRIPTS: '' }), 'iam-preservation');
     const service = fn.serviceConfig, env = service.environmentVariables || {};
-    need(isDeepStrictEqual(sorted(env), ['EVENTARC_CLOUD_EVENT_SOURCE', 'FIREBASE_CONFIG', 'FUNCTION_TARGET', 'GCLOUD_PROJECT', 'LOG_EXECUTION_ID']) &&
+    const requiredEnv = ['EVENTARC_CLOUD_EVENT_SOURCE', 'FIREBASE_CONFIG', 'FUNCTION_TARGET', 'GCLOUD_PROJECT', 'LOG_EXECUTION_ID'];
+    // HTTP Functions may explicitly select the framework's default signature.
+    // Preserve presence/value exactly; no event signature or unknown key is accepted.
+    const signaturePresent = Object.hasOwn(env, 'FUNCTION_SIGNATURE_TYPE');
+    need((!signaturePresent || env.FUNCTION_SIGNATURE_TYPE === 'http') &&
+      isDeepStrictEqual(sorted(env), signaturePresent ? [...requiredEnv, 'FUNCTION_SIGNATURE_TYPE'].sort() : requiredEnv) &&
       env.FUNCTION_TARGET === name && env.GCLOUD_PROJECT === S.project && env.LOG_EXECUTION_ID === 'true' &&
       env.EVENTARC_CLOUD_EVENT_SOURCE === `projects/${S.project}/locations/${S.region}/services/${name}`, 'iam-preservation');
     let config; try { config = JSON.parse(env.FIREBASE_CONFIG); } catch { need(false, 'iam-preservation'); }
