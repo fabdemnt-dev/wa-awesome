@@ -3,7 +3,8 @@
 
 The owner must separately approve the reviewed new commit and this exact trust
 change. --renew requires a TTY and a fresh hash-bound approval; no --yes/resume.
-Only the existing provider's attributeCondition may be written. The original
+--audit performs only a complete read-only baseline check; it cannot renew.
+Only the existing provider's attributeCondition may be written by --renew. The original
 setup module is a hash-pinned read/validation dependency; its setup never runs.
 """
 import argparse
@@ -21,6 +22,7 @@ import time
 BASE_SHA256 = '8a4c2a4a4fc2725b19ec2159766559bed120e11e9c8605933661b11dddef77b5'
 OLD_SHA = '74027567a8761e78423c8df0e744abc8d5633a8b'
 NEW_RUN = '3'
+REVIEWED_OWNER_SDKS = ('568.0.0', '587.0.0')
 
 
 def load_base():
@@ -53,7 +55,75 @@ def update_args(sha):
             '--attribute-condition=' + new_condition(sha)]
 
 
-class RenewalGcloud(base.Gcloud):
+def read_allowed(args, stage):
+    """Finite metadata-only command surface, separate from the renewal writer.
+
+    The hash-pinned collector selects identities from this fixed project. Even
+    a mislabeled write=False mutation, extra flag, or future collector command
+    is rejected here before a process can start.
+    """
+    fixed = {
+        'gcloud_version': [['version']],
+        'gcloud_config': [['config', 'list']],
+        'owner_identity': [['auth', 'list', '--filter=status:ACTIVE']],
+        'project_identity': [['projects', 'describe', base.PROJECT]],
+        'enabled_apis': [['services', 'list', '--enabled', '--limit=1000']],
+        'function_metadata': [base.function_inventory_args()],
+        'function_policy': [['functions', 'get-iam-policy', name, '--region=' + base.REGION]
+                            for name in base.FUNCTIONS],
+        'source_bucket_owner': [['storage', 'buckets', 'describe', 'gs://' + base.BUCKET,
+                                 '--raw', '--format=json(name,projectNumber)']],
+        'source_bucket_policy': [['storage', 'buckets', 'get-iam-policy', 'gs://' + base.BUCKET]],
+        'project_policy': [base.policy_command('project', 'get-iam-policy')],
+        'secret_policy': [base.policy_command('secret', 'get-iam-policy')],
+        'project_ancestors': [['projects', 'get-ancestors', base.PROJECT]],
+        'account_inventory': [['iam', 'service-accounts', 'list', '--limit=1000']],
+        'deployer_keys': [['iam', 'service-accounts', 'keys', 'list', '--iam-account=' + base.DEPLOYER,
+                           '--managed-by=user', '--limit=1000']],
+        'custom_role_inventory': [['iam', 'roles', 'list', '--show-deleted', '--limit=1000']],
+        'pool_inventory': [['iam', 'workload-identity-pools', 'list', '--location=global',
+                            '--show-deleted', '--limit=1000']],
+        'pool_policy': [base.policy_command('pool', 'get-iam-policy')],
+        'provider_inventory': [['iam', 'workload-identity-pools', 'providers', 'list', '--location=global',
+                                '--workload-identity-pool=' + base.POOL, '--show-deleted', '--limit=1000']],
+        'provider_metadata': [['iam', 'workload-identity-pools', 'providers', 'describe', base.PROVIDER,
+                               '--location=global', '--workload-identity-pool=' + base.POOL]],
+    }
+    for version in ('1', 'latest'):
+        fixed['hmac_' + version + '_metadata'] = [['secrets', 'versions', 'describe', version,
+            '--secret=' + base.SECRET, '--format=json(name,state)']]
+    if stage in fixed:
+        return args in fixed[stage]
+    if not isinstance(args, list) or not all(isinstance(a, str) for a in args):
+        return False
+    if stage == 'ancestor_policy':
+        return ((len(args) == 4 and args[:3] == ['resource-manager', 'folders', 'get-iam-policy']) or
+                (len(args) == 3 and args[:2] == ['organizations', 'get-iam-policy'])) and bool(re.fullmatch(r'[0-9]+', args[-1]))
+    if stage in ('account_metadata', 'account_policy'):
+        verb = 'describe' if stage == 'account_metadata' else 'get-iam-policy'
+        return (len(args) == 4 and args[:3] == ['iam', 'service-accounts', verb] and
+                bool(re.fullmatch(r'[a-z][a-z0-9-]{4,28}[a-z0-9]@' + re.escape(base.PROJECT) + r'\.iam\.gserviceaccount\.com', args[3]) or
+                     args[3] in (base.APPSPOT, base.NUMBER + '-compute@developer.gserviceaccount.com',
+                                 base.NUMBER + '@cloudbuild.gserviceaccount.com')))
+    if stage == 'role_metadata':
+        return (len(args) in (4, 5) and args[:3] == ['iam', 'roles', 'describe'] and
+                bool(re.fullmatch(r'(?:roles/)?[A-Za-z0-9_.]+', args[3])) and
+                (len(args) == 4 or (not args[3].startswith('roles/') and
+                                   re.fullmatch(r'--organization=[0-9]+', args[4]) is not None)))
+    return False
+
+
+class ReadOnlyGcloud(base.Gcloud):
+    """Audit has no writer, even if approved is set or write=False is misused."""
+    def __init__(self):
+        super().__init__(OLD_SHA, '2')
+
+    def __call__(self, args, stage, write=False):
+        need(not write and read_allowed(args, stage), 'read_only_command_required')
+        return super().__call__(args, stage, write=False)
+
+
+class RenewalGcloud(ReadOnlyGcloud):
     """One narrowly allowlisted helper mutation; no setup, retry or rollback.
 
     Stock SDK HTTP transport retries are independent of helper command retries.
@@ -63,7 +133,7 @@ class RenewalGcloud(base.Gcloud):
     def __init__(self, sha):
         self.new_sha = sha
         new_condition(sha)
-        super().__init__(OLD_SHA, '2')
+        super().__init__()
         self.mutation_attempts = 0
 
     def __call__(self, args, stage, write=False):
@@ -74,6 +144,8 @@ class RenewalGcloud(base.Gcloud):
             self.mutation_attempts += 1
         # The shared boundary supplies fixed project/billing/JSON flags,
         # redacted diagnostics, timeouts and NO to unexpected SDK prompts.
+        if write:
+            return base.Gcloud.__call__(self, args, stage, write=False)
         return super().__call__(args, stage, write=False)
 
 
@@ -168,12 +240,47 @@ class State:
         self.save_file(f'status-{index:04d}.json', self.data)
 
 
+def check_sdk(run):
+    version = run(['version'], 'gcloud_version')
+    need(isinstance(version, dict) and version.get('Google Cloud SDK') in REVIEWED_OWNER_SDKS,
+         'reviewed_owner_sdk_required')
+    return version['Google Cloud SDK']
+
+
+def audit(run, sha, *, emit=print, now=lambda: time.time() * 1000):
+    """Read-only full baseline validation, never a plan, journal, or writer.
+
+    Only bounded fixed labels and digests leave memory. The owner account,
+    policies and raw snapshots are not printed or saved. Two complete matching
+    reads detect intervening drift, but cannot guarantee future immutability.
+    """
+    try:
+        new_condition(sha)
+        need(now() < base.EXPIRY, 'original_deadline_expired')
+        sdk = check_sdk(run)
+        before = collect(run, sha)
+        need(collect(run, sha) == before, 'state_changed_during_audit')
+        need(now() < base.EXPIRY, 'original_deadline_expired')
+        emit(json.dumps({'result': 'TRUST_AUDIT_VERIFIED', 'mode': 'read-only-audit',
+                         'project': base.PROJECT, 'number': base.NUMBER, 'owner_sdk': sdk,
+                         'original_expiry': base.EXPIRY, 'deadline': base.DEADLINE,
+                         'condition_state': validate_snapshot(before, sha),
+                         'snapshot_sha256': digest(before), 'complete_matching_reads': 2,
+                         'cloud_writes': 0, 'release_ready': False}, sort_keys=True))
+        return 0
+    except (Stop, EOFError, KeyboardInterrupt, AttributeError, KeyError, TypeError, ValueError, OSError) as error:
+        stage = error.stage if isinstance(error, Stop) else 'metadata_or_local_state_error'
+        emit('TRUST_AUDIT_STOP stage=' + stage + ' cloud_writes=0 release_ready=false.')
+        return 2
+    finally:
+        run.approved = False
+
+
 def execute(run, state, sha, *, confirm=input, emit=print, now=lambda: time.time() * 1000):
     try:
         new_condition(sha)
         need(now() < base.EXPIRY, 'original_deadline_expired')
-        version = run(['version'], 'gcloud_version')
-        need(isinstance(version, dict) and version.get('Google Cloud SDK') == '568.0.0', 'reviewed_sdk_568_required')
+        check_sdk(run)
         before = collect(run, sha)
         plan = make_plan(before, sha)
         token = digest(plan)
@@ -216,7 +323,7 @@ def execute(run, state, sha, *, confirm=input, emit=print, now=lambda: time.time
         state.save()
         emit('TRUST_METADATA_VERIFIED mutation_commands=1 release_ready=false. Exact provider and inspected IAM readback passed. This does not prove token exchange, deployment or Garden readiness.')
         return 0
-    except (Stop, EOFError, KeyboardInterrupt, KeyError, TypeError, ValueError, OSError) as error:
+    except (Stop, EOFError, KeyboardInterrupt, AttributeError, KeyError, TypeError, ValueError, OSError) as error:
         stage = error.stage if isinstance(error, Stop) else ('owner_interrupted' if isinstance(error, (EOFError, KeyboardInterrupt)) else 'metadata_or_local_state_error')
         state.data.update(stage=stage, trust_metadata_verified=False,
                           possibly_applied=state.data['mutation_attempts'] > 0,
@@ -237,6 +344,7 @@ def main(argv=None):
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument('--plan', action='store_true')
     modes.add_argument('--renew', action='store_true')
+    modes.add_argument('--audit', action='store_true')
     parser.add_argument('--project')
     parser.add_argument('--project-number')
     parser.add_argument('--original-expiry', type=int)
@@ -245,7 +353,7 @@ def main(argv=None):
     parser.add_argument('--state-dir')
     args = parser.parse_args(argv)
     try:
-        if not args.renew:
+        if not args.renew and not args.audit:
             sha = args.approved_release_sha
             condition = new_condition(sha, args.approved_release_run_number or NEW_RUN) if sha else '<requires reviewed NEW 40-hex commit; run 3 only>'
             need(args.approved_release_run_number in (None, NEW_RUN), 'reviewed_run_3_required')
@@ -257,7 +365,13 @@ def main(argv=None):
                               'next': 'Separately authorized owner uses --renew with exact fixed scope and reviews the live hash-bound plan.'}, indent=2))
             return 0
         need(args.project == base.PROJECT and args.project_number == base.NUMBER and
-             args.original_expiry == base.EXPIRY and args.state_dir and sys.stdin.isatty(),
+             args.original_expiry == base.EXPIRY, 'explicit_fixed_scope_required')
+        new_condition(args.approved_release_sha, args.approved_release_run_number)
+        need(time.time() * 1000 < base.EXPIRY, 'original_deadline_expired')
+        if args.audit:
+            need(args.state_dir is None, 'audit_has_no_state_directory')
+            return audit(ReadOnlyGcloud(), args.approved_release_sha)
+        need(args.state_dir and sys.stdin.isatty(),
              'explicit_fixed_scope_and_interactive_owner_required')
         new_condition(args.approved_release_sha, args.approved_release_run_number)
         need(time.time() * 1000 < base.EXPIRY, 'original_deadline_expired')
@@ -265,7 +379,7 @@ def main(argv=None):
         return execute(run, State(args.state_dir), args.approved_release_sha)
     except (Stop, OSError, ValueError) as error:
         stage = error.stage if isinstance(error, Stop) else 'local_state_unavailable'
-        print('TRUST_RENEWAL_STOP stage=' + stage)
+        print(('TRUST_AUDIT_STOP' if args.audit else 'TRUST_RENEWAL_STOP') + ' stage=' + stage)
         return 2
 
 
