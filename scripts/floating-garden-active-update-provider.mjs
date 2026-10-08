@@ -358,7 +358,17 @@ export function createActiveUpdateProvider({ plan, toolingDir, runner = makeClou
     await recheckActiveUpdatePlan(plan); await assertClosed(); await assertSettingsUnchanged();
     if (!applied.length) check(isDeepStrictEqual(baseline.proof, await evidence('previous')), 'provider-drift');
     else await verifyFunctions();
-    if (kind === 'hosting') await verifyRules();
+    if (kind === 'rules') {
+      const oldRules = await oldAdapter.verifyRules({ includeProof: true });
+      check(isDeepStrictEqual(baseline.proof.rules, { release: oldRules.release, ruleset: oldRules.ruleset }), 'provider-drift');
+    }
+    if (kind === 'hosting') {
+      await verifyRules();
+      // The CLI has no expected-version CAS. Recheck the exact old live
+      // release and hosted bytes as close as possible before its one attempt.
+      // Alias-only metadata differences normalize inside readHosting().
+      check(isDeepStrictEqual(baseline.proof.hosting, await oldAdapter.readHosting()), 'provider-drift');
+    }
     // Mark the whole stage before any attempt. A partial stage cannot resume.
     attemptedStages.add(kind);
     if (kind === 'functions') return deployCiFunctions();

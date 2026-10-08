@@ -13,7 +13,7 @@ import { prepareCiPacket } from './prepare-floating-garden-ci-packet.mjs';
 import { validateOperationReview } from './prepare-floating-garden-trial-operation.mjs';
 import { createActiveUpdateProvider, ciProviderFailureDiagnostic } from './floating-garden-active-update-provider.mjs';
 import { makeCloudRunner, describeAdapterFailure } from './floating-garden-trial-cloud-adapter.mjs';
-import { checkTooling, canonicalVersionName } from './deploy-floating-garden-connection-template.mjs';
+import { checkTooling, canonicalVersionName, liveChannel } from './deploy-floating-garden-connection-template.mjs';
 import { ACTIVE_UPDATE_SCOPE as S, prepareActiveUpdatePlan, recheckActiveUpdatePlan,
   proveOldInvocationIsolation, activeUpdateReason } from './floating-garden-active-update.mjs';
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
@@ -21,9 +21,10 @@ const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 const json = value => JSON.stringify(value, null, 2) + '\n';
 const failures = new WeakMap();
 function need(condition, code) { if (!condition) { const e = new Error('CI release blocked'); failures.set(e, code); throw e; } }
+export const CI_RELEASE_RECOVERY = Object.freeze({ before: '74027567a8761e78423c8df0e744abc8d5633a8b', runNumber: '3' });
 const STAGES = ['closed-baseline', 'functions', 'rules', 'hosting', 'preservation', 'reopen', 'reopened'];
 export function ciReleaseApproval(sourceCommit, runNumber) {
-  return { schemaVersion: 1, repository: 'fabdemnt-dev/wa-awesome', sourceCommit, runNumber,
+  return { schemaVersion: 2, previousSourceCommit: CI_RELEASE_RECOVERY.before, releaseRefCreated: false, repository: 'fabdemnt-dev/wa-awesome', sourceCommit, runNumber,
     oldInventory: S.oldInventory, newInventory: S.newInventory, expiresAtMillis: S.endsAtMillis,
     existingClosedTrial: true, fiveFunctionsRulesHosting: true, standardCliInternalRetriesAndParallelism: true,
     functionsDeployer: 'gcloud-568.0.0', functionsSequential: true, serviceIdentityGeneration: false, preserveExistingIamAndData: true, reopenSamePairOnce: true,
@@ -32,7 +33,9 @@ export function ciReleaseApproval(sourceCommit, runNumber) {
 function context(env, approval, policy, now) {
   requireCiAuthPolicy(policy).validateEnvironment(env, []);
   need(/^[a-f0-9]{40}$/.test(env.GITHUB_SHA || '') && env.GITHUB_WORKFLOW_SHA === env.GITHUB_SHA &&
-    /^[1-9][0-9]*$/.test(env.GITHUB_RUN_ID || '') && env.GITHUB_RUN_ATTEMPT === '1' && env.GITHUB_RUN_NUMBER === '2' && env.GARDEN_RELEASE_REF_CREATED === 'true', 'ci-context');
+    /^[1-9][0-9]*$/.test(env.GITHUB_RUN_ID || '') && env.GITHUB_RUN_ATTEMPT === '1' && env.GITHUB_RUN_NUMBER === CI_RELEASE_RECOVERY.runNumber && env.GARDEN_RELEASE_REF_CREATED === 'false' &&
+    env.GARDEN_RELEASE_EVENT_BEFORE === CI_RELEASE_RECOVERY.before && env.GARDEN_RELEASE_EVENT_AFTER === env.GITHUB_SHA &&
+    env.GITHUB_SHA !== CI_RELEASE_RECOVERY.before, 'ci-context');
   need(isDeepStrictEqual(approval, ciReleaseApproval(env.GITHUB_SHA, env.GITHUB_RUN_NUMBER)), 'release-approval');
   need(Number.isSafeInteger(now()) && now() >= S.startsAtMillis && now() < S.endsAtMillis, 'fixed-window');
 }
@@ -112,6 +115,44 @@ export function matchOldReview(baseManifest, testerUids, marker, now) {
   }
   need(candidates.length === 1, 'old-hosting-marker'); return candidates[0];
 }
+// Fixed diagnostic codes only. Never expose CLI stdout/stderr, channel names,
+// URLs, markers, roster IDs, authentication material or thrown error messages.
+export function ciReleasePreparationFailure(error) {
+  const adapter = describeAdapterFailure(error);
+  return { status: 'blocked', stage: 'preparation', reason: failures.get(error) ||
+    (['ci_clients_guard', 'ci_auth_policy_guard'].includes(error?.message) ? error.message : adapter.reason),
+    access: 'unknown', automaticRetry: false, automaticRollback: false };
+}
+export function readCiOldHostingChannel(raw) {
+  need(raw && typeof raw === 'object' && !Array.isArray(raw), 'old-hosting-cli-result');
+  need(!raw.timedOut, 'old-hosting-cli-timeout');
+  need(!raw.signal, 'old-hosting-cli-signal');
+  need(raw.exitCode === 0, 'old-hosting-cli-exit');
+  need(typeof raw.stdout === 'string', 'old-hosting-json');
+  let response;
+  try { response = JSON.parse(raw.stdout); } catch { need(false, 'old-hosting-json'); }
+  const plain = x => x !== null && typeof x === 'object' && !Array.isArray(x);
+  need(plain(response), 'old-hosting-schema');
+  need(response.status === 'success', 'old-hosting-response-status');
+  need(plain(response.result) && Array.isArray(response.result.channels), 'old-hosting-schema');
+  const prefixes = [`sites/${S.project}`, `projects/${S.project}/sites/${S.project}`, `projects/${S.projectNumber}/sites/${S.project}`];
+  need(response.result.channels.every(c => plain(c) && typeof c.name === 'string' &&
+    prefixes.some(p => c.name.startsWith(`${p}/channels/`))), 'old-hosting-channel-schema');
+  const matches = response.result.channels.filter(c => prefixes.some(p => c.name === `${p}/channels/live`));
+  need(matches.length === 1, 'old-hosting-channel-count');
+  const candidate = matches[0];
+  need(candidate.url === S.origin, 'old-hosting-url');
+  need(!candidate.expireTime, 'old-hosting-expiring-channel');
+  // Reuse the existing exact project/site identity contract after classifying
+  // safe failures above. No arbitrary suffix matching or fallback live guess.
+  const channel = liveChannel(response.result);
+  need(plain(channel.release) && plain(channel.release.version), 'old-hosting-release-schema');
+  need(channel.release.type === 'DEPLOY', 'old-hosting-release-type');
+  need(channel.release.version.status === 'FINALIZED', 'old-hosting-version-status');
+  try { canonicalVersionName(channel.release.version.name); } catch { need(false, 'old-hosting-version-name'); }
+  need(typeof channel.release.message === 'string' && channel.release.message.match(/^garden-trial-game-v1:[a-f0-9]{64}$/)?.[0] === channel.release.message, 'old-hosting-marker');
+  return channel;
+}
 export async function prepareCiReleaseFiles({ db, workDir, toolingDir, runner, now }) {
   need(isAbsolute(workDir) && resolve(workDir) === workDir && !workDir.startsWith(ROOT), 'private-path');
   await mkdir(workDir, { mode: 0o700 }); await privatePath(workDir);
@@ -127,13 +168,11 @@ export async function prepareCiReleaseFiles({ db, workDir, toolingDir, runner, n
     retainBuildArtifacts: false, allowInitialFunctionRecreate: false, approvePublicInvoker: false };
   const seed = await oldGenerator.prepareTrialOperation({ review: review0, output: join(workDir, 'old-seed'), repositoryRoot: oldRoot, now: now() });
   const cli = checkTooling(toolingDir, (cmd, args, cwd) => { const r = runner(cmd, args, cwd); need(r.exitCode === 0, 'tooling'); return r.stdout; });
-  const raw = runner(process.execPath, [cli, 'hosting:channel:list', '--site', S.project, '--project', S.project, '--config', join(seed.gameDir, 'firebase.hosting-only.json'), '--non-interactive', '--json'], workDir);
-  need(raw.exitCode === 0 && !raw.signal && !raw.timedOut, 'old-hosting-read');
-  const response = JSON.parse(raw.stdout);
-  const channel = response.result?.channels?.filter(c => c.name === `sites/${S.project}/channels/live`);
-  need(response.status === 'success' && channel?.length === 1 && channel[0].url === S.origin && channel[0].release?.type === 'DEPLOY' && channel[0].release.version?.status === 'FINALIZED', 'old-hosting-read');
-  canonicalVersionName(channel[0].release.version.name);
-  const review = matchOldReview(JSON.parse(await readFile(seed.manifestPath, 'utf8')), pair, channel[0].release.message, now());
+  let raw;
+  try { raw = runner(process.execPath, [cli, 'hosting:channel:list', '--site', S.project, '--project', S.project, '--config', join(seed.gameDir, 'firebase.hosting-only.json'), '--non-interactive', '--json'], workDir); }
+  catch { need(false, 'old-hosting-cli-spawn'); }
+  const channel = readCiOldHostingChannel(raw);
+  const review = matchOldReview(JSON.parse(await readFile(seed.manifestPath, 'utf8')), pair, channel.release.message, now());
   const previous = await oldGenerator.prepareTrialOperation({ review, output: join(workDir, 'previous'), repositoryRoot: oldRoot, now: now() });
   const reviewPath = join(workDir, 'private-review.json'); await writeFile(reviewPath, json(review), { flag: 'wx', mode: 0o600 });
   await prepareCiPacket({ reviewPath, output: join(workDir, 'next'), now });
@@ -159,9 +198,7 @@ export async function main(args = process.argv.slice(2), { log = console.log, en
     const result = await executeCiRelease({ plan, approval, cloud, journal, env, environmentPolicy: clients.environmentPolicy, now });
     log('CI_RELEASE_RESULT: ' + JSON.stringify(result)); return result.status === 'npc-released' ? 0 : 2;
   } catch (error) {
-    const adapter = describeAdapterFailure(error);
-    log('CI_RELEASE_RESULT: ' + JSON.stringify({ status: 'blocked', stage: 'preparation', reason: failures.get(error) || (['ci_clients_guard', 'ci_auth_policy_guard'].includes(error?.message) ? error.message : adapter.reason),
-      access: 'unknown', automaticRetry: false, automaticRollback: false })); return 2;
+    log('CI_RELEASE_RESULT: ' + JSON.stringify(ciReleasePreparationFailure(error))); return 2;
   } finally { if (db) try { await db.terminate(); } catch { /* Do not reveal SDK diagnostics. */ } }
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) process.exitCode = await main();

@@ -588,7 +588,7 @@ export function createCloudAdapter({ packet, review, toolingDir, prior, runner =
   }
   function cliRead(args) {
     const r = cli(args, 'game', undefined, true);
-    if (r?.exitCode !== 0) {
+    if (r?.exitCode !== 0 || r.signal || r.timedOut) {
       const diagnostic = cliFailureDiagnostic(r);
       throw safe('hosting-cli-read', { ...diagnostic, reason: diagnostic.reason === 'unclassified' ? 'hosting-cli-read' : diagnostic.reason });
     }
