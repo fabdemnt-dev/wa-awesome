@@ -190,7 +190,10 @@ async function harness({ actualTransport = false, actualBridge = false, database
         assert(!args.some(a => /allow-unauthenticated|stage-bucket|runtime=|entry-point|labels|secrets|env-vars/.test(a)));
         providerWrites.push('functions');
         const fault = cliFault?.('functions', 'before', index); if (fault) return fault;
+        // Source-only SDK update preserves the complete existing environment map.
+        const priorEnv = clone(functions[index].serviceConfig.environmentVariables);
         functions[index] = makeMetadata(index, '124');
+        functions[index].serviceConfig.environmentVariables = priorEnv;
         return cliFault?.('functions', 'after', index) || { exitCode: 0, stdout: JSON.stringify(functions[index]) };
       }
       if (args[0] === 'version') result = { 'Google Cloud SDK': '568.0.0' };
@@ -293,7 +296,7 @@ async function harness({ actualTransport = false, actualBridge = false, database
   if (ci) {
     const authPath = join(path, 'gha-creds-0123456789abcdef.json'), C = CI_CLIENT_SCOPE;
     await writeFile(authPath, JSON.stringify({ type: 'external_account', audience: C.audience, subject_token_type: 'urn:ietf:params:oauth:token-type:jwt', token_url: 'https://sts.googleapis.com/v1/token', service_account_impersonation_url: `https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${C.serviceAccount}:generateAccessToken`, credential_source: { url: 'https://pipelines.actions.githubusercontent.com/synthetic/oidc', headers: { Authorization: 'Bearer SYNTHETIC' }, format: { type: 'json', subject_token_field_name: 'value' } } }), { mode: 0o600 });
-    env = { CI: 'true', GITHUB_ACTIONS: 'true', GITHUB_EVENT_NAME: 'push', GITHUB_REPOSITORY_ID: C.repositoryId, GITHUB_REPOSITORY: C.repository, GITHUB_REPOSITORY_OWNER_ID: C.repositoryOwnerId, GITHUB_REF: C.ref, GITHUB_WORKFLOW_REF: `${C.repository}/${C.workflow}@${C.ref}`, GITHUB_WORKSPACE: path, GOOGLE_CLOUD_PROJECT: C.project, GOOGLE_APPLICATION_CREDENTIALS: authPath, GOOGLE_GHA_CREDS_PATH: authPath, CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: authPath, GITHUB_SHA: 'a'.repeat(40), GITHUB_WORKFLOW_SHA: 'a'.repeat(40), GITHUB_RUN_ID: '12345', GITHUB_RUN_NUMBER: '4', GITHUB_RUN_ATTEMPT: '1', GARDEN_RELEASE_REF_CREATED: 'false', GARDEN_RELEASE_EVENT_BEFORE: CI_RELEASE_RECOVERY.before, GARDEN_RELEASE_EVENT_AFTER: 'a'.repeat(40) };
+    env = { CI: 'true', GITHUB_ACTIONS: 'true', GITHUB_EVENT_NAME: 'push', GITHUB_REPOSITORY_ID: C.repositoryId, GITHUB_REPOSITORY: C.repository, GITHUB_REPOSITORY_OWNER_ID: C.repositoryOwnerId, GITHUB_REF: C.ref, GITHUB_WORKFLOW_REF: `${C.repository}/${C.workflow}@${C.ref}`, GITHUB_WORKSPACE: path, GOOGLE_CLOUD_PROJECT: C.project, GOOGLE_APPLICATION_CREDENTIALS: authPath, GOOGLE_GHA_CREDS_PATH: authPath, CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: authPath, GITHUB_SHA: 'a'.repeat(40), GITHUB_WORKFLOW_SHA: 'a'.repeat(40), GITHUB_RUN_ID: '12345', GITHUB_RUN_NUMBER: '5', GITHUB_RUN_ATTEMPT: '1', GARDEN_RELEASE_REF_CREATED: 'false', GARDEN_RELEASE_EVENT_BEFORE: CI_RELEASE_RECOVERY.before, GARDEN_RELEASE_EVENT_AFTER: 'a'.repeat(40) };
     environmentPolicy = createCiAuthPolicy({ env, now: () => time, execArgv: [] });
   }
   const cloud = createActiveUpdateProvider({ plan, toolingDir, runner, requestClient, db, fetchImpl: providerFetch, now: () => time, env, execArgv: [], transport, environmentPolicy });
@@ -723,15 +726,17 @@ test('CI gcloud/Rules/Hosting route never requests obsolete function-CLI metadat
   assert.equal(deploys.length, 2); assert(deploys.every(c => !c.args[c.args.indexOf('--only') + 1].startsWith('functions')));
 });
 
-test('CI recovery requires exact run 4 attempt 1 and one fast-forward from the consumed release head', async () => {
+test('CI recovery requires exact run 5 attempt 1 and one fast-forward from the consumed release head', async () => {
   for (const mutate of [
     h => h.env.GARDEN_RELEASE_REF_CREATED = 'true',
     h => delete h.env.GARDEN_RELEASE_REF_CREATED,
     h => h.env.GITHUB_RUN_NUMBER = '0',
     h => h.env.GITHUB_RUN_NUMBER = '3',
-    h => h.env.GITHUB_RUN_NUMBER = '5',
+    h => h.env.GITHUB_RUN_NUMBER = '4',
+    h => h.env.GITHUB_RUN_NUMBER = '6',
     h => h.env.GITHUB_RUN_ATTEMPT = '2',
     h => h.env.GARDEN_RELEASE_EVENT_BEFORE = '74027567a8761e78423c8df0e744abc8d5633a8b',
+    h => h.env.GARDEN_RELEASE_EVENT_BEFORE = '95ec4e69e4b566df91a37a4107e1a1fd94478ebf',
     h => h.env.GARDEN_RELEASE_EVENT_BEFORE = 'b'.repeat(40),
     h => h.env.GARDEN_RELEASE_EVENT_BEFORE = '0'.repeat(40),
     h => delete h.env.GARDEN_RELEASE_EVENT_BEFORE,
@@ -745,7 +750,7 @@ test('CI recovery requires exact run 4 attempt 1 and one fast-forward from the c
     assert.equal(h.calls.length, 0); assert.equal(h.providerWrites.length, 0); assert.equal(h.db.writes.length, 0);
   }
   const h = await harness({ ci: true });
-  await assert.rejects(h.runCi({ approval: ciReleaseApproval(h.env.GITHUB_SHA, '3') }));
+  await assert.rejects(h.runCi({ approval: ciReleaseApproval(h.env.GITHUB_SHA, '4') }));
   assert.equal(h.calls.length, 0); assert.equal(h.providerWrites.length, 0); assert.equal(h.db.writes.length, 0);
 });
 
@@ -774,6 +779,47 @@ test('CI pre-reopen configuration drift is rejected after each exact function an
       if (kind === 'functions' && when === 'after' && i === 0) mutate(h.functions[0]);
       return null;
     } });
+    const result = await h.runCi(); assert.equal(result.status, 'blocked'); assert.equal(result.access, 'closed');
+    assert.deepEqual(h.providerWrites, ['functions']); assert.equal(h.db.writes.length, 0);
+  }
+});
+
+test('CI permits only the optional exact HTTP signature and preserves its original presence', async () => {
+  const h = await harness({ ci: true });
+  for (const fn of h.functions.slice(1)) fn.serviceConfig.environmentVariables.FUNCTION_SIGNATURE_TYPE = 'http';
+  const before = h.functions.map(fn => structuredClone(fn.serviceConfig.environmentVariables));
+  const result = await h.runCi();
+  assert.equal(result.status, 'npc-released', JSON.stringify(result));
+  assert.deepEqual(h.functions.map(fn => fn.serviceConfig.environmentVariables), before);
+});
+
+test('CI rejects non-HTTP signature values and all unknown environment keys before any mutation', async () => {
+  for (const value of ['event', 'cloudevent', 'HTTP', ' http', 'http ', '', null, false, 1, {}, []]) {
+    const h = await harness({ ci: true });
+    h.functions[1].serviceConfig.environmentVariables.FUNCTION_SIGNATURE_TYPE = value;
+    const before = h.db.entries(), result = await h.runCi();
+    assert.equal(result.status, 'blocked'); assert.equal(result.stage, 'closed-baseline');
+    assert.equal(result.reason, 'iam-preservation');
+    assert.deepEqual(h.providerWrites, []); assert.equal(h.db.writes.length, 0); assert.deepEqual(h.db.entries(), before);
+  }
+  const h = await harness({ ci: true });
+  h.functions[1].serviceConfig.environmentVariables.FUNCTION_SIGNATURE_TYPE = 'http';
+  h.functions[1].serviceConfig.environmentVariables.UNREVIEWED_KEY = 'http';
+  const result = await h.runCi(); assert.equal(result.status, 'blocked'); assert.equal(result.reason, 'iam-preservation');
+  assert.deepEqual(h.providerWrites, []); assert.equal(h.db.writes.length, 0);
+});
+
+test('CI detects signature addition removal or mutation after a function update and never continues', async () => {
+  for (const change of ['add', 'remove', 'change']) {
+    let h; h = await harness({ ci: true, cliFault: (kind, when, i) => {
+      if (kind === 'functions' && when === 'after' && i === 0) {
+        const env = h.functions[0].serviceConfig.environmentVariables;
+        if (change === 'remove') delete env.FUNCTION_SIGNATURE_TYPE;
+        else env.FUNCTION_SIGNATURE_TYPE = change === 'add' ? 'http' : 'cloudevent';
+      }
+      return null;
+    } });
+    if (change !== 'add') h.functions[0].serviceConfig.environmentVariables.FUNCTION_SIGNATURE_TYPE = 'http';
     const result = await h.runCi(); assert.equal(result.status, 'blocked'); assert.equal(result.access, 'closed');
     assert.deepEqual(h.providerWrites, ['functions']); assert.equal(h.db.writes.length, 0);
   }
