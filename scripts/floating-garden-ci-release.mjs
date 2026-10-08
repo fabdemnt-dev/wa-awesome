@@ -21,7 +21,7 @@ const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 const json = value => JSON.stringify(value, null, 2) + '\n';
 const failures = new WeakMap();
 function need(condition, code) { if (!condition) { const e = new Error('CI release blocked'); failures.set(e, code); throw e; } }
-export const CI_RELEASE_RECOVERY = Object.freeze({ before: '95ec4e69e4b566df91a37a4107e1a1fd94478ebf', runNumber: '4' });
+export const CI_RELEASE_RECOVERY = Object.freeze({ before: '69ef07b9356470fbd3a643638baeec12bdd5680c', runNumber: '5' });
 const STAGES = ['closed-baseline', 'functions', 'rules', 'hosting', 'preservation', 'reopen', 'reopened'];
 export function ciReleaseApproval(sourceCommit, runNumber) {
   return { schemaVersion: 2, previousSourceCommit: CI_RELEASE_RECOVERY.before, releaseRefCreated: false, repository: 'fabdemnt-dev/wa-awesome', sourceCommit, runNumber,
