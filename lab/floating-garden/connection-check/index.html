@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="referrer" content="no-referrer">
+    <meta name="robots" content="noindex, nofollow">
+    <title>浮遊庭園 · 接続確認</title>
+    <link rel="stylesheet" href="./style.css">
+    <script type="module" src="./app.js"></script>
+  </head>
+  <body>
+    <main aria-labelledby="page-title">
+      <p class="eyebrow">浮遊庭園</p>
+      <h1 id="page-title">接続確認</h1>
+      <p class="intro">開始すると、このブラウザーで App Check と匿名認証を確認します。</p>
+      <p class="note">ゲームは開始しません。ゲームの7日間の試験期間も開始しません。</p>
+      <section class="result" aria-label="接続状態">
+        <p id="connection-status" role="status" aria-live="polite">準備中</p>
+        <dl>
+          <div><dt>このブラウザーの匿名 UID</dt><dd id="connection-uid">未確認</dd></div>
+          <div><dt>停止した段階 / 確認コード</dt><dd id="connection-diagnostic">なし</dd></div>
+          <div><dt>接続確認の有効期限</dt><dd id="connection-expiry">開始時に確認します</dd></div>
+        </dl>
+      </section>
+      <button id="connection-start" type="button" disabled>接続確認を開始</button>
+      <p class="note">同じブラウザーの匿名認証を引き継ぎます。失敗・停止後は、このページで認証を繰り返しません。</p>
+      <p class="note">同じスマホ・ブラウザーを使い、登録担当には匿名 UID だけを伝えてください。認証情報は送らず、ブラウザーのデータも消去しないでください。</p>
+      <p class="note">失敗した場合は「停止した段階 / 確認コード」を伝えてください。このコードだけでは原因を確定できません。</p>
+      <noscript><p>接続確認には JavaScript が必要です。</p></noscript>
+    </main>
+  </body>
+</html>

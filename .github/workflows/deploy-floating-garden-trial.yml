@@ -1,0 +1,124 @@
+name: First Garden NPC release
+
+# Publication on another preparation/PR branch does not deploy. Fast-forwarding this
+# exact release ref update is separately approved after narrow owner trust renewal.
+on:
+  push:
+    branches: [release/garden-trial]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: garden-trial-first-npc-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: >-
+      github.repository_id == '1321198654' &&
+      github.repository_owner_id == '312340196' &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/release/garden-trial' &&
+      github.event.created == false &&
+      github.event.before == '69ef07b9356470fbd3a643638baeec12bdd5680c' &&
+      github.event.after == github.sha &&
+      github.workflow_sha == github.sha &&
+      github.sha != github.event.before &&
+      github.run_attempt == 1 &&
+      github.run_number == 5
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    environment: garden-trial
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      CLOUDSDK_CORE_DISABLE_USAGE_REPORTING: 'true'
+      CLOUDSDK_CORE_DISABLE_FILE_LOGGING: 'true'
+      CLOUDSDK_CORE_LOG_HTTP: 'false'
+      CLOUDSDK_COMPONENT_MANAGER_DISABLE_UPDATE_CHECK: 'true'
+      CLOUDSDK_PAGER: ''
+      TERM: dumb
+      GARDEN_RELEASE_REF_CREATED: ${{ github.event.created }}
+      GARDEN_RELEASE_EVENT_BEFORE: ${{ github.event.before }}
+      GARDEN_RELEASE_EVENT_AFTER: ${{ github.event.after }}
+    steps:
+      - name: Set isolated gcloud directory before SDK use
+        env:
+          ISOLATED_GCLOUD: ${{ runner.temp }}/garden-release-gcloud
+        run: printf 'CLOUDSDK_CONFIG=%s\n' "$ISOLATED_GCLOUD" >> "$GITHUB_ENV"
+      - name: Reject debug mode before authentication or dependency work
+        env:
+          RUNNER_DEBUG_ENABLED: ${{ runner.debug == '1' }}
+        run: |
+          set -euo pipefail
+          if [ "$RUNNER_DEBUG_ENABLED" != 'false' ]; then
+            echo 'ci_debug_guard passed=false'
+            exit 1
+          fi
+      - name: Checkout exact reviewed source without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Set up pinned major Node runtime without cache
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Install checksum-locked dependencies before authentication
+        run: |
+          set -eu
+          umask 077
+          mkdir "$CLOUDSDK_CONFIG" "$RUNNER_TEMP/garden-firebase-tooling"
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm ci --prefix functions/floating-garden-trial --ignore-scripts --no-audit --no-fund
+          cp tests/fixtures/floating-garden-maintenance-package.json "$RUNNER_TEMP/garden-firebase-tooling/package.json"
+          cp package-lock.json "$RUNNER_TEMP/garden-firebase-tooling/package-lock.json"
+          cp -R node_modules "$RUNNER_TEMP/garden-firebase-tooling/node_modules"
+      - name: Run local release and regression tests before authentication
+        run: |
+          python3 -I tests/floating-garden-ci-setup.test.py
+          python3 -I tests/floating-garden-ci-trust-renewal.test.py
+          node --test tests/floating-garden-ci-packet.test.mjs tests/floating-garden-ci-auth-policy.test.mjs tests/floating-garden-ci-clients.test.mjs tests/floating-garden-ci-release.test.mjs tests/floating-garden-ci-gcloud.test.mjs tests/floating-garden-active-update.test.mjs tests/floating-garden-trial-operation.test.mjs
+      - name: Install official gcloud without logging in
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+        with:
+          version: '568.0.0'
+          cache: false
+      - name: Verify actual gcloud update requests and exact NPC ZIP without cloud access
+        run: |
+          export GARDEN_TEST_GCLOUD_SDK_ROOT="$(python3 -I -c 'import pathlib,shutil; print(pathlib.Path(shutil.which("gcloud")).resolve().parent.parent)')"
+          node tests/floating-garden-ci-gcloud-sdk.integration.mjs
+          python3 -I tests/floating-garden-ci-trust-renewal.test.py --sdk-root "$GARDEN_TEST_GCLOUD_SDK_ROOT"
+      - name: Create private run-bound release acknowledgement
+        run: |
+          node --input-type=module - <<'JS'
+          import { writeFile } from 'node:fs/promises';
+          import { ciReleaseApproval } from './scripts/floating-garden-ci-release.mjs';
+          // WIF also requires this exact reviewed workflow SHA. This file is
+          // not independent permission; the separately approved release-ref
+          // publication is the action that starts this single release job.
+          await writeFile(process.env.RUNNER_TEMP + '/garden-release-approval.json',
+            JSON.stringify(ciReleaseApproval(process.env.GITHUB_SHA, process.env.GITHUB_RUN_NUMBER)), { flag: 'wx', mode: 0o600 });
+          JS
+      - name: Authenticate only as the separately configured Garden identity
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          project_id: wa-awesome-garden-stg
+          workload_identity_provider: projects/120030709276/locations/global/workloadIdentityPools/garden-github/providers/wa-awesome-release
+          service_account: garden-github-deployer@wa-awesome-garden-stg.iam.gserviceaccount.com
+          create_credentials_file: true
+          export_environment_variables: true
+          cleanup_credentials: true
+      - name: Release exact NPC packet from closed state once
+        run: |
+          node scripts/floating-garden-ci-release.mjs --run-ci \
+            --approval "$RUNNER_TEMP/garden-release-approval.json" \
+            --work-dir "$RUNNER_TEMP/garden-release-$GITHUB_RUN_ID" \
+            --tooling "$RUNNER_TEMP/garden-firebase-tooling"
+      # No raw logs, private review/roster, source archives, ADC, or journals are
+      # uploaded. CI_RELEASE_RESULT contains only fixed sanitized result fields.
+      # GitHub run logs retain that redacted evidence; runner-local files expire.

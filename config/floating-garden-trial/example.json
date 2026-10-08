@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "enabled": false,
+  "projectId": "wa-awesome-garden-stg",
+  "previewOrigin": "https://wa-awesome-garden-stg.web.app",
+  "startsAtMillis": 0,
+  "endsAtMillis": 0,
+  "region": "asia-northeast1",
+  "maxTesters": 2,
+  "maxRooms": 20,
+  "firebase": {
+    "apiKey": "REPLACE_WITH_PUBLIC_WEB_APP_CONFIG",
+    "authDomain": "wa-awesome-garden-stg.firebaseapp.com",
+    "projectId": "wa-awesome-garden-stg",
+    "appId": "REPLACE_WITH_PUBLIC_WEB_APP_ID"
+  },
+  "appCheck": {
+    "provider": "recaptcha-enterprise",
+    "siteKey": "REPLACE_WITH_APPROVED_PUBLIC_SITE_KEY",
+    "verified": false
+  }
+}
