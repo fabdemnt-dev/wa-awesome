@@ -209,11 +209,15 @@ export function validateRunService(service, expectedName, expectedRevision) {
   const traffic = service.trafficStatuses;
   const target = Array.isArray(traffic) && traffic.length === 1 ? traffic[0] : null;
   const latestType = 'TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST', revisionType = 'TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION';
-  // Run v2 may omit the revision for a LATEST target. The exact Ready/latest
-  // function revision was verified above; an explicit conflicting revision,
-  // unknown type or split must still fail rather than be normalized away.
+  // Run v2 status may return a short revision ID. Bind only a strict short
+  // ID to this already-verified exact Service; never compare by suffix or
+  // normalize a supplied full path, project, region, case, or encoded text.
+  const targetRevision = typeof target?.revision === 'string' && /^[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(target.revision)
+    ? `${expectedName}/revisions/${target.revision}` : target?.revision;
+  // LATEST may also omit the revision. An explicit conflicting revision,
+  // unknown type, partial allocation or split still fails closed.
   requireThat(plain(target) && target.percent === 100 && (
-    target.revision === service.latestReadyRevision && [undefined, latestType, revisionType].includes(target.type) ||
+    targetRevision === service.latestReadyRevision && [undefined, latestType, revisionType].includes(target.type) ||
     target.type === latestType && (target.revision === undefined || target.revision === '')
   ), 'run-latest-traffic');
   return true;
