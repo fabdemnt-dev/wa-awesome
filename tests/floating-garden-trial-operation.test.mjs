@@ -831,6 +831,31 @@ test('fully injected provider proof verifies Functions/source/Run/IAM/Rules and 
   assert(h.cli.every(({ args }) => !args.includes('deploy')));
 });
 
+test('Hosting metadata reads reject timeout or signal despite exit zero and complete success JSON', async (t) => {
+  for (const command of ['hosting:sites:list', 'hosting:channel:list']) for (const fault of [
+    { timedOut: true, signal: null, reason: 'timeout' },
+    { timedOut: false, signal: 'SYNTHETIC_PRIVATE_SIGNAL', reason: 'process-interrupted' },
+  ]) {
+    let h, reads = 0;
+    h = await providerHarness(t, { command: (_, args) => {
+      if (args[1] !== command) return undefined;
+      reads++;
+      const result = command === 'hosting:sites:list' ? { sites: [{ name: `projects/${PROJECT}/sites/${PROJECT}`, defaultUrl: ORIGIN }] } :
+        { channels: [{ name: `sites/${PROJECT}/channels/live`, url: ORIGIN, release: { type: 'DEPLOY',
+          message: `garden-trial-game-v1:${h.packet.manifestDigest}`,
+          version: { name: `sites/${PROJECT}/versions/synthetic`, status: 'FINALIZED' } } }] };
+      return { exitCode: 0, signal: fault.signal, timedOut: fault.timedOut,
+        stdout: JSON.stringify({ status: 'success', result }), stderr: 'SYNTHETIC_PRIVATE_STDERR' };
+    } });
+    await assert.rejects(h.cloud.readHosting(), error => {
+      assert.deepEqual(describeAdapterFailure(error), { reason: fault.reason, exitCode: 0, timedOut: fault.timedOut });
+      assert(!error.message.includes('SYNTHETIC_PRIVATE')); return true;
+    });
+    assert.equal(reads, 1); assert.equal(h.publicReads.length, 0);
+    assert(h.cli.every(({ args }) => !args.includes('deploy')));
+  }
+});
+
 test('provider proof fails closed on wrong source generation and Rules bytes', async (t) => {
   const wrongSource = await providerHarness(t, { response: (url, data) => url.startsWith('https://storage.googleapis.com/') && url.includes('/o/') && !url.includes('alt=media') ? { ...data, generation: '999' } : data });
   await assert.rejects(wrongSource.cloud.verifyFunctions(), /source-object-identity/);

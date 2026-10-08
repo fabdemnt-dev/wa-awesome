@@ -20,7 +20,7 @@ import { ACTIVE_UPDATE_SCOPE as S, prepareActiveUpdatePlan, activeUpdatePackets,
 import { createActiveUpdateTransport } from '../scripts/floating-garden-active-update-transport.mjs';
 import { createActiveUpdateProvider, stableFunctionConfiguration, stableArtifactRepositories } from '../scripts/floating-garden-active-update-provider.mjs';
 import { CI_CLIENT_SCOPE, createCiAuthPolicy } from '../scripts/floating-garden-ci-auth-policy.mjs';
-import { executeCiRelease, ciReleaseApproval } from '../scripts/floating-garden-ci-release.mjs';
+import { executeCiRelease, ciReleaseApproval, CI_RELEASE_RECOVERY } from '../scripts/floating-garden-ci-release.mjs';
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const require = createRequire(import.meta.url), archiver = require('archiver');
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -126,7 +126,7 @@ function run(fn) {
       scaling: { maxInstanceCount: 1 }, maxInstanceRequestConcurrency: 1, timeout: '30s', containers: [{ image: 'old-or-new-image', resources: { limits: { memory: '256Mi', cpu: '1' } } }] },
     traffic: [{ type: 'TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST', percent: 100 }], trafficStatuses: [{ revision, percent: 100 }] };
 }
-async function harness({ actualTransport = false, actualBridge = false, database, iamPolicy, ci = false, cliFault } = {}) {
+async function harness({ actualTransport = false, actualBridge = false, database, iamPolicy, ci = false, cliFault, hostingMetadata } = {}) {
   const legacy = await legacyData(), { first, second } = legacy; const db = database || legacy.db;
   if (database) {
     const batch = database.batch();
@@ -225,6 +225,7 @@ async function harness({ actualTransport = false, actualBridge = false, database
     else { assert.equal(args[1], 'hosting:channel:list'); result = { channels: [{ name: `sites/${S.project}/channels/live`, url: S.origin,
       release: { type: 'DEPLOY', message: `garden-trial-game-v1:${choose(hostingPhase).manifestDigest}`,
         version: { name: `sites/${S.project}/versions/${hostingPhase}`, status: 'FINALIZED' } } }] }; }
+    if (hostingMetadata) result = hostingMetadata(args[1], result);
     return { exitCode: 0, stdout: JSON.stringify({ status: 'success', result }) };
   };
   const fetchImpl = async url => {
@@ -292,7 +293,7 @@ async function harness({ actualTransport = false, actualBridge = false, database
   if (ci) {
     const authPath = join(path, 'gha-creds-0123456789abcdef.json'), C = CI_CLIENT_SCOPE;
     await writeFile(authPath, JSON.stringify({ type: 'external_account', audience: C.audience, subject_token_type: 'urn:ietf:params:oauth:token-type:jwt', token_url: 'https://sts.googleapis.com/v1/token', service_account_impersonation_url: `https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${C.serviceAccount}:generateAccessToken`, credential_source: { url: 'https://pipelines.actions.githubusercontent.com/synthetic/oidc', headers: { Authorization: 'Bearer SYNTHETIC' }, format: { type: 'json', subject_token_field_name: 'value' } } }), { mode: 0o600 });
-    env = { CI: 'true', GITHUB_ACTIONS: 'true', GITHUB_EVENT_NAME: 'push', GITHUB_REPOSITORY_ID: C.repositoryId, GITHUB_REPOSITORY: C.repository, GITHUB_REPOSITORY_OWNER_ID: C.repositoryOwnerId, GITHUB_REF: C.ref, GITHUB_WORKFLOW_REF: `${C.repository}/${C.workflow}@${C.ref}`, GITHUB_WORKSPACE: path, GOOGLE_CLOUD_PROJECT: C.project, GOOGLE_APPLICATION_CREDENTIALS: authPath, GOOGLE_GHA_CREDS_PATH: authPath, CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: authPath, GITHUB_SHA: 'a'.repeat(40), GITHUB_WORKFLOW_SHA: 'a'.repeat(40), GITHUB_RUN_ID: '12345', GITHUB_RUN_NUMBER: '2', GITHUB_RUN_ATTEMPT: '1', GARDEN_RELEASE_REF_CREATED: 'true' };
+    env = { CI: 'true', GITHUB_ACTIONS: 'true', GITHUB_EVENT_NAME: 'push', GITHUB_REPOSITORY_ID: C.repositoryId, GITHUB_REPOSITORY: C.repository, GITHUB_REPOSITORY_OWNER_ID: C.repositoryOwnerId, GITHUB_REF: C.ref, GITHUB_WORKFLOW_REF: `${C.repository}/${C.workflow}@${C.ref}`, GITHUB_WORKSPACE: path, GOOGLE_CLOUD_PROJECT: C.project, GOOGLE_APPLICATION_CREDENTIALS: authPath, GOOGLE_GHA_CREDS_PATH: authPath, CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: authPath, GITHUB_SHA: 'a'.repeat(40), GITHUB_WORKFLOW_SHA: 'a'.repeat(40), GITHUB_RUN_ID: '12345', GITHUB_RUN_NUMBER: '3', GITHUB_RUN_ATTEMPT: '1', GARDEN_RELEASE_REF_CREATED: 'false', GARDEN_RELEASE_EVENT_BEFORE: CI_RELEASE_RECOVERY.before, GARDEN_RELEASE_EVENT_AFTER: 'a'.repeat(40) };
     environmentPolicy = createCiAuthPolicy({ env, now: () => time, execArgv: [] });
   }
   const cloud = createActiveUpdateProvider({ plan, toolingDir, runner, requestClient, db, fetchImpl: providerFetch, now: () => time, env, execArgv: [], transport, environmentPolicy });
@@ -598,6 +599,77 @@ test('CI actual-provider path starts closed, runs three pinned CLI stages, prese
   assert(h.journalEntries.some(e => e.stage === 'official-cli-functions'));
   await assert.rejects(h.cloud.deployCiStage('functions'));
 });
+test('CI full provider route accepts every exact Hosting channel/version alias without weakening preservation', async t => {
+  const prefixes = ['', `projects/${S.project}/`, `projects/${S.projectNumber}/`];
+  for (const [channelIndex, channelPrefix] of prefixes.entries()) for (const [versionIndex, versionPrefix] of prefixes.entries()) {
+    await t.test(`channel form ${channelIndex}, version form ${versionIndex}`, async () => {
+      const h = await harness({ ci: true, hostingMetadata(command, result) {
+        if (command === 'hosting:sites:list') result.sites[0].name = `projects/${channelIndex % 2 ? S.projectNumber : S.project}/sites/${S.project}`;
+        else {
+          result.channels[0].name = channelPrefix + result.channels[0].name;
+          result.channels[0].release.version.name = versionPrefix + result.channels[0].release.version.name;
+        }
+        return result;
+      } });
+      const before = h.db.entries(), result = await h.runCi();
+      assert.equal(result.status, 'npc-released', JSON.stringify(result));
+      assert.deepEqual(h.providerWrites, [...Array(5).fill('functions'), 'rules', 'hosting']);
+      const retained = entries => entries.filter(([p]) => p !== 'floatingGardenTrial/config' && !p.startsWith('floatingGardenTrialTesters/'));
+      assert.deepEqual(retained(h.db.entries()), retained(before));
+      assert.equal(h.db.attempts.filter(a => !a.readOnly).length, 1); assert.equal(h.db.writes.length, 3);
+      assert(h.db.attempts.filter(a => !a.readOnly).every(a => a.maxAttempts === 1));
+    });
+  }
+});
+test('CI Hosting aliases may change between reads while canonical identity stays exact', async () => {
+  let channels = 0, sites = 0;
+  const prefixes = ['', `projects/${S.project}/`, `projects/${S.projectNumber}/`];
+  const h = await harness({ ci: true, hostingMetadata(command, result) {
+    if (command === 'hosting:sites:list') result.sites[0].name = `projects/${sites++ % 2 ? S.projectNumber : S.project}/sites/${S.project}`;
+    else {
+      result.channels[0].name = prefixes[channels % 3] + result.channels[0].name;
+      result.channels[0].release.version.name = prefixes[(channels++ + 1) % 3] + result.channels[0].release.version.name;
+    }
+    return result;
+  } });
+  const result = await h.runCi(); assert.equal(result.status, 'npc-released', JSON.stringify(result));
+  assert(channels > 3 && sites > 2); assert.equal(h.db.writes.length, 3);
+  assert.deepEqual(h.providerWrites, [...Array(5).fill('functions'), 'rules', 'hosting']);
+});
+test('CI Hosting version drift after baseline stops before the sole Hosting mutation and gate reopen', async () => {
+  let h, driftReads = 0;
+  h = await harness({ ci: true, hostingMetadata(command, result) {
+    if (command === 'hosting:channel:list' && h.providerWrites.includes('rules') && !h.providerWrites.includes('hosting')) {
+      driftReads++;
+      result.channels[0].release.version.name = `projects/${S.projectNumber}/sites/${S.project}/versions/concurrent-deployment`;
+    }
+    return result;
+  } });
+  const before = h.db.entries(), result = await h.runCi();
+  assert.equal(result.status, 'blocked'); assert.equal(result.stage, 'hosting'); assert.equal(result.reason, 'provider-drift');
+  assert.equal(result.access, 'closed'); assert(driftReads >= 2);
+  assert.deepEqual(h.providerWrites, [...Array(5).fill('functions'), 'rules']);
+  assert.deepEqual(h.db.entries(), before); assert.equal(h.db.writes.length, 0);
+  assert(!h.journalEntries.some(e => e.stage === 'official-cli-hosting'));
+});
+test('CI Rules identity drift after Functions stops before the sole Rules mutation and gate reopen', async () => {
+  const h = await harness({ ci: true }); let driftReads = 0;
+  h.setOverride((url, result) => {
+    if (h.providerWrites.length === 5 && !h.providerWrites.includes('rules') && url.includes('firebaserules.googleapis.com')) {
+      driftReads++; const changed = structuredClone(result);
+      if (url.includes('/releases/cloud.firestore')) changed.rulesetName = `projects/${S.project}/rulesets/concurrent-deployment`;
+      else if (url.includes('/rulesets/')) changed.name = `projects/${S.project}/rulesets/concurrent-deployment`;
+      return changed;
+    }
+    return result;
+  });
+  const before = h.db.entries(), result = await h.runCi();
+  assert.equal(result.status, 'blocked'); assert.equal(result.stage, 'rules'); assert.equal(result.reason, 'provider-drift');
+  assert.equal(result.access, 'closed'); assert(driftReads >= 3);
+  assert.deepEqual(h.providerWrites, Array(5).fill('functions'));
+  assert.deepEqual(h.db.entries(), before); assert.equal(h.db.writes.length, 0);
+  assert(!h.journalEntries.some(e => ['official-cli-rules', 'official-cli-hosting'].includes(e.stage)));
+});
 test('CI never pauses/reopens the old version and rejects open baseline, custom config, missing approval and reruns', async () => {
   for (const change of [h => h.db.set('floatingGardenTrial/config', { ...h.db.get('floatingGardenTrial/config'), enabled: true, testerUids: [...review.testerUids] }),
     h => h.functions[0].labels.custom = 'retain', h => h.functions[0].serviceConfig.environmentVariables.FIREBASE_CONFIG = JSON.stringify({ projectId: 'wrong-project', storageBucket: S.project + '.appspot.com' }), h => h.functions[0].buildConfig.environmentVariables.EXTRA = 'retain']) {
@@ -651,19 +723,27 @@ test('CI gcloud/Rules/Hosting route never requests obsolete function-CLI metadat
   assert.equal(deploys.length, 2); assert(deploys.every(c => !c.args[c.args.indexOf('--only') + 1].startsWith('functions')));
 });
 
-test('CI release requires the exact approved run number and a newly-created release ref', async () => {
+test('CI recovery requires exact run 3 attempt 1 and one fast-forward from the consumed release head', async () => {
   for (const mutate of [
-    h => h.env.GARDEN_RELEASE_REF_CREATED = 'false',
+    h => h.env.GARDEN_RELEASE_REF_CREATED = 'true',
     h => delete h.env.GARDEN_RELEASE_REF_CREATED,
     h => h.env.GITHUB_RUN_NUMBER = '0',
-    h => h.env.GITHUB_RUN_NUMBER = '3',
+    h => h.env.GITHUB_RUN_NUMBER = '2',
+    h => h.env.GITHUB_RUN_NUMBER = '4',
+    h => h.env.GITHUB_RUN_ATTEMPT = '2',
+    h => h.env.GARDEN_RELEASE_EVENT_BEFORE = '0'.repeat(40),
+    h => delete h.env.GARDEN_RELEASE_EVENT_BEFORE,
+    h => h.env.GARDEN_RELEASE_EVENT_AFTER = 'b'.repeat(40),
+    h => delete h.env.GARDEN_RELEASE_EVENT_AFTER,
+    h => h.env.GITHUB_WORKFLOW_SHA = 'b'.repeat(40),
+    h => { h.env.GITHUB_SHA = CI_RELEASE_RECOVERY.before; h.env.GITHUB_WORKFLOW_SHA = CI_RELEASE_RECOVERY.before; h.env.GARDEN_RELEASE_EVENT_AFTER = CI_RELEASE_RECOVERY.before; },
     h => h.env.GITHUB_RUN_NUMBER = 'not-a-number',
   ]) {
     const h = await harness({ ci: true }); mutate(h); await assert.rejects(h.runCi());
     assert.equal(h.calls.length, 0); assert.equal(h.providerWrites.length, 0); assert.equal(h.db.writes.length, 0);
   }
   const h = await harness({ ci: true });
-  await assert.rejects(h.runCi({ approval: ciReleaseApproval(h.env.GITHUB_SHA, '3') }));
+  await assert.rejects(h.runCi({ approval: ciReleaseApproval(h.env.GITHUB_SHA, '2') }));
   assert.equal(h.calls.length, 0); assert.equal(h.providerWrites.length, 0); assert.equal(h.db.writes.length, 0);
 });
 
