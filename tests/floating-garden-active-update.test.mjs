@@ -293,7 +293,7 @@ async function harness({ actualTransport = false, actualBridge = false, database
   if (ci) {
     const authPath = join(path, 'gha-creds-0123456789abcdef.json'), C = CI_CLIENT_SCOPE;
     await writeFile(authPath, JSON.stringify({ type: 'external_account', audience: C.audience, subject_token_type: 'urn:ietf:params:oauth:token-type:jwt', token_url: 'https://sts.googleapis.com/v1/token', service_account_impersonation_url: `https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${C.serviceAccount}:generateAccessToken`, credential_source: { url: 'https://pipelines.actions.githubusercontent.com/synthetic/oidc', headers: { Authorization: 'Bearer SYNTHETIC' }, format: { type: 'json', subject_token_field_name: 'value' } } }), { mode: 0o600 });
-    env = { CI: 'true', GITHUB_ACTIONS: 'true', GITHUB_EVENT_NAME: 'push', GITHUB_REPOSITORY_ID: C.repositoryId, GITHUB_REPOSITORY: C.repository, GITHUB_REPOSITORY_OWNER_ID: C.repositoryOwnerId, GITHUB_REF: C.ref, GITHUB_WORKFLOW_REF: `${C.repository}/${C.workflow}@${C.ref}`, GITHUB_WORKSPACE: path, GOOGLE_CLOUD_PROJECT: C.project, GOOGLE_APPLICATION_CREDENTIALS: authPath, GOOGLE_GHA_CREDS_PATH: authPath, CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: authPath, GITHUB_SHA: 'a'.repeat(40), GITHUB_WORKFLOW_SHA: 'a'.repeat(40), GITHUB_RUN_ID: '12345', GITHUB_RUN_NUMBER: '3', GITHUB_RUN_ATTEMPT: '1', GARDEN_RELEASE_REF_CREATED: 'false', GARDEN_RELEASE_EVENT_BEFORE: CI_RELEASE_RECOVERY.before, GARDEN_RELEASE_EVENT_AFTER: 'a'.repeat(40) };
+    env = { CI: 'true', GITHUB_ACTIONS: 'true', GITHUB_EVENT_NAME: 'push', GITHUB_REPOSITORY_ID: C.repositoryId, GITHUB_REPOSITORY: C.repository, GITHUB_REPOSITORY_OWNER_ID: C.repositoryOwnerId, GITHUB_REF: C.ref, GITHUB_WORKFLOW_REF: `${C.repository}/${C.workflow}@${C.ref}`, GITHUB_WORKSPACE: path, GOOGLE_CLOUD_PROJECT: C.project, GOOGLE_APPLICATION_CREDENTIALS: authPath, GOOGLE_GHA_CREDS_PATH: authPath, CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: authPath, GITHUB_SHA: 'a'.repeat(40), GITHUB_WORKFLOW_SHA: 'a'.repeat(40), GITHUB_RUN_ID: '12345', GITHUB_RUN_NUMBER: '4', GITHUB_RUN_ATTEMPT: '1', GARDEN_RELEASE_REF_CREATED: 'false', GARDEN_RELEASE_EVENT_BEFORE: CI_RELEASE_RECOVERY.before, GARDEN_RELEASE_EVENT_AFTER: 'a'.repeat(40) };
     environmentPolicy = createCiAuthPolicy({ env, now: () => time, execArgv: [] });
   }
   const cloud = createActiveUpdateProvider({ plan, toolingDir, runner, requestClient, db, fetchImpl: providerFetch, now: () => time, env, execArgv: [], transport, environmentPolicy });
@@ -723,14 +723,16 @@ test('CI gcloud/Rules/Hosting route never requests obsolete function-CLI metadat
   assert.equal(deploys.length, 2); assert(deploys.every(c => !c.args[c.args.indexOf('--only') + 1].startsWith('functions')));
 });
 
-test('CI recovery requires exact run 3 attempt 1 and one fast-forward from the consumed release head', async () => {
+test('CI recovery requires exact run 4 attempt 1 and one fast-forward from the consumed release head', async () => {
   for (const mutate of [
     h => h.env.GARDEN_RELEASE_REF_CREATED = 'true',
     h => delete h.env.GARDEN_RELEASE_REF_CREATED,
     h => h.env.GITHUB_RUN_NUMBER = '0',
-    h => h.env.GITHUB_RUN_NUMBER = '2',
-    h => h.env.GITHUB_RUN_NUMBER = '4',
+    h => h.env.GITHUB_RUN_NUMBER = '3',
+    h => h.env.GITHUB_RUN_NUMBER = '5',
     h => h.env.GITHUB_RUN_ATTEMPT = '2',
+    h => h.env.GARDEN_RELEASE_EVENT_BEFORE = '74027567a8761e78423c8df0e744abc8d5633a8b',
+    h => h.env.GARDEN_RELEASE_EVENT_BEFORE = 'b'.repeat(40),
     h => h.env.GARDEN_RELEASE_EVENT_BEFORE = '0'.repeat(40),
     h => delete h.env.GARDEN_RELEASE_EVENT_BEFORE,
     h => h.env.GARDEN_RELEASE_EVENT_AFTER = 'b'.repeat(40),
@@ -743,7 +745,7 @@ test('CI recovery requires exact run 3 attempt 1 and one fast-forward from the c
     assert.equal(h.calls.length, 0); assert.equal(h.providerWrites.length, 0); assert.equal(h.db.writes.length, 0);
   }
   const h = await harness({ ci: true });
-  await assert.rejects(h.runCi({ approval: ciReleaseApproval(h.env.GITHUB_SHA, '2') }));
+  await assert.rejects(h.runCi({ approval: ciReleaseApproval(h.env.GITHUB_SHA, '3') }));
   assert.equal(h.calls.length, 0); assert.equal(h.providerWrites.length, 0); assert.equal(h.db.writes.length, 0);
 });
 
