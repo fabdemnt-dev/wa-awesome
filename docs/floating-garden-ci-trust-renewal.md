@@ -1,4 +1,4 @@
-# Read-only trust audit and run-4 renewal (owner only)
+# Read-only trust audit and run-5 renewal (owner only)
 
 This is prepared owner tooling, **not evidence of an executed audit or renewal,
 published commit, successful token exchange, deployment, or Garden readiness**.
@@ -10,8 +10,8 @@ a branch name, an abbreviated SHA, or the synthetic SHA used by tests.
 - Existing project: `wa-awesome-garden-stg` (`120030709276`).
 - Existing pool/provider: `garden-github` / `wa-awesome-release`.
 - Change only the provider's `attributeCondition`: exact `workflow_sha`
-  `95ec4e69e4b566df91a37a4107e1a1fd94478ebf` → the separately reviewed new
-  40-character lowercase commit SHA; exact `run_number` `3` → `4`.
+  `69ef07b9356470fbd3a643638baeec12bdd5680c` → the separately reviewed new
+  40-character lowercase commit SHA; exact `run_number` `4` → `5`.
 - Keep repository/owner IDs, release ref, workflow path, `push`, `garden-trial`,
   and `run_attempt == '1'` constraints byte-for-byte; keep issuer, audience,
   mapping, enabled states, service accounts, roles and every IAM binding.
@@ -23,24 +23,31 @@ mismatched existing provider (`provider_collision`). **Do not rerun setup as a
 renewal mechanism**, delete/recreate federation, add a broad claim, grant another
 role, or extend an expiry to work around that rejection.
 
-## Run-4 preparation boundary
+## Run-5 preparation boundary
 
-Run 3 / attempt 1 was consumed by a release that stopped during the closed-state
-baseline traffic check, before deployment stages. Preparing or publishing this
-run-4 source does not retry that run, renew trust, deploy, or reopen the Garden.
+Run 3 / attempt 1 stopped during the closed-state baseline traffic check.
+Run 4 / attempt 1 then stopped at `closed-baseline` with `iam-preservation`,
+before any deployment stage. Its live HTTP Functions included the known optional
+`FUNCTION_SIGNATURE_TYPE=http` environment key, which the previous exact-key
+validator rejected. This source accepts only that optional exact HTTP value;
+unknown keys and other signature values still stop, and each Function's original
+key presence and value must survive deployment unchanged. Neither run deployed
+or reopened the Garden. Preserve both runs' history and private journals.
+Preparing or publishing this run-5 source does not retry either consumed run,
+renew trust, deploy, or reopen the Garden.
 The release workflow requires an existing-branch push whose exact before-SHA is
-`95ec4e69e4b566df91a37a4107e1a1fd94478ebf`, new event-after/workflow/source SHA all
-match, and run 4 / attempt 1. Check refs and the latest workflow run again before
+`69ef07b9356470fbd3a643638baeec12bdd5680c`, new event-after/workflow/source SHA all
+match, and run 5 / attempt 1. Check refs and the latest workflow run again before
 any separately approved release publication. Do not rerun a consumed attempt.
 
-The live old provider condition is exactly **95ec/run 3**, not the legacy setup
+The live old provider condition is exactly **69ef/run 4**, not the legacy setup
 condition. The helper checks that live condition (or the exact approved intended
-new-SHA/run-4 condition) before consulting the original setup validator. That
+new-SHA/run-5 condition) before consulting the original setup validator. That
 immutable, hash-pinned validator still understands run 2. Only a private copied
 snapshot's already-checked provider condition is projected to its original
 74027567/run-2 representation; its fixed validation context is checked, every
 other field is unchanged, and live data is never edited by the projection.
-Old run-2 live trust is rejected rather than repaired or accepted as current.
+Old run-2 and run-3 live trust is rejected rather than repaired or accepted as current.
 
 The eventual deployment retains the existing closed baseline: two rooms and
 created-room count 2, room cap 20, the same two testers, the same original expiry,
@@ -55,7 +62,7 @@ Neither the renewal result nor a source/CI result proves those later checks.
    separate explicit owner approval for the exact trust change and reviewed
    release commit. Source preparation, publication, and a successful audit do
    not approve that security change or a release. Before renewal, separately
-   verify the next intended workflow run is run 4 / attempt 1 at that commit.
+   verify the next intended workflow run is run 5 / attempt 1 at that commit.
 2. Download/check out both scripts from that exact commit, preserving their
    sibling paths. Use the authenticated repository's commit-specific download
    or a detached Git worktree for the reviewed full SHA. Do not use a moving
@@ -110,7 +117,7 @@ python3 -I scripts/renew-floating-garden-ci-trust-owner.py --audit \
   --project-number 120030709276 \
   --original-expiry 1791762351472 \
   --approved-release-sha REVIEWED_NEW_40_HEX_COMMIT \
-  --approved-release-run-number 4
+  --approved-release-run-number 5
 ```
 
 `--audit` uses a separate read-only command boundary. It has no renewal writer,
@@ -156,8 +163,8 @@ python3 -I scripts/renew-floating-garden-ci-trust-owner.py --renew \
   --project-number 120030709276 \
   --original-expiry 1791762351472 \
   --approved-release-sha REVIEWED_NEW_40_HEX_COMMIT \
-  --approved-release-run-number 4 \
-  --state-dir "$HOME/garden-run4-trust-renewal-UNIQUE"
+  --approved-release-run-number 5 \
+  --state-dir "$HOME/garden-run5-trust-renewal-UNIQUE"
 ```
 
 The helper reads the actual state, displays both complete conditions and a plan
@@ -167,7 +174,7 @@ Read all plan expectations before launching. Copy the current prompt's `RENEW`
 plus the complete plan hash without its final colon; do not use the snapshot
 hash or an earlier prompt. Keep input/output attached to the terminal, never
 pipe an approval or capture the interactive prompt behind a heredoc. Preserve
-all old run-3 directories and use a fresh run-4 directory even after a stop.
+all old run-3 and run-4 directories and use a fresh run-5 directory even after a stop.
 Approval expires after five minutes, including the fresh metadata pass.
 
 After approval, it durably saves a private before-snapshot and plan, re-reads
@@ -187,7 +194,7 @@ and the [official update-oidc command](https://cloud.google.com/sdk/gcloud/refer
 
 - Success requires a fresh complete snapshot equal to the before-snapshot with
   only the intended `attributeCondition` replaced. The after-snapshot is saved.
-- An already exact intended new-SHA/run-4 state is a no-op only after two matching
+- An already exact intended new-SHA/run-5 state is a no-op only after two matching
   complete reads. Any other SHA, run, claim, setting, or incomplete setup fails.
 - Any timeout, interruption, readback mismatch, or local-state failure stops.
   A dispatched mutation remains marked `possibly_applied` until exact readback
