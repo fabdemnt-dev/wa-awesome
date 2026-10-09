@@ -1,0 +1,13 @@
+{
+  "version": "10.8.0",
+  "retrievedOn": "2026-10-04",
+  "license": "Apache-2.0",
+  "licenseUrl": "https://www.apache.org/licenses/LICENSE-2.0",
+  "files": {
+    "firebase-firestore.js": {
+      "url": "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js",
+      "bytes": 434464,
+      "sha256": "d5b81349f2b7b2317bacdd3effd576d4e0a747ff12eab684f77956ebc1fe7040"
+    }
+  }
+}
