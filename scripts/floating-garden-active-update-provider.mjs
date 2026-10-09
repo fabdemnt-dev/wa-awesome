@@ -16,6 +16,11 @@ import { ACTIVE_UPDATE_SCOPE as S, activeUpdatePackets, recheckActiveUpdatePlan,
   toggleActiveRecords, assertPreservedRecords, requireActiveUpdate as check, activeUpdateFailure,
   activeUpdateReason, dataDigest, canonicalData } from './floating-garden-active-update.mjs';
 
+import { requireOwnerReadonlyPolicy } from './floating-garden-owner-readonly-policy.mjs';
+import { preservationDifference } from './floating-garden-active-update-evidence.mjs';
+import { validateMixedAssignment, mixedRecoveryCandidate } from './floating-garden-active-update-mixed-recovery.mjs';
+const preservationDiagnostics = new WeakMap();
+export function providerPreservationDiagnostic(error) { return preservationDiagnostics.get(error); }
 const ciDiagnostics = new WeakMap();
 export function ciProviderFailureDiagnostic(error) { return ciDiagnostics.get(error); }
 const ROOTS = Object.freeze(['floatingGardenTrial', 'floatingGardenTrialTesters', 'floatingGardenRooms',
@@ -76,10 +81,12 @@ export function validateAppliedTraffic(proof) {
 }
 export function createActiveUpdateProvider({ plan, toolingDir, runner = makeCloudRunner(), requestClient,
   db: injectedDb, fetchImpl = fetch, now = Date.now, env = process.env, execArgv = process.execArgv,
-  transport, environmentPolicy } = {}) {
+  transport, environmentPolicy, ownerReadonlyPolicy } = {}) {
+  const ownerOnly = ownerReadonlyPolicy !== undefined;
+  if (ownerOnly) { requireOwnerReadonlyPolicy(ownerReadonlyPolicy); check(environmentPolicy === undefined, 'provider-writes-not-enabled'); }
   let db = injectedDb, client = requestClient, previous, next, oldAdapter, newAdapter, recordStep;
   let initialised = false, attemptedPause = false, attemptedReopen = false, ciClosed = false;
-  let baseline, stopped, applied = [], settingsBefore, reopened = false, journalBound = false; const attemptedStages = new Set();
+  let baseline, stopped, applied = [], settingsBefore, reopened = false, journalBound = false, inspectionOnly = false, recordEvidence; const attemptedStages = new Set();
   const checkedNow = () => { const value = now(); check(Number.isSafeInteger(value) && value >= S.startsAtMillis && value < S.endsAtMillis, 'fixed-window'); return value; };
   function sdk() {
     const modules = join(next.packet.gameDir, 'functions/node_modules');
@@ -102,7 +109,8 @@ export function createActiveUpdateProvider({ plan, toolingDir, runner = makeClou
   async function initialize() {
     if (initialised) return;
     await recheckActiveUpdatePlan(plan); ({ old: previous, next } = activeUpdatePackets(plan));
-    if (environmentPolicy === undefined) validateEnvironment(env, execArgv);
+    if (ownerOnly) { requireOwnerReadonlyPolicy(ownerReadonlyPolicy).validateEnvironment(env, execArgv); check(client && db, 'provider-read'); }
+    else if (environmentPolicy === undefined) validateEnvironment(env, execArgv);
     else { requireCiAuthPolicy(environmentPolicy).validateEnvironment(env, execArgv); check(client && db, 'provider-read'); }
     if (!client || !db) {
       const req = sdk();
@@ -114,7 +122,7 @@ export function createActiveUpdateProvider({ plan, toolingDir, runner = makeClou
         db.settings({ ignoreUndefinedProperties: false, clientConfig: FIRESTORE_CLIENT_CONFIG });
       }
     }
-    if (!transport) transport = createActiveUpdateTransport({
+    if (!ownerOnly && !transport) transport = createActiveUpdateTransport({
       request: createActiveUpdateRequest({ requestClient: client, fetchImpl }), now,
       wait: millis => new Promise(done => setTimeout(done, millis)),
     });
@@ -127,7 +135,7 @@ export function createActiveUpdateProvider({ plan, toolingDir, runner = makeClou
       }
       return result;
     };
-    const shared = { toolingDir, runner, requestClient: client, db, fetchImpl: checkedFetch, now, env, execArgv, environmentPolicy };
+    const shared = { toolingDir, runner, requestClient: client, db, fetchImpl: checkedFetch, now, env, execArgv, environmentPolicy, ownerReadonlyPolicy };
     oldAdapter = createCloudAdapter({ ...previous, ...shared }); newAdapter = createCloudAdapter({ ...next, ...shared });
     await oldAdapter.preflight('inspect'); await newAdapter.preflight('inspect'); initialised = true;
   }
@@ -157,7 +165,7 @@ export function createActiveUpdateProvider({ plan, toolingDir, runner = makeClou
     return { iam, runtime: gcloud(['iam', 'service-accounts', 'describe', RUNTIME_ACCOUNT]),
       secret: gcloud(['secrets', 'describe', SECRET]),
       secretVersion: gcloud(['secrets', 'versions', 'describe', '1', `--secret=${SECRET}`]),
-      ...(environmentPolicy === undefined ? {} : { secretLatest: gcloud(['secrets', 'versions', 'describe', 'latest', `--secret=${SECRET}`]) }),
+      ...(!ownerOnly && environmentPolicy === undefined ? {} : { secretLatest: gcloud(['secrets', 'versions', 'describe', 'latest', `--secret=${SECRET}`]) }),
       artifacts: stableArtifactRepositories(gcloud(['artifacts', 'repositories', 'list', `--location=${S.region}`])),
       apis: gcloud(['services', 'list', '--enabled']),
       auth: await read(`https://identitytoolkit.googleapis.com/admin/v2/projects/${S.project}/config`),
@@ -231,24 +239,75 @@ export function createActiveUpdateProvider({ plan, toolingDir, runner = makeClou
     return { kind: 'baseline', fingerprint: dataDigest(baseline), createdRoomCount: after.records.usage.createdRoomCount,
       roomCount: after.roomCount, documentCount: after.documentCount, runtimeImagePreserved: false };
   }
-  async function inspect() { check(!ciClosed, 'stage-order'); return inspectState(true); }
+  async function inspect() { check(!ownerOnly && !inspectionOnly && !ciClosed, 'stage-order'); return inspectState(true); }
   async function inspectClosed() {
-    check(environmentPolicy !== undefined && !baseline && !attemptedPause, 'stage-order');
+    check(!ownerOnly && !inspectionOnly && environmentPolicy !== undefined && !baseline && !attemptedPause, 'stage-order');
     requireCiAuthPolicy(environmentPolicy).validateEnvironment(env, execArgv); ciClosed = true;
     const result = await inspectState(false);
     check(result.createdRoomCount === 2 && result.roomCount === 2, 'data-preservation');
-    validateCiFunctionConfiguration(baseline.proof.functions);
-    check(Array.isArray(settingsBefore.apis) && REQUIRED_APIS.every(api => settingsBefore.apis.some(a => a.config?.name === api)), 'provider-read');
-    const latest = settingsBefore.secretLatest;
-    check(latest?.state === 'ENABLED' && [S.project, S.projectNumber].some(p => latest.name === `projects/${p}/secrets/${SECRET}/versions/1`) &&
-      isDeepStrictEqual(latest, settingsBefore.secretVersion), 'iam-preservation');
-    check(settingsBefore.iam.secret.bindings.some(b => b.role === 'roles/secretmanager.secretAccessor' && !b.condition &&
-      b.members?.includes(`serviceAccount:${RUNTIME_ACCOUNT}`)), 'iam-preservation');
+    validateCiBaseline(baseline.proof.functions, settingsBefore);
+    if (recordEvidence) await recordEvidence('baseline', baseline);
     return result;
+  }
+  function validateCiBaseline(functions, settings) {
+    validateCiFunctionConfiguration(functions);
+    check(!settings.appCheckServices.nextPageToken, 'provider-read');
+    check(Array.isArray(settings.apis) && REQUIRED_APIS.every(api => settings.apis.some(a => a.config?.name === api)), 'provider-read');
+    const latest = settings.secretLatest;
+    check(latest?.state === 'ENABLED' && [S.project, S.projectNumber].some(p => latest.name === `projects/${p}/secrets/${SECRET}/versions/1`) &&
+      isDeepStrictEqual(latest, settings.secretVersion), 'iam-preservation');
+    check(settings.iam.secret.bindings.some(b => b.role === 'roles/secretmanager.secretAccessor' && !b.condition &&
+      b.members?.includes(`serviceAccount:${RUNTIME_ACCOUNT}`)), 'iam-preservation');
+  }
+  async function inspectMixedRecovery({ assignment, evidenceStore } = {}) {
+    check(!inspectionOnly && !baseline && !ciClosed && !attemptedPause && !journalBound && (ownerOnly || environmentPolicy !== undefined), 'stage-order');
+    // Latch even when validation/read/evidence fails. No method may turn this
+    // provider into an executable recovery session afterwards.
+    inspectionOnly = true;
+    assignment = validateMixedAssignment(assignment);
+    check(evidenceStore && typeof evidenceStore.append === 'function', 'journal');
+    await initialize(); checkedNow();
+    const round = async () => {
+      const data = await readData();
+      assertActiveRecords(data.records, next.review, { active: false, now: checkedNow() });
+      check(data.roomCount === 2 && data.records.usage.createdRoomCount === 2, 'data-preservation');
+      const oldNames = assignment.filter(a => a.source === 'previous').map(a => a.name);
+      const newNames = assignment.filter(a => a.source === 'next').map(a => a.name);
+      const old = await oldAdapter.verifyFunctions({ includeProof: true, functionNames: oldNames });
+      const current = await newAdapter.verifyFunctions({ includeProof: true, functionNames: newNames });
+      check(isDeepStrictEqual(old.inventory, current.inventory), 'provider-drift');
+      const functions = [...old.functions, ...current.functions].sort((a, b) => FUNCTION_NAMES.indexOf(a.function.buildConfig.entryPoint) - FUNCTION_NAMES.indexOf(b.function.buildConfig.entryPoint));
+      check(new Set(functions.map(p => p.function.serviceConfig.service.replace(`projects/${S.projectNumber}/`, `projects/${S.project}/`))).size === 5, 'source-proof');
+      validateAppliedTraffic(functions);
+      const rules = await oldAdapter.verifyRules({ includeProof: true });
+      const proof = { functions, inventory: current.inventory, rules: { release: rules.release, ruleset: rules.ruleset }, hosting: await oldAdapter.readHosting() };
+      const settings = await readSettings(); validateCiBaseline(functions, settings);
+      check(isDeepStrictEqual(data, await readData()), 'admin-race');
+      const capture = { data, proof, settings };
+      await evidenceStore.append('recovery-round', capture); return capture;
+    };
+    const before = await round(), current = await round();
+    check(isDeepStrictEqual(before, current), 'provider-drift');
+    await recheckActiveUpdatePlan(plan);
+    const candidate = mixedRecoveryCandidate({ plan, assignment, capture: current, capturedAtMillis: checkedNow() });
+    await evidenceStore.append('recovery-candidate', candidate);
+    // Review is a separate explicit input to the pure review validator.
+    // Neither baseline nor stopped nor ciClosed is populated here.
+    return { kind: 'mixed-recovery-candidate', candidate };
+  }
+  async function preserve(before, after, category) {
+    if (isDeepStrictEqual(before, after)) return;
+    const error = activeUpdateFailure('iam-preservation');
+    preservationDiagnostics.set(error, preservationDifference(before, after, category));
+    if (recordEvidence) {
+      try { await recordEvidence('preservation-failure', { before, after }); }
+      catch { preservationDiagnostics.set(error, { ...preservationDiagnostics.get(error), evidenceSaved: false }); }
+    }
+    throw error;
   }
   const stableConfiguration = proof => ciClosed ? stableCiFunctionConfiguration(proof, stableFunctionConfiguration) : stableFunctionConfiguration(proof);
   async function assertSettingsUnchanged() {
-    check(isDeepStrictEqual(settingsBefore, await readSettings()), 'iam-preservation');
+    const settings = await readSettings(); await preserve(settingsBefore, settings, 'settings'); return settings;
   }
   async function assertClosed() {
     checkedNow(); const value = await readData();
@@ -256,7 +315,7 @@ export function createActiveUpdateProvider({ plan, toolingDir, runner = makeClou
     assertActiveRecords(value.records, next.review, { active: false, now: checkedNow() }); return value;
   }
   async function compareAndSet(active) {
-    check(initialised && baseline, 'stage-order'); await recheckActiveUpdatePlan(plan); checkedNow();
+    check(!ownerOnly && !inspectionOnly && initialised && baseline, 'stage-order'); await recheckActiveUpdatePlan(plan); checkedNow();
     check(active ? !attemptedReopen && stopped && applied.join(',') === 'functions,rules,hosting' : !attemptedPause && !stopped, 'unsafe-retry');
     if (active) attemptedReopen = true; else attemptedPause = true;
     let issued = false;
@@ -283,11 +342,13 @@ export function createActiveUpdateProvider({ plan, toolingDir, runner = makeClou
     } catch (error) { return { kind: issued ? 'unknown' : 'failed', reason: activeUpdateReason(error), access: 'unknown' }; }
   }
   function bindJournal(journal) {
-    check(!journalBound && !attemptedPause && journal && typeof journal.providerStep === 'function', 'journal');
+    check(!ownerOnly && !inspectionOnly && !journalBound && !attemptedPause && journal && typeof journal.providerStep === 'function', 'journal');
+    if (environmentPolicy !== undefined) check(typeof journal.privateEvidence === 'function', 'journal');
+    recordEvidence = typeof journal.privateEvidence === 'function' ? (event, value) => journal.privateEvidence(event, value) : undefined;
     recordStep = step => journal.providerStep(step); journalBound = true;
   }
   async function pause(expectedFingerprint) {
-    check(!ciClosed && journalBound && typeof recordStep === 'function' && transport && ['functions', 'rules', 'hosting'].every(key => typeof transport[key] === 'function'), 'provider-writes-not-enabled');
+    check(!ownerOnly && !inspectionOnly && !ciClosed && journalBound && typeof recordStep === 'function' && transport && ['functions', 'rules', 'hosting'].every(key => typeof transport[key] === 'function'), 'provider-writes-not-enabled');
     check(baseline && expectedFingerprint === dataDigest(baseline), 'admin-race');
     check(isDeepStrictEqual(baseline.proof, await evidence('previous')), 'provider-drift'); await assertSettingsUnchanged();
     return compareAndSet(false);
@@ -299,13 +360,14 @@ export function createActiveUpdateProvider({ plan, toolingDir, runner = makeClou
     if (completed.length) proof.push(...(await newAdapter.verifyFunctions({ includeProof: true, functionNames: completed })).functions);
     proof.sort((a, b) => FUNCTION_NAMES.indexOf(a.function.buildConfig.entryPoint) - FUNCTION_NAMES.indexOf(b.function.buildConfig.entryPoint));
     validateAppliedTraffic(proof);
+    await preserve(stableConfiguration(baseline.proof.functions), stableConfiguration(proof), 'functions');
     if (ciClosed) validateCiFunctionConfiguration(proof);
-    check(isDeepStrictEqual(stableConfiguration(baseline.proof.functions), stableConfiguration(proof)), 'iam-preservation');
+    return proof;
   }
   // The transport is only used by the separately approved state machine. It
   // receives immutable exact packets and baseline evidence, never a broad CLI.
   async function update(kind) {
-    check(!ciClosed && ['functions', 'rules', 'hosting'][applied.length] === kind && transport && !attemptedStages.has(kind), 'stage-order');
+    check(!ownerOnly && !inspectionOnly && !ciClosed && ['functions', 'rules', 'hosting'][applied.length] === kind && transport && !attemptedStages.has(kind), 'stage-order');
     attemptedStages.add(kind);
     await recheckActiveUpdatePlan(plan); await assertClosed(); await assertSettingsUnchanged();
     const result = await transport[kind]({ previous, next, baseline: copy(baseline.proof),
@@ -325,14 +387,16 @@ export function createActiveUpdateProvider({ plan, toolingDir, runner = makeClou
     const completed = [];
     for (const [index, name] of FUNCTION_NAMES.entries()) {
       requireCiAuthPolicy(environmentPolicy).validateEnvironment(env, execArgv);
-      await recheckActiveUpdatePlan(plan); await assertClosed(); await assertSettingsUnchanged();
-      await verifyMixedFunctions(completed);
+      await recheckActiveUpdatePlan(plan); const data = await assertClosed(), settings = await assertSettingsUnchanged();
+      const functions = await verifyMixedFunctions(completed);
       const fn = baseline.proof.functions.find(p => p.function.buildConfig.entryPoint === name).function;
       const args = ciFunctionDeployArguments(fn, join(next.packet.gameDir, 'functions'), ignoreFile);
       const file = lstatSync(ignoreFile);
       check(file.isFile() && !file.isSymbolicLink() && file.nlink === 1 && !(file.mode & 0o077) &&
         readFileSync(ignoreFile, 'utf8') === GCLOUD_SOURCE_IGNORE, 'local-packet');
+      await recordEvidence('prewrite-functions', { baseline, current: { data, settings, functions } });
       await recordStep({ stage: 'official-cli-functions', resourceKind: 'functions', index });
+      checkedNow(); requireCiAuthPolicy(environmentPolicy).validateEnvironment(env, execArgv);
       let raw; try { raw = runner('gcloud', args, next.packet.gameDir); }
       catch { raw = { exitCode: null, stdout: '', signal: true }; }
       const result = classifyCiFunctionDeploy(raw, fn);
@@ -353,7 +417,7 @@ export function createActiveUpdateProvider({ plan, toolingDir, runner = makeClou
   // apiece. Each SDK retains its own internal retry/poll behavior.
 
   async function deployCiStage(kind) {
-    check(ciClosed && journalBound && ['functions', 'rules', 'hosting'][applied.length] === kind && !attemptedStages.has(kind), 'stage-order');
+    check(!ownerOnly && !inspectionOnly && ciClosed && journalBound && ['functions', 'rules', 'hosting'][applied.length] === kind && !attemptedStages.has(kind), 'stage-order');
     requireCiAuthPolicy(environmentPolicy).validateEnvironment(env, execArgv);
     await recheckActiveUpdatePlan(plan); await assertClosed(); await assertSettingsUnchanged();
     if (!applied.length) check(isDeepStrictEqual(baseline.proof, await evidence('previous')), 'provider-drift');
@@ -379,7 +443,9 @@ export function createActiveUpdateProvider({ plan, toolingDir, runner = makeClou
       ...(kind === 'hosting' ? ['--message', `garden-trial-game-v1:${next.packet.manifestDigest}`] : []),
       '--config', config, '--project', S.project, '--non-interactive', '--json'];
     // Mark the attempt before the command. An uncertain exit never retries it.
+    await recordEvidence(`prewrite-${kind}`, { baseline, current: { data: await assertClosed(), settings: await assertSettingsUnchanged() } });
     await recordStep({ stage: `official-cli-${kind}`, resourceKind: kind, index: 0 });
+    checkedNow(); requireCiAuthPolicy(environmentPolicy).validateEnvironment(env, execArgv);
     let raw; try { raw = runner(process.execPath, args, next.packet.gameDir); }
     catch { raw = { exitCode: null, stdout: '', signal: true }; }
     const result = classifyDeployResult(raw);
@@ -397,9 +463,10 @@ export function createActiveUpdateProvider({ plan, toolingDir, runner = makeClou
   }
   async function verifyFunctions() {
     const got = await newAdapter.verifyFunctions({ includeProof: true }); validateAppliedTraffic(got.functions);
-    if (ciClosed) validateCiFunctionConfiguration(got.functions);
     const before = stableConfiguration(baseline.proof.functions), after = stableConfiguration(got.functions);
-    check(isDeepStrictEqual(before, after), 'iam-preservation'); await assertSettingsUnchanged(); await assertClosed(); return { kind: 'verified' };
+    await preserve(before, after, 'functions');
+    if (ciClosed) validateCiFunctionConfiguration(got.functions);
+    await assertSettingsUnchanged(); await assertClosed(); return { kind: 'verified' };
   }
   async function verifyRules() { await newAdapter.verifyRules(); await assertClosed(); return { kind: 'verified' }; }
   async function verifyHosting() { await newAdapter.verifyHosting('game'); await assertClosed(); return { kind: 'verified' }; }
@@ -412,7 +479,7 @@ export function createActiveUpdateProvider({ plan, toolingDir, runner = makeClou
     assertPreservedRecords(expected, projected, next.review, true);
     check(actual.usage.createdRoomCount >= expected.usage.createdRoomCount, 'usage-preservation');
   }
-  async function reopen() { await verifyPreservation(); return compareAndSet(true); }
+  async function reopen() { check(!ownerOnly && !inspectionOnly, 'stage-order'); await verifyPreservation(); return compareAndSet(true); }
   async function verifyReopened() {
     check(reopened && stopped, 'stage-order'); const actual = await readData(); assertReopenedRecords(actual.records, stopped.records);
     const proof = await evidence('next');
@@ -430,7 +497,7 @@ export function createActiveUpdateProvider({ plan, toolingDir, runner = makeClou
     }
     catch { return { access: 'unknown' }; }
   }
-  return Object.freeze({ bindJournal, inspect, inspectClosed, deployCiStage, pause, assertClosed, updateFunctions: () => update('functions'), verifyFunctions,
+  return Object.freeze({ bindJournal, inspect, inspectClosed, inspectMixedRecovery, deployCiStage, pause, assertClosed, updateFunctions: () => update('functions'), verifyFunctions,
     updateRules: () => update('rules'), verifyRules, updateHosting: () => update('hosting'), verifyHosting,
     verifyPreservation, reopen, verifyReopened, readAccess });
 }

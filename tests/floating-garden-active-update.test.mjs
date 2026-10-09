@@ -20,6 +20,10 @@ import { ACTIVE_UPDATE_SCOPE as S, prepareActiveUpdatePlan, activeUpdatePackets,
 import { createActiveUpdateTransport } from '../scripts/floating-garden-active-update-transport.mjs';
 import { createActiveUpdateProvider, stableFunctionConfiguration, stableArtifactRepositories } from '../scripts/floating-garden-active-update-provider.mjs';
 import { CI_CLIENT_SCOPE, createCiAuthPolicy } from '../scripts/floating-garden-ci-auth-policy.mjs';
+import { prepareOwnerReadonlyPreflight, validateOwnerReadonlyReview } from '../scripts/floating-garden-active-update-owner-readonly.mjs';
+import { createSyntheticOwnerJournal } from './helpers/floating-garden-owner-journal.mjs';
+import { MIXED_RECOVERY_ASSIGNMENT, validateMixedRecoveryReview } from '../scripts/floating-garden-active-update-mixed-recovery.mjs';
+import { createPrivateEvidence } from '../scripts/floating-garden-active-update-evidence.mjs';
 import { executeCiRelease, ciReleaseApproval, CI_RELEASE_RECOVERY } from '../scripts/floating-garden-ci-release.mjs';
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const require = createRequire(import.meta.url), archiver = require('archiver');
@@ -101,11 +105,16 @@ async function legacyData() {
   assert.equal(db.get('floatingGardenTrial/usage').createdRoomCount, 2); db.writes.length = 0; db.attempts.length = 0;
   return { db, first, second };
 }
-async function zip(packet) {
+async function zip(packet, fault) {
   const archive = archiver('zip'), chunks = [];
   const done = new Promise((ok, fail) => { archive.on('end', ok); archive.on('error', fail); });
   archive.on('data', bytes => chunks.push(bytes));
-  for (const path of Object.keys(packet.manifest.files).filter(p => p.startsWith('game/functions/'))) archive.append(await readFile(join(packet.output, path)), { name: path.slice(15), mode: 0o100644 });
+  for (const path of Object.keys(packet.manifest.files).filter(p => p.startsWith('game/functions/'))) {
+    const bytes = await readFile(join(packet.output, path));
+    if (fault === 'byte' && path.endsWith('/package.json')) bytes[0] ^= 1;
+    archive.append(bytes, { name: path.slice(15), mode: 0o100644 });
+  }
+  if (fault === 'extra') archive.append('unreviewed', { name: 'unreviewed.txt', mode: 0o100644 });
   await archive.finalize(); await done; return Buffer.concat(chunks);
 }
 function metadata(i, generation = '123') {
@@ -126,7 +135,7 @@ function run(fn) {
       scaling: { maxInstanceCount: 1 }, maxInstanceRequestConcurrency: 1, timeout: '30s', containers: [{ image: 'old-or-new-image', resources: { limits: { memory: '256Mi', cpu: '1' } } }] },
     traffic: [{ type: 'TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST', percent: 100 }], trafficStatuses: [{ revision, percent: 100 }] };
 }
-async function harness({ actualTransport = false, actualBridge = false, database, iamPolicy, ci = false, cliFault, hostingMetadata } = {}) {
+async function harness({ actualTransport = false, actualBridge = false, database, iamPolicy, ci = false, cliFault, hostingMetadata, secretVersion } = {}) {
   const legacy = await legacyData(), { first, second } = legacy; const db = database || legacy.db;
   if (database) {
     const batch = database.batch();
@@ -201,7 +210,7 @@ async function harness({ actualTransport = false, actualBridge = false, database
       else if (args[0] === 'projects' && args[1] === 'describe') result = { projectId: S.project, projectNumber: S.projectNumber, lifecycleState: 'ACTIVE' };
       else if (args.includes('get-iam-policy')) result = iamPolicy
         ? iamPolicy(args[0] === 'iam' ? 'runtime' : args[0] === 'secrets' ? 'secret' : 'project', policy()) : policy();
-      else if (ci && args[0] === 'secrets' && args[1] === 'versions') result = { name: `projects/${S.projectNumber}/secrets/FLOATING_GARDEN_INVITE_HMAC_KEY/versions/1`, state: 'ENABLED' };
+      else if (ci && args[0] === 'secrets' && args[1] === 'versions') result = secretVersion ? secretVersion(args[3]) : { name: `projects/${S.projectNumber}/secrets/FLOATING_GARDEN_INVITE_HMAC_KEY/versions/1`, state: 'ENABLED' };
       else if (args[0] === 'artifacts' || args[0] === 'services') result = ci && args[0] === 'services' ? RESUME_REQUIRED_APIS.map(name => ({ config: { name } })) : [];
       else result = { name: args.slice(0, 3).join('-'), settingsRevision };
       if (ci && args[0] === 'secrets' && args[1] === 'get-iam-policy') result.bindings.push({ role: 'roles/secretmanager.secretAccessor', members: [`serviceAccount:${RUNTIME_ACCOUNT}`] });
@@ -300,9 +309,9 @@ async function harness({ actualTransport = false, actualBridge = false, database
     environmentPolicy = createCiAuthPolicy({ env, now: () => time, execArgv: [] });
   }
   const cloud = createActiveUpdateProvider({ plan, toolingDir, runner, requestClient, db, fetchImpl: providerFetch, now: () => time, env, execArgv: [], transport, environmentPolicy });
-  const journal = { providerStep: async step => journalEntries.push(step), issued: async stage => journalEntries.push({ issued: stage }), verified: async stage => journalEntries.push({ verified: stage }),
+  const journal = { privateEvidence: async () => ({ saved: true }), providerStep: async step => journalEntries.push(step), issued: async stage => journalEntries.push({ issued: stage }), verified: async stage => journalEntries.push({ verified: stage }),
     finish: async () => journalEntries.push({ finished: true }), fail: async (stage, reason, access) => journalEntries.push({ stage, reason, access }) };
-  return { cloud, db, first, second, calls, functions, transport, providerWrites, journal, journalEntries, env,
+  return { cloud, db, rawRunner: runner, readOnlyRequestClient, publicFetch: fetchImpl, first, second, calls, functions, transport, providerWrites, journal, journalEntries, env,
     runCi: options => executeCiRelease({ plan, approval: ciReleaseApproval(env.GITHUB_SHA, env.GITHUB_RUN_NUMBER), cloud, journal, env, environmentPolicy, now: () => time, ...options }),
     setTime(value) { time = value; }, changeSettings() { settingsRevision++; }, setOverride(value) { override = value; },
     run: options => executeActiveUpdate({ plan, mode: 'apply', approval: approval(), cloud, journal, now: () => time, ...options }) };
@@ -822,5 +831,159 @@ test('CI detects signature addition removal or mutation after a function update 
     if (change !== 'add') h.functions[0].serviceConfig.environmentVariables.FUNCTION_SIGNATURE_TYPE = 'http';
     const result = await h.runCi(); assert.equal(result.status, 'blocked'); assert.equal(result.access, 'closed');
     assert.deepEqual(h.providerWrites, ['functions']); assert.equal(h.db.writes.length, 0);
+  }
+});
+
+// Mixed recovery preparation uses actual packet ZIP readers and provider paths.
+const sink = () => ({ captures: [], async append(event, value) { this.captures.push({ event, value: clone(value) }); return { saved: true }; } });
+const setMixed = h => { h.functions[0].buildConfig.sourceProvenance.resolvedStorageSource = clone(metadata(0, '124').buildConfig.sourceProvenance.resolvedStorageSource); };
+async function assertInspectionLocked(h) {
+  for (const call of [() => h.cloud.inspect(), () => h.cloud.inspectClosed(), () => h.cloud.pause('x'),
+    () => h.cloud.deployCiStage('functions'), () => h.cloud.updateFunctions(), () => h.cloud.updateRules(), () => h.cloud.updateHosting(), () => h.cloud.reopen()]) await assert.rejects(call());
+  assert.throws(() => h.cloud.bindJournal(h.journal));
+  assert.equal(h.db.writes.length, 0); assert.equal(h.providerWrites.length, 0);
+}
+test('mixed read-only preflight proves exact ZIP contents and latches every mutation path', async () => {
+  const h = await harness({ ci: true }); setMixed(h); const evidence = sink();
+  const result = await h.cloud.inspectMixedRecovery({ assignment: clone(MIXED_RECOVERY_ASSIGNMENT), evidenceStore: evidence });
+  assert.equal(result.kind, 'mixed-recovery-candidate'); assert.equal(result.candidate.executionAllowed, false);
+  assert.equal(result.candidate.historicalPreservation, 'unknown'); assert.equal(evidence.captures.length, 3);
+  assert(h.calls.filter(c => c.url?.includes('&alt=media')).length >= 4);
+  const review = { schemaVersion: 1, purpose: 'mixed-source-read-only-review', candidateFingerprint: result.candidate.fingerprint,
+    acknowledgeHistoricalPreservationUnknown: true, executionAllowed: false };
+  assert.equal(validateMixedRecoveryReview(result.candidate, review, NOW).executionAllowed, false);
+  for (const bad of [{ ...review, executionAllowed: true }, { ...review, candidateFingerprint: '0'.repeat(64) }]) assert.throws(() => validateMixedRecoveryReview(result.candidate, bad, NOW));
+  assert.throws(() => validateMixedRecoveryReview(result.candidate, review, NOW + 300001));
+  assert.throws(() => validateMixedRecoveryReview({ ...result.candidate, currentEvidenceFingerprint: '0'.repeat(64) }, review, NOW));
+  await assertInspectionLocked(h);
+});
+test('failed mixed inspection cannot be turned into a write session', async () => {
+  for (const mode of ['assignment', 'archive', 'inventory', 'settings', 'sink', 'latest']) {
+    const h = await harness({ ci: true, ...(mode === 'latest' ? { secretVersion: selector => ({ name: `projects/${S.projectNumber}/secrets/FLOATING_GARDEN_INVITE_HMAC_KEY/versions/${selector === 'latest' ? '2' : '1'}`, state: 'ENABLED' }) } : {}) });
+    setMixed(h); let evidence = sink(), assignment = clone(MIXED_RECOVERY_ASSIGNMENT), reads = 0;
+    if (mode === 'assignment') assignment[0].source = 'previous';
+    if (mode === 'archive') h.setOverride((url, data) => url.includes('&alt=media') ? Buffer.from('not the reviewed ZIP') : data);
+    if (mode === 'inventory') h.setOverride((url, data) => { if (url.includes('/functions?') && ++reads >= 3) data.functions[0].description = 'raced'; return data; });
+    if (mode === 'settings') { const append = evidence.append.bind(evidence); evidence.append = async (...args) => { const r = await append(...args); h.changeSettings(); return r; }; }
+    if (mode === 'sink') evidence = { append: async () => { throw Error('private sink unavailable'); } };
+    await assert.rejects(h.cloud.inspectMixedRecovery({ assignment, evidenceStore: evidence }), mode);
+    await assertInspectionLocked(h);
+  }
+});
+test('CI durable prewrite file and directory fsync failures stop before the first SDK write', async () => {
+  for (const failure of ['file', 'directory']) {
+    const h = await harness({ ci: true }); const path = await mkdtemp(join(directory, 'evidence-fault-'));
+    let fileSyncs = 0, dirSyncs = 0;
+    const evidence = await createPrivateEvidence(path, {
+      syncFile: async f => { if (failure === 'file' && ++fileSyncs === 2) throw Error('synthetic fsync'); await f.sync(); },
+      syncDirectory: async f => { if (failure === 'directory' && ++dirSyncs === 3) throw Error('synthetic directory fsync'); await f.sync(); },
+    });
+    h.journal.privateEvidence = (event, value) => evidence.append(event, value);
+    const result = await h.runCi(); assert.equal(result.status, 'blocked');
+    assert.equal(h.providerWrites.length, 0); assert.equal(h.db.writes.length, 0);
+    await assert.rejects(h.cloud.deployCiStage('functions'));
+  }
+});
+test('private evidence delay reaching original expiry prevents the next SDK write', async () => {
+  const h = await harness({ ci: true });
+  h.journal.privateEvidence = async event => { if (event === 'prewrite-functions') h.setTime(S.endsAtMillis); };
+  const result = await h.runCi(); assert.equal(result.status, 'blocked'); assert.equal(h.providerWrites.length, 0);
+});
+test('preservation failure prints bounded fixed field paths and never provider values', async () => {
+  let h;
+  h = await harness({ ci: true, cliFault: (kind, phase, index) => {
+    if (kind === 'functions' && phase === 'after' && index === 0) h.setOverride((url, data) => {
+      if (url.startsWith('https://run.googleapis.com/') && !url.includes(':getIamPolicy')) data.lastModifier = 'PRIVATE_TOKEN_SENTINEL';
+      return data;
+    });
+  } });
+  const result = await h.runCi(); assert.equal(result.status, 'blocked'); assert.equal(result.reason, 'iam-preservation');
+  assert(result.preservation.paths.some(p => p.endsWith('.run.lastModifier')));
+  assert(!JSON.stringify(result).includes('PRIVATE_TOKEN_SENTINEL'));
+  assert.equal(h.providerWrites.length, 1); await assert.rejects(h.cloud.deployCiStage('functions')); assert.equal(h.providerWrites.length, 1);
+});
+
+test('mixed ZIP proof rejects changed valid-archive bytes, extra files and old code at new generation', async () => {
+  for (const fault of ['byte', 'extra', 'old']) {
+    const h = await harness({ ci: true }); setMixed(h);
+    const bad = await zip(fault === 'old' ? oldPacket.packet : newPacket.packet, fault);
+    h.setOverride((url, data) => {
+      if (url.includes('generation=124')) {
+        if (url.includes('&alt=media')) return bad;
+        if (url.includes('/o/')) return { ...data, size: String(bad.length) };
+      }
+      return data;
+    });
+    await assert.rejects(h.cloud.inspectMixedRecovery({ assignment: clone(MIXED_RECOVERY_ASSIGNMENT), evidenceStore: sink() }));
+    await assertInspectionLocked(h);
+  }
+});
+test('unknown preservation field remains blocked and never prints dynamic name or value', async () => {
+  let h;
+  h = await harness({ ci: true, cliFault: (kind, phase, index) => {
+    if (kind === 'functions' && phase === 'after' && index === 0) h.setOverride((url, data) => {
+      if (url.startsWith('https://run.googleapis.com/') && !url.includes(':getIamPolicy')) data.PRIVATE_DYNAMIC_NAME = 'PRIVATE_DYNAMIC_VALUE';
+      return data;
+    });
+  } });
+  const result = await h.runCi(); assert.equal(result.status, 'blocked'); assert.equal(result.reason, 'iam-preservation');
+  assert.equal(result.preservation.unknown, true); assert(result.preservation.paths.some(p => p.endsWith('.$unknown')));
+  assert(!JSON.stringify(result).includes('PRIVATE_DYNAMIC')); assert.equal(h.providerWrites.length, 1); assert.equal(h.db.writes.length, 0);
+});
+
+test('complete owner-read-only API proves real ZIPs/settings/data through bounded synthetic SDK and REST', async () => {
+  const h = await harness({ ci: true }); setMixed(h);
+  const home = await mkdtemp(join(directory, 'owner-home-')), journalPins = await createSyntheticOwnerJournal(home);
+  const token = 'SYNTHETIC_OWNER_TOKEN_NEVER_SAVED_123456'; const issued = [], httpCalls = []; let txs = 0;
+  const encode = x => x === null ? { nullValue: null } : typeof x === 'string' ? { stringValue: x } : typeof x === 'boolean' ? { booleanValue: x } :
+    typeof x === 'number' ? (Number.isInteger(x) ? { integerValue: String(x) } : { doubleValue: x }) : Array.isArray(x) ? { arrayValue: { values: x.map(encode) } } : { mapValue: { fields: fields(x) } };
+  const fields = x => Object.fromEntries(Object.entries(x).map(([k,v]) => [k,encode(v)]));
+  const spawn = (path, args) => {
+    issued.push(args); const base = args.filter(a => !/^--(?:project|billing-project|verbosity|format|account)=/.test(a));
+    if (base[0] === 'version') return { status: 0, stdout: JSON.stringify({ 'Google Cloud SDK': '587.0.0' }) };
+    if (base[0] === 'auth') return { status: 0, stdout: base[1] === 'print-access-token' ? token : JSON.stringify([{ account: 'owner@example.invalid', status: 'ACTIVE' }]) };
+    const r = h.rawRunner('gcloud', base); return { status: r.exitCode, stdout: r.stdout };
+  };
+  const fetchImpl = async (url, options) => {
+    httpCalls.push({ url, method: options.method });
+    if (url.startsWith(S.origin)) { assert.equal(options.headers.Authorization, undefined); assert.equal(options.redirect, 'manual'); return h.publicFetch(url); }
+    assert.equal(options.headers.Authorization, 'Bearer ' + token); assert.equal(options.redirect, 'error');
+    let data;
+    if (url.startsWith('https://firestore.googleapis.com/')) {
+      const body = JSON.parse(options.body); assert.equal(options.method, 'POST');
+      if (url.endsWith(':listCollectionIds')) data = { collectionIds: [...new Set(h.db.entries().map(([p]) => p.split('/')[0]))] };
+      else if (url.endsWith(':beginTransaction')) { assert.deepEqual(body, { options: { readOnly: {} } }); txs++; data = { transaction: Buffer.from('tx' + txs).toString('base64') }; }
+      else if (url.endsWith(':rollback')) data = {};
+      else { assert(url.endsWith(':runQuery')); const from = body.structuredQuery.from[0];
+        data = h.db.entries().filter(([p]) => from.allDescendants ? p.split('/').at(-2) === from.collectionId : p.split('/').length === 2 && p.startsWith(from.collectionId + '/'))
+          .map(([p,v]) => ({ document: { name: `projects/${S.project}/databases/(default)/documents/${p}`, fields: fields(v) } })); }
+    } else if (url.startsWith('https://firebasehosting.googleapis.com/')) data = url.endsWith('/channels/live') ? {
+      name: `sites/${S.project}/channels/live`, url: S.origin, release: { type: 'DEPLOY', message: `garden-trial-game-v1:${oldPacket.packet.manifestDigest}`,
+        version: { name: `sites/${S.project}/versions/old`, status: 'FINALIZED' } } } : { name: `projects/${S.project}/sites/${S.project}`, defaultUrl: S.origin };
+    else data = (await h.readOnlyRequestClient.request({ url, method: 'GET', responseType: url.includes('&alt=media') ? 'arraybuffer' : 'json', retry: false, maxRedirects: 0 })).data;
+    return new Response(Buffer.isBuffer(data) ? data : JSON.stringify(data), { status: 200 });
+  };
+  const result = await prepareOwnerReadonlyPreflight({ mode: 'inspect-owner-readonly', env: { HOME: home }, execArgv: [], now: () => NOW,
+    previousOutput: oldPacket.packet.output, nextOutput: newPacket.packet.output, journalPins, gcloudPath: '/usr/bin/true', spawn, fetchImpl });
+  assert.equal(result.executionAllowed, false); assert.equal(result.candidate.historicalPreservation, 'unknown'); assert.equal(txs, 4);
+  assert.equal(h.providerWrites.length, 0); assert.equal(h.db.writes.length, 0);
+  assert(httpCalls.every(c => c.method === 'GET' || /:(listCollectionIds|beginTransaction|runQuery|rollback)$/.test(c.url)));
+  assert(!JSON.stringify(result).includes(token)); assert(!JSON.stringify(result).includes('owner@example.invalid'));
+  const ownerReview = { schemaVersion: 1, purpose: 'owner-readonly-review', ownerFingerprint: result.fingerprint, acknowledgeHistoricalPreservationUnknown: true, executionAllowed: false };
+  assert.equal(validateOwnerReadonlyReview(result, ownerReview, NOW).executionAllowed, false);
+  assert.throws(() => validateOwnerReadonlyReview({ ...result, ownerJournalFingerprint: '0'.repeat(64) }, ownerReview, NOW));
+  const captures = join(home, '.garden-owner-readonly-preflight-20261009', 'PRIVATE-EVIDENCE');
+  for (const filename of ['0000.json','0001.json','0002.json']) { const bytes = await readFile(join(captures, filename), 'utf8'); assert(!bytes.includes(token)); assert(!bytes.includes(review.testerUids[0])); }
+  const count = issued.length; await assert.rejects(prepareOwnerReadonlyPreflight({ mode: 'inspect-owner-readonly', env: { HOME: home }, execArgv: [], now: () => NOW,
+    previousOutput: oldPacket.packet.output, nextOutput: newPacket.packet.output, journalPins, gcloudPath: '/usr/bin/true', spawn, fetchImpl })); assert.equal(issued.length, count);
+});
+
+test('mixed preflight rejects duplicate Run identities across source subsets and project aliases', async () => {
+  for (const alias of [false, true]) {
+    const h = await harness({ ci: true }); setMixed(h);
+    h.functions[0].serviceConfig.service = h.functions[1].serviceConfig.service.replace(`projects/${S.project}/`, `projects/${alias ? S.projectNumber : S.project}/`);
+    h.functions[0].serviceConfig.revision = h.functions[1].serviceConfig.revision;
+    await assert.rejects(h.cloud.inspectMixedRecovery({ assignment: clone(MIXED_RECOVERY_ASSIGNMENT), evidenceStore: sink() }), error => activeUpdateReason(error) === 'source-proof');
+    await assertInspectionLocked(h);
   }
 });

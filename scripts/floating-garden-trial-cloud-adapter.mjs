@@ -10,6 +10,7 @@ import { createRequire } from 'node:module';
 import { inflateRawSync } from 'node:zlib';
 import { isDeepStrictEqual, stripVTControlCharacters, types } from 'node:util';
 import { fileURLToPath } from 'node:url';
+import { requireOwnerReadonlyPolicy } from './floating-garden-owner-readonly-policy.mjs';
 import { requireCiAuthPolicy } from './floating-garden-ci-auth-policy.mjs';
 import { FUNCTION_NAMES } from './prepare-floating-garden-trial.mjs';
 import { validateOperationReview, publicTrialConfig } from './prepare-floating-garden-trial-operation.mjs';
@@ -322,7 +323,9 @@ function checkedDirectory(dir) {
 function checkedFile(path) { const s = lstatSync(path); requireThat(s.isFile() && !s.isSymbolicLink() && s.nlink === 1 && s.size <= 4 * 1024 * 1024, 'local-file'); return readFileSync(path); }
 
 export function createCloudAdapter({ packet, review, toolingDir, prior, runner = makeCloudRunner(), requestClient,
-  db: injectedDb, now = Date.now, fetchImpl = fetch, env = process.env, execArgv = process.execArgv, environmentPolicy } = {}) {
+  db: injectedDb, now = Date.now, fetchImpl = fetch, env = process.env, execArgv = process.execArgv, environmentPolicy, ownerReadonlyPolicy } = {}) {
+  const ownerOnly = ownerReadonlyPolicy !== undefined;
+  if (ownerOnly) { requireOwnerReadonlyPolicy(ownerReadonlyPolicy); requireThat(environmentPolicy === undefined && requestClient && injectedDb, 'preflight-mode'); }
   let firebase, auth, database = injectedDb, manifest, expectedSource, readyMode, localReady = false;
   let attemptedFunctions = false, attemptedRules = false, attemptedHosting = false, attemptedCreate = false;
   let priorProof, attemptedWindowReplacement = false, windowReplaced = false;
@@ -348,7 +351,7 @@ export function createCloudAdapter({ packet, review, toolingDir, prior, runner =
   async function boundary(fn) { try { return await fn(); } catch (e) { if (adapterFailures.has(e)) throw e; throw safe('provider-or-local-check'); } }
   function localScope() {
     checkedReview();
-    (environmentPolicy === undefined ? { validateEnvironment } : requireCiAuthPolicy(environmentPolicy)).validateEnvironment(env, execArgv);
+    (ownerOnly ? requireOwnerReadonlyPolicy(ownerReadonlyPolicy) : environmentPolicy === undefined ? { validateEnvironment } : requireCiAuthPolicy(environmentPolicy)).validateEnvironment(env, execArgv);
     for (const key of ['DEBUG', 'GRPC_TRACE', 'GRPC_VERBOSITY', 'GOOGLE_SDK_NODE_LOGGING']) requireThat(!env[key], 'diagnostic-environment');
     requireThat(Number(process.versions.node.split('.')[0]) >= 20, 'node-version');
     checkedDirectory(packet.output); checkedDirectory(packet.gameDir); checkedDirectory(packet.stoppedDir);
@@ -417,7 +420,7 @@ export function createCloudAdapter({ packet, review, toolingDir, prior, runner =
   }
   async function request(url, { bytes = false } = {}) {
     const u = new URL(url);
-    requireThat(u.protocol === 'https:' && !u.username && !u.password && ['cloudfunctions.googleapis.com', 'run.googleapis.com', 'firebaserules.googleapis.com', 'storage.googleapis.com'].includes(u.hostname), 'read-url');
+    requireThat(u.protocol === 'https:' && !u.username && !u.password && ['cloudfunctions.googleapis.com', 'run.googleapis.com', 'firebaserules.googleapis.com', 'storage.googleapis.com', ...(ownerOnly ? ['firebasehosting.googleapis.com'] : [])].includes(u.hostname), 'read-url');
     // Only GETs use this boundary; no extracted token, user-selected URL or retry.
     const c = await client();
     let response;
@@ -487,6 +490,7 @@ export function createCloudAdapter({ packet, review, toolingDir, prior, runner =
     requireThat(same({ ...oldConfig, startsAtMillis: review.startsAtMillis, endsAtMillis: review.endsAtMillis }, newConfig), 'resume-source-change');
   }
   async function replaceStoppedWindow(next, expected) { return boundary(async () => {
+    requireThat(!ownerOnly, 'preflight-mode');
     requireThat(readyMode === 'resume' && priorProof && !attemptedWindowReplacement, 'resume-replace-mode');
     requireLocal(); checkResumeSource(); assertRecords(next, true);
     requireThat(same(expected, priorProof.admin) && same(expected, stoppedRecords(prior.review)), 'resume-replace-expected');
@@ -512,6 +516,7 @@ export function createCloudAdapter({ packet, review, toolingDir, prior, runner =
     }
   }); }
   async function createStoppedAdmin(records) { return boundary(async () => {
+    requireThat(!ownerOnly, 'preflight-mode');
     requireThat(readyMode === 'deploy' && !attemptedCreate, 'admin-create-mode'); requireLocal(); assertRecords(records, true);
     const db = await getDb(), r = refs(db); let writes = false;
     attemptedCreate = true;
@@ -525,6 +530,7 @@ export function createCloudAdapter({ packet, review, toolingDir, prior, runner =
     } catch { return result(writes ? 'unknown' : 'failed'); }
   }); }
   async function updateAdmin(next, expected) { return boundary(async () => {
+    requireThat(!ownerOnly, 'preflight-mode');
     requireThat(['deploy', 'resume', 'activate', 'stop'].includes(readyMode), 'admin-update-mode'); requireLocal(); assertRecords(next); assertRecords(expected);
     requireThat(same(next.usage, expected.usage), 'admin-usage-untouched');
     const activation = next.gate?.enabled === true;
@@ -637,9 +643,19 @@ export function createCloudAdapter({ packet, review, toolingDir, prior, runner =
     }
     return { verified: true };
   }
-  async function readHosting() { return boundary(async () => { requireLocal(); const a = readRelease(); await verifyHostingBytes(a.kind); requireThat(same(a, readRelease()), 'hosting-concurrent-change'); return a; }); }
+  async function ownerReadRelease() {
+    const site = await request(`https://firebasehosting.googleapis.com/v1beta1/projects/${PROJECT}/sites/${PROJECT}`);
+    sitePresent({ sites: [site] });
+    const channel = liveChannel({ channels: [await request(`https://firebasehosting.googleapis.com/v1beta1/projects/${PROJECT}/sites/${PROJECT}/channels/live`)] });
+    const release = channel.release;
+    requireThat(release?.type === 'DEPLOY' && release.version?.status === 'FINALIZED' && release.message === marker('game'), 'hosting-release');
+    return { kind: 'game', version: canonicalVersionName(release.version.name), marker: release.message };
+  }
+  async function readHosting() { return boundary(async () => { requireLocal(); const readCurrent = ownerOnly ? ownerReadRelease : readRelease;
+    const a = await readCurrent(); await verifyHostingBytes(a.kind); requireThat(same(a, await readCurrent()), 'hosting-concurrent-change'); return a; }); }
   async function verifyHosting(kind) { return boundary(async () => { const h = await readHosting(); requireThat(h.kind === kind, 'hosting-target'); return { verified: true }; }); }
   async function deployHosting(kind) { return boundary(async () => {
+    requireThat(!ownerOnly, 'preflight-mode');
     requireThat(['game', 'stopped'].includes(kind) && (kind === 'game' ? ['deploy', 'resume'].includes(readyMode) : ['deploy', 'resume', 'stop'].includes(readyMode)) && !attemptedHosting, 'hosting-deploy-mode');
     if (readyMode === 'resume') requireThat(windowReplaced, 'resume-replacement-required');
     requireLocal(); const current = await readHosting();
@@ -682,12 +698,12 @@ export function createCloudAdapter({ packet, review, toolingDir, prior, runner =
         const object = await request(objectUrl);
         requireThat(object.bucket === source.bucket && object.name === source.object && String(object.generation) === source.generation &&
           /^[1-9][0-9]*$/.test(String(object.size)) && Number(object.size) <= MAX_BYTES, 'source-object-identity');
-        validateSourceArchive(await request(`${objectUrl}&alt=media`, { bytes: true }), expectedSource, { allowDirectoryEntries: environmentPolicy !== undefined }); proven.add(key);
+        validateSourceArchive(await request(`${objectUrl}&alt=media`, { bytes: true }), expectedSource, { allowDirectoryEntries: ownerOnly || environmentPolicy !== undefined }); proven.add(key);
       }
     }
     requireThat(same(functions, await functionsList()), 'functions-concurrent-change');
     // Private detailed evidence is opt-in and is never logged by this adapter.
-    return includeProof ? { verified: true, functions: proof } : { verified: true };
+    return includeProof ? { verified: true, functions: proof, inventory: functions } : { verified: true };
   }); }
   async function rulesState(includeProof = false) {
     const release = await request(`https://firebaserules.googleapis.com/v1/projects/${PROJECT}/releases/cloud.firestore`);
@@ -717,6 +733,7 @@ export function createCloudAdapter({ packet, review, toolingDir, prior, runner =
     return { verified: true };
   }); }
   async function deployFunctions() { return boundary(async () => {
+    requireThat(!ownerOnly, 'preflight-mode');
     requireThat(['deploy', 'resume'].includes(readyMode) && !attemptedFunctions, 'functions-deploy-mode'); requireLocal();
     requireThat(review.retainBuildArtifacts && review.allowInitialFunctionRecreate && review.approvePublicInvoker, 'cli-effects-review');
     if (readyMode === 'resume') {
@@ -729,6 +746,7 @@ export function createCloudAdapter({ packet, review, toolingDir, prior, runner =
     return deployCommand(['deploy', '--only', FUNCTION_NAMES.map((name) => `functions:${CODEBASE}:${name}`).join(',')], 'game', 'firebase.trial.json', 'functions', { allowCleanupWarning: true });
   }); }
   async function deployRules() { return boundary(async () => {
+    requireThat(!ownerOnly, 'preflight-mode');
     requireThat(['deploy', 'resume'].includes(readyMode) && !attemptedRules, 'rules-deploy-mode'); requireLocal();
     if (readyMode === 'resume') requireThat(windowReplaced, 'resume-replacement-required');
     const current = await rulesState();
@@ -737,14 +755,14 @@ export function createCloudAdapter({ packet, review, toolingDir, prior, runner =
     return deployCommand(['deploy', '--only', 'firestore:rules'], 'game', 'firebase.trial.json', 'rules');
   }); }
   async function preflight(mode) { return boundary(async () => {
-    requireThat(['deploy', 'resume', 'activate', 'inspect', 'stop'].includes(mode), 'preflight-mode'); localScope();
-    (environmentPolicy === undefined ? { validateConfiguration } : requireCiAuthPolicy(environmentPolicy)).validateConfiguration(gcloud(['config', 'list', '--all']));
+    requireThat((!ownerOnly || mode === 'inspect') && ['deploy', 'resume', 'activate', 'inspect', 'stop'].includes(mode), 'preflight-mode'); localScope();
+    (ownerOnly ? requireOwnerReadonlyPolicy(ownerReadonlyPolicy) : environmentPolicy === undefined ? { validateConfiguration } : requireCiAuthPolicy(environmentPolicy)).validateConfiguration(gcloud(['config', 'list', '--all']));
     const project = gcloud(['projects', 'describe', PROJECT]);
     requireThat(project.projectId === PROJECT && String(project.projectNumber) === PROJECT_NUMBER && project.lifecycleState === 'ACTIVE', 'project-identity');
     // Stop is gate-first. Hosting, tooling, runtime and build failures must not
     // prevent disabling an existing exact private gate with the existing ADC.
     if (mode === 'stop') { readyMode = mode; return { verified: true }; }
-    setupTooling();
+    if (!ownerOnly) setupTooling();
     if (mode === 'inspect' || mode === 'activate') {
       if (mode === 'activate') requireThat(review.retainBuildArtifacts && review.allowInitialFunctionRecreate && review.approvePublicInvoker, 'cli-effects-review');
       readyMode = mode; return { verified: true };

@@ -7,11 +7,12 @@ import { resolve, join, dirname, isAbsolute, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { createHash } from 'node:crypto';
+import { createPrivateEvidence } from './floating-garden-active-update-evidence.mjs';
 import { createCiClients } from './floating-garden-ci-clients.mjs';
 import { requireCiAuthPolicy } from './floating-garden-ci-auth-policy.mjs';
 import { prepareCiPacket } from './prepare-floating-garden-ci-packet.mjs';
 import { validateOperationReview } from './prepare-floating-garden-trial-operation.mjs';
-import { createActiveUpdateProvider, ciProviderFailureDiagnostic } from './floating-garden-active-update-provider.mjs';
+import { createActiveUpdateProvider, ciProviderFailureDiagnostic, providerPreservationDiagnostic } from './floating-garden-active-update-provider.mjs';
 import { makeCloudRunner, describeAdapterFailure } from './floating-garden-trial-cloud-adapter.mjs';
 import { checkTooling, canonicalVersionName, liveChannel } from './deploy-floating-garden-connection-template.mjs';
 import { ACTIVE_UPDATE_SCOPE as S, prepareActiveUpdatePlan, recheckActiveUpdatePlan,
@@ -66,10 +67,10 @@ export async function executeCiRelease({ plan, approval, cloud, journal, env, en
     const reason = failures.get(error) || (active !== 'unclassified' ? active : adapter.reason);
     let journalWriteFailed = false;
     try { await journal.fail(stage, reason, access); } catch { journalWriteFailed = true; }
-    const cliOutcome = ciProviderFailureDiagnostic(error);
+    const cliOutcome = ciProviderFailureDiagnostic(error), preservation = providerPreservationDiagnostic(error);
     return { status: 'blocked', stage, reason, access, automaticRetry: false, automaticRollback: false,
       ...(adapter.httpStatus ? { httpStatus: adapter.httpStatus } : {}),
-      ...(cliOutcome ? { cliOutcome } : {}), ...(journalWriteFailed ? { journalWriteFailed: true } : {}) };
+      ...(cliOutcome ? { cliOutcome } : {}), ...(preservation ? { preservation } : {}), ...(journalWriteFailed ? { journalWriteFailed: true } : {}) };
   }
 }
 async function privatePath(path, file = false) {
@@ -83,11 +84,12 @@ async function privatePath(path, file = false) {
   need(!(info.mode & 0o077) && (file ? info.isFile() && !info.isSymbolicLink() && info.nlink === 1 && info.size <= 8192 : info.isDirectory()), 'private-path');
 }
 export async function createCiJournal(directory, now = Date.now) {
-  await privatePath(directory); const file = await open(join(directory, 'CI-RELEASE-JOURNAL.jsonl'), 'wx', 0o600);
+  await privatePath(directory); const evidence = await createPrivateEvidence(directory); const file = await open(join(directory, 'CI-RELEASE-JOURNAL.jsonl'), 'wx', 0o600);
   let terminal = false; const issued = new Set(), providerIssued = new Map();
   const append = async value => { need(!terminal, 'journal'); await file.writeFile(JSON.stringify({ atMillis: now(), ...value }) + '\n'); await file.sync(); };
   await append({ event: 'created', originalExpiry: S.endsAtMillis });
   return {
+    async privateEvidence(event, value) { need(!terminal, 'journal'); return evidence.append(event, value); },
     async issued(stage) { need(STAGES.includes(stage) && !issued.has(stage), 'journal'); issued.add(stage); await append({ event: 'issued', stage }); },
     async verified(stage) { need(issued.has(stage), 'journal'); await append({ event: 'verified', stage }); },
     async providerStep(s) {
