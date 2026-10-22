@@ -1,0 +1,23 @@
+{
+  "version": "10.8.0",
+  "retrievedOn": "2026-10-03",
+  "license": "Apache-2.0",
+  "licenseUrl": "https://www.apache.org/licenses/LICENSE-2.0",
+  "files": {
+    "firebase-app.js": {
+      "url": "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js",
+      "bytes": 94489,
+      "sha256": "039f62b40bec14479291b93e0a35d9ad71cc4e6d64e9abf1285e1d2c6f9d83cb"
+    },
+    "firebase-app-check.js": {
+      "url": "https://www.gstatic.com/firebasejs/10.8.0/firebase-app-check.js",
+      "bytes": 25038,
+      "sha256": "d74ff19cdc1d627142cc7b0f4f3198130e20af8c2cf1f84faf7cb79433540296"
+    },
+    "firebase-auth.js": {
+      "url": "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js",
+      "bytes": 147398,
+      "sha256": "33b487bc8e0dd6007ea461c6e63374b51c01101a9f5ad5450a580ea40dfc26ae"
+    }
+  }
+}

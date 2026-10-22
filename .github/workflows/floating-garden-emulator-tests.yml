@@ -1,0 +1,80 @@
+name: Floating Garden Emulator Tests
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/floating-garden-emulator-tests.yml'
+      - 'lab/floating-garden/**'
+      - 'functions/**'
+      - 'firestore.rules'
+      - 'firestore.indexes.json'
+      - 'firebase.floating-garden-emulator.json'
+      - 'scripts/prepare-floating-garden-core.mjs'
+      - 'tests/floating-garden-*'
+      - 'tests/helpers/floating-garden-*'
+      - 'tests/e2e/package*.json'
+      - 'package*.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: floating-garden-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  isolated-emulators:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      GCLOUD_PROJECT: demo-floating-garden
+      GOOGLE_CLOUD_PROJECT: demo-floating-garden
+      FIREBASE_PROJECT_ID: demo-floating-garden
+      FIREBASE_CONFIG: '{"projectId":"demo-floating-garden"}'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            functions/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm ci --prefix functions --ignore-scripts --no-audit --no-fund
+      - name: Check canonical rules and CPU regressions
+        run: npm run check:floating-garden:core && npm test
+      - name: Check member-only Firestore rules
+        run: npm run test:floating-garden:rules
+      - name: Check real Firestore transaction behavior
+        run: npm run test:floating-garden:transactions
+      - name: Run authenticated two-client callable matches
+        run: npm run test:floating-garden:integration
+      - name: Install existing browser test dependencies
+        run: npm ci --prefix tests/e2e --ignore-scripts --no-audit --no-fund
+      - name: Prepare Chromium
+        run: tests/e2e/node_modules/.bin/playwright install --with-deps chromium
+      - name: Exercise the real two-client garden UI
+        run: npm run test:floating-garden:browser
+      - name: Exercise unchanged app with real browser Firebase emulators
+        run: npm run test:floating-garden:browser:emulator
+      - name: Retain isolated emulator diagnostics and browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: floating-garden-ci-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            *-debug.log
+            /tmp/floating-garden-online-browser-qa/
+            /tmp/floating-garden-online-browser-emulator-qa/
+          retention-days: 7
+          if-no-files-found: warn

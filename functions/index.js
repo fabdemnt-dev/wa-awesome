@@ -1445,3 +1445,11 @@ exports.deepMiningAgreementJoinRoom = deepMiningAgreementOnline.joinRoom;
 exports.deepMiningAgreementGetSnapshot = deepMiningAgreementOnline.getSnapshot;
 exports.deepMiningAgreementStartGame = deepMiningAgreementOnline.startGame;
 exports.deepMiningAgreementSubmitAction = deepMiningAgreementOnline.submitAction;
+
+// Floating Garden uses its own authoritative state and collection namespace.
+const floatingGardenOnline = require('./floating-garden-online');
+exports.floatingGardenCreateRoom = floatingGardenOnline.floatingGardenCreateRoom;
+exports.floatingGardenJoinRoom = floatingGardenOnline.floatingGardenJoinRoom;
+exports.floatingGardenStartMatch = floatingGardenOnline.floatingGardenStartMatch;
+exports.floatingGardenGetSnapshot = floatingGardenOnline.floatingGardenGetSnapshot;
+exports.floatingGardenSubmitAction = floatingGardenOnline.floatingGardenSubmitAction;
