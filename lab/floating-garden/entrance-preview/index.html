@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex,nofollow">
+  <meta name="theme-color" content="#10203e">
+  <meta name="description" content="星詠みの浮遊庭園の入口を確認する公開プレビューです。完成版ではなく、このページでは対戦・保存・ログインはできません。">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self'; media-src 'self'; font-src 'self'; style-src 'self'; script-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>星詠みの浮遊庭園｜入口の公開プレビュー</title>
+  <link rel="stylesheet" href="./entrance.css">
+</head>
+<body>
+  <a class="skip-link" href="#play">遊び方の選択へ</a>
+  <div class="page-shell">
+    <header class="topbar">
+      <a class="back-link" href="https://fabdemnt-dev.github.io/wa-awesome/toybox/">← おもちゃ箱へ</a>
+      <button id="motion-toggle" class="motion-toggle" type="button" aria-label="背景アニメーション" aria-pressed="false" hidden><span aria-hidden="true" id="motion-icon">▷</span><span id="motion-label">背景を動かす</span></button>
+    </header>
+    <main>
+      <aside class="preview-notice" id="preview-notice" aria-label="公開プレビューについて"><strong>入口の公開プレビュー · 完成版ではありません</strong><p>URLを知る方は閲覧できます。絵・背景の動き・遊び方・画面幅の確認用です。ここではゲームを開始できず、ログイン・対戦・ゲームデータの保存や変更は行いません。</p></aside>
+      <section class="garden-card" aria-labelledby="garden-title">
+        <div class="title-block">
+          <p class="eyebrow" aria-hidden="true"><span></span> STARLIT GARDEN <span></span></p>
+          <h1 id="garden-title"><span>星詠みの</span><span>浮遊庭園</span></h1>
+          <p class="catchcopy">星の流れをつないで、<wbr>あなただけの庭を。</p>
+        </div>
+        <div class="scene" id="garden-scene" role="img" aria-label="星空に浮かぶ庭園。石のアーチと青く光る結晶、小さな滝。">
+          <img class="scene-media" src="./assets/garden-night.png" alt="" width="1280" height="720" fetchpriority="high">
+          <video id="garden-video" class="scene-media" data-src="./assets/garden-night.mp4" muted loop playsinline preload="none" aria-hidden="true" tabindex="-1"></video>
+        </div>
+        <div class="mode-list" id="play" aria-label="遊び方の表示見本" tabindex="-1">
+          <button class="mode-link solo" id="solo-link" type="button" disabled aria-describedby="preview-notice">
+            <span class="mode-symbol" aria-hidden="true">✧</span>
+            <span class="mode-copy"><strong>ひとりで遊ぶ</strong><small>あなた1人 ＋ CPU 1〜3人</small></span>
+            <span class="mode-arrow" aria-hidden="true">◇</span>
+          </button>
+          <button class="mode-link online" id="online-link" type="button" disabled aria-describedby="preview-notice">
+            <span class="mode-symbol" aria-hidden="true">✧<span>✧</span></span>
+            <span class="mode-copy"><strong>ふたりでオンライン</strong><small>人間2人 ＋ NPC 0〜2人 · 招待コードで参加</small></span>
+            <span class="mode-arrow" aria-hidden="true">◇</span>
+          </button>
+        </div>
+        <p class="preview-mode-note">上の2つは表示見本です。このページでは遊べません。</p>
+        <div class="help-area">
+          <button class="howto-button" id="howto-open" type="button" hidden><span aria-hidden="true">?</span> はじめての遊び方</button>
+          <a class="howto-fallback" id="howto-fallback" href="#howto-static">はじめての遊び方 ↓</a>
+          <details class="online-note">
+            <summary>ゲーム本体の人数・部屋について（参考）</summary>
+            <p>ゲーム本体のオンラインは人間2人用です。NPCを0〜2人追加できます。人間3〜4人でのオンラインには、まだ対応していません。</p>
+            <p>新しく作れる部屋は公開版全体で20部屋まで。各部屋は作成から24時間使えます。上限に達した場合、新しい部屋は作れません。</p>
+          </details>
+        </div>
+        <p class="save-note">ゲーム本体のひとり用は、同じ端末・ブラウザーなら<br class="small-break">最新1試合を続きから遊べます。<span>※ ゲーム本体でブラウザーの保存機能が使える場合。この確認ページは保存しません。</span></p>
+      </section>
+      <section id="howto-static" class="howto-static" aria-labelledby="howto-static-title">
+        <h2 id="howto-static-title">小さな庭から、星の流れを。</h2>
+        <ol><li>タイルを1枚引き、自分の庭に置くか、相手へ譲るか、保管するかを選びます。</li><li>4×4の庭で、タイルを回して流れをつなぎます。仮置きを見てから確定できます。</li><li>瞑想で力をため、石を置いて得点を伸ばします。みんなの庭が完成したら、流れ・石・お題の合計で競います。</li></ol>
+        <p>詳しいルールと図つきのお手本は、ゲーム画面で確認できます。</p>
+        <a href="#play">遊び方の選択へ戻る ↑</a>
+      </section>
+    </main>
+    <footer class="page-footer">ひとつの星空、みんなの庭。</footer>
+  </div>
+  <dialog id="howto-dialog" aria-labelledby="howto-title">
+    <div class="dialog-heading"><p class="eyebrow">HOW TO PLAY</p><button id="howto-close" class="close-button" type="button" aria-label="遊び方を閉じる" autofocus>×</button></div>
+    <h2 id="howto-title">小さな庭から、<br>星の流れを。</h2>
+    <p class="dialog-lead">タイルをつなぎ、石を置く。<br>4×4の庭で楽しむ、星空の庭づくり。</p>
+    <ol class="howto-steps">
+      <li><span class="step-number" aria-hidden="true">01</span><div><h3>1枚引いて、行き先を選ぶ</h3><p>自分の庭に使う、相手へ譲る、あとで使うために保管する。タイルの行き先を考えましょう。</p></div></li>
+      <li><span class="step-number" aria-hidden="true">02</span><div><h3>回して、流れをつなぐ</h3><p>4×4のマスへ仮置き。向きを回し、得点を確かめてから配置を確定できます。</p></div></li>
+      <li><span class="step-number" aria-hidden="true">03</span><div><h3>力をためて、石で彩る</h3><p>瞑想で力をため、石を置いて得点アップ。庭が完成したら、流れ・石・お題の合計を比べます。</p></div></li>
+    </ol>
+    <p class="howto-tip">ひとり用のCPUは「CPUの手を進める」を押すまで待ってくれます。詳しいルールと図つきのお手本はゲーム画面にあります。</p>
+    <button id="howto-done" class="done-button" type="button">遊び方を選ぶ</button>
+  </dialog>
+  <script type="module" src="./entrance.js"></script>
+</body>
+</html>
