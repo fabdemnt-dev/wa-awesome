@@ -94,3 +94,26 @@ if (typeof dialog.showModal === 'function') {
     if (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) close();
   });
 }
+
+// UI-only composition selector. No game state, credentials or network access.
+const humans = document.querySelector('#human-count');
+const npcs = document.querySelector('#npc-count');
+const modeSummary = document.querySelector('#mode-summary');
+const modeAvailability = document.querySelector('#mode-availability');
+function showComposition() {
+  const humanCount = [2, 3, 4].includes(Number(humans.value)) ? Number(humans.value) : 2;
+  humans.value = String(humanCount);
+  const previous = Number(npcs.value);
+  const maximum = 4 - humanCount;
+  npcs.innerHTML = '<option value="0">なし</option>' + (maximum >= 1 ? '<option value="1">1人</option>' : '') + (maximum >= 2 ? '<option value="2">2人</option>' : '');
+  const npcCount = Number.isInteger(previous) && previous >= 0 && previous <= maximum ? previous : 0;
+  npcs.value = String(npcCount);
+  npcs.disabled = maximum === 0;
+  modeSummary.textContent = `人間${humanCount}人 ＋ NPC${npcCount === 0 ? 'なし' : npcCount + '人'} · 合計${humanCount + npcCount}人戦`;
+  modeAvailability.textContent = humanCount >= 3 ? 'この3〜4人用モードは未公開の見本です。' : '確認用のため開始できません。';
+}
+humans.addEventListener('change', showComposition);
+npcs.addEventListener('change', showComposition);
+showComposition();
+document.querySelector('#mode-controls').hidden = false;
+document.querySelector('#mode-fallback').hidden = true;
