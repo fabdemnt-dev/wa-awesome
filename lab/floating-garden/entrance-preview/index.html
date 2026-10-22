@@ -19,21 +19,29 @@
       <button id="motion-toggle" class="motion-toggle" type="button" aria-label="背景アニメーション" aria-pressed="false" hidden><span aria-hidden="true" id="motion-icon">▷</span><span id="motion-label">背景を動かす</span></button>
     </header>
     <main>
-      <aside class="preview-notice" id="preview-notice" aria-label="公開プレビューについて"><strong>入口の確認用 · このページでは遊べません</strong><details><summary>公開プレビューについて</summary><p>完成版ではありません。URLを知る方は閲覧できます。ログイン・対戦・ゲームデータの保存や変更は行いません。</p></details></aside>
+      <aside class="preview-notice" id="preview-notice" aria-label="公開プレビューについて"><strong>入口の公開プレビュー · 完成版ではありません</strong><p>URLを知る方は閲覧できます。絵・背景の動き・遊び方・画面幅の確認用です。ここではゲームを開始できず、ログイン・対戦・ゲームデータの保存や変更は行いません。</p></aside>
       <section class="garden-card" aria-labelledby="garden-title">
+        <div class="title-block">
+          <p class="eyebrow" aria-hidden="true"><span></span> STARLIT GARDEN <span></span></p>
+          <h1 id="garden-title"><span>星詠みの</span><span>浮遊庭園</span></h1>
+          <p class="catchcopy">星の流れをつないで、<wbr>あなただけの庭を。</p>
+        </div>
         <div class="scene" id="garden-scene" role="img" aria-label="星空に浮かぶ庭園。石のアーチと青く光る結晶、小さな滝。">
           <img class="scene-media" src="./assets/garden-night.png" alt="" width="1280" height="720" fetchpriority="high">
           <video id="garden-video" class="scene-media" data-src="./assets/garden-night.mp4" muted loop playsinline preload="none" aria-hidden="true" tabindex="-1"></video>
         </div>
-        <div class="title-block">
-          <p class="eyebrow" aria-hidden="true">STARLIT GARDEN</p>
-          <h1 id="garden-title"><span>星詠みの</span><span>浮遊庭園</span></h1>
-          <p class="catchcopy">星の流れをつないで、あなただけの庭を。<br><span class="player-range">ひとりでも、友だちと2〜4人でも。</span></p>
-        </div>
         <div class="mode-list" id="play" aria-label="遊び方の表示見本" tabindex="-1">
-          <button class="entry-button primary" id="solo-link" type="button" disabled aria-describedby="preview-notice">ひとりで遊ぶ（CPU対戦）</button>
+          <button class="mode-link solo" id="solo-link" type="button" disabled aria-describedby="preview-notice">
+            <span class="mode-symbol" aria-hidden="true">✧</span>
+            <span class="mode-copy"><strong>ひとりで遊ぶ</strong><small>あなた1人 ＋ CPU 1〜3人</small></span>
+            <span class="mode-arrow" aria-hidden="true">◇</span>
+          </button>
           <details class="mode-picker" id="online-picker">
-            <summary class="entry-button">友だちとオンライン（2〜4人） <small>人数の見本を見る</small></summary>
+            <summary class="mode-link online">
+              <span class="mode-symbol" aria-hidden="true">✧<span>✧</span></span>
+              <span class="mode-copy"><strong>友だちとオンライン（2〜4人）</strong><small>人数の見本を見る · 招待コードで参加</small></span>
+              <span class="mode-arrow" aria-hidden="true">◇</span>
+            </summary>
             <div class="picker-options" aria-label="オンラインの人数・NPC構成の見本">
               <p>人数構成の表示見本です。どのモードも、このページでは開始できません。</p>
               <div id="mode-controls" hidden>
@@ -48,9 +56,18 @@
               <p id="mode-fallback">人数の見本：人間2人＋NPC 0〜2人／人間3人のみ（3人戦）／人間3人 ＋ NPC1人（4人戦）／人間4人のみ（4人戦）。3〜4人用は未公開の見本です。</p>
             </div>
           </details>
-          <button class="entry-button" id="howto-open" type="button" hidden>遊び方</button>
-          <a class="entry-button" id="howto-fallback" href="#howto-static">遊び方</a>
         </div>
+        <p class="preview-mode-note">すべて表示見本です。このページでは遊べません。</p>
+        <div class="help-area">
+          <button class="howto-button" id="howto-open" type="button" hidden><span aria-hidden="true">?</span> はじめての遊び方</button>
+          <a class="howto-fallback" id="howto-fallback" href="#howto-static">はじめての遊び方 ↓</a>
+          <details class="online-note">
+            <summary>ゲーム本体の人数・部屋について（参考）</summary>
+            <p>現在公開中のゲーム本体は人間2人用で、NPCを0〜2人追加できます。この見本にある人間3人・人間3人＋NPC1人・人間4人のモードは準備中で、まだ公開していません。</p>
+            <p>新しく作れる部屋は公開版全体で20部屋まで。各部屋は作成から24時間使えます。上限に達した場合、新しい部屋は作れません。</p>
+          </details>
+        </div>
+        <p class="save-note">ゲーム本体のひとり用は、同じ端末・ブラウザーなら<br class="small-break">最新1試合を続きから遊べます。<span>※ ゲーム本体でブラウザーの保存機能が使える場合。この確認ページは保存しません。</span></p>
       </section>
       <section id="howto-static" class="howto-static" aria-labelledby="howto-static-title">
         <h2 id="howto-static-title">小さな庭から、星の流れを。</h2>
