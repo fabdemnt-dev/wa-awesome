@@ -135,12 +135,12 @@ test('confirmed duplicate corners are not shown as reparable; only a pending dup
   assert.doesNotMatch(duplicatePreview, /この試合では達成できません/);
 });
 
-test('the solo rule panel describe all four objectives and mark corners as an example, not a universal rule', () => {
+test('the solo rule panel describes all four objectives with matching illustrated examples, not a universal corner rule', () => {
   for (const html of [renderMatchRules(objectiveOf('flow-chain'), true)]) {
     for (const definition of Object.values(OBJECTIVES)) assert.ok(html.includes(definition.name));
     assert.match(html, /輪になった流れも含みます/);
     assert.match(html, /1人につき1回だけ/);
-    assert.match(html, /お題の一例として四隅を示します/);
+    assert.match(html, /4種類のお題のお手本を見比べられます/);
     assert.match(html, /この試合: <strong>六枚の流れ/);
     assert.doesNotMatch(html, /隣り合う流れの接続1辺につき1点。四隅を4種類/);
   }
