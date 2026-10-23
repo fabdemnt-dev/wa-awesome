@@ -1,0 +1,254 @@
+name: Garden CI preparation offline tests
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/garden-ci-preparation-tests.yml'
+      - 'scripts/prepare-floating-garden-ci-packet.mjs'
+      - 'tests/floating-garden-ci-packet.test.mjs'
+      - 'scripts/setup-floating-garden-ci-owner.py'
+      - 'scripts/renew-floating-garden-ci-trust-owner.py'
+      - 'tests/floating-garden-ci-trust-renewal.test.py'
+      - 'tests/floating-garden-ci-owner-sdk.test.py'
+      - 'docs/floating-garden-ci-trust-renewal.md'
+      - 'tests/floating-garden-ci-setup.test.py'
+      - 'scripts/floating-garden-ci-clients.mjs'
+      - 'tests/floating-garden-ci-clients.test.mjs'
+      - '.github/workflows/deploy-floating-garden-trial.yml'
+      - 'scripts/floating-garden-ci-auth-policy.mjs'
+      - 'scripts/floating-garden-ci-configuration.mjs'
+      - 'scripts/floating-garden-ci-gcloud.mjs'
+      - 'tests/floating-garden-ci-gcloud.test.mjs'
+      - 'tests/floating-garden-ci-gcloud-sdk.test.py'
+      - 'tests/floating-garden-ci-gcloud-sdk.integration.mjs'
+      - 'scripts/floating-garden-ci-release.mjs'
+      - 'tests/floating-garden-ci-auth-policy.test.mjs'
+      - 'tests/floating-garden-ci-release.test.mjs'
+      - 'scripts/floating-garden-active-update-provider.mjs'
+      - 'scripts/floating-garden-trial-cloud-adapter.mjs'
+      - 'tests/floating-garden-active-update.test.mjs'
+      - 'tests/floating-garden-trial-operation.test.mjs'
+
+permissions:
+  contents: read
+
+jobs:
+  offline-preparation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDSDK_CORE_DISABLE_PROMPTS: 'true'
+      CLOUDSDK_CORE_DISABLE_USAGE_REPORTING: 'true'
+      CLOUDSDK_CORE_DISABLE_FILE_LOGGING: 'true'
+      CLOUDSDK_CORE_LOG_HTTP: 'false'
+      CLOUDSDK_COMPONENT_MANAGER_DISABLE_UPDATE_CHECK: 'true'
+      CLOUDSDK_AUTH_DISABLE_CREDENTIALS: 'true'
+      CLOUDSDK_PAGER: ''
+      TERM: dumb
+    steps:
+      - name: Set isolated gcloud directory before SDK use
+        env:
+          ISOLATED_GCLOUD: ${{ runner.temp }}/garden-ci-empty-gcloud
+        run: printf 'CLOUDSDK_CONFIG=%s\n' "$ISOLATED_GCLOUD" >> "$GITHUB_ENV"
+      - name: Checkout preparation code without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Set up Node.js without a dependency cache
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Test owner setup using only the in-memory fake
+        run: |
+          python3 -I tests/floating-garden-ci-setup.test.py
+          python3 -I tests/floating-garden-ci-trust-renewal.test.py
+      - name: Test synthetic packet preparation without SDKs or cloud calls
+        run: node --test tests/floating-garden-ci-packet.test.mjs
+      - name: Install locked SDK dependencies without lifecycle scripts
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm ci --prefix functions/floating-garden-trial --ignore-scripts --no-audit --no-fund
+      - name: Test real pinned SDK initialization with network and subprocesses denied
+        run: node --test tests/floating-garden-ci-clients.test.mjs tests/floating-garden-ci-auth-policy.test.mjs tests/floating-garden-ci-release.test.mjs tests/floating-garden-ci-gcloud.test.mjs tests/floating-garden-active-update.test.mjs tests/floating-garden-trial-operation.test.mjs
+      - name: Require a fresh credential-free gcloud configuration
+        run: |
+          python3 -I - <<'PY'
+          import os
+          from pathlib import Path
+          forbidden = ('GOOGLE_APPLICATION_CREDENTIALS', 'GOOGLE_GHA_CREDS_PATH',
+                       'CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE', 'CLOUDSDK_AUTH_ACCESS_TOKEN',
+                       'CLOUDSDK_AUTH_ACCESS_TOKEN_FILE', 'CLOUDSDK_AUTH_IMPERSONATE_SERVICE_ACCOUNT',
+                       'CLOUDSDK_AUTH_LOGIN_CONFIG_FILE', 'ACTIONS_ID_TOKEN_REQUEST_TOKEN',
+                       'ACTIONS_ID_TOKEN_REQUEST_URL')
+          assert not any(os.environ.get(key) for key in forbidden), 'credentials/OIDC are forbidden'
+          assert not any(value and key.startswith('CLOUDSDK_API_ENDPOINT_OVERRIDES_')
+                         for key, value in os.environ.items()), 'endpoint overrides are forbidden'
+          Path(os.environ['CLOUDSDK_CONFIG']).mkdir(mode=0o700, exist_ok=False)
+          PY
+      # This official installer internally runs "gcloud auth list" against the
+      # fresh empty config. It does not log in, exchange a token or select a project.
+      # The command-help processes below are --help-only; the separate real
+      # argument-parser probe blocks all SDK dispatch, auth, network and processes.
+      - name: Install official gcloud for offline compatibility checks
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+        with:
+          version: '568.0.0'
+          cache: false
+      - name: Verify actual gcloud update requests and exact NPC ZIP without cloud access
+        run: |
+          export GARDEN_TEST_GCLOUD_SDK_ROOT="$(python3 -I -c 'import pathlib,shutil; print(pathlib.Path(shutil.which("gcloud")).resolve().parent.parent)')"
+          node tests/floating-garden-ci-gcloud-sdk.integration.mjs
+          python3 -I tests/floating-garden-ci-trust-renewal.test.py --sdk-root "$GARDEN_TEST_GCLOUD_SDK_ROOT"
+      - name: Check owner-helper command and flag availability without cloud requests
+        run: |
+          python3 -I - <<'PY'
+          import os
+          import re
+          import runpy
+          import shutil
+          import subprocess
+          import sys
+          import tempfile
+          from pathlib import Path
+          from unittest.mock import patch
+
+          sys.dont_write_bytecode = True
+          allowed, spawned = set(), []
+          def audit(event, args):
+              if event == 'subprocess.Popen':
+                  command = tuple(args[1])
+                  assert command in allowed and command[-1] == '--help', 'non-help process forbidden'
+                  spawned.append(command)
+              if event in ('os.system', 'os.posix_spawn', 'os.spawn'):
+                  raise AssertionError('alternate process launch forbidden')
+          sys.addaudithook(audit)
+
+          # Derive the finite commands from the real helper and its existing fake.
+          # All fake reads/writes remain in memory; spawning is blocked throughout.
+          with patch.object(subprocess, 'run', side_effect=AssertionError('fixture process forbidden')):
+              fixture = runpy.run_path('tests/floating-garden-ci-setup.test.py', run_name='garden_fixture')
+              m, fake = fixture['m'], fixture['Fake']()
+              fake.ancestors += [{'type': 'folder', 'id': '123'}, {'type': 'organization', 'id': '456'}]
+              with tempfile.TemporaryDirectory() as directory:
+                  result = m.execute(fake, m.State(Path(directory) / 'state'),
+                      confirm=lambda p: p.removeprefix('Type exactly ').removesuffix(': '),
+                      emit=lambda _: None, now=lambda: m.EXPIRY - 86400000, sleep=lambda _: None)
+                  assert result == 0, 'synthetic setup must finish before checking help'
+              m.read_role(fake, 'organizations/456/roles/synthetic')
+
+          # Capture the helper's real argv, including its global flags, without
+          # running any of it. The ONLY executable form adds a final --help.
+          captured = []
+          def capture(command, **kwargs):
+              assert command[0] == 'gcloud' and not kwargs.get('shell', False)
+              captured.append(tuple(command[1:]))
+              return subprocess.CompletedProcess(command, 0, b'{}', b'')
+          with patch.object(subprocess, 'run', side_effect=capture):
+              runner = m.Gcloud()
+              runner.approved = True
+              for args, stage, write in fake.calls:
+                  runner(args, stage, write=write)
+          commands = sorted(set(captured))
+          assert 30 <= len(commands) <= 100, 'review changed command surface'
+          gcloud = shutil.which('gcloud')
+          assert gcloud, 'official gcloud is required'
+          allowed.update((gcloud, *args, '--help') for args in commands)
+          issues = []
+          for command in sorted(allowed):
+              assert command[-1] == '--help' and command.count('--help') == 1
+              result = subprocess.run(list(command), shell=False, stdin=subprocess.DEVNULL,
+                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=30, check=False)
+              depth = 2
+              if tuple(command[1:3]) in (('storage', 'buckets'), ('resource-manager', 'folders'),
+                  ('secrets', 'versions'), ('iam', 'roles'), ('iam', 'service-accounts'),
+                  ('iam', 'workload-identity-pools')):
+                  depth = 3
+              if tuple(command[1:4]) in (('iam', 'workload-identity-pools', 'providers'),
+                  ('iam', 'service-accounts', 'keys')):
+                  depth = 4
+              family = ' '.join(command[1:depth + 1])
+              assert re.fullmatch(r'[a-z -]+', family), 'unrecognized command family'
+              if result.returncode != 0:
+                  issues.append(f'{family}: help-exit={result.returncode}')
+                  continue
+              help_text = re.sub(r'.\x08', '', result.stdout).replace('--[no-]', '--')
+              if 'SYNOPSIS' not in help_text:
+                  issues.append(f'{family}: help-shape')
+                  continue
+              for arg in command[1:-1]:
+                  if not arg.startswith('--'):
+                      continue
+                  flag = arg.split('=', 1)[0]
+                  if flag.startswith('--no-'):
+                      flag = '--' + flag[5:]
+                  if flag not in help_text:
+                      issues.append(f'{family}: undocumented-flag={flag}')
+          assert len(spawned) == len(allowed) and set(spawned) == allowed
+          for issue in sorted(set(issues)):
+              print('GCLOUD_HELP_ISSUE: ' + issue)
+          assert not issues, 'gcloud help compatibility failed; no operational fallback is allowed'
+          print(f'Official gcloud local help: {len(spawned)} argv variants checked; no operational command executed.')
+          print('Help checks command/flag availability only, not flag-value semantics, IAM, token exchange or live API compatibility.')
+          PY
+      - name: Parse every helper argument, verify SDK output formats, and reject prompts offline
+        run: |
+          python3 -I - <<'PYCODE'
+          import pathlib, runpy, shutil
+          sdk = pathlib.Path(shutil.which('gcloud')).resolve().parent.parent
+          checks = runpy.run_path('tests/floating-garden-ci-setup.test.py', run_name='garden_fixture')
+          checks['verify_sdk_parser_and_prompts'](sdk)
+          PYCODE
+
+  offline-owner-sdk-587:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDSDK_CORE_DISABLE_PROMPTS: 'true'
+      CLOUDSDK_CORE_DISABLE_USAGE_REPORTING: 'true'
+      CLOUDSDK_CORE_DISABLE_FILE_LOGGING: 'true'
+      CLOUDSDK_CORE_LOG_HTTP: 'false'
+      CLOUDSDK_COMPONENT_MANAGER_DISABLE_UPDATE_CHECK: 'true'
+      CLOUDSDK_AUTH_DISABLE_CREDENTIALS: 'true'
+      CLOUDSDK_PAGER: ''
+      TERM: dumb
+    steps:
+      - name: Set isolated owner SDK configuration
+        env:
+          ISOLATED_GCLOUD: ${{ runner.temp }}/garden-owner-sdk-587-empty-gcloud
+        run: printf 'CLOUDSDK_CONFIG=%s\n' "$ISOLATED_GCLOUD" >> "$GITHUB_ENV"
+      - name: Checkout without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Require fresh credential-free owner SDK configuration
+        run: |
+          python3 -I - <<'PY'
+          import os
+          from pathlib import Path
+          forbidden = ('GOOGLE_APPLICATION_CREDENTIALS', 'GOOGLE_GHA_CREDS_PATH',
+                       'CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE', 'CLOUDSDK_AUTH_ACCESS_TOKEN',
+                       'CLOUDSDK_AUTH_ACCESS_TOKEN_FILE', 'CLOUDSDK_AUTH_IMPERSONATE_SERVICE_ACCOUNT',
+                       'CLOUDSDK_AUTH_LOGIN_CONFIG_FILE', 'ACTIONS_ID_TOKEN_REQUEST_TOKEN',
+                       'ACTIONS_ID_TOKEN_REQUEST_URL')
+          assert not any(os.environ.get(key) for key in forbidden), 'credentials/OIDC forbidden'
+          assert not any(value and key.startswith('CLOUDSDK_API_ENDPOINT_OVERRIDES_')
+                         for key, value in os.environ.items()), 'endpoint overrides forbidden'
+          Path(os.environ['CLOUDSDK_CONFIG']).mkdir(mode=0o700, exist_ok=False)
+          PY
+      # Separate ephemeral CI SDK only; never installs/changes the owner's SDK.
+      # setup-gcloud performs local auth inventory of the fresh empty config.
+      - name: Install exact official owner SDK for offline qualification
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+        with:
+          version: '587.0.0'
+          cache: false
+      - name: Qualify owner reads and condition-only renewal without cloud access
+        run: |
+          SDK_ROOT="$(python3 -I -c 'import pathlib,shutil; print(pathlib.Path(shutil.which("gcloud")).resolve().parent.parent)')"
+          python3 -I tests/floating-garden-ci-trust-renewal.test.py
+          python3 -I tests/floating-garden-ci-owner-sdk.test.py
+          python3 -I tests/floating-garden-ci-owner-sdk.test.py --sdk-root "$SDK_ROOT"
+          python3 -I tests/floating-garden-ci-trust-renewal.test.py --sdk-root "$SDK_ROOT"

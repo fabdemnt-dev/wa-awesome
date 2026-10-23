@@ -1,0 +1,989 @@
+// Actual old/new generators and actual provider adapters; all SDK/HTTP/CLI I/O
+// below is local injected evidence. No ADC, Cloud API, or deployment is used.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, mkdir, readFile, writeFile, rm, cp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { execFileSync } from 'node:child_process';
+import { createRequire } from 'node:module';
+import { createHash } from 'node:crypto';
+import { gzipSync } from 'node:zlib';
+import { prepareTrialOperation } from '../scripts/prepare-floating-garden-trial-operation.mjs';
+import { readOperationPacket } from '../scripts/operate-floating-garden-trial.mjs';
+import { FUNCTION_NAMES } from '../scripts/prepare-floating-garden-trial.mjs';
+import { REGION, RUNTIME_ACCOUNT, FIRESTORE_CLIENT_CONFIG, RESUME_REQUIRED_APIS, CLEANUP_WARNING } from '../scripts/floating-garden-trial-cloud-adapter.mjs';
+import { ACTIVE_UPDATE_SCOPE as S, prepareActiveUpdatePlan, activeUpdatePackets, recheckActiveUpdatePlan,
+  assertActiveRecords, toggleActiveRecords, assertPreservedRecords, activeUpdateReason,
+  executeActiveUpdate, createActiveUpdateJournal, proveOldInvocationIsolation, main, canonicalData } from '../scripts/floating-garden-active-update.mjs';
+import { createActiveUpdateTransport } from '../scripts/floating-garden-active-update-transport.mjs';
+import { createActiveUpdateProvider, stableFunctionConfiguration, stableArtifactRepositories } from '../scripts/floating-garden-active-update-provider.mjs';
+import { CI_CLIENT_SCOPE, createCiAuthPolicy } from '../scripts/floating-garden-ci-auth-policy.mjs';
+import { prepareOwnerReadonlyPreflight, validateOwnerReadonlyReview } from '../scripts/floating-garden-active-update-owner-readonly.mjs';
+import { createSyntheticOwnerJournal } from './helpers/floating-garden-owner-journal.mjs';
+import { MIXED_RECOVERY_ASSIGNMENT, validateMixedRecoveryReview } from '../scripts/floating-garden-active-update-mixed-recovery.mjs';
+import { createPrivateEvidence } from '../scripts/floating-garden-active-update-evidence.mjs';
+import { executeCiRelease, ciReleaseApproval, CI_RELEASE_RECOVERY } from '../scripts/floating-garden-ci-release.mjs';
+const ROOT = fileURLToPath(new URL('../', import.meta.url));
+const require = createRequire(import.meta.url), archiver = require('archiver');
+const sha = bytes => createHash('sha256').update(bytes).digest('hex');
+const NOW = S.startsAtMillis + 10000;
+const review = { schemaVersion: 1, startsAtMillis: S.startsAtMillis, endsAtMillis: S.endsAtMillis,
+  testerUids: ['SYNTHETIC_ACTIVE_A', 'SYNTHETIC_ACTIVE_B'], retainBuildArtifacts: false,
+  allowInitialFunctionRecreate: false, approvePublicInvoker: false };
+let directory, oldRoot, oldPacket, newPacket, plan;
+test.before(async () => {
+  directory = await mkdtemp(join(tmpdir(), 'garden-active-update-test-'));
+  oldRoot = join(directory, 'previous-source'); await mkdir(oldRoot);
+  const archive = execFileSync('git', ['archive', S.oldCommit, 'package.json', 'lab/floating-garden',
+    'functions/floating-garden-online', 'functions/floating-garden-trial',
+    'scripts/prepare-floating-garden-trial.mjs', 'scripts/prepare-floating-garden-trial-operation.mjs'], { cwd: ROOT, maxBuffer: 16 * 1024 * 1024 });
+  execFileSync('tar', ['-xf', '-', '-C', oldRoot], { input: archive });
+  const previousGenerator = await import(pathToFileURL(join(oldRoot, 'scripts/prepare-floating-garden-trial-operation.mjs')));
+  await previousGenerator.prepareTrialOperation({ review, output: join(directory, 'previous'), now: NOW, repositoryRoot: oldRoot });
+  await prepareTrialOperation({ review, output: join(directory, 'next'), now: NOW });
+  oldPacket = await readOperationPacket(join(directory, 'previous'));
+  newPacket = await readOperationPacket(join(directory, 'next'));
+  plan = await prepareActiveUpdatePlan({ previousOutput: oldPacket.packet.output, nextOutput: newPacket.packet.output });
+});
+test.after(async () => { if (directory) await rm(directory, { recursive: true, force: true }); });
+const approval = () => ({ oldManifestDigest: plan.oldManifestDigest, newManifestDigest: plan.newManifestDigest,
+  pauseExistingPair: true, updateFiveFunctionSources: true, updateDedicatedRules: true, updateExactHosting: true,
+  reopenExistingPair: true, retainAllData: true, preserveExistingIam: true, exclusiveMaintenance: true });
+const clone = value => structuredClone(value);
+function memoryDatabase() {
+  const values = new Map(); let version = 0;
+  const writes = [], attempts = []; let fault;
+  const snapshot = path => ({ ref: { path }, exists: values.has(path), data: () => clone(values.get(path)) });
+  const ref = path => ({ path, get: async () => snapshot(path) });
+  const db = {
+    doc: ref, collection: id => ({ limit: count => ({ id, count, group: false }) }),
+    collectionGroup: id => ({ limit: count => ({ id, count, group: true }) }),
+    listCollections: async () => [...new Set([...values.keys()].map(p => p.split('/')[0]))].map(id => ({ id })),
+    async getAll(...refs) { return refs.map(r => snapshot(r.path)); },
+    async runTransaction(body, options = {}) {
+      attempts.push(clone(options)); const start = version, pending = [];
+      const tx = { get: async target => {
+        assert.equal(pending.length, 0, 'all reads precede writes');
+        if (target.path) return snapshot(target.path);
+        const names = [...values.keys()].filter(p => target.group ? p.split('/').at(-2) === target.id : p.split('/').length === 2 && p.startsWith(`${target.id}/`));
+        return { docs: names.slice(0, target.count).map(snapshot) };
+      }, create: (r, data) => { assert(!values.has(r.path)); pending.push({ kind: 'create', path: r.path, data: clone(data) }); },
+      set: (r, data) => pending.push({ kind: 'set', path: r.path, data: clone(data) }),
+      update: (r, data) => { assert(values.has(r.path)); pending.push({ kind: 'update', path: r.path, data: clone(data) }); } };
+      const result = await body(tx);
+      if (pending.length && fault) await fault({ phase: 'before', pending, db });
+      if (!options.readOnly && start !== version) throw Error('ABORTED synthetic concurrent change');
+      for (const item of pending) { values.set(item.path, item.kind === 'update' ? { ...values.get(item.path), ...item.data } : item.data); writes.push(item); version++; }
+      if (pending.length && fault) await fault({ phase: 'after', pending, db });
+      return result;
+    },
+    set(path, data) { values.set(path, clone(data)); version++; }, get: path => clone(values.get(path)),
+    entries: () => [...values].map(([path, data]) => [path, clone(data)]), writes, attempts,
+    setFault(value) { fault = value; },
+  }; return db;
+}
+async function legacyData() {
+  const db = memoryDatabase(), dir = oldPacket.packet.gameDir;
+  const old = require(join(dir, 'functions/online/handlers.js'));
+  const trial = require(join(dir, 'functions/trial-handlers.js'));
+  const config = JSON.parse(await readFile(join(dir, 'functions/trial-config.json')));
+  const records = JSON.parse(await readFile(join(dir, 'ADMIN-RECORDS-REVIEW.json')));
+  db.set('floatingGardenTrial/config', { ...records['floatingGardenTrial/config'], enabled: true, testerUids: [...review.testerUids], preservedExtra: 'retain' });
+  db.set('floatingGardenTrial/usage', records['floatingGardenTrial/usage']);
+  review.testerUids.forEach(uid => db.set(`floatingGardenTrialTesters/${uid}`, { ...records.testerDocumentTemplate, active: true, preservedExtra: 'retain' }));
+  let serial = 0;
+  const handlers = trial.createTrialHandlers({ db, config, trustedHandlersFactory: old.createHandlers,
+    now: () => NOW, env: { GCLOUD_PROJECT: S.project }, inviteSecret: () => 'synthetic-local-only-hmac-key-12345678901234567890',
+    randomUUID: () => `00000000-0000-4000-8000-${String(++serial).padStart(12, '0')}`, randomInt: () => 0 });
+  const request = (uid, data) => ({ auth: { uid }, app: { appId: 'synthetic' }, rawRequest: { headers: { origin: S.origin }, ip: '127.0.0.1' }, data });
+  const first = await handlers.floatingGardenCreateRoom(request(review.testerUids[0], { displayName: 'A', requestId: 'synthetic-waiting' }));
+  const second = await handlers.floatingGardenCreateRoom(request(review.testerUids[0], { displayName: 'A', requestId: 'synthetic-active' }));
+  await handlers.floatingGardenJoinRoom(request(review.testerUids[1], { displayName: 'B', requestId: 'synthetic-join', inviteCode: second.inviteCode }));
+  await handlers.floatingGardenStartMatch(request(review.testerUids[0], { requestId: 'synthetic-start', roomId: second.roomId, expectedRevision: 2 }));
+  assert.equal(db.get('floatingGardenTrial/usage').createdRoomCount, 2); db.writes.length = 0; db.attempts.length = 0;
+  return { db, first, second };
+}
+async function zip(packet, fault) {
+  const archive = archiver('zip'), chunks = [];
+  const done = new Promise((ok, fail) => { archive.on('end', ok); archive.on('error', fail); });
+  archive.on('data', bytes => chunks.push(bytes));
+  for (const path of Object.keys(packet.manifest.files).filter(p => p.startsWith('game/functions/'))) {
+    const bytes = await readFile(join(packet.output, path));
+    if (fault === 'byte' && path.endsWith('/package.json')) bytes[0] ^= 1;
+    archive.append(bytes, { name: path.slice(15), mode: 0o100644 });
+  }
+  if (fault === 'extra') archive.append('unreviewed', { name: 'unreviewed.txt', mode: 0o100644 });
+  await archive.finalize(); await done; return Buffer.concat(chunks);
+}
+function metadata(i, generation = '123') {
+  const name = FUNCTION_NAMES[i], service = `projects/${S.project}/locations/${REGION}/services/garden-${i}`;
+  return { name: `projects/${S.project}/locations/${REGION}/functions/${name}`, environment: 'GEN_2', state: 'ACTIVE',
+    labels: { 'firebase-functions-codebase': 'floating-garden-trial', 'deployment-callable': 'true' },
+    buildConfig: { runtime: 'nodejs22', entryPoint: name, sourceProvenance: { resolvedStorageSource: {
+      bucket: `gcf-v2-sources-${S.projectNumber}-${REGION}`, object: `source-${generation}.zip`, generation } } },
+    serviceConfig: { service, revision: `garden-${i}-${generation}`, serviceAccountEmail: RUNTIME_ACCOUNT,
+      availableMemory: '256Mi', availableCpu: '1', maxInstanceRequestConcurrency: 1, maxInstanceCount: 1,
+      timeoutSeconds: 30, ingressSettings: 'ALLOW_ALL', allTrafficOnLatestRevision: true,
+      secretEnvironmentVariables: i < 2 ? [{ key: 'FLOATING_GARDEN_INVITE_HMAC_KEY', secret: 'FLOATING_GARDEN_INVITE_HMAC_KEY', projectId: S.projectNumber, version: '1' }] : [] } };
+}
+function run(fn) {
+  const name = fn.serviceConfig.service, revision = `${name}/revisions/${fn.serviceConfig.revision}`;
+  return { name, generation: '1', observedGeneration: '1', terminalCondition: { type: 'Ready', state: 'CONDITION_SUCCEEDED' },
+    latestCreatedRevision: revision, latestReadyRevision: revision, template: { serviceAccount: RUNTIME_ACCOUNT,
+      scaling: { maxInstanceCount: 1 }, maxInstanceRequestConcurrency: 1, timeout: '30s', containers: [{ image: 'old-or-new-image', resources: { limits: { memory: '256Mi', cpu: '1' } } }] },
+    traffic: [{ type: 'TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST', percent: 100 }], trafficStatuses: [{ revision, percent: 100 }] };
+}
+async function harness({ actualTransport = false, actualBridge = false, database, iamPolicy, ci = false, cliFault, hostingMetadata, secretVersion } = {}) {
+  const legacy = await legacyData(), { first, second } = legacy; const db = database || legacy.db;
+  if (database) {
+    const batch = database.batch();
+    for (const [path, data] of legacy.db.entries()) batch.set(database.doc(path), data);
+    await batch.commit();
+  }
+  if (ci) {
+    db.set('floatingGardenTrial/config', { ...db.get('floatingGardenTrial/config'), enabled: false, testerUids: [] });
+    for (const uid of review.testerUids) db.set(`floatingGardenTrialTesters/${uid}`, { ...db.get(`floatingGardenTrialTesters/${uid}`), active: false });
+  }
+  const path = await mkdtemp(join(directory, 'provider-')), toolingDir = join(path, 'tooling');
+  await mkdir(join(toolingDir, 'node_modules/firebase-tools/lib/bin'), { recursive: true });
+  await writeFile(join(toolingDir, 'package.json'), await readFile(join(ROOT, 'tests/fixtures/floating-garden-maintenance-package.json')));
+  await writeFile(join(toolingDir, 'package-lock.json'), await readFile(join(ROOT, 'package-lock.json')));
+  await writeFile(join(toolingDir, 'node_modules/firebase-tools/package.json'), '{"version":"14.27.0"}');
+  await writeFile(join(toolingDir, 'node_modules/firebase-tools/lib/bin/firebase.js'), '// synthetic; never executed');
+  const archives = { '123': await zip(oldPacket.packet), '124': await zip(newPacket.packet) };
+  const makeMetadata = (i, generation = '123') => {
+    const fn = metadata(i, generation); if (!ci) return fn;
+    fn.labels['deployment-tool'] = 'cli-firebase'; fn.labels['firebase-functions-hash'] = 'a'.repeat(40);
+    fn.buildConfig.serviceAccount = `projects/${S.project}/serviceAccounts/${S.projectNumber}-compute@developer.gserviceaccount.com`;
+    fn.buildConfig.environmentVariables = { GOOGLE_NODE_RUN_SCRIPTS: '' };
+    fn.serviceConfig.environmentVariables = { EVENTARC_CLOUD_EVENT_SOURCE: `projects/${S.project}/locations/${S.region}/services/${FUNCTION_NAMES[i]}`, FIREBASE_CONFIG: JSON.stringify({ projectId: S.project, storageBucket: S.project + '.appspot.com' }), FUNCTION_TARGET: FUNCTION_NAMES[i], GCLOUD_PROJECT: S.project, LOG_EXECUTION_ID: 'true' }; return fn;
+  };
+  const functions = FUNCTION_NAMES.map((_, i) => makeMetadata(i));
+  let rulesPhase = 'old', hostingPhase = 'old', settingsRevision = 1, time = NOW, override;
+  const calls = [], providerWrites = [], journalEntries = [];
+  const policy = () => ({ version: 3, etag: 'preserved', bindings: [{ role: 'roles/run.invoker', members: ['allUsers'] }, { role: 'roles/run.viewer', members: ['group:synthetic@example.invalid'], condition: { title: 'preserved', expression: 'true' } }], auditConfigs: [{ service: 'allServices', auditLogConfigs: [{ logType: 'ADMIN_READ' }] }] });
+  const choose = phase => phase === 'old' ? oldPacket.packet : newPacket.packet;
+  let requestClient = { request: async options => {
+    calls.push(options); assert.equal(options.method, 'GET'); assert.equal(options.retry, false); assert.equal(options.maxRedirects, 0);
+    const { url } = options; let data;
+    if (url.startsWith('https://cloudfunctions.googleapis.com/') && url.includes(':getIamPolicy')) data = policy();
+    else if (url.startsWith('https://cloudfunctions.googleapis.com/')) data = { functions: clone(functions) };
+    else if (url.startsWith('https://run.googleapis.com/') && url.includes(':getIamPolicy')) data = policy();
+    else if (url.startsWith('https://run.googleapis.com/')) data = run(functions.find(fn => url.endsWith(fn.serviceConfig.service)));
+    else if (url.includes('/releases/cloud.firestore')) data = { name: `projects/${S.project}/releases/cloud.firestore`, rulesetName: `projects/${S.project}/rulesets/${rulesPhase}` };
+    else if (url.includes('/rulesets/')) data = { name: `projects/${S.project}/rulesets/${rulesPhase}`, source: { files: [{ name: 'firestore.rules', content: await readFile(join(choose(rulesPhase).gameDir, 'firestore.rules'), 'utf8') }] } };
+    else if (url.startsWith('https://storage.googleapis.com/')) {
+      const generation = new URL(url).searchParams.get('generation') || '123';
+      data = url.includes('&alt=media') ? archives[generation] : url.includes('/o/') ? {
+        bucket: `gcf-v2-sources-${S.projectNumber}-${REGION}`, name: `source-${generation}.zip`, generation, size: String(archives[generation].length),
+      } : { name: `gcf-v2-sources-${S.projectNumber}-${REGION}`, projectNumber: S.projectNumber };
+    } else if (ci && url.startsWith('https://firebaseextensions.googleapis.com/')) data = {};
+    else if (ci && url.startsWith('https://firebase.googleapis.com/')) data = { projectId: S.project, storageBucket: S.project + '.appspot.com' };
+    else if (url.startsWith('https://identitytoolkit.googleapis.com/')) data = { name: `projects/${S.project}/config`, signIn: { anonymous: { enabled: true } }, settingsRevision };
+    else if (url.startsWith('https://firebaseappcheck.googleapis.com/')) data = url.includes('/services?') ? { services: [{ name: 'firestore', enforcementMode: 'ENFORCED' }] } : { siteKey: 'synthetic-preserved' };
+    else assert.fail(`Unexpected synthetic URL ${url}`);
+    return { status: 200, data: override ? override(url, data) : data };
+  } };
+  const readOnlyRequestClient = requestClient;
+  const runner = (command, args) => {
+    calls.push({ command, args }); let result;
+    if (command === 'gcloud') {
+      if (ci && args[0] === 'functions' && args[1] === 'deploy') {
+        const index = FUNCTION_NAMES.indexOf(args[2]); assert(index >= 0);
+        assert.equal(db.get('floatingGardenTrial/config').enabled, false);
+        assert(args.includes('--gen2') && args.includes('--quiet') && args.includes('--format=json'));
+        assert(args.includes(`--run-service-account=${RUNTIME_ACCOUNT}`));
+        assert(args.includes(`--build-service-account=${functions[index].buildConfig.serviceAccount}`));
+        assert(!args.some(a => /allow-unauthenticated|stage-bucket|runtime=|entry-point|labels|secrets|env-vars/.test(a)));
+        providerWrites.push('functions');
+        const fault = cliFault?.('functions', 'before', index); if (fault) return fault;
+        // Source-only SDK update preserves the complete existing environment map.
+        const priorEnv = clone(functions[index].serviceConfig.environmentVariables);
+        functions[index] = makeMetadata(index, '124');
+        functions[index].serviceConfig.environmentVariables = priorEnv;
+        return cliFault?.('functions', 'after', index) || { exitCode: 0, stdout: JSON.stringify(functions[index]) };
+      }
+      if (args[0] === 'version') result = { 'Google Cloud SDK': '568.0.0' };
+      else if (args[0] === 'config') result = {};
+      else if (args[0] === 'projects' && args[1] === 'describe') result = { projectId: S.project, projectNumber: S.projectNumber, lifecycleState: 'ACTIVE' };
+      else if (args.includes('get-iam-policy')) result = iamPolicy
+        ? iamPolicy(args[0] === 'iam' ? 'runtime' : args[0] === 'secrets' ? 'secret' : 'project', policy()) : policy();
+      else if (ci && args[0] === 'secrets' && args[1] === 'versions') result = secretVersion ? secretVersion(args[3]) : { name: `projects/${S.projectNumber}/secrets/FLOATING_GARDEN_INVITE_HMAC_KEY/versions/1`, state: 'ENABLED' };
+      else if (args[0] === 'artifacts' || args[0] === 'services') result = ci && args[0] === 'services' ? RESUME_REQUIRED_APIS.map(name => ({ config: { name } })) : [];
+      else result = { name: args.slice(0, 3).join('-'), settingsRevision };
+      if (ci && args[0] === 'secrets' && args[1] === 'get-iam-policy') result.bindings.push({ role: 'roles/secretmanager.secretAccessor', members: [`serviceAccount:${RUNTIME_ACCOUNT}`] });
+      return { exitCode: 0, stdout: JSON.stringify(result) };
+    }
+    assert.equal(command, process.execPath);
+    if (args.includes('--version')) return { exitCode: 0, stdout: '14.27.0' };
+    if (ci && args[1] === 'deploy') {
+      assert.equal(db.get('floatingGardenTrial/config').enabled, false);
+      assert(args.includes('--non-interactive') && args.includes('--json') && !args.includes('--force'));
+      assert.equal(args[args.indexOf('--project') + 1], S.project);
+      const only = args[args.indexOf('--only') + 1];
+      const kind = only.startsWith('functions:') ? 'functions' : only === 'firestore:rules' ? 'rules' : only === `hosting:${S.project}` ? 'hosting' : assert.fail('bad selector');
+      providerWrites.push(kind);
+      const fault = cliFault?.(kind, 'before'); if (fault) return fault;
+      if (kind === 'functions') {
+        assert.equal(only, FUNCTION_NAMES.map(n => `functions:floating-garden-trial:${n}`).join(','));
+        functions.splice(0, 5, ...FUNCTION_NAMES.map((_, i) => makeMetadata(i, '124')));
+      } else if (kind === 'rules') rulesPhase = 'new';
+      else { assert.equal(args[args.indexOf('--message') + 1], `garden-trial-game-v1:${newPacket.packet.manifestDigest}`); hostingPhase = 'new'; }
+      return cliFault?.(kind, 'after') || { exitCode: 0, stdout: JSON.stringify({ status: 'success', result: {} }) };
+    }
+    if (args[1] === 'hosting:sites:list') result = { sites: [{ name: `projects/${S.project}/sites/${S.project}`, defaultUrl: S.origin }] };
+    else { assert.equal(args[1], 'hosting:channel:list'); result = { channels: [{ name: `sites/${S.project}/channels/live`, url: S.origin,
+      release: { type: 'DEPLOY', message: `garden-trial-game-v1:${choose(hostingPhase).manifestDigest}`,
+        version: { name: `sites/${S.project}/versions/${hostingPhase}`, status: 'FINALIZED' } } }] }; }
+    if (hostingMetadata) result = hostingMetadata(args[1], result);
+    return { exitCode: 0, stdout: JSON.stringify({ status: 'success', result }) };
+  };
+  const fetchImpl = async url => {
+    const packet = choose(hostingPhase), config = JSON.parse(await readFile(join(packet.gameDir, 'firebase.hosting-only.json')));
+    const headers = Object.fromEntries(config.hosting.headers[0].headers.map(h => [h.key, h.value]));
+    const path = new URL(url).pathname;
+    headers['Content-Type'] = path.endsWith('.js') ? 'text/javascript; charset=utf-8' : path.endsWith('.css') ? 'text/css' : 'text/html';
+    if (path === '/') return new Response('', { status: 302, headers: { ...headers, location: '/lab/floating-garden/trial/index.html' } });
+    return new Response(await readFile(join(packet.gameDir, 'public', path)), { status: 200, headers });
+  };
+  let transport = {
+    async functions({ beforeMutation }) { await beforeMutation({ stage: 'functions-patch', resourceKind: 'function', index: 0 }); providerWrites.push('functions'); functions.splice(0, 5, ...FUNCTION_NAMES.map((_, i) => metadata(i, '124'))); return { kind: 'success' }; },
+    async rules({ beforeMutation }) { await beforeMutation({ stage: 'rules-patch', resourceKind: 'rules', index: 0 }); providerWrites.push('rules'); rulesPhase = 'new'; return { kind: 'success' }; },
+    async hosting({ beforeMutation }) { await beforeMutation({ stage: 'hosting-release', resourceKind: 'hosting', index: 0 }); providerWrites.push('hosting'); hostingPhase = 'new'; return { kind: 'success' }; },
+  };
+  let hostingFinalized = false;
+  const transportRequest = async options => {
+    calls.push(options); const { url, method } = options; let body;
+    if (method === 'GET') {
+      if (url.startsWith('https://cloudfunctions.googleapis.com/v2/') && /\/functions\/[^/?]+$/.test(url)) body = clone(functions.find(fn => url.endsWith(fn.name)));
+      else if (url.includes('/channels/live')) body = { name: `sites/${S.project}/channels/live`, release: { version: { name: `sites/${S.project}/versions/${hostingPhase}` }, message: `garden-trial-game-v1:${choose(hostingPhase).manifestDigest}` } };
+      else if (url.includes('/versions/new/files')) {
+        const expected = new URL(url).searchParams.get('status') === 'EXPECTED';
+        body = { files: expected ? [] : await Promise.all(Object.keys(newPacket.packet.manifest.files).filter(p => p.startsWith('game/public/')).map(async path => ({
+          path: '/'+path.slice(12), hash: sha(gzipSync(await readFile(join(newPacket.packet.output, path)), { level: 9 })), status: 'ACTIVE',
+        }))) };
+      } else if (url.endsWith('/versions/new')) {
+        const h = JSON.parse(await readFile(join(newPacket.packet.gameDir, 'firebase.hosting-only.json'))).hosting;
+        body = { name: `sites/${S.project}/versions/new`, status: hostingFinalized ? 'FINALIZED' : 'CREATED', config: { headers: h.headers.map(row => ({ glob: row.source, headers: Object.fromEntries(row.headers.map(header => [header.key, header.value])) })), redirects: h.redirects.map(row => ({ glob: row.source, location: row.destination, statusCode: row.type })) } };
+      } else body = (await readOnlyRequestClient.request({ ...options, method: 'GET', retry: false, maxRedirects: 0 })).data;
+    } else {
+      assert.equal((db.get ? db.get('floatingGardenTrial/config') : (await db.doc('floatingGardenTrial/config').get()).data()).enabled, false, 'all provider writes require verified closed gate');
+      providerWrites.push(url.includes('cloudfunctions') ? 'functions' : url.includes('firebaserules') ? 'rules' : 'hosting');
+      if (url.endsWith('/functions:generateUploadUrl')) body = { storageSource: { bucket: `gcf-v2-uploads-${S.projectNumber}-${REGION}`, object: 'synthetic.zip' }, uploadUrl: `https://storage.googleapis.com/gcf-v2-uploads-${S.projectNumber}-${REGION}/synthetic.zip?synthetic=signature` };
+      else if (url.startsWith('https://storage.googleapis.com/')) { assert.equal(options.auth, 'none'); assert(Buffer.isBuffer(options.body)); body = ''; }
+      else if (url.startsWith('https://cloudfunctions.googleapis.com/') && method === 'PATCH') {
+        const index = functions.findIndex(fn => fn.name === options.body.name); assert(index >= 0); functions[index] = metadata(index, '124');
+        body = { name: `projects/${S.project}/locations/${REGION}/operations/synthetic-${index}`, done: true, response: clone(functions[index]) };
+      } else if (url.endsWith('/rulesets')) body = { name: `projects/${S.project}/rulesets/new` };
+      else if (url.endsWith('/releases/cloud.firestore')) { rulesPhase = 'new'; body = { name: `projects/${S.project}/releases/cloud.firestore`, rulesetName: `projects/${S.project}/rulesets/new` }; }
+      else if (url.endsWith('/versions')) body = { name: `sites/${S.project}/versions/new`, status: 'CREATED' };
+      else if (url.endsWith(':populateFiles')) body = { uploadRequiredHashes: [], uploadUrl: `https://upload-firebasehosting.googleapis.com/upload/sites/${S.project}/versions/new/files` };
+      else if (url.endsWith('?updateMask=status')) { hostingFinalized = true; body = { name: `sites/${S.project}/versions/new`, status: 'FINALIZED' }; }
+      else if (url.includes('/releases?versionName=')) { hostingPhase = 'new'; body = { name: `sites/${S.project}/releases/new`, version: { name: `sites/${S.project}/versions/new` }, message: `garden-trial-game-v1:${newPacket.packet.manifestDigest}` }; }
+      else assert.fail('Unexpected synthetic transport operation');
+    }
+    return { status: 200, body, headers: { 'x-goog-generation': '456' } };
+  };
+  if (actualTransport) transport = createActiveUpdateTransport({ now: () => time, wait: async millis => { time += millis; }, request: transportRequest });
+  let providerFetch = fetchImpl;
+  if (actualBridge) {
+    transport = undefined; const readClient = requestClient;
+    requestClient = { request: async options => {
+      if (options.responseType !== 'arraybuffer' || options.method === 'GET' && options.url.includes('storage.googleapis.com')) return readClient.request(options);
+      const result = await transportRequest({ ...options, body: options.data, auth: 'google' });
+      return { status: result.status, data: Buffer.from(JSON.stringify(result.body)), headers: result.headers };
+    } };
+    providerFetch = async (url, options) => {
+      if (!url.startsWith('https://storage.googleapis.com/')) return fetchImpl(url, options);
+      const result = await transportRequest({ url, ...options, auth: 'none' });
+      return new Response(result.body, { status: result.status, headers: result.headers });
+    };
+  }
+  let env = {}, environmentPolicy;
+  if (ci) {
+    const authPath = join(path, 'gha-creds-0123456789abcdef.json'), C = CI_CLIENT_SCOPE;
+    await writeFile(authPath, JSON.stringify({ type: 'external_account', audience: C.audience, subject_token_type: 'urn:ietf:params:oauth:token-type:jwt', token_url: 'https://sts.googleapis.com/v1/token', service_account_impersonation_url: `https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${C.serviceAccount}:generateAccessToken`, credential_source: { url: 'https://pipelines.actions.githubusercontent.com/synthetic/oidc', headers: { Authorization: 'Bearer SYNTHETIC' }, format: { type: 'json', subject_token_field_name: 'value' } } }), { mode: 0o600 });
+    env = { CI: 'true', GITHUB_ACTIONS: 'true', GITHUB_EVENT_NAME: 'push', GITHUB_REPOSITORY_ID: C.repositoryId, GITHUB_REPOSITORY: C.repository, GITHUB_REPOSITORY_OWNER_ID: C.repositoryOwnerId, GITHUB_REF: C.ref, GITHUB_WORKFLOW_REF: `${C.repository}/${C.workflow}@${C.ref}`, GITHUB_WORKSPACE: path, GOOGLE_CLOUD_PROJECT: C.project, GOOGLE_APPLICATION_CREDENTIALS: authPath, GOOGLE_GHA_CREDS_PATH: authPath, CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: authPath, GITHUB_SHA: 'a'.repeat(40), GITHUB_WORKFLOW_SHA: 'a'.repeat(40), GITHUB_RUN_ID: '12345', GITHUB_RUN_NUMBER: '5', GITHUB_RUN_ATTEMPT: '1', GARDEN_RELEASE_REF_CREATED: 'false', GARDEN_RELEASE_EVENT_BEFORE: CI_RELEASE_RECOVERY.before, GARDEN_RELEASE_EVENT_AFTER: 'a'.repeat(40) };
+    environmentPolicy = createCiAuthPolicy({ env, now: () => time, execArgv: [] });
+  }
+  const cloud = createActiveUpdateProvider({ plan, toolingDir, runner, requestClient, db, fetchImpl: providerFetch, now: () => time, env, execArgv: [], transport, environmentPolicy });
+  const journal = { privateEvidence: async () => ({ saved: true }), providerStep: async step => journalEntries.push(step), issued: async stage => journalEntries.push({ issued: stage }), verified: async stage => journalEntries.push({ verified: stage }),
+    finish: async () => journalEntries.push({ finished: true }), fail: async (stage, reason, access) => journalEntries.push({ stage, reason, access }) };
+  return { cloud, db, rawRunner: runner, readOnlyRequestClient, publicFetch: fetchImpl, first, second, calls, functions, transport, providerWrites, journal, journalEntries, env,
+    runCi: options => executeCiRelease({ plan, approval: ciReleaseApproval(env.GITHUB_SHA, env.GITHUB_RUN_NUMBER), cloud, journal, env, environmentPolicy, now: () => time, ...options }),
+    setTime(value) { time = value; }, changeSettings() { settingsRevision++; }, setOverride(value) { override = value; },
+    run: options => executeActiveUpdate({ plan, mode: 'apply', approval: approval(), cloud, journal, now: () => time, ...options }) };
+}
+
+test('actual generator packets pin the full first-NPC delta and keep all approvals false', async () => {
+  assert.equal(Object.keys(oldPacket.packet.manifest.files).length, 43); assert.equal(Object.keys(newPacket.packet.manifest.files).length, 44);
+  assert.equal(plan.added.length, 1); assert.equal(plan.changed.length, 8); assert.equal(plan.unchangedFileCount, 35);
+  assert.deepEqual(activeUpdatePackets(plan).next.review, review);
+  assert.equal(JSON.stringify(plan).includes(review.testerUids[0]), false);
+  assert.equal(await recheckActiveUpdatePlan(plan), true);
+});
+test('default CLI and mode are plan-only; apply flag cannot invoke providers', async () => {
+  const logs = []; assert.equal(await main([], { log: v => logs.push(v) }), 0);
+  assert.equal(await main(['--apply'], { log: v => logs.push(v) }), 1);
+  assert.equal(await executeActiveUpdate({ plan }), plan);
+  await assert.rejects(executeActiveUpdate({ plan, mode: 'apply', approval: review }), e => activeUpdateReason(e) === 'approval-required');
+});
+test('actual provider read-only inspection verifies both legacy rooms and all five archive/config/IAM proofs', async () => {
+  const h = await harness(), result = await h.cloud.inspect();
+  assert.equal(result.kind, 'baseline'); assert.equal(result.createdRoomCount, 2); assert.equal(result.roomCount, 2);
+  assert(result.documentCount > 10); assert.equal(h.db.writes.length, 0); assert.equal(h.providerWrites.length, 0);
+  assert(h.calls.some(c => c.url?.includes('&alt=media'))); assert(h.calls.some(c => c.url?.includes(':getIamPolicy')));
+  assert(h.calls.every(c => !c.args?.includes('deploy')));
+});
+test('documented etag-only runtime policy passes real read-only provider inspection without writes', async () => {
+  const h = await harness({ iamPolicy: (name, value) => name === 'runtime' ? { etag: 'BwWKmjvelug=' } : value });
+  const result = await h.cloud.inspect();
+  assert.equal(result.kind, 'baseline'); assert.equal(result.createdRoomCount, 2);
+  assert.equal(h.db.writes.length, 0); assert.equal(h.providerWrites.length, 0); assert.equal(h.journalEntries.length, 0);
+});
+test('empty-runtime exception rejects malformed and broader shapes and never applies to project or secret', async () => {
+  for (const value of [null, [], false, 'invalid', {}, { etag: '' }, { etag: 1 }, { etag: null },
+    { etag: 'not base64!' }, { etag: 'BwWKmjvelug' }, { etag: 'AB==' }, { etag: 'BwWKmjvelug=', error: {} },
+    { etag: 'BwWKmjvelug=', version: 1 }, { etag: 'BwWKmjvelug=', bindings: null }, { bindings: {} }]) {
+    const h = await harness({ iamPolicy: (name, original) => name === 'runtime' ? value : original });
+    await assert.rejects(h.cloud.inspect(), error => activeUpdateReason(error) === 'iam-preservation');
+    assert.equal(h.db.writes.length, 0); assert.equal(h.providerWrites.length, 0); assert.equal(h.journalEntries.length, 0);
+  }
+  for (const target of ['project', 'secret']) {
+    const h = await harness({ iamPolicy: (name, value) => name === target ? { etag: 'BwWKmjvelug=' } : value });
+    await assert.rejects(h.cloud.inspect(), error => activeUpdateReason(error) === 'iam-preservation');
+    assert.equal(h.db.writes.length, 0); assert.equal(h.providerWrites.length, 0); assert.equal(h.journalEntries.length, 0);
+  }
+});
+test('etag-only runtime metadata remains in exact baseline and pre-pause preservation comparisons', async () => {
+  let reads = 0;
+  const h = await harness({ iamPolicy: (name, value) => name === 'runtime'
+    ? { etag: ++reads > 1 ? 'BwWKmjveluk=' : 'BwWKmjvelug=' } : value });
+  await assert.rejects(h.cloud.inspect(), error => activeUpdateReason(error) === 'provider-drift');
+  assert.equal(h.db.writes.length, 0); assert.equal(h.providerWrites.length, 0);
+  reads = 0;
+  const next = await harness({ iamPolicy: (name, value) => name === 'runtime'
+    ? { etag: ++reads > 2 ? 'BwWKmjveluk=' : 'BwWKmjvelug=' } : value });
+  const result = await next.run(); assert.equal(result.status, 'blocked'); assert.equal(result.reason, 'iam-preservation');
+  assert.equal(result.access, 'open'); assert.equal(next.db.writes.length, 0); assert.equal(next.providerWrites.length, 0);
+});
+test('full real-adapter staged path preserves nonzero usage, original data, dates, roster and extra fields', async () => {
+  const h = await harness(), before = h.db.entries(); const result = await h.run();
+  assert.equal(result.status, 'active-updated', JSON.stringify(result)); assert.deepEqual(h.providerWrites, ['functions', 'rules', 'hosting']);
+  assert.deepEqual(h.db.entries(), before); assert.equal(h.db.get('floatingGardenTrial/usage').createdRoomCount, 2);
+  assert(h.db.writes.every(w => w.kind === 'update' && (w.path === 'floatingGardenTrial/config' || w.path.startsWith('floatingGardenTrialTesters/'))));
+  assert.equal(h.db.writes.length, 6); assert(h.db.attempts.filter(a => !a.readOnly).every(a => a.maxAttempts === 1));
+  assert.equal(result.oldInvocationsDrained, false); assert.equal(result.oldInvocationsIsolatedBySourceFence, true);
+});
+test('complete IAM/config comparisons preserve audit config, conditional binding and environment', async () => {
+  const h = await harness(); h.setOverride((url, value) => url.includes(':getIamPolicy') && h.providerWrites.length ? { ...value, auditConfigs: [] } : value);
+  const result = await h.run(); assert.equal(result.status, 'blocked'); assert.equal(result.reason, 'iam-preservation'); assert.equal(result.access, 'closed');
+  assert.deepEqual(h.providerWrites, ['functions']);
+});
+test('source archive mismatch stops before pause', async () => {
+  const h = await harness(); h.setOverride((url, value) => url.includes('&alt=media') ? Buffer.from('invalid synthetic archive') : value);
+  const result = await h.run(); assert.equal(result.status, 'blocked'); assert.equal(h.db.writes.length, 0); assert.equal(h.providerWrites.length, 0);
+});
+test('changed initial baseline and expired trial stop before admin/provider mutation', async () => {
+  const h = await harness(); h.setTime(S.endsAtMillis); assert.equal((await h.run()).status, 'blocked'); assert.equal(h.db.writes.length, 0);
+  const other = await harness(); other.db.set('floatingGardenTrial/usage', { ...other.db.get('floatingGardenTrial/usage'), createdRoomCount: 0 });
+  assert.equal((await other.run()).status, 'blocked'); assert.equal(other.db.writes.length, 0);
+});
+test('pause CAS includes nonzero usage and all data, races never retry', async () => {
+  const h = await harness(); let count = 0;
+  h.db.setFault(({ phase, pending, db }) => { if (phase === 'before' && pending[0].data.enabled === false && count++ === 0) db.set('floatingGardenTrial/usage', { ...db.get('floatingGardenTrial/usage'), createdRoomCount: 3 }); });
+  const result = await h.run(); assert.equal(result.status, 'blocked'); assert.equal(h.providerWrites.length, 0); assert.equal(h.db.writes.length, 0);
+  assert.equal(h.db.attempts.filter(a => a.maxAttempts === 1).length, 1);
+});
+test('uncertain pause stays closed, records stage, and never deploys or retries', async () => {
+  const h = await harness(); h.db.setFault(({ phase }) => { if (phase === 'after') throw Error('SYNTHETIC_PRIVATE_TOKEN'); });
+  const result = await h.run(); assert.equal(result.status, 'blocked'); assert.equal(result.stage, 'pause-cas'); assert.equal(result.access, 'closed');
+  assert.equal(h.providerWrites.length, 0); assert.equal(h.db.writes.length, 3); assert(!JSON.stringify(result).includes('SYNTHETIC_PRIVATE_TOKEN'));
+});
+test('each uncertain provider stage is single-attempt, retains closed access, and forbids downstream work', async () => {
+  for (const kind of ['functions', 'rules', 'hosting']) {
+    const h = await harness(), original = h.transport[kind]; let attempts = 0;
+    h.transport[kind] = async args => { attempts++; await original(args); return { kind: 'unknown', reason: 'PRIVATE_SENTINEL' }; };
+    const result = await h.run(); assert.equal(result.status, 'blocked'); assert.equal(result.access, 'closed'); assert.equal(attempts, 1);
+    assert.equal(h.providerWrites.at(-1), kind); assert.equal(h.db.writes.length, 3);
+    await assert.rejects(h.cloud[`update${kind[0].toUpperCase()}${kind.slice(1)}`]()); assert.equal(attempts, 1);
+  }
+});
+test('uncertain reopening is never reported closed or retried', async () => {
+  const h = await harness(); h.db.setFault(({ phase, pending }) => { if (phase === 'after' && pending[0].data.enabled === true) throw Error('synthetic lost commit response'); });
+  const result = await h.run(); assert.equal(result.status, 'blocked'); assert.equal(result.stage, 'reopen-cas'); assert.equal(result.access, 'open');
+  assert.equal(h.db.writes.length, 6); await assert.rejects(h.cloud.reopen()); assert.equal(h.db.writes.length, 6);
+});
+test('late compatible old create usage increase after reopen is not reset or misclassified', async () => {
+  const h = await harness(); h.db.setFault(({ phase, pending, db }) => {
+    if (phase === 'after' && pending[0].data.enabled === true) db.set('floatingGardenTrial/usage', { ...db.get('floatingGardenTrial/usage'), createdRoomCount: 3 });
+  });
+  const result = await h.run(); assert.equal(result.status, 'active-updated', JSON.stringify(result));
+  assert.equal(h.db.get('floatingGardenTrial/usage').createdRoomCount, 3); assert(h.db.writes.every(w => w.path !== 'floatingGardenTrial/usage'));
+});
+test('settings drift and data change while closed block reopening', async () => {
+  const h = await harness(), original = h.transport.rules;
+  h.transport.rules = async args => { const result = await original(args); h.changeSettings(); return result; };
+  const result = await h.run(); assert.equal(result.status, 'blocked'); assert.equal(result.access, 'closed'); assert.equal(h.db.writes.length, 3);
+  const other = await harness(), hosting = other.transport.hosting;
+  other.transport.hosting = async args => { const result = await hosting(args); const path = `floatingGardenRooms/${other.first.roomId}`; other.db.set(path, { ...other.db.get(path), revision: 2 }); return result; };
+  assert.equal((await other.run()).status, 'blocked'); assert.equal(other.db.writes.length, 3);
+});
+test('durable journal is private, one-shot and sanitized', async () => {
+  const journal = await createActiveUpdateJournal({ plan, now: () => NOW });
+  await journal.issued('pause-cas'); await journal.verified('pause-cas'); await journal.fail('pause-cas', 'SYNTHETIC_PRIVATE_TOKEN', 'closed');
+  const text = await readFile(join(newPacket.packet.output, 'ACTIVE-UPDATE-JOURNAL.jsonl'), 'utf8');
+  assert(!text.includes('SYNTHETIC_PRIVATE_TOKEN')); assert(!text.includes(review.testerUids[0]));
+  await assert.rejects(createActiveUpdateJournal({ plan, now: () => NOW }));
+});
+
+ test('canonical preservation hashing cannot confuse Timestamp, map, array or number tags', () => {
+  class Timestamp { constructor(seconds, nanoseconds) { this._seconds = seconds; this._nanoseconds = nanoseconds; } toMillis() { return 0; } toDate() { return new Date(0); } }
+  const timestamp = new Timestamp(123, 456);
+  const inputs = [timestamp, { $timestamp: [123, 456] }, ['timestamp', 123, 456], { _seconds: 123, _nanoseconds: 456 }, null, 'null', 0, -0, { $number: '-0' }];
+  assert.equal(new Set(inputs.map(canonicalData)).size, inputs.length);
+  assert.notEqual(canonicalData(timestamp), canonicalData(new Timestamp(123, 457)));
+  assert.throws(() => canonicalData(new Proxy({}, {})));
+ });
+
+ test('Artifact storage growth is allowed while cleanup, KMS, identity and configuration remain exact', () => {
+  const original = [{ name: 'synthetic-repo', createTime: '2026-10-01T00:00:00Z', updateTime: '2026-10-01T00:00:00Z', sizeBytes: '1',
+    mode: 'STANDARD_REPOSITORY', kmsKeyName: 'preserved-key', cleanupPolicyDryRun: true, cleanupPolicies: { keep: { action: 'KEEP' } } }];
+  const larger = clone(original); larger[0].sizeBytes = '1000'; larger[0].updateTime = '2026-10-05T00:00:00Z';
+  assert.deepEqual(stableArtifactRepositories(original), stableArtifactRepositories(larger));
+  for (const key of ['createTime', 'name', 'kmsKeyName', 'mode', 'cleanupPolicyDryRun', 'cleanupPolicies']) {
+    const changed = clone(larger); changed[0][key] = 'changed'; assert.notDeepEqual(stableArtifactRepositories(original), stableArtifactRepositories(changed));
+  }
+ });
+
+ test('actual source-only transport executes through real provider proofs and CAS with injected HTTP only', async () => {
+  const h = await harness({ actualTransport: true }); const before = h.db.entries();
+  const result = await h.run(); assert.equal(result.status, 'active-updated', JSON.stringify(result)); assert.deepEqual(h.db.entries(), before);
+  const patches = h.calls.filter(call => call.method === 'PATCH' && call.url?.includes('cloudfunctions.googleapis.com'));
+  assert.equal(patches.length, 5); assert(patches.every(call => call.url.endsWith('?updateMask=buildConfig.source')));
+  assert(h.calls.every(call => call.method !== 'DELETE'));
+  assert.equal(h.db.writes.length, 6);
+ });
+
+ test('CAS record projections retain Timestamp-typed unrelated gate and tester fields', async () => {
+  class Timestamp { constructor() { this._seconds = 123; this._nanoseconds = 456; Object.freeze(this); } toMillis() { return 0; } toDate() { return new Date(0); } }
+  const h = await legacyData(); const records = { gate: h.db.get('floatingGardenTrial/config'), usage: h.db.get('floatingGardenTrial/usage'), testers: review.testerUids.map(uid => h.db.get(`floatingGardenTrialTesters/${uid}`)) };
+  records.gate.extraTimestamp = new Timestamp(); records.testers[0].extraTimestamp = new Timestamp();
+  const closed = toggleActiveRecords(records, review, false);
+  assert(closed.gate.extraTimestamp instanceof Timestamp); assert(closed.testers[0].extraTimestamp instanceof Timestamp);
+  assert.equal(closed.usage, records.usage); assert.equal(assertPreservedRecords(records, closed, review, false), true);
+  const reopened = toggleActiveRecords(closed, review, true); assert.deepEqual(reopened, records);
+ });
+
+ test('documented output-only runtime patch version can move without permitting configured policy changes', () => {
+  const fn = metadata(0); fn.buildConfig.onDeployUpdatePolicy = { runtimeVersion: 'nodejs22-previous', retainedFutureField: 'preserve' };
+  const before = [{ function: fn, run: run(fn), iam: { bindings: [] } }];
+  const after = clone(before); after[0].function.buildConfig.onDeployUpdatePolicy.runtimeVersion = 'nodejs22-current';
+  assert.deepEqual(stableFunctionConfiguration(before), stableFunctionConfiguration(after));
+  after[0].function.buildConfig.onDeployUpdatePolicy.retainedFutureField = 'changed';
+  assert.notDeepEqual(stableFunctionConfiguration(before), stableFunctionConfiguration(after));
+  delete after[0].function.buildConfig.onDeployUpdatePolicy; after[0].function.buildConfig.automaticUpdatePolicy = {};
+  assert.notDeepEqual(stableFunctionConfiguration(before), stableFunctionConfiguration(after));
+ });
+
+// Registered only by the explicit *.integration.mjs entry. Importing the ordinary
+// unit suite never loads Admin/ADC or contacts an emulator.
+export function registerActiveUpdateEmulatorTests() {
+  const host = process.env.FIRESTORE_EMULATOR_HOST;
+  assert.match(host || '', /^(127\.0\.0\.1|localhost):[0-9]{2,5}$/);
+  const sdk = createRequire(join(ROOT, 'functions/floating-garden-trial/package.json'));
+  const { initializeApp, deleteApp } = sdk('firebase-admin/app');
+  const { getFirestore, Timestamp } = sdk('firebase-admin/firestore');
+  async function fixture(t, fault) {
+    const projectId = `demo-garden-active-${Math.random().toString(36).slice(2, 10)}`;
+    const app = initializeApp({ projectId }, projectId); const actual = getFirestore(app);
+    actual.settings({ ignoreUndefinedProperties: false, clientConfig: FIRESTORE_CLIENT_CONFIG });
+    t.after(async () => { await actual.terminate(); await deleteApp(app); });
+    const writes = [], attempts = []; let inject;
+    const database = {
+      doc: path => actual.doc(path), collection: path => actual.collection(path), collectionGroup: id => actual.collectionGroup(id),
+      getAll: (...refs) => actual.getAll(...refs), listCollections: () => actual.listCollections(), batch: () => actual.batch(),
+      async runTransaction(body, options) {
+        attempts.push(options);
+        if (options?.maxAttempts === 1 && inject) await inject('before', []);
+        let pending = [];
+        const result = await actual.runTransaction(tx => body({ get: target => tx.get(target),
+          update(ref, data) { pending.push({ path: ref.path, data }); return tx.update(ref, data); } }), options);
+        writes.push(...pending);
+        if (pending.length && inject) await inject('after', pending);
+        return result;
+      },
+    };
+    const h = await harness({ actualTransport: true, database });
+    const stamp = new Timestamp(1791157551, 472000123);
+    await actual.doc('floatingGardenTrial/config').update({ extraTimestamp: stamp });
+    await actual.doc(`floatingGardenTrialTesters/${review.testerUids[0]}`).update({ extraTimestamp: stamp });
+    const groups = await actual.collectionGroup('serverGames').get();
+    for (const doc of groups.docs) await doc.ref.update({ expiresAt: stamp });
+    async function allData() {
+      const map = new Map();
+      for (const root of await actual.listCollections()) for (const doc of (await root.get()).docs) map.set(doc.ref.path, doc.data());
+      for (const group of ['members', 'serverGames']) for (const doc of (await actual.collectionGroup(group).get()).docs) map.set(doc.ref.path, doc.data());
+      return [...map].sort(([a], [b]) => a.localeCompare(b));
+    }
+    return { ...h, actual, writes, attempts, allData, setFault(value) { inject = value; } };
+  }
+  test('Firestore emulator: actual query transactions preserve two legacy rooms, nonzero usage and nanosecond Timestamp fields', async t => {
+    const h = await fixture(t); const before = canonicalData(await h.allData()); const result = await h.run();
+    assert.equal(result.status, 'active-updated', JSON.stringify(result)); assert.equal(canonicalData(await h.allData()), before);
+    assert.equal((await h.actual.doc('floatingGardenTrial/usage').get()).data().createdRoomCount, 2);
+    assert.equal(h.writes.length, 6); assert(h.writes.every(w => w.path !== 'floatingGardenTrial/usage'));
+    assert(h.attempts.filter(a => !a.readOnly).every(a => a.maxAttempts === 1));
+  });
+  test('Firestore emulator: baseline race is detected by real query CAS and never resets usage or retries', async t => {
+    const h = await fixture(t); let injected = false;
+    h.setFault(async phase => { if (phase === 'before' && !injected) { injected = true; await h.actual.doc('floatingGardenTrial/usage').update({ createdRoomCount: 3 }); } });
+    const result = await h.run(); assert.equal(result.status, 'blocked'); assert.equal(h.writes.length, 0);
+    assert.equal(h.attempts.filter(a => a.maxAttempts === 1).length, 1); assert.equal((await h.actual.doc('floatingGardenTrial/usage').get()).data().createdRoomCount, 3);
+  });
+  for (const active of [false, true]) test(`Firestore emulator: uncertain ${active ? 'reopen' : 'pause'} commit is reconciled without resend`, async t => {
+    const h = await fixture(t);
+    h.setFault(async (phase, pending) => { if (phase === 'after' && pending[0]?.data.enabled === active) throw Error('SYNTHETIC_LOST_RESPONSE'); });
+    const result = await h.run(); assert.equal(result.status, 'blocked'); assert.equal(result.access, active ? 'open' : 'closed');
+    assert.equal(h.writes.length, active ? 6 : 3); assert.equal((await h.actual.doc('floatingGardenTrial/usage').get()).data().createdRoomCount, 2);
+  });
+}
+
+ test('private baseline rejects altered window/roster/cap and legacy-version NPC-shaped rooms', async () => {
+  for (const corrupt of [
+    h => h.db.set('floatingGardenTrial/config', { ...h.db.get('floatingGardenTrial/config'), endsAtMillis: S.endsAtMillis + 1 }),
+    h => h.db.set('floatingGardenTrial/config', { ...h.db.get('floatingGardenTrial/config'), testerUids: ['OTHER_SYNTHETIC', review.testerUids[1]] }),
+    h => h.db.set('floatingGardenTrial/config', { ...h.db.get('floatingGardenTrial/config'), maxRooms: 21 }),
+    h => { const path = `floatingGardenRooms/${h.second.roomId}`, room = h.db.get(path); h.db.set(path, { ...room, players: [...room.players, { seat: 2, name: 'invalid NPC' }] }); },
+  ]) { const h = await harness(); corrupt(h); const result = await h.run(); assert.equal(result.status, 'blocked'); assert.equal(h.db.writes.length, 0); assert.equal(h.providerWrites.length, 0); }
+ });
+ test('expiry immediately before reopen retains closed gate and original deadline', async () => {
+  const h = await harness(), original = h.cloud.verifyPreservation;
+  const cloud = { ...h.cloud, verifyPreservation: async () => { const value = await original(); h.setTime(S.endsAtMillis); return value; } };
+  const result = await h.run({ cloud }); assert.equal(result.status, 'blocked'); assert.equal(result.access, 'closed');
+  assert.equal(h.db.writes.length, 3); assert.equal(h.db.get('floatingGardenTrial/config').endsAtMillis, S.endsAtMillis);
+ });
+ test('provider-step journal failure prevents the corresponding first provider mutation', async () => {
+  const h = await harness({ actualTransport: true }); h.journal.providerStep = async () => { throw Error('synthetic journal unavailable'); };
+  const result = await h.run(); assert.equal(result.status, 'blocked'); assert.equal(result.access, 'closed'); assert.equal(h.providerWrites.length, 0);
+ });
+ test('uncertain reopen reconciles access independently from corrupt usage and new NPC data', async () => {
+  const h = await harness(); h.db.setFault(({ phase, pending, db }) => {
+    if (phase === 'after' && pending[0].data.enabled === true) {
+      db.set('floatingGardenTrial/usage', { ...db.get('floatingGardenTrial/usage'), createdRoomCount: -1 });
+      db.set('floatingGardenRooms/synthetic-new-npc', { id: 'synthetic-new-npc', rulesVersion: 'floating-garden-online-npc-1', npcCount: 1, playerCount: 3 });
+      throw Error('synthetic response lost');
+    }
+  });
+  const result = await h.run(); assert.equal(result.status, 'blocked'); assert.equal(result.access, 'open'); assert.equal(h.db.writes.length, 6);
+ });
+ test('source packet mutation and coherently rewritten manifest still fail the reviewed full-byte pin', async () => {
+  const dir = await mkdtemp(join(directory, 'tampered-')); const output = join(dir, 'next'); await cp(newPacket.packet.output, output, { recursive: true });
+  const path = 'game/functions/online/core/cpu.js'; await writeFile(join(output, path), 'changed');
+  let manifest = JSON.parse(await readFile(join(output, 'OPERATION-MANIFEST.json'))); manifest.files[path] = sha('changed');
+  await writeFile(join(output, 'OPERATION-MANIFEST.json'), JSON.stringify(manifest, null, 2)+'\n');
+  await assert.rejects(prepareActiveUpdatePlan({ previousOutput: oldPacket.packet.output, nextOutput: output }), e => activeUpdateReason(e) === 'packet-source-pin');
+  assert(Object.isFrozen(activeUpdatePackets(plan).next.packet.manifest.files));
+ });
+
+ test('approved default provider wiring uses real authenticated request bridge with only injected SDK and fetch', async () => {
+  const h = await harness({ actualBridge: true }); const result = await h.run();
+  assert.equal(result.status, 'active-updated', JSON.stringify(result));
+  const patches = h.calls.filter(call => call.method === 'PATCH' && call.url?.includes('cloudfunctions.googleapis.com'));
+  assert.equal(patches.length, 5); assert.equal(h.db.writes.length, 6);
+ });
+
+
+test('CI actual-provider path starts closed, runs three pinned CLI stages, preserves data and opens with exactly three updates', async () => {
+  const h = await harness({ ci: true }), before = h.db.entries();
+  const result = await h.runCi(); assert.equal(result.status, 'npc-released', JSON.stringify(result));
+  assert.deepEqual(h.providerWrites, [...Array(5).fill('functions'), 'rules', 'hosting']);
+  assert.equal(h.db.writes.length, 3); assert.equal(h.db.attempts.filter(a => !a.readOnly).length, 1);
+  assert(h.db.attempts.filter(a => !a.readOnly).every(a => a.maxAttempts === 1));
+  assert(h.db.writes.every(w => w.kind === 'update' && (w.path === 'floatingGardenTrial/config' || w.path.startsWith('floatingGardenTrialTesters/'))));
+  const retained = entries => entries.filter(([p]) => p !== 'floatingGardenTrial/config' && !p.startsWith('floatingGardenTrialTesters/'));
+  assert.deepEqual(retained(h.db.entries()), retained(before));
+  assert.equal(h.db.get('floatingGardenTrial/usage').createdRoomCount, 2);
+  assert.equal(h.db.get('floatingGardenTrial/config').endsAtMillis, S.endsAtMillis);
+  assert.deepEqual(h.db.get('floatingGardenTrial/config').testerUids, review.testerUids);
+  assert(h.journalEntries.some(e => e.stage === 'official-cli-functions'));
+  await assert.rejects(h.cloud.deployCiStage('functions'));
+});
+test('CI full provider route accepts every exact Hosting channel/version alias without weakening preservation', async t => {
+  const prefixes = ['', `projects/${S.project}/`, `projects/${S.projectNumber}/`];
+  for (const [channelIndex, channelPrefix] of prefixes.entries()) for (const [versionIndex, versionPrefix] of prefixes.entries()) {
+    await t.test(`channel form ${channelIndex}, version form ${versionIndex}`, async () => {
+      const h = await harness({ ci: true, hostingMetadata(command, result) {
+        if (command === 'hosting:sites:list') result.sites[0].name = `projects/${channelIndex % 2 ? S.projectNumber : S.project}/sites/${S.project}`;
+        else {
+          result.channels[0].name = channelPrefix + result.channels[0].name;
+          result.channels[0].release.version.name = versionPrefix + result.channels[0].release.version.name;
+        }
+        return result;
+      } });
+      const before = h.db.entries(), result = await h.runCi();
+      assert.equal(result.status, 'npc-released', JSON.stringify(result));
+      assert.deepEqual(h.providerWrites, [...Array(5).fill('functions'), 'rules', 'hosting']);
+      const retained = entries => entries.filter(([p]) => p !== 'floatingGardenTrial/config' && !p.startsWith('floatingGardenTrialTesters/'));
+      assert.deepEqual(retained(h.db.entries()), retained(before));
+      assert.equal(h.db.attempts.filter(a => !a.readOnly).length, 1); assert.equal(h.db.writes.length, 3);
+      assert(h.db.attempts.filter(a => !a.readOnly).every(a => a.maxAttempts === 1));
+    });
+  }
+});
+test('CI Hosting aliases may change between reads while canonical identity stays exact', async () => {
+  let channels = 0, sites = 0;
+  const prefixes = ['', `projects/${S.project}/`, `projects/${S.projectNumber}/`];
+  const h = await harness({ ci: true, hostingMetadata(command, result) {
+    if (command === 'hosting:sites:list') result.sites[0].name = `projects/${sites++ % 2 ? S.projectNumber : S.project}/sites/${S.project}`;
+    else {
+      result.channels[0].name = prefixes[channels % 3] + result.channels[0].name;
+      result.channels[0].release.version.name = prefixes[(channels++ + 1) % 3] + result.channels[0].release.version.name;
+    }
+    return result;
+  } });
+  const result = await h.runCi(); assert.equal(result.status, 'npc-released', JSON.stringify(result));
+  assert(channels > 3 && sites > 2); assert.equal(h.db.writes.length, 3);
+  assert.deepEqual(h.providerWrites, [...Array(5).fill('functions'), 'rules', 'hosting']);
+});
+test('CI Hosting version drift after baseline stops before the sole Hosting mutation and gate reopen', async () => {
+  let h, driftReads = 0;
+  h = await harness({ ci: true, hostingMetadata(command, result) {
+    if (command === 'hosting:channel:list' && h.providerWrites.includes('rules') && !h.providerWrites.includes('hosting')) {
+      driftReads++;
+      result.channels[0].release.version.name = `projects/${S.projectNumber}/sites/${S.project}/versions/concurrent-deployment`;
+    }
+    return result;
+  } });
+  const before = h.db.entries(), result = await h.runCi();
+  assert.equal(result.status, 'blocked'); assert.equal(result.stage, 'hosting'); assert.equal(result.reason, 'provider-drift');
+  assert.equal(result.access, 'closed'); assert(driftReads >= 2);
+  assert.deepEqual(h.providerWrites, [...Array(5).fill('functions'), 'rules']);
+  assert.deepEqual(h.db.entries(), before); assert.equal(h.db.writes.length, 0);
+  assert(!h.journalEntries.some(e => e.stage === 'official-cli-hosting'));
+});
+test('CI Rules identity drift after Functions stops before the sole Rules mutation and gate reopen', async () => {
+  const h = await harness({ ci: true }); let driftReads = 0;
+  h.setOverride((url, result) => {
+    if (h.providerWrites.length === 5 && !h.providerWrites.includes('rules') && url.includes('firebaserules.googleapis.com')) {
+      driftReads++; const changed = structuredClone(result);
+      if (url.includes('/releases/cloud.firestore')) changed.rulesetName = `projects/${S.project}/rulesets/concurrent-deployment`;
+      else if (url.includes('/rulesets/')) changed.name = `projects/${S.project}/rulesets/concurrent-deployment`;
+      return changed;
+    }
+    return result;
+  });
+  const before = h.db.entries(), result = await h.runCi();
+  assert.equal(result.status, 'blocked'); assert.equal(result.stage, 'rules'); assert.equal(result.reason, 'provider-drift');
+  assert.equal(result.access, 'closed'); assert(driftReads >= 3);
+  assert.deepEqual(h.providerWrites, Array(5).fill('functions'));
+  assert.deepEqual(h.db.entries(), before); assert.equal(h.db.writes.length, 0);
+  assert(!h.journalEntries.some(e => ['official-cli-rules', 'official-cli-hosting'].includes(e.stage)));
+});
+test('CI never pauses/reopens the old version and rejects open baseline, custom config, missing approval and reruns', async () => {
+  for (const change of [h => h.db.set('floatingGardenTrial/config', { ...h.db.get('floatingGardenTrial/config'), enabled: true, testerUids: [...review.testerUids] }),
+    h => h.functions[0].labels.custom = 'retain', h => h.functions[0].serviceConfig.environmentVariables.FIREBASE_CONFIG = JSON.stringify({ projectId: 'wrong-project', storageBucket: S.project + '.appspot.com' }), h => h.functions[0].buildConfig.environmentVariables.EXTRA = 'retain']) {
+    const h = await harness({ ci: true }); change(h); const r = await h.runCi();
+    assert.equal(r.status, 'blocked'); assert.equal(h.providerWrites.length, 0); assert.equal(h.db.writes.length, 0);
+  }
+  const h = await harness({ ci: true }); await assert.rejects(h.runCi({ approval: {} }));
+  h.env.GITHUB_RUN_ATTEMPT = '2'; await assert.rejects(h.runCi()); assert.equal(h.providerWrites.length, 0);
+});
+test('CI exact label/configuration preservation keeps all security/config fields, and CLI failures always receive readback but stay closed', async () => {
+  for (const failed of ['functions', 'rules', 'hosting']) {
+    const h = await harness({ ci: true, cliFault: (kind, when) => kind === failed && when === 'before' ? { exitCode: 1, stdout: JSON.stringify({ status: 'error', error: 'SYNTHETIC_SECRET_DO_NOT_PRINT' }) } : null });
+    const r = await h.runCi(); assert.equal(r.status, 'blocked'); assert.equal(r.access, 'closed');
+    assert.equal(h.providerWrites.filter(x => x === failed).length, 1); assert.equal(h.db.writes.length, 0);
+    assert(!JSON.stringify(r).includes('SYNTHETIC_SECRET'));
+  }
+  const h = await harness({ ci: true }); h.setOverride((url, value) => url.includes(':getIamPolicy') && h.providerWrites.length ? { ...value, auditConfigs: [] } : value);
+  const r = await h.runCi(); assert.equal(r.status, 'blocked'); assert.equal(r.access, 'closed'); assert.equal(h.db.writes.length, 0);
+});
+test('CI Firebase cleanup-warning text is never accepted for gcloud, even when source landed', async () => {
+  const h = await harness({ ci: true, cliFault: (kind, when) => kind === 'functions' && when === 'after' ? { exitCode: 1, stdout: JSON.stringify({ status: 'error', error: CLEANUP_WARNING }) } : null });
+  assert.equal((await h.runCi()).status, 'blocked'); assert.equal(h.db.writes.length, 0);
+  const failed = await harness({ ci: true, cliFault: (kind, when) => kind === 'functions' && when === 'before' ? { exitCode: 1, stdout: JSON.stringify({ status: 'error', error: CLEANUP_WARNING }) } : null });
+  assert.equal((await failed.runCi()).status, 'blocked'); assert.equal(failed.db.writes.length, 0);
+});
+
+test('CI CAS uncertainty never writes a verified reopen journal entry or retries', async () => {
+  for (const phase of ['before', 'after']) {
+    const h = await harness({ ci: true }); h.db.setFault(({ phase: at }) => { if (phase === at) throw Error('SYNTHETIC_PRIVATE_CAS'); });
+    const r = await h.runCi(); assert.equal(r.status, 'blocked'); assert.equal(r.stage, 'reopen');
+    assert.equal(r.access, phase === 'before' ? 'closed' : 'open');
+    assert.equal(h.db.attempts.filter(a => !a.readOnly).length, 1);
+    assert(!h.journalEntries.some(e => e.verified === 'reopen')); assert(!JSON.stringify(r).includes('SYNTHETIC_PRIVATE'));
+  }
+});
+
+test('CI journal failure preserves actual failed phase and reconciled access', async () => {
+  const h = await harness({ ci: true });
+  const original = h.journal.verified;
+  h.journal.verified = async stage => { if (stage === 'reopen') throw Error('SYNTHETIC_PRIVATE_DISK'); return original(stage); };
+  h.journal.fail = async () => { throw Error('SYNTHETIC_PRIVATE_DISK'); };
+  const r = await h.runCi(); assert.equal(r.status, 'blocked'); assert.equal(r.stage, 'reopen'); assert.equal(r.access, 'open');
+  assert.equal(r.journalWriteFailed, true); assert.equal(h.db.writes.length, 3); assert(!JSON.stringify(r).includes('SYNTHETIC_PRIVATE'));
+});
+
+test('CI gcloud/Rules/Hosting route never requests obsolete function-CLI metadata', async () => {
+  const h = await harness({ ci: true });
+  assert.equal((await h.runCi()).status, 'npc-released');
+  assert(!h.calls.some(c => /firebaseextensions|adminSdkConfig|apikeys|billingInfo/.test(c.url || '')));
+  const deploys = h.calls.filter(c => c.command === process.execPath && c.args?.[1] === 'deploy');
+  assert.equal(deploys.length, 2); assert(deploys.every(c => !c.args[c.args.indexOf('--only') + 1].startsWith('functions')));
+});
+
+test('CI recovery requires exact run 5 attempt 1 and one fast-forward from the consumed release head', async () => {
+  for (const mutate of [
+    h => h.env.GARDEN_RELEASE_REF_CREATED = 'true',
+    h => delete h.env.GARDEN_RELEASE_REF_CREATED,
+    h => h.env.GITHUB_RUN_NUMBER = '0',
+    h => h.env.GITHUB_RUN_NUMBER = '3',
+    h => h.env.GITHUB_RUN_NUMBER = '4',
+    h => h.env.GITHUB_RUN_NUMBER = '6',
+    h => h.env.GITHUB_RUN_ATTEMPT = '2',
+    h => h.env.GARDEN_RELEASE_EVENT_BEFORE = '74027567a8761e78423c8df0e744abc8d5633a8b',
+    h => h.env.GARDEN_RELEASE_EVENT_BEFORE = '95ec4e69e4b566df91a37a4107e1a1fd94478ebf',
+    h => h.env.GARDEN_RELEASE_EVENT_BEFORE = 'b'.repeat(40),
+    h => h.env.GARDEN_RELEASE_EVENT_BEFORE = '0'.repeat(40),
+    h => delete h.env.GARDEN_RELEASE_EVENT_BEFORE,
+    h => h.env.GARDEN_RELEASE_EVENT_AFTER = 'b'.repeat(40),
+    h => delete h.env.GARDEN_RELEASE_EVENT_AFTER,
+    h => h.env.GITHUB_WORKFLOW_SHA = 'b'.repeat(40),
+    h => { h.env.GITHUB_SHA = CI_RELEASE_RECOVERY.before; h.env.GITHUB_WORKFLOW_SHA = CI_RELEASE_RECOVERY.before; h.env.GARDEN_RELEASE_EVENT_AFTER = CI_RELEASE_RECOVERY.before; },
+    h => h.env.GITHUB_RUN_NUMBER = 'not-a-number',
+  ]) {
+    const h = await harness({ ci: true }); mutate(h); await assert.rejects(h.runCi());
+    assert.equal(h.calls.length, 0); assert.equal(h.providerWrites.length, 0); assert.equal(h.db.writes.length, 0);
+  }
+  const h = await harness({ ci: true });
+  await assert.rejects(h.runCi({ approval: ciReleaseApproval(h.env.GITHUB_SHA, '4') }));
+  assert.equal(h.calls.length, 0); assert.equal(h.providerWrites.length, 0); assert.equal(h.db.writes.length, 0);
+});
+
+test('CI every partial Functions interruption stops once, reconciles, and leaves gate/data closed', async () => {
+  for (let index = 0; index < FUNCTION_NAMES.length; index++) for (const when of ['before', 'after']) {
+    const h = await harness({ ci: true, cliFault: (kind, at, i) => kind === 'functions' && i === index && at === when
+      ? { exitCode: null, signal: true, timedOut: index % 2 === 0, stdout: 'SYNTHETIC_PRIVATE_DIAGNOSTIC' } : null });
+    const before = h.db.entries(), result = await h.runCi();
+    assert.equal(result.status, 'blocked'); assert.equal(result.stage, 'functions'); assert.equal(result.access, 'closed');
+    assert.equal(h.providerWrites.length, index + 1); assert(h.providerWrites.every(k => k === 'functions'));
+    assert.deepEqual(h.db.entries(), before); assert.equal(h.db.writes.length, 0);
+    assert.equal(h.functions.filter(fn => fn.buildConfig.sourceProvenance.resolvedStorageSource.generation === '124').length, index + (when === 'after' ? 1 : 0));
+    const attempts = h.journalEntries.filter(e => e.stage === 'official-cli-functions');
+    assert.deepEqual(attempts.map(e => e.index), Array.from({ length: index + 1 }, (_, i) => i));
+    assert(!JSON.stringify(result).includes('SYNTHETIC_PRIVATE'));
+    await assert.rejects(h.cloud.deployCiStage('functions'));
+  }
+});
+test('CI pre-reopen configuration drift is rejected after each exact function and never reaches next stage', async () => {
+  for (const mutate of [fn => fn.labels['firebase-functions-hash'] = 'b'.repeat(40),
+    fn => fn.buildConfig.serviceAccount = `projects/${S.project}/serviceAccounts/${S.projectNumber}@cloudbuild.gserviceaccount.com`,
+    fn => fn.serviceConfig.environmentVariables.LOG_EXECUTION_ID = 'false',
+    fn => fn.serviceConfig.secretEnvironmentVariables[0].version = '2',
+    fn => fn.buildConfig.environmentVariables.GOOGLE_NODE_RUN_SCRIPTS = 'build']) {
+    let h; h = await harness({ ci: true, cliFault: (kind, when, i) => {
+      if (kind === 'functions' && when === 'after' && i === 0) mutate(h.functions[0]);
+      return null;
+    } });
+    const result = await h.runCi(); assert.equal(result.status, 'blocked'); assert.equal(result.access, 'closed');
+    assert.deepEqual(h.providerWrites, ['functions']); assert.equal(h.db.writes.length, 0);
+  }
+});
+
+test('CI permits only the optional exact HTTP signature and preserves its original presence', async () => {
+  const h = await harness({ ci: true });
+  for (const fn of h.functions.slice(1)) fn.serviceConfig.environmentVariables.FUNCTION_SIGNATURE_TYPE = 'http';
+  const before = h.functions.map(fn => structuredClone(fn.serviceConfig.environmentVariables));
+  const result = await h.runCi();
+  assert.equal(result.status, 'npc-released', JSON.stringify(result));
+  assert.deepEqual(h.functions.map(fn => fn.serviceConfig.environmentVariables), before);
+});
+
+test('CI rejects non-HTTP signature values and all unknown environment keys before any mutation', async () => {
+  for (const value of ['event', 'cloudevent', 'HTTP', ' http', 'http ', '', null, false, 1, {}, []]) {
+    const h = await harness({ ci: true });
+    h.functions[1].serviceConfig.environmentVariables.FUNCTION_SIGNATURE_TYPE = value;
+    const before = h.db.entries(), result = await h.runCi();
+    assert.equal(result.status, 'blocked'); assert.equal(result.stage, 'closed-baseline');
+    assert.equal(result.reason, 'iam-preservation');
+    assert.deepEqual(h.providerWrites, []); assert.equal(h.db.writes.length, 0); assert.deepEqual(h.db.entries(), before);
+  }
+  const h = await harness({ ci: true });
+  h.functions[1].serviceConfig.environmentVariables.FUNCTION_SIGNATURE_TYPE = 'http';
+  h.functions[1].serviceConfig.environmentVariables.UNREVIEWED_KEY = 'http';
+  const result = await h.runCi(); assert.equal(result.status, 'blocked'); assert.equal(result.reason, 'iam-preservation');
+  assert.deepEqual(h.providerWrites, []); assert.equal(h.db.writes.length, 0);
+});
+
+test('CI detects signature addition removal or mutation after a function update and never continues', async () => {
+  for (const change of ['add', 'remove', 'change']) {
+    let h; h = await harness({ ci: true, cliFault: (kind, when, i) => {
+      if (kind === 'functions' && when === 'after' && i === 0) {
+        const env = h.functions[0].serviceConfig.environmentVariables;
+        if (change === 'remove') delete env.FUNCTION_SIGNATURE_TYPE;
+        else env.FUNCTION_SIGNATURE_TYPE = change === 'add' ? 'http' : 'cloudevent';
+      }
+      return null;
+    } });
+    if (change !== 'add') h.functions[0].serviceConfig.environmentVariables.FUNCTION_SIGNATURE_TYPE = 'http';
+    const result = await h.runCi(); assert.equal(result.status, 'blocked'); assert.equal(result.access, 'closed');
+    assert.deepEqual(h.providerWrites, ['functions']); assert.equal(h.db.writes.length, 0);
+  }
+});
+
+// Mixed recovery preparation uses actual packet ZIP readers and provider paths.
+const sink = () => ({ captures: [], async append(event, value) { this.captures.push({ event, value: clone(value) }); return { saved: true }; } });
+const setMixed = h => { h.functions[0].buildConfig.sourceProvenance.resolvedStorageSource = clone(metadata(0, '124').buildConfig.sourceProvenance.resolvedStorageSource); };
+async function assertInspectionLocked(h) {
+  for (const call of [() => h.cloud.inspect(), () => h.cloud.inspectClosed(), () => h.cloud.pause('x'),
+    () => h.cloud.deployCiStage('functions'), () => h.cloud.updateFunctions(), () => h.cloud.updateRules(), () => h.cloud.updateHosting(), () => h.cloud.reopen()]) await assert.rejects(call());
+  assert.throws(() => h.cloud.bindJournal(h.journal));
+  assert.equal(h.db.writes.length, 0); assert.equal(h.providerWrites.length, 0);
+}
+test('mixed read-only preflight proves exact ZIP contents and latches every mutation path', async () => {
+  const h = await harness({ ci: true }); setMixed(h); const evidence = sink();
+  const result = await h.cloud.inspectMixedRecovery({ assignment: clone(MIXED_RECOVERY_ASSIGNMENT), evidenceStore: evidence });
+  assert.equal(result.kind, 'mixed-recovery-candidate'); assert.equal(result.candidate.executionAllowed, false);
+  assert.equal(result.candidate.historicalPreservation, 'unknown'); assert.equal(evidence.captures.length, 3);
+  assert(h.calls.filter(c => c.url?.includes('&alt=media')).length >= 4);
+  const review = { schemaVersion: 1, purpose: 'mixed-source-read-only-review', candidateFingerprint: result.candidate.fingerprint,
+    acknowledgeHistoricalPreservationUnknown: true, executionAllowed: false };
+  assert.equal(validateMixedRecoveryReview(result.candidate, review, NOW).executionAllowed, false);
+  for (const bad of [{ ...review, executionAllowed: true }, { ...review, candidateFingerprint: '0'.repeat(64) }]) assert.throws(() => validateMixedRecoveryReview(result.candidate, bad, NOW));
+  assert.throws(() => validateMixedRecoveryReview(result.candidate, review, NOW + 300001));
+  assert.throws(() => validateMixedRecoveryReview({ ...result.candidate, currentEvidenceFingerprint: '0'.repeat(64) }, review, NOW));
+  await assertInspectionLocked(h);
+});
+test('failed mixed inspection cannot be turned into a write session', async () => {
+  for (const mode of ['assignment', 'archive', 'inventory', 'settings', 'sink', 'latest']) {
+    const h = await harness({ ci: true, ...(mode === 'latest' ? { secretVersion: selector => ({ name: `projects/${S.projectNumber}/secrets/FLOATING_GARDEN_INVITE_HMAC_KEY/versions/${selector === 'latest' ? '2' : '1'}`, state: 'ENABLED' }) } : {}) });
+    setMixed(h); let evidence = sink(), assignment = clone(MIXED_RECOVERY_ASSIGNMENT), reads = 0;
+    if (mode === 'assignment') assignment[0].source = 'previous';
+    if (mode === 'archive') h.setOverride((url, data) => url.includes('&alt=media') ? Buffer.from('not the reviewed ZIP') : data);
+    if (mode === 'inventory') h.setOverride((url, data) => { if (url.includes('/functions?') && ++reads >= 3) data.functions[0].description = 'raced'; return data; });
+    if (mode === 'settings') { const append = evidence.append.bind(evidence); evidence.append = async (...args) => { const r = await append(...args); h.changeSettings(); return r; }; }
+    if (mode === 'sink') evidence = { append: async () => { throw Error('private sink unavailable'); } };
+    await assert.rejects(h.cloud.inspectMixedRecovery({ assignment, evidenceStore: evidence }), mode);
+    await assertInspectionLocked(h);
+  }
+});
+test('CI durable prewrite file and directory fsync failures stop before the first SDK write', async () => {
+  for (const failure of ['file', 'directory']) {
+    const h = await harness({ ci: true }); const path = await mkdtemp(join(directory, 'evidence-fault-'));
+    let fileSyncs = 0, dirSyncs = 0;
+    const evidence = await createPrivateEvidence(path, {
+      syncFile: async f => { if (failure === 'file' && ++fileSyncs === 2) throw Error('synthetic fsync'); await f.sync(); },
+      syncDirectory: async f => { if (failure === 'directory' && ++dirSyncs === 3) throw Error('synthetic directory fsync'); await f.sync(); },
+    });
+    h.journal.privateEvidence = (event, value) => evidence.append(event, value);
+    const result = await h.runCi(); assert.equal(result.status, 'blocked');
+    assert.equal(h.providerWrites.length, 0); assert.equal(h.db.writes.length, 0);
+    await assert.rejects(h.cloud.deployCiStage('functions'));
+  }
+});
+test('private evidence delay reaching original expiry prevents the next SDK write', async () => {
+  const h = await harness({ ci: true });
+  h.journal.privateEvidence = async event => { if (event === 'prewrite-functions') h.setTime(S.endsAtMillis); };
+  const result = await h.runCi(); assert.equal(result.status, 'blocked'); assert.equal(h.providerWrites.length, 0);
+});
+test('preservation failure prints bounded fixed field paths and never provider values', async () => {
+  let h;
+  h = await harness({ ci: true, cliFault: (kind, phase, index) => {
+    if (kind === 'functions' && phase === 'after' && index === 0) h.setOverride((url, data) => {
+      if (url.startsWith('https://run.googleapis.com/') && !url.includes(':getIamPolicy')) data.lastModifier = 'PRIVATE_TOKEN_SENTINEL';
+      return data;
+    });
+  } });
+  const result = await h.runCi(); assert.equal(result.status, 'blocked'); assert.equal(result.reason, 'iam-preservation');
+  assert(result.preservation.paths.some(p => p.endsWith('.run.lastModifier')));
+  assert(!JSON.stringify(result).includes('PRIVATE_TOKEN_SENTINEL'));
+  assert.equal(h.providerWrites.length, 1); await assert.rejects(h.cloud.deployCiStage('functions')); assert.equal(h.providerWrites.length, 1);
+});
+
+test('mixed ZIP proof rejects changed valid-archive bytes, extra files and old code at new generation', async () => {
+  for (const fault of ['byte', 'extra', 'old']) {
+    const h = await harness({ ci: true }); setMixed(h);
+    const bad = await zip(fault === 'old' ? oldPacket.packet : newPacket.packet, fault);
+    h.setOverride((url, data) => {
+      if (url.includes('generation=124')) {
+        if (url.includes('&alt=media')) return bad;
+        if (url.includes('/o/')) return { ...data, size: String(bad.length) };
+      }
+      return data;
+    });
+    await assert.rejects(h.cloud.inspectMixedRecovery({ assignment: clone(MIXED_RECOVERY_ASSIGNMENT), evidenceStore: sink() }));
+    await assertInspectionLocked(h);
+  }
+});
+test('unknown preservation field remains blocked and never prints dynamic name or value', async () => {
+  let h;
+  h = await harness({ ci: true, cliFault: (kind, phase, index) => {
+    if (kind === 'functions' && phase === 'after' && index === 0) h.setOverride((url, data) => {
+      if (url.startsWith('https://run.googleapis.com/') && !url.includes(':getIamPolicy')) data.PRIVATE_DYNAMIC_NAME = 'PRIVATE_DYNAMIC_VALUE';
+      return data;
+    });
+  } });
+  const result = await h.runCi(); assert.equal(result.status, 'blocked'); assert.equal(result.reason, 'iam-preservation');
+  assert.equal(result.preservation.unknown, true); assert(result.preservation.paths.some(p => p.endsWith('.$unknown')));
+  assert(!JSON.stringify(result).includes('PRIVATE_DYNAMIC')); assert.equal(h.providerWrites.length, 1); assert.equal(h.db.writes.length, 0);
+});
+
+test('complete owner-read-only API proves real ZIPs/settings/data through bounded synthetic SDK and REST', async () => {
+  const h = await harness({ ci: true }); setMixed(h);
+  const home = await mkdtemp(join(directory, 'owner-home-')), journalPins = await createSyntheticOwnerJournal(home);
+  const token = 'SYNTHETIC_OWNER_TOKEN_NEVER_SAVED_123456'; const issued = [], httpCalls = []; let txs = 0;
+  const encode = x => x === null ? { nullValue: null } : typeof x === 'string' ? { stringValue: x } : typeof x === 'boolean' ? { booleanValue: x } :
+    typeof x === 'number' ? (Number.isInteger(x) ? { integerValue: String(x) } : { doubleValue: x }) : Array.isArray(x) ? { arrayValue: { values: x.map(encode) } } : { mapValue: { fields: fields(x) } };
+  const fields = x => Object.fromEntries(Object.entries(x).map(([k,v]) => [k,encode(v)]));
+  const spawn = (path, args) => {
+    issued.push(args); const base = args.filter(a => !/^--(?:project|billing-project|verbosity|format|account)=/.test(a));
+    if (base[0] === 'version') return { status: 0, stdout: JSON.stringify({ 'Google Cloud SDK': '587.0.0' }) };
+    if (base[0] === 'auth') return { status: 0, stdout: base[1] === 'print-access-token' ? token : JSON.stringify([{ account: 'owner@example.invalid', status: 'ACTIVE' }]) };
+    const r = h.rawRunner('gcloud', base); return { status: r.exitCode, stdout: r.stdout };
+  };
+  const fetchImpl = async (url, options) => {
+    httpCalls.push({ url, method: options.method });
+    if (url.startsWith(S.origin)) { assert.equal(options.headers.Authorization, undefined); assert.equal(options.redirect, 'manual'); return h.publicFetch(url); }
+    assert.equal(options.headers.Authorization, 'Bearer ' + token); assert.equal(options.redirect, 'error');
+    let data;
+    if (url.startsWith('https://firestore.googleapis.com/')) {
+      const body = JSON.parse(options.body); assert.equal(options.method, 'POST');
+      if (url.endsWith(':listCollectionIds')) data = { collectionIds: [...new Set(h.db.entries().map(([p]) => p.split('/')[0]))] };
+      else if (url.endsWith(':beginTransaction')) { assert.deepEqual(body, { options: { readOnly: {} } }); txs++; data = { transaction: Buffer.from('tx' + txs).toString('base64') }; }
+      else if (url.endsWith(':rollback')) data = {};
+      else { assert(url.endsWith(':runQuery')); const from = body.structuredQuery.from[0];
+        data = h.db.entries().filter(([p]) => from.allDescendants ? p.split('/').at(-2) === from.collectionId : p.split('/').length === 2 && p.startsWith(from.collectionId + '/'))
+          .map(([p,v]) => ({ document: { name: `projects/${S.project}/databases/(default)/documents/${p}`, fields: fields(v) } })); }
+    } else if (url.startsWith('https://firebasehosting.googleapis.com/')) data = url.endsWith('/channels/live') ? {
+      name: `sites/${S.project}/channels/live`, url: S.origin, release: { type: 'DEPLOY', message: `garden-trial-game-v1:${oldPacket.packet.manifestDigest}`,
+        version: { name: `sites/${S.project}/versions/old`, status: 'FINALIZED' } } } : { name: `projects/${S.project}/sites/${S.project}`, defaultUrl: S.origin };
+    else data = (await h.readOnlyRequestClient.request({ url, method: 'GET', responseType: url.includes('&alt=media') ? 'arraybuffer' : 'json', retry: false, maxRedirects: 0 })).data;
+    return new Response(Buffer.isBuffer(data) ? data : JSON.stringify(data), { status: 200 });
+  };
+  const result = await prepareOwnerReadonlyPreflight({ mode: 'inspect-owner-readonly', env: { HOME: home }, execArgv: [], now: () => NOW,
+    previousOutput: oldPacket.packet.output, nextOutput: newPacket.packet.output, journalPins, gcloudPath: '/usr/bin/true', spawn, fetchImpl });
+  assert.equal(result.executionAllowed, false); assert.equal(result.candidate.historicalPreservation, 'unknown'); assert.equal(txs, 4);
+  assert.equal(h.providerWrites.length, 0); assert.equal(h.db.writes.length, 0);
+  assert(httpCalls.every(c => c.method === 'GET' || /:(listCollectionIds|beginTransaction|runQuery|rollback)$/.test(c.url)));
+  assert(!JSON.stringify(result).includes(token)); assert(!JSON.stringify(result).includes('owner@example.invalid'));
+  const ownerReview = { schemaVersion: 1, purpose: 'owner-readonly-review', ownerFingerprint: result.fingerprint, acknowledgeHistoricalPreservationUnknown: true, executionAllowed: false };
+  assert.equal(validateOwnerReadonlyReview(result, ownerReview, NOW).executionAllowed, false);
+  assert.throws(() => validateOwnerReadonlyReview({ ...result, ownerJournalFingerprint: '0'.repeat(64) }, ownerReview, NOW));
+  const captures = join(home, '.garden-owner-readonly-preflight-20261009', 'PRIVATE-EVIDENCE');
+  for (const filename of ['0000.json','0001.json','0002.json']) { const bytes = await readFile(join(captures, filename), 'utf8'); assert(!bytes.includes(token)); assert(!bytes.includes(review.testerUids[0])); }
+  const count = issued.length; await assert.rejects(prepareOwnerReadonlyPreflight({ mode: 'inspect-owner-readonly', env: { HOME: home }, execArgv: [], now: () => NOW,
+    previousOutput: oldPacket.packet.output, nextOutput: newPacket.packet.output, journalPins, gcloudPath: '/usr/bin/true', spawn, fetchImpl })); assert.equal(issued.length, count);
+});
+
+test('mixed preflight rejects duplicate Run identities across source subsets and project aliases', async () => {
+  for (const alias of [false, true]) {
+    const h = await harness({ ci: true }); setMixed(h);
+    h.functions[0].serviceConfig.service = h.functions[1].serviceConfig.service.replace(`projects/${S.project}/`, `projects/${alias ? S.projectNumber : S.project}/`);
+    h.functions[0].serviceConfig.revision = h.functions[1].serviceConfig.revision;
+    await assert.rejects(h.cloud.inspectMixedRecovery({ assignment: clone(MIXED_RECOVERY_ASSIGNMENT), evidenceStore: sink() }), error => activeUpdateReason(error) === 'source-proof');
+    await assertInspectionLocked(h);
+  }
+});
