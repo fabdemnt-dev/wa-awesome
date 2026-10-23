@@ -25,12 +25,15 @@ test('solo v2 is not accepted as an old online protocol snapshot',async()=>{
   const {controller}=fixture(2,0,false);await controller.resume();
   assert.equal(controller.getState().connection,'syncing');assert.equal(controller.getState().room,null);controller.dispose();
 });
-test('solo module import closure uses its own coherent cache tag',()=>{
+test('solo module import closure pins changed UI modules and unchanged game modules to their exact release tags',()=>{
+  const refreshed = new Set(['match-app.js','match-view.js','match-rule-examples.js']);
   const pending=['match-app.js'],seen=new Set();
   while(pending.length){const file=pending.pop();if(seen.has(file))continue;seen.add(file);
     const text=readFileSync(new URL('../floating-garden/'+file,import.meta.url),'utf8');
     for(const [,target] of text.matchAll(/from ['"]\.\/([^'"]+)['"]/g)){
-      assert.ok(target.endsWith('?v=20261023-solo-objectives-1'),`${file}: ${target}`);pending.push(target.split('?')[0]);
+      const dependency = target.split('?')[0];
+      const tag = refreshed.has(dependency) ? '20261023-rule-examples-1' : '20261023-solo-objectives-1';
+      assert.equal(target, `${dependency}?v=${tag}`, `${file}: ${target}`); pending.push(dependency);
     }
   }
   assert.deepEqual([...seen].sort(),['cpu.js','engine.js','match-app.js','match-assist.js','match-engine.js','match-rule-examples.js','match-save.js','match-view.js','session.js','view.js']);

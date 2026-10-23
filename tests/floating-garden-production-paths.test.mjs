@@ -27,7 +27,7 @@ const replacements = {
   'match.html': [['href="./entrance/index.html"','href="./index.html"'],['href="./index.html">自由配置・4人表示デモへ','href="../lab/floating-garden/index.html">自由配置・4人表示デモへ']],
   'play/index.html': [['href="../entrance/index.html"','href="../index.html"']],
 };
-const soloChanged = new Set(['engine.js','match-engine.js','cpu.js','match-save.js','view.js','match-view.js','style.css','match.html','match-app.js','session.js','match-assist.js','match-rule-examples.js','index.html']);
+const soloChanged = new Set(['engine.js','match-engine.js','cpu.js','match-save.js','view.js','match-view.js','style.css','match.html','match-app.js','session.js','match-assist.js','match-rule-examples.js','match-style.css','index.html']);
 test('production tree stays 37 files; files outside the solo objective scope preserve their original lab mapping', async () => {
   const files = [];
   async function walk(prefix = '') { for (const item of await readdir(new URL(prefix, root), {withFileTypes:true})) { if (item.isDirectory()) await walk(prefix+item.name+'/'); else files.push(prefix+item.name); } }

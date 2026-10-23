@@ -119,3 +119,52 @@
 .save-actions button { min-height: 44px; max-width: 100%; white-space: normal; }
 .save-recovery { padding: .9rem; margin: .8rem 0 1.2rem; border: 1px solid var(--line, #425360); border-radius: 12px; }
 .save-recovery h3 { margin-top: 0; }
+
+/* Objective teaching cases stay separate from live controls and reuse the existing responsive boards. */
+.rule-objective-example-case + .rule-objective-example-case { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 12px; }
+.rule-objective-example-label { margin: 10px 0 6px; color: var(--text); font-size: .86rem; overflow-wrap: anywhere; }
+.rule-objective-examples-intro { margin: 10px 0; }
+
+/* Solo-only entrance palette. Colors only: keep all layout, tile art and online styles intact. */
+body.solo-entrance-palette {
+  --bg: #10203e; --panel: #172e4d; --text: #f4eee1; --muted: #bac9df;
+  --gold: #d9c695; --line: #6885a8; --teal: #accbea;
+  background: radial-gradient(ellipse at 50% 25%, #243e65 0%, #10203e 65%, #0b1931 100%);
+}
+.solo-entrance-palette .panel { background: #172e4df2; box-shadow: 0 12px 32px #06152a35; }
+.solo-entrance-palette button:where(:not(.cell):not([class*="terrain-"])) { color: var(--text); background-color: #182c48; border-color: #92a7c6; }
+.solo-entrance-palette button:where(:not(.cell):not([class*="terrain-"])):hover:not(:disabled) { background-color: #304d70; border-color: #f0ddb0; }
+.solo-entrance-palette button.primary { color: var(--text); background: #2e4865; border-color: #d7c18d; }
+.solo-entrance-palette button.primary:hover:not(:disabled) { background: #395672; }
+.solo-entrance-palette button:focus-visible,
+.solo-entrance-palette summary:focus-visible { outline-color: #fff0ae; }
+.solo-entrance-palette .eyebrow span,
+.solo-entrance-palette .lead { color: #d5e0ee; }
+.solo-entrance-palette .board { border-color: #7895b5; background: linear-gradient(135deg, #263f60, #162b48); box-shadow: 0 12px 0 #07152b, 0 24px 45px #06152a80; }
+.solo-entrance-palette .mini-board { box-shadow: none; }
+.solo-entrance-palette .comparison-garden .board { box-shadow: 0 6px 0 #07152b; }
+.solo-entrance-palette .cell.empty { background: #132742; border-color: #7895b5; }
+.solo-entrance-palette .empty .coordinate { color: #bac9df; }
+.solo-entrance-palette .empty-star { color: #8fadd1; }
+.solo-entrance-palette .placement-bar { background: #172e4df5; border-color: #92a7c6; }
+.solo-entrance-palette .status { color: #d5e0ee; }
+.solo-entrance-palette .status.error { color: #ffd4b0; }
+.solo-entrance-palette .turn-badge { background: #263f60; }
+.solo-entrance-palette .objective { background: #203b5b; }
+.solo-entrance-palette .objective.achieved { background: #2e4865; border-color: #d7c18d; }
+.solo-entrance-palette .objective p,
+.solo-entrance-palette .opponent-objective,
+.solo-entrance-palette .rule-content,
+.solo-entrance-palette .rule-example-caution,
+.solo-entrance-palette .comparison-help,
+.solo-entrance-palette .comparison-legend { color: #cad8e9; }
+.solo-entrance-palette .objective .objective-progress { color: var(--text); }
+.solo-entrance-palette .garden-dialog { background: #132742; border-color: #92a7c6; }
+.solo-entrance-palette .garden-dialog::backdrop { background: #061326c9; }
+.solo-entrance-palette .dialog-heading { background: #132742; }
+.solo-entrance-palette .rule-example { border-color: var(--line); }
+.solo-entrance-palette .rule-example-board { background: #132742; border-color: var(--line); }
+.solo-entrance-palette .rule-example-cell.is-empty { background: #172e4d; border-color: #6885a8; }
+.solo-entrance-palette .rule-example-cell.is-counted { box-shadow: 0 0 8px #accbea38, inset 0 0 6px #accbea2e; }
+.solo-entrance-palette .rule-example-caution { border-color: #8fadd1; }
+.solo-entrance-palette .page-footer { color: #bac9df; }
