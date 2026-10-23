@@ -1,4 +1,5 @@
 import { test } from 'node:test';
+import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { extname } from 'node:path';
@@ -6,6 +7,14 @@ import { fileURLToPath } from 'node:url';
 import { modeRoute, parseEntryMode } from '../floating-garden/online/entry-mode.js';
 import { bootstrapTrial } from '../floating-garden/play/bootstrap.js';
 import runtime from '../floating-garden/play/trialruntime.js';
+import limitedRuntime from '../floating-garden/limited-trial/play/trialruntime.js';
+import { PUBLIC_POLICY as LIMITED_POLICY } from '../floating-garden/limited-trial/play/public-policy.js';
+import { resolvePublicEnvironment as resolveLimitedEnvironment, PRODUCTION_AUTH_APP_NAME } from '../floating-garden/limited-trial/play/config.js';
+import { bootstrapTrial as bootstrapLimitedTrial, createPublicStorage as createLimitedStorage, publicRecoveryKey as limitedRecoveryKey } from '../floating-garden/limited-trial/play/bootstrap.js';
+import { createTrialFirebaseTransport as createLimitedTransport } from '../floating-garden/limited-trial/play/firebase.js';
+import { THREE_HUMAN_MODES_READY as LIMITED_THREE_READY, FOUR_HUMAN_MODES_READY as LIMITED_FOUR_READY } from '../floating-garden/limited-trial/online/runtime-modes.js';
+import { validateEntryMode as validateLimitedMode, parseEntryMode as parseLimitedMode } from '../floating-garden/limited-trial/online/entry-mode.js';
+import { ONLINE_SAVE_KEY as LIMITED_SAVE_KEY } from '../floating-garden/limited-trial/online/controller.js';
 import * as oldSave from '../lab/floating-garden/match-save.js';
 import * as newSave from '../floating-garden/match-save.js';
 import { createMatch, MATCH_VERSION, SOLO_MATCH_VERSION } from '../floating-garden/match-engine.js';
@@ -27,11 +36,156 @@ const replacements = {
   'match.html': [['href="./entrance/index.html"','href="./index.html"'],['href="./index.html">自由配置・4人表示デモへ','href="../lab/floating-garden/index.html">自由配置・4人表示デモへ']],
   'play/index.html': [['href="../entrance/index.html"','href="../index.html"']],
 };
+// Exact reviewed production-binding source files copied for this isolated trial.
+// Reverse only the enumerated relocation, trial wording, and activation differences,
+// then compare original bytes by SHA-256. No external preparation tree is required.
+const limitedTrialSourceHashes = {
+  "play/app.js": "887d88f18d8567bc8fc161aa316bbf36f6c433fb4a7aede8a824bb71834ea54d",
+  "play/bootstrap.js": "0614e70a5b6a6617a105e21f5b366e5ddb931584f7f2f786b4fd7aad42760990",
+  "play/config.js": "61bdfcdb1fb9948fd0ce4f00517f4fd212d25a593b00d3ff6692038210156bb3",
+  "play/firebase.js": "7bd8e0e09e2e67c106b39ab06a8836ef9397b70e00d97240af35251985b42499",
+  "play/index.html": "53b04ac4da4cde32782b9447a93b940868dc15a8330356dd8ce7b34205ba9c62",
+  "play/public-origins.js": "0278c439a4f3a455dad5655dd40ab5577517d7d65ece441b4d0dc75447043da6",
+  "play/public-policy.js": "3384cfbb7a33c412f9a9f8b96a79b2d57992a3a3de02e1d6013d726554da8f19",
+  "play/style.css": "f251f0864aa15ec8dfa4e18e7e1dba370d694150272e3a104374de22fb1a4619",
+  "play/trialruntime.js": "b4eefdda4eb80cd5b2287a70767b78b57df32c7c1d4dc3a016f571f3092aa0b2",
+  "online/controller.js": "a2831bd1cae7e04acc9411e78a9f589adb35ff86b42c5ba003e0e49229b3234c",
+  "online/entry-mode.js": "ba4195bf8ec3c71919968823bd72f4f468c6919e35d67d1bdbc18ad74884b195",
+  "online/modes.js": "9e5f4ec3547425d094bdcae785510a346573625c0e6023d24cdbff25739c50c6",
+  "online/mount.js": "5a9c53ae5739c1379362a1e9d87107df8b4770de5b2e32fbee801aaf7f47fe29",
+  "online/runtime-modes.js": "ac6d9221704be56dce9fc3f125f8da32e376e8034d576254dbed95f14031f32e",
+  "online/style.css": "c7536c7b7ac6ef2f4fb816bc3d2fd243d759bbaca4cd1cf8f3701dd3bae88573",
+  "online/view.js": "ceb21f9c91518f0c251ffab0bfb5d8e627cedd4508c6d7ee5f4169bb332fd63c"
+};
+const limitedTrialTransforms = {
+  "play/index.html": [
+    [
+      "href=\"../style.css?",
+      "href=\"../../style.css?"
+    ],
+    [
+      "href=\"../match-style.css?",
+      "href=\"../../match-style.css?"
+    ],
+    [
+      "href=\"../index.html\"",
+      "href=\"../../index.html\""
+    ],
+    [
+      "星詠みの浮遊庭園 — オンライン統合準備版",
+      "星詠みの浮遊庭園 — 限定オンライン試験"
+    ],
+    [
+      "統合準備版です。オンライン接続は無効で、部屋作成・参加はできません。",
+      "限定オンライン試験用の画面です。サーバー側の試験準備が整うまでは接続できません。"
+    ],
+    [
+      "<a href=\"../../index.html\">← 人数の選択へ戻る</a><p><a href=\"https://wa-awesome-garden-stg.web.app/lab/floating-garden/trial/index.html\">現在のオンライン版・前の部屋を開く →</a></p><p>人間2人＋NPC 0〜2人用。前の部屋は、作成・参加した元の端末とブラウザーで開いてください。このGitHub Pages版へログイン状態や部屋の情報は引き継がれません。</p>",
+      "<a href=\"../../index.html\">← 通常の入口へ戻る（オンライン停止中）</a><p>人間2人＋NPC 0〜2人の限定試験です。通常の入口からこの試験画面への案内はありませんが、URLの非掲載はアクセス制限ではありません。認証条件を満たす第三者もAPIを利用でき、通信・保存などの料金が発生する場合があります。</p><p>試験終了後は接続を停止します。同じ席への復帰には、この試験で作成・参加した元の端末とブラウザーを使い、保存情報を消さないでください。別の配信元で作成した前の部屋の情報は引き継ぎません。</p>"
+    ]
+  ],
+  "play/app.js": [
+    [
+      "現在は接続を停止しています。このGitHub Pages版はオンライン接続の準備中です。接続設定の確認が終わるまでは、上のリンクから現在のオンライン版をご利用ください。",
+      "この限定試験の接続設定または配信元を確認できません。URLの追加設定は使えません。保存情報を消さず、試験担当者の確認を待ってください。"
+    ]
+  ],
+  "play/bootstrap.js": [
+    [
+      "<h2>招待で遊ぶ浮遊庭園</h2>",
+      "<h2>浮遊庭園の限定オンライン試験</h2>"
+    ],
+    [
+      "部屋は作成から24時間利用できます。公開用の新規枠は20部屋で、過去の試用枠とは別です。受付停止後も既存の部屋は期限まで利用できます（緊急停止時を除く）。",
+      "試験用の新規枠は20部屋、部屋の期限は作成から24時間です。試験終了後は接続を停止するため、期限内でも継続できない場合があります。"
+    ],
+    [
+      "同じ席に戻るには同じブラウザーを使ってください。保存情報を消すと復帰できなくなる場合があります。公開7日後は運用確認の目安であり、一律の終了日ではありません。",
+      "同じ席に戻るには同じブラウザーを使ってください。保存情報を消すと復帰できなくなる場合があります。URLの非掲載はアクセス制限ではなく、認証条件を満たす第三者もAPIを利用できる場合があります。"
+    ]
+  ],
+  "play/config.js": [
+    [
+      "// Runtime flags alone cannot activate this locally prepared, unapproved source.",
+      "// Both immutable source policy and exact runtime flags must permit this limited trial."
+    ]
+  ],
+  "play/public-policy.js": [
+    [
+      "// Shared-production candidate only. Source gate stays disabled until separately approved.",
+      "// Limited trial source only. Normal entry and normal play remain disabled."
+    ],
+    [
+      "\"enabled\": false",
+      "\"enabled\": true"
+    ]
+  ],
+  "play/trialruntime.js": [
+    [
+      "// Public identifiers copied explicitly from reviewed main, never imported from its resolver.\n// Existing App Check key registration matches, but domain allowlist and token issuance are\n// unverified for this Garden profile. No anonymous Auth or SDK load is allowed while disabled.",
+      "// Public identifiers copied explicitly from reviewed main, never imported from its resolver.\n// Enabled only for this isolated limited-trial source. Publication and live testing remain\n// separately gated; this local flag is not proof of a successful live App Check or Auth test."
+    ],
+    [
+      "\"enabled\": false",
+      "\"enabled\": true"
+    ],
+    [
+      "\"verified\": false",
+      "\"verified\": true"
+    ]
+  ],
+  "online/controller.js": [
+    [
+      "from '../engine.js?",
+      "from '../../engine.js?"
+    ],
+    [
+      "from '../match-engine.js?",
+      "from '../../match-engine.js?"
+    ]
+  ],
+  "online/view.js": [
+    [
+      "from '../engine.js?",
+      "from '../../engine.js?"
+    ],
+    [
+      "from '../match-engine.js?",
+      "from '../../match-engine.js?"
+    ],
+    [
+      "from '../session.js?",
+      "from '../../session.js?"
+    ],
+    [
+      "from '../view.js?",
+      "from '../../view.js?"
+    ],
+    [
+      "from '../match-rule-examples.js?",
+      "from '../../match-rule-examples.js?"
+    ]
+  ]
+};
+const limitedTrialFiles = Object.keys(limitedTrialSourceHashes).map(path => 'limited-trial/' + path);
+const unchangedNormalHashes = {
+  "index.html": "aabbae9b6067318b8b7cf81ad5aecbc3bcecc176652bfa01a78b4f7a30735ec1",
+  "entrance.js": "32f9757bc9ebe6acc8c73e8a843840155fdb785a37412e717e8d3d4d06653ab4",
+  "play/app.js": "f22dd58ce2ca47d4894695265c3b113d8b5d4ea276fa281ea97fefe0ce2e4786",
+  "play/bootstrap.js": "fa3167334e1408c08ba2ce9e144ddd36c098c4ba985929aaa11ba974ba76ebda",
+  "play/config.js": "c958021d13e5ce716648cd6252bc832f3c72df952b341c5ea0b0308d9e6e54f0",
+  "play/firebase.js": "8098290ff419fe427620b2ee4526a5b8d8140b8486f045991a47bb1d953299ac",
+  "play/index.html": "21947410708bb9d0c6d490df154abad95dd23f56fb72c410e4f4fc60f7ae3dbc",
+  "play/public-origins.js": "21f7b82b1b482316e8e128a1e738cb49ce25791d9a522f450cc1b6374166530d",
+  "play/public-policy.js": "dea6800e53e7177c6e538cb4ac91a5774eae84bace1ebcd2b77005f69e00ba43",
+  "play/style.css": "f251f0864aa15ec8dfa4e18e7e1dba370d694150272e3a104374de22fb1a4619",
+  "play/trialruntime.js": "f51de322229a5bee15f608ab6ea47befd629628d44335b7e5ddbe5d372bfcb02"
+};
 const soloChanged = new Set(['engine.js','match-engine.js','cpu.js','match-save.js','view.js','match-view.js','style.css','match.html','match-app.js','session.js','match-assist.js','match-rule-examples.js','match-style.css','index.html']);
-test('production tree adds only two isolated diagnostic files; original game files preserve their lab mapping', async () => {
+test('production tree adds only exact diagnostic and isolated limited-trial files; original game files preserve their lab mapping', async () => {
   const files = [];
   async function walk(prefix = '') { for (const item of await readdir(new URL(prefix, root), {withFileTypes:true})) { if (item.isDirectory()) await walk(prefix+item.name+'/'); else files.push(prefix+item.name); } }
-  await walk(); assert.deepEqual(files.sort(), [...Object.keys(mapping), 'diagnostics/stopped.html', 'diagnostics/stopped.js'].sort());
+  await walk(); assert.deepEqual(files.sort(), [...Object.keys(mapping), 'diagnostics/stopped.html', 'diagnostics/stopped.js', ...limitedTrialFiles].sort());
   for (const [path, source] of Object.entries(mapping)) {
     let expected = await readFile(new URL(source, oldRoot));
     if (replacements[path]) {
@@ -43,7 +197,7 @@ test('production tree adds only two isolated diagnostic files; original game fil
   }
 });
 test('all HTML/CSS/static-module resource dependencies resolve inside production Garden', async () => {
-  const pending = ['index.html','match.html','play/index.html'], seen = new Set();
+  const pending = ['index.html','match.html','play/index.html','limited-trial/play/index.html'], seen = new Set();
   while (pending.length) {
     const path = pending.pop(); if (seen.has(path)) continue; seen.add(path);
     const url = new URL(path, root); await stat(url);
@@ -61,7 +215,7 @@ test('all HTML/CSS/static-module resource dependencies resolve inside production
       pending.push(target.href.slice(root.href.length));
     }
   }
-  assert.equal(seen.size,37);
+  assert.equal(seen.size,53);
 });
 test('entrance, solo, online and legacy navigation use intentional exact destinations', async () => {
   const entrance=await read('index.html'), solo=await read('match.html'), online=await read('play/index.html');
@@ -135,6 +289,142 @@ test('actual relocated selector creates six production URLs without network or s
 });
 test('toybox remains unlisted for Garden', async () => {
   const toybox=await readFile(new URL('../toybox/index.html',import.meta.url),'utf8'); assert.doesNotMatch(toybox,/floating-garden|浮遊庭園/);
+});
+
+test('limited trial is exactly the reviewed source with enumerated reversible changes only', async () => {
+  assert.equal(Object.keys(limitedTrialSourceHashes).filter(path => path.startsWith('play/')).length, 9);
+  assert.equal(Object.keys(limitedTrialSourceHashes).filter(path => path.startsWith('online/')).length, 7);
+  for (const [path, expectedHash] of Object.entries(limitedTrialSourceHashes)) {
+    let original = await read('limited-trial/' + path);
+    for (const [before, after] of [...(limitedTrialTransforms[path] || [])].reverse()) {
+      assert.equal(original.split(after).length, 2, `${path}: exact allowed replacement`);
+      original = original.replace(after, before);
+    }
+    assert.equal(createHash('sha256').update(original).digest('hex'), expectedHash, path);
+  }
+});
+
+test('normal entrance and disabled play bytes remain unchanged and no normal page links to the trial', async () => {
+  for (const [path, expectedHash] of Object.entries(unchangedNormalHashes)) {
+    assert.equal(createHash('sha256').update(await readFile(new URL(path, root))).digest('hex'), expectedHash, path);
+  }
+  for (const path of [...Object.keys(mapping), 'diagnostics/stopped.html', 'diagnostics/stopped.js']) {
+    if (['.html', '.js', '.css'].includes(extname(path))) assert.doesNotMatch(await read(path), /limited-trial/);
+  }
+  assert.equal(runtime.enabled, false);
+  assert.equal(limitedRuntime.enabled, true);
+  assert.equal(LIMITED_POLICY.enabled, true);
+  assert.equal(limitedRuntime.appCheck.verified, true);
+  assert.equal(LIMITED_THREE_READY, false);
+  assert.equal(LIMITED_FOUR_READY, false);
+});
+
+const limitedUrl = 'https://fabdemnt-dev.github.io/wa-awesome/floating-garden/limited-trial/play/index.html';
+test('limited trial uses exact production profile, Auth namespace and recovery scope without URL overrides', () => {
+  const config = resolveLimitedEnvironment(limitedRuntime, limitedUrl + '#mode=2-0');
+  assert.equal(config.projectId, 'wa-awesome');
+  assert.equal(config.projectNumber, '1074804319870');
+  assert.equal(config.origin, 'https://fabdemnt-dev.github.io');
+  assert.equal(config.epochId, 'public-production-20261023-v1');
+  assert.equal(PRODUCTION_AUTH_APP_NAME, 'floating-garden-production-wa-awesome');
+  assert.equal(config.maxRooms, 20);
+  assert.equal(config.roomTtlMillis, 86400000);
+  assert.equal(config.retentionMillis, 604800000);
+  assert.equal(config.region, 'asia-northeast1');
+  assert.equal(Object.isFrozen(config), true);
+  assert.equal(Object.isFrozen(config.firebase), true);
+  assert.equal(Object.isFrozen(config.appCheck), true);
+  for (const url of [limitedUrl + '?', limitedUrl + '?enabled=true', limitedUrl + '?projectId=other#mode=2-0', limitedUrl.replace('https:', 'http:'), limitedUrl.replace('.io/', '.io:443/'), limitedUrl.replace('fabdemnt-dev.github.io', 'wa-awesome-garden-stg.web.app'), limitedUrl.replace('fabdemnt-dev.github.io', 'fabdemnt-dev.github.io.example.com')]) {
+    assert.throws(() => resolveLimitedEnvironment(limitedRuntime, url));
+  }
+  for (const change of [{enabled:false}, {projectId:'wa-awesome-garden-stg'}, {epochId:'other'}, {projectNumber:'123'}, {maxRooms:21}, {origin:'https://wa-awesome-garden-stg.web.app'}, {firebase:{...limitedRuntime.firebase, apiKey:'changed'}}, {appCheck:{...limitedRuntime.appCheck, verified:false}}, {extra:true}]) {
+    assert.throws(() => resolveLimitedEnvironment({...limitedRuntime, ...change}, limitedUrl));
+  }
+  assert.equal(limitedRecoveryKey('wa-awesome', limitedRuntime.epochId), `floating-garden-public:wa-awesome:public-production-20261023-v1:${LIMITED_SAVE_KEY}`);
+  assert.throws(() => limitedRecoveryKey('wa-awesome-garden-stg', limitedRuntime.epochId));
+  assert.throws(() => limitedRecoveryKey('wa-awesome', 'other'));
+  const calls = [], storage = createLimitedStorage({getItem:key => { calls.push(['get', key]); return null; }, setItem:(key, value) => calls.push(['set', key, value])}, 'wa-awesome', limitedRuntime.epochId);
+  storage.getItem(LIMITED_SAVE_KEY); storage.setItem(LIMITED_SAVE_KEY, 'saved');
+  assert.deepEqual(calls, [['get', limitedRecoveryKey('wa-awesome', limitedRuntime.epochId)], ['set', limitedRecoveryKey('wa-awesome', limitedRuntime.epochId), 'saved']]);
+  assert.throws(() => storage.getItem('floating-garden-cpu-match'));
+  assert.throws(() => storage.setItem('unrelated', 'saved'));
+});
+
+test('limited trial retains the existing SDK/Auth transport and adds no administrator or alternate-auth path', async () => {
+  const source = await read('limited-trial/play/firebase.js');
+  const sdkImports = [...source.matchAll(/import\('([^']+)'\)/g)].map(match => match[1]);
+  assert.deepEqual(sdkImports, ['app','app-check','auth','firestore','functions'].map(sdk => `https://www.gstatic.com/firebasejs/10.8.0/firebase-${sdk}.js`));
+  assert.match(source, /const appName = PRODUCTION_AUTH_APP_NAME;/);
+  assert.match(source, /authSdk\.setPersistence\(auth, authSdk\.browserLocalPersistence\)/);
+  assert.match(source, /auth\.currentUser \|\| \(await authSdk\.signInAnonymously\(auth\)\)\.user/);
+  assert.match(source, /auth\.authStateReady\(\)/);
+  assert.match(source, /httpsCallable\(functions, name/);
+  assert.doesNotMatch(source, /firebase-database|connect\w+Emulator|signInWith|customToken|admin|fetch\(|XMLHttpRequest|serviceWorker\.register/);
+  assert.equal(source.indexOf('appCheckSdk.getToken(appCheck, false)') < source.indexOf('authSdk.getAuth(app)'), true);
+});
+
+test('limited trial invalid configuration or URL cannot reach even an injected offline SDK', async () => {
+  for (const [profile, url] of [[{...limitedRuntime, enabled:false}, limitedUrl], [{...limitedRuntime, appCheck:{...limitedRuntime.appCheck, verified:false}}, limitedUrl], [limitedRuntime, limitedUrl + '?enabled=true'], [limitedRuntime, limitedUrl.replace('.io/', '.io:443/')]]) {
+    await assert.rejects(() => createLimitedTransport(profile, url, {loadSdk:() => assert.fail('invalid input loaded SDK')}));
+  }
+  await assert.rejects(() => createLimitedTransport(limitedRuntime, limitedUrl, {environment:{FIREBASE_APPCHECK_DEBUG_TOKEN:false}, loadSdk:() => assert.fail('debug provider loaded SDK')}));
+});
+
+test('limited trial advertises two human seats only and labels nonlisting as no access restriction', async () => {
+  const html = await read('limited-trial/play/index.html'), bootstrap = await read('limited-trial/play/bootstrap.js');
+  assert.match(html, /限定オンライン試験/);
+  assert.match(html, /人間2人＋NPC 0〜2人/);
+  assert.match(html, /URLの非掲載はアクセス制限ではありません/);
+  assert.match(html, /認証条件を満たす第三者もAPIを利用/);
+  assert.match(html, /料金が発生/);
+  assert.match(html, /試験終了後は接続を停止/);
+  assert.match(html, /href="\.\.\/\.\.\/index.html">← 通常の入口へ戻る（オンライン停止中）/);
+  assert.doesNotMatch(html, /現在のオンライン版|wa-awesome-garden-stg|オンライン統合準備版|統合準備版です/);
+  assert.match(bootstrap, /試験終了後は接続を停止するため、期限内でも継続できない場合/);
+  for (const mode of ['2-0', '2-1', '2-2']) assert.equal(validateLimitedMode(parseLimitedMode('#mode=' + mode), {threeHumanModesReady:LIMITED_THREE_READY, fourHumanModesReady:LIMITED_FOUR_READY}).id, mode);
+  for (const mode of ['3-0', '3-1', '4-0']) assert.throws(() => validateLimitedMode(parseLimitedMode('#mode=' + mode), {threeHumanModesReady:LIMITED_THREE_READY, fourHumanModesReady:LIMITED_FOUR_READY}));
+  for (const hash of ['#mode=2-0&enabled=true', '#mode=4-1', '#mode=1-0', '#projectId=other']) assert.throws(() => parseLimitedMode(hash));
+});
+
+function limitedTrialPage() {
+  const events = new Map();
+  const page = {navigator:{onLine:true}, addEventListener(){}, removeEventListener(){}, get localStorage() { assert.fail('idle page accessed storage'); }};
+  const root = {innerHTML:'', ownerDocument:{defaultView:page}, addEventListener:(name, listener) => events.set(name, listener), removeEventListener:name => events.delete(name), setAttribute(){}};
+  return {root, page, events, status:{innerHTML:''}};
+}
+for (const mode of ['2-0', '2-1', '2-2']) test(`limited trial actual app ${mode} remains idle until explicit connection without SDK/network/storage`, async () => {
+  const {root, status, events} = limitedTrialPage(), selection = {}, touched = [];
+  const values = {document:{value:{querySelector:selector => selector === '#online-app' ? root : selector === '#trial-status' ? status : selection}}, location:{value:new URL(limitedUrl + '#mode=' + mode)}};
+  for (const name of ['fetch','XMLHttpRequest','WebSocket','EventSource']) values[name] = {value:() => { touched.push(name); assert.fail('idle ' + name); }};
+  for (const name of ['localStorage','sessionStorage','indexedDB','caches']) values[name] = {get(){ touched.push(name); assert.fail('idle ' + name); }};
+  await withGlobals(values, () => import(new URL(`../floating-garden/limited-trial/play/app.js?offline-test=${mode}`, import.meta.url)));
+  assert.deepEqual(touched, []);
+  assert.match(selection.textContent, /選択した構成/);
+  assert.match(root.innerHTML, /data-public-connect/);
+  assert.match(status.innerHTML, /限定オンライン試験/);
+  assert.equal(events.size, 1);
+});
+
+test('limited trial offline connection is single-flight, uses exact source config and preserves existing mode gates', async () => {
+  const {root, status, page, events} = limitedTrialPage(), calls = [];
+  Object.defineProperty(page, 'localStorage', {value:{getItem:() => null, setItem(){}}});
+  const transport = {isActive:() => true, dispose:() => calls.push('dispose')};
+  const controller = {suspend(){}, storageChanged(){}};
+  const instance = await bootstrapLimitedTrial(root, status, limitedRuntime, {
+    location:limitedUrl + '#mode=2-2',
+    transportFactory:async (config, url) => { assert.deepEqual(config, limitedRuntime); assert.equal(url, limitedUrl + '#mode=2-2'); calls.push('transport'); return transport; },
+    makeController:options => { assert.equal(options.threeHumanModesReady, false); assert.equal(options.fourHumanModesReady, false); calls.push('controller'); return controller; },
+    mount:(_root, options) => { assert.equal(options.initialMode.id, '2-2'); assert.equal(options.controller, controller); calls.push('mount'); return {ready:Promise.resolve(), unmount:() => calls.push('unmount')}; },
+  });
+  assert.deepEqual(calls, []);
+  const first = instance.connect();
+  assert.equal(instance.connect(), first);
+  assert.equal(await first, controller);
+  assert.deepEqual(calls, ['transport', 'controller', 'mount']);
+  instance.unmount();
+  assert.equal(events.size, 0);
+  assert.equal(await instance.connect(), null);
+  assert.deepEqual(calls, ['transport', 'controller', 'mount', 'unmount', 'dispose']);
 });
 
 // Fixed stop-response diagnostic tests are offline: no provider SDK or real request is used.
