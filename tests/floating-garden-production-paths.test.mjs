@@ -8,7 +8,7 @@ import { bootstrapTrial } from '../floating-garden/play/bootstrap.js';
 import runtime from '../floating-garden/play/trialruntime.js';
 import * as oldSave from '../lab/floating-garden/match-save.js';
 import * as newSave from '../floating-garden/match-save.js';
-import { createMatch } from '../floating-garden/match-engine.js';
+import { createMatch, MATCH_VERSION, SOLO_MATCH_VERSION } from '../floating-garden/match-engine.js';
 
 const root = new URL('../floating-garden/', import.meta.url);
 const oldRoot = new URL('../lab/floating-garden/', import.meta.url);
@@ -27,7 +27,8 @@ const replacements = {
   'match.html': [['href="./entrance/index.html"','href="./index.html"'],['href="./index.html">自由配置・4人表示デモへ','href="../lab/floating-garden/index.html">自由配置・4人表示デモへ']],
   'play/index.html': [['href="../entrance/index.html"','href="../index.html"']],
 };
-test('production tree is exactly 37 files, with only five path-only changes from preserved lab sources', async () => {
+const soloChanged = new Set(['engine.js','match-engine.js','cpu.js','match-save.js','view.js','match-view.js','style.css','match.html','match-app.js','session.js','match-assist.js','match-rule-examples.js','index.html']);
+test('production tree stays 37 files; files outside the solo objective scope preserve their original lab mapping', async () => {
   const files = [];
   async function walk(prefix = '') { for (const item of await readdir(new URL(prefix, root), {withFileTypes:true})) { if (item.isDirectory()) await walk(prefix+item.name+'/'); else files.push(prefix+item.name); } }
   await walk(); assert.deepEqual(files.sort(), Object.keys(mapping).sort());
@@ -38,7 +39,7 @@ test('production tree is exactly 37 files, with only five path-only changes from
       for (const [from,to] of replacements[path]) { assert.equal(text.split(from).length, 2, path); text = text.replace(from,to); }
       expected = Buffer.from(text);
     }
-    assert.deepEqual(await readFile(new URL(path, root)), expected, path);
+    if (!soloChanged.has(path)) assert.deepEqual(await readFile(new URL(path, root)), expected, path);
   }
 });
 test('all HTML/CSS/static-module resource dependencies resolve inside production Garden', async () => {
@@ -83,13 +84,19 @@ test('six exact modes route under production path, while malformed modes fail cl
   }
   for (const hash of ['#mode=4-1','#mode=3-2','#mode=1-0','#mode=03-1','#mode=3-1&enabled=true']) assert.throws(()=>parseEntryMode(hash));
 });
-test('CPU save format/key/lock and existing saved game remain mutually compatible', () => {
+test('CPU save key and lock stay shared; v1 resumes unchanged while new solo games use v2', () => {
   assert.equal(newSave.SAVE_KEY,'floating-garden-cpu-match'); assert.equal(newSave.SAVE_LOCK,'floating-garden-cpu-match-writer');
-  assert.equal(newSave.SAVE_KEY,oldSave.SAVE_KEY); assert.equal(newSave.SAVE_LOCK,oldSave.SAVE_LOCK); assert.equal(newSave.SAVE_VERSION,oldSave.SAVE_VERSION);
-  const state=createMatch({playerCount:3,seed:'placement-check',humanSeat:0});
+  assert.equal(newSave.SAVE_KEY,oldSave.SAVE_KEY); assert.equal(newSave.SAVE_LOCK,oldSave.SAVE_LOCK);
+  assert.equal(newSave.LEGACY_SAVE_VERSION,oldSave.SAVE_VERSION);
+  const state=createMatch({playerCount:3,seed:'placement-check',humanSeat:0,legacy:true});
   const raw=oldSave.encodeMatchSave({state,actions:[],savedAt:1});
   assert.deepEqual(newSave.decodeMatchSave(raw),oldSave.decodeMatchSave(raw));
   assert.equal(newSave.encodeMatchSave({state,actions:[],savedAt:1}),raw);
+  const fresh=createMatch({playerCount:3,seed:'placement-check',humanSeat:0});
+  assert.equal(state.version,MATCH_VERSION); assert.equal(fresh.version,SOLO_MATCH_VERSION);
+  const freshRaw=newSave.encodeMatchSave({state:fresh,actions:[],savedAt:1});
+  assert.equal(newSave.decodeMatchSave(freshRaw).state.objective.id,fresh.objective.id);
+  assert.throws(()=>oldSave.decodeMatchSave(freshRaw));
 });
 test('activation gates remain disabled, and separate CSP/guard candidate is not imported', async () => {
   assert.equal(runtime.enabled,false);

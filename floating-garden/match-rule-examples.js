@@ -1,5 +1,5 @@
-import { cellName, createGarden, createTile, placeStone, placeTile, scoreGarden, STONE_CAP, STONES, TERRAIN, tilePorts } from './engine.js?v=20261002-match-save';
-import { tileArt } from './view.js?v=20261002-match-save';
+import { cellName, createGarden, createTile, placeStone, placeTile, scoreGarden, STONE_CAP, STONES, TERRAIN, tilePorts } from './engine.js?v=20261023-solo-objectives-1';
+import { tileArt } from './view.js?v=20261023-solo-objectives-1';
 
 const escape = (text) => String(text).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 

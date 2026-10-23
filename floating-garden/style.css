@@ -194,3 +194,17 @@ summary { cursor: pointer; min-height: 44px; display: list-item; align-content: 
   .paired-garden .empty-star { font-size: .8rem; }
   .comparison-breakdown { font-size: .64rem; }
 }
+
+/* Shared objectives use the same progress and condition in every score view. */
+.shared-objective { max-width: 34rem; }
+.shared-objective > span, .shared-objective > small { display: block; margin-top: 4px; line-height: 1.55; }
+.shared-objective > span { font-size: .78rem; color: var(--text); }
+.shared-objective > small { font-size: .68rem; }
+.objective > div { min-width: 0; }
+.objective .objective-progress { color: var(--text); font-weight: 700; }
+.objective .objective-committed { color: #e7d3a3; }
+.objective .objective-cells { overflow-wrap: anywhere; }
+.objective-preview { border: 1px dashed #aab9ce; }
+.opponent-objective { grid-column: 1 / -1; display: block; text-align: left; color: #d0dfdf; font-size: .68rem; line-height: 1.6; }
+.compact-score .objective { margin: 12px 0; padding: 10px; }
+.compact-score .objective strong { font-size: .78rem; }

@@ -1,5 +1,5 @@
-import { cellName, scoreGarden, STONES, TERRAIN } from './engine.js?v=20261002-match-save';
-import { displayedGarden } from './session.js?v=20261002-match-save';
+import { cellName, createGarden, evaluateObjective, OBJECTIVE_IDS, OBJECTIVE_VERSION, scoreGarden, STONES, TERRAIN } from './engine.js?v=20261023-solo-objectives-1';
+import { displayedGarden } from './session.js?v=20261023-solo-objectives-1';
 
 const escape = (text) => String(text).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const portNames = ['上', '右', '下', '左'];
@@ -15,9 +15,9 @@ function tileLabel(tile) {
   return `${TERRAIN[tile.terrain].name}、${shapeName(tile.shape)}、流れは${ports.join('と')}${tile.stone ? `、${STONES[tile.stone].name}の石` : ''}`;
 }
 
-export function renderBoard(session, { readOnly = false, compact = false, previewIndex = session.pending?.index, label = '4行4列の庭。列AからD、行1から4' } = {}) {
+export function renderBoard(session, { readOnly = false, compact = false, previewIndex = session.pending?.index, objective = session.objective, label = '4行4列の庭。列AからD、行1から4' } = {}) {
   const garden = displayedGarden(session);
-  const { connections } = scoreGarden(garden);
+  const { connections } = scoreGarden(garden, objective);
   const boardTag = compact ? 'span' : 'div';
   const cellTag = readOnly ? 'span' : 'button';
   return `<${boardTag} class="board${readOnly ? ' read-only-board' : ''}${compact ? ' mini-board' : ''}" ${compact ? 'aria-hidden="true"' : `role="group" aria-label="${escape(label)}"`}>
@@ -34,24 +34,79 @@ export function renderBoard(session, { readOnly = false, compact = false, previe
   </${boardTag}>`;
 }
 
-export function renderScore(garden, committedTotal, isPreview, { idPrefix = 'score', title = isPreview ? '仮置きした庭の得点' : 'いまの庭の得点', detailsOpen = true, compact = false } = {}) {
-  const score = scoreGarden(garden);
+const objectiveProgressNames = {
+  corners: ['四隅の異なる地形', '種類'],
+  'terrain-cluster': ['同じ地形のまとまり（達成分）', '枚'],
+  'flow-chain': ['つながる流れのまとまり（達成分）', '枚'],
+  'diverse-line': ['縦・横1列の異なる地形の最多', '種類'],
+};
+
+function objectiveProgressText(result) {
+  const [label, unit] = objectiveProgressNames[result.id];
+  return `${label}: ${result.progress} / ${result.target}${unit}`;
+}
+
+function hasDuplicateCorners(garden, corners) {
+  const terrains = corners.flatMap((index) => garden[index] ? [garden[index].terrain] : []);
+  return new Set(terrains).size !== terrains.length;
+}
+
+/** Progress describes the board as it is, never a promise that the goal is still attainable. */
+export function renderObjective(garden, objective, { isPreview = false, committedGarden = null, immutable = false } = {}) {
+  const result = evaluateObjective(garden, objective);
+  const committed = committedGarden ? evaluateObjective(committedGarden, objective) : null;
+  let reason = result.achieved
+    ? isPreview ? (committed?.achieved ? '達成済み · 仮置き後も4点のままです（追加点はありません）' : '仮置きでは達成。確定すると4点です') : '達成！ このお題で4点です'
+    : '未達成 · 条件を満たすと4点です';
+  if (!result.achieved && result.id === 'corners') {
+    const lockedGarden = committedGarden || (!isPreview ? garden : null);
+    if (immutable && lockedGarden && hasDuplicateCorners(lockedGarden, result.corners)) {
+      reason = '未達成 · 確定済みの四隅に同じ地形があるため、この試合では達成できません';
+    } else if (hasDuplicateCorners(garden, result.corners)) {
+      reason = isPreview ? '未達成 · この仮置きでは四隅に同じ地形があります。確定前なら置き場所を変えられます' : '未達成 · 四隅に同じ地形があります';
+    } else {
+      reason = '未達成 · 四隅にまだ空きマスがあります';
+    }
+  }
+  const cells = result.id === 'corners'
+    ? result.corners.map((index) => `${cellName(index)}: ${garden[index] ? TERRAIN[garden[index].terrain].name : '空き'}`).join(' / ')
+    : result.cells.length ? `数えているマス: ${result.cells.map(cellName).join('・')}` : 'まだ数えられるマスがありません';
+  return `<div class="objective ${result.achieved ? 'achieved' : ''}${isPreview ? ' objective-preview' : ''}" data-objective-id="${result.id}" data-objective-progress="${result.progress}" data-objective-points="${result.points}" data-objective-preview="${isPreview}"><span aria-hidden="true">${result.achieved ? '✦' : '◇'}</span><div><strong>${escape(result.name)} · ${result.points}点</strong><p class="objective-progress">${isPreview ? '仮置き後' : '確定済み'} · ${escape(objectiveProgressText(result))}</p>${isPreview && committed ? `<p class="objective-committed">確定済み: ${committed.progress} / ${committed.target}${objectiveProgressNames[result.id][1]} · ${committed.points}点</p>` : ''}<p>${escape(reason)}</p><p>${escape(result.description)}<br>達成した人それぞれに4点。1人につき1回だけ。</p><p class="objective-cells">${escape(cells)}</p></div></div>`;
+}
+
+export function objectiveStatusText(result) {
+  return `${result.name}、${objectiveProgressText(result)}、${result.achieved ? '達成' : '未達成'}、${result.points}点`;
+}
+
+export function renderObjectiveChip(result) {
+  return `<span class="opponent-objective" data-objective-id="${result.id}">${escape(result.name)}<br>${escape(objectiveProgressText(result))} · ${result.achieved ? '達成' : '未達成'} · ${result.points}点</span>`;
+}
+
+export function renderSharedObjective(objective) {
+  const result = evaluateObjective(createGarden(), objective);
+  return `<p class="shared-objective" data-shared-objective="${result.id}">共通のお題<strong>${escape(result.name)} · 達成で4点</strong><span>${escape(result.description)}</span><small>全員同じお題 · 達成した人それぞれに1回だけ4点</small></p>`;
+}
+
+export function renderObjectiveRules(objective, { hasMatch = false } = {}) {
+  const current = hasMatch ? evaluateObjective(createGarden(), objective) : null;
+  return `<h3>共通のお題</h3><p>新しい試合では次の4種類から1題を選び、全員が同じお題で遊びます。達成した人それぞれに4点。1人につき1回だけで、複数のまとまりや列を作っても加算しません。</p>${current ? `<p class="current-objective-rule">${objective ? 'この試合' : '旧ルールで保存した試合'}: <strong>${escape(current.name)}</strong>。${escape(current.description)}</p>` : ''}<ul>${OBJECTIVE_IDS.map((id) => { const result = evaluateObjective(createGarden(), { id, version: OBJECTIVE_VERSION }); return `<li><strong>${escape(result.name)}</strong>: ${escape(result.description)}</li>`; }).join('')}</ul><p>同じ地形のまとまりは上下左右だけで数え、流れの向きは問いません。流れのお題は向かい合う辺どうしがつながる別々のタイルを数え、輪になった流れも含みます。列のお題は縦または横の4マスすべてが必要です。斜めは対象外です。</p><p>途中の進み具合は現在の配置の数で、今後の達成を保証するものではありません。確定した地形は動かせません。四隅に同じ地形を確定すると、四隅のお題は達成できなくなります。</p>`;
+}
+
+export function renderScore(garden, committedTotal, isPreview, { idPrefix = 'score', title = isPreview ? '仮置きした庭の得点' : 'いまの庭の得点', detailsOpen = true, compact = false, objective, committedGarden = null, immutable = false } = {}) {
+  const score = scoreGarden(garden, objective);
   const delta = score.total - committedTotal;
   const heading = compact ? 'h4' : 'h2';
   const detailHeading = compact ? 'h5' : 'h3';
-  const cornerTypes = score.objective.corners.map((index) => garden[index]?.terrain);
-  const objectiveReason = score.objective.achieved ? '達成！ 四隅がすべて別の地形です' : cornerTypes.some((terrain) => !terrain) ? '未達成: 四隅にまだ空きマスがあります' : '未達成: 四隅に同じ地形があります';
-  const objective = `<div class="objective ${score.objective.achieved ? 'achieved' : ''}"><span aria-hidden="true">${score.objective.achieved ? '✦' : '◇'}</span><div><strong>四隅異なる地形 · ${score.objective.points}点</strong><p>${objectiveReason}<br>A1・D1・A4・D4を4種類の地形で埋めると4点</p><p>${score.objective.corners.map((index) => `${cellName(index)}: ${garden[index] ? TERRAIN[garden[index].terrain].name : '空き'}`).join(' / ')}</p></div></div>`;
+  const objectiveDetails = renderObjective(garden, objective, { isPreview, committedGarden, immutable });
   return `<section class="score-panel panel${compact ? ' compact-score' : ''}" aria-labelledby="${escape(idPrefix)}-title">
     <div class="section-label"><${heading} id="${escape(idPrefix)}-title">${escape(title)}</${heading}><span>${isPreview ? 'PREVIEW' : 'SCORE'}</span></div>
     <div class="total"><strong>${score.total}</strong><span>点</span>${isPreview ? `<span class="score-delta">確定済み ${committedTotal}点 → ${delta >= 0 ? '+' : ''}${delta}点</span>` : ''}</div>
     <dl class="score-summary"><div><dt>つながる流れ</dt><dd>${score.connectionPoints}<small>点</small></dd></div><div><dt>星の石</dt><dd>${score.stonePoints}<small>点</small></dd></div><div><dt>共通のお題</dt><dd>${score.objective.points}<small>点</small></dd></div></dl>
-    ${compact ? '' : objective}
+    ${objectiveDetails}
     <details id="${escape(idPrefix)}-details"${detailsOpen ? ' open' : ''}><summary>得点の内訳・理由を見る</summary><div class="score-details">
       <${detailHeading}>流れ · ${score.connectionPoints}点</${detailHeading}><p>向かい合う辺の流れが合うと1点。地形は違ってもつながります。<br>${score.connections.length ? `接続: ${score.connections.map(({ from, to }) => `${cellName(from)}–${cellName(to)}`).join(' / ')}` : 'いまはつながる辺がありません'}</p>
       <${detailHeading}>星の石 · ${score.stonePoints}点</${detailHeading}>
       ${score.stones.length ? `<ul class="stone-breakdown">${score.stones.map((stone) => `<li><div><strong>${STONES[stone.stone].name} <small>${cellName(stone.index)}</small></strong><b>${stone.points}点</b></div><p>${STONES[stone.stone].rule}。上限6点。</p><p>${stone.count}${stone.stone === 'color' ? '種類' : stone.stone === 'echo' ? '個' : '枚'} × 2${stone.capped ? ` = ${stone.rawPoints}点 → 上限6点` : ` = ${stone.points}点`}<br>${stone.matches.length ? `対象: ${stone.matches.map(cellName).join('・')}${stone.stone === 'color' ? '（重複する地形は1種類）' : ''}` : 'いまは対象がありません'}</p></li>`).join('')}</ul>` : '<p>まだ石は置かれていません。星の石は0点です。</p>'}
-      ${compact ? `<${detailHeading}>共通のお題 · ${score.objective.points}点</${detailHeading}>${objective}` : ''}
     </div></details>
   </section>`;
 }
@@ -82,7 +137,7 @@ export function renderSession(session, { message = '', error = false, replacemen
     <div class="experiment-actions"><button type="button" data-action="undo" data-focus="undo" ${!session.history.length || session.pending ? 'disabled' : ''}>1手戻す</button><button type="button" data-action="example" data-focus="example">見本の庭</button><button type="button" data-action="reset" data-focus="reset">空の庭に戻す</button></div>
     ${replacement ? `<section class="replacement-confirm panel" role="region" aria-labelledby="replace-title"><h2 id="replace-title">${replacement === 'example' ? '見本の庭に切り替えますか？' : '庭を空にしますか？'}</h2><p>いまの配置と「1手戻す」の履歴が消えます。</p><div><button type="button" class="primary" data-action="replace-confirm" data-focus="replace-confirm">${replacement === 'example' ? '見本に切り替える' : '空の庭に戻す'}</button><button type="button" data-action="replace-cancel" data-focus="replace-cancel">やめる</button></div></section>` : ''}
     <p class="sandbox-note">自由配置モード · 素材は何度でも選べます。「1手戻す」は検証用です。対戦ルールでは確定した地形や石を動かしません。</p>
-  </div><aside class="sidebar">${renderScore(garden, committed.total, Boolean(session.pending))}
+  </div><aside class="sidebar">${renderScore(garden, committed.total, Boolean(session.pending), { committedGarden: session.garden })}
     <section class="rules-panel panel"><details id="rules-details"><summary>この試作のルール</summary><div class="rule-content"><h3>流れをつなぐ</h3><p>隣り合う2枚の向かい合う辺で流れがつながると1点。同じ辺は1回だけ数えます。盤外や空きマスは0点。</p><h3>星の石を置く</h3><p>各種類1個、地形1枚に石1個。すべて上限6点。得点は庭が変わるたびに計算します。</p><ul>${Object.values(STONES).map((stone) => `<li><strong>${stone.name}</strong> — ${stone.rule}</li>`).join('')}</ul><p>風守・彩りは足元と斜めを数えません。共鳴は自分の石を数えません。彩りは4種類あっても6点です。</p><h3>自由配置とは別のモード</h3><p>引いた1枚を使う・譲る判断、保管、精霊を招く／庭に迎える、力、12巡と仕上げ、CPU、複数人対戦、通信。この画面は配置・採点の実験室です。CPU対戦はページ上部のリンクから遊べます。オンライン通信は未実装です。</p></div></details></section>
   </aside></div>`;
 }

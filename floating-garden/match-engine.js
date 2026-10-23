@@ -1,7 +1,10 @@
 /** Serializable deterministic rules. No DOM, clock, network or ambient randomness. */
-import { createGarden, createTile, placeTile, placeStone, scoreGarden, validateGarden, TERRAIN, STONES } from './engine.js?v=20261002-match-save';
+import { createGarden, createTile, placeTile, placeStone, scoreGarden, validateGarden, validateObjective, selectObjectiveId, OBJECTIVE_VERSION, TERRAIN, STONES } from './engine.js?v=20261023-solo-objectives-1';
 
+// Keep the dormant online client's public contract at v1. Only solo creation uses v2.
 export const MATCH_VERSION = 'floating-garden-match-1';
+export const LEGACY_MATCH_VERSION = MATCH_VERSION;
+export const SOLO_MATCH_VERSION = 'floating-garden-match-2';
 export const POWER = Object.freeze({ initial: 4, max: 6, meditate: 1, give: 2, invite: 3, welcome: 2, stone: 3 });
 const names = ['あなた', '月の庭', '森の庭', '結晶の庭'];
 const filled = (player) => player.garden.every(Boolean);
@@ -18,11 +21,14 @@ function shuffledDeck(count, seed) {
   return deck;
 }
 
-export function createMatch({ playerCount = 4, seed = 'garden-1', humanSeat = 0 } = {}) {
+export function createMatch({ playerCount = 4, seed = 'garden-1', humanSeat = 0, legacy = false, objectiveId } = {}) {
   if (![2, 3, 4].includes(playerCount)) fail('invalid-player-count', '参加人数は2〜4人です');
   if (!Number.isInteger(humanSeat) || humanSeat < -1 || humanSeat >= playerCount) fail('invalid-human-seat', '操作する席を確認してください');
   if (!['string', 'number'].includes(typeof seed) || (typeof seed === 'number' && !Number.isFinite(seed))) fail('invalid-seed', '山札の合言葉を確認してください');
-  const state = { version: MATCH_VERSION, seed: String(seed), revision: 0, players: Array.from({ length: playerCount }, (_, seat) => ({ seat, id: `p${seat}`, name: seat === humanSeat ? 'あなた' : names[seat] === 'あなた' ? '星の庭' : names[seat], isHuman: seat === humanSeat, garden: createGarden(), tileIds: Array(16).fill(null), power: POWER.initial, storage: null, careCount: 0 })), deck: shuffledDeck(playerCount, seed), deckCursor: 0, round: 1, phase: 'normal', activeSeat: 0, prioritySeat: 1, step: 'source', drawn: null, offerTarget: null, inviteSeats: [], inviteIndex: 0, requests: [], placementSeat: null, afterPlacement: null, finalSeat: 0, log: ['庭づくりを始めます。通常12巡、その後は全員の庭を仕上げます'] };
+  if (typeof legacy !== 'boolean' || (legacy && objectiveId !== undefined)) fail('invalid-objective', '旧ルールではお題を変更できません');
+  const state = { version: SOLO_MATCH_VERSION, seed: String(seed), revision: 0, players: Array.from({ length: playerCount }, (_, seat) => ({ seat, id: `p${seat}`, name: seat === humanSeat ? 'あなた' : names[seat] === 'あなた' ? '星の庭' : names[seat], isHuman: seat === humanSeat, garden: createGarden(), tileIds: Array(16).fill(null), power: POWER.initial, storage: null, careCount: 0 })), deck: shuffledDeck(playerCount, seed), deckCursor: 0, round: 1, phase: 'normal', activeSeat: 0, prioritySeat: 1, step: 'source', drawn: null, offerTarget: null, inviteSeats: [], inviteIndex: 0, requests: [], placementSeat: null, afterPlacement: null, finalSeat: 0, log: ['庭づくりを始めます。通常12巡、その後は全員の庭を仕上げます'] };
+  if (legacy) state.version = LEGACY_MATCH_VERSION;
+  else state.objective = validateObjective({ id: objectiveId === undefined ? selectObjectiveId(seed) : objectiveId, version: OBJECTIVE_VERSION });
   assertMatchInvariants(state);
   return state;
 }
@@ -163,12 +169,14 @@ export function applyMatchAction(state, command) {
 }
 
 export function rankMatch(state) {
-  const scores = state.players.map((player) => ({ seat: player.seat, score: scoreGarden(player.garden).total }));
+  assertMatchObjective(state);
+  const scores = state.players.map((player) => ({ seat: player.seat, score: scoreGarden(player.garden, state.objective).total }));
   return scores.map((item) => ({ ...item, rank: 1 + scores.filter((other) => other.score > item.score).length })).sort((a, b) => a.rank - b.rank || a.seat - b.seat);
 }
 
 /** Run after every transition, including gifts, invitations, storage and final stones. */
 export function assertMatchInvariants(state) {
+  assertMatchObjective(state);
   const ids = [];
   const originals = new Map(state.deck.map((tile) => [tile.id, tile]));
   const record = (tile, id) => {
@@ -193,4 +201,14 @@ export function assertMatchInvariants(state) {
   if (Math.max(...care) - Math.min(...care) > 1) fail('unequal-care', '手入れ回数が一致しません');
   if (['final-stone', 'finished'].includes(state.phase) && (!state.players.every(filled) || new Set(care).size !== 1)) fail('unfinished-final', '最後の配置の前に全員の庭を完成させます');
   return true;
+}
+
+function assertMatchObjective(state) {
+  if (!state || ![LEGACY_MATCH_VERSION, SOLO_MATCH_VERSION].includes(state.version)) fail('invalid-match-version', '対戦ルールの版を確認してください');
+  if (state.version === LEGACY_MATCH_VERSION) {
+    if (Object.hasOwn(state, 'objective')) fail('invalid-objective', '旧ルールのお題は四隅のままです');
+  } else {
+    if (!Object.hasOwn(state, 'objective')) fail('invalid-objective', '対戦のお題がありません');
+    validateObjective(state.objective);
+  }
 }

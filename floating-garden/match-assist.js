@@ -1,5 +1,5 @@
 /** CPU-match counting aid. Uses public inventory only, never the seed or hidden deck. */
-import { TERRAIN } from './engine.js?v=20261002-match-save';
+import { TERRAIN } from './engine.js?v=20261023-solo-objectives-1';
 
 export function remainingTileCounts({ players, drawn }) {
   // The fixed deck has two copies of every terrain/shape for each participant.
