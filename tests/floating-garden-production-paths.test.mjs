@@ -28,10 +28,10 @@ const replacements = {
   'play/index.html': [['href="../entrance/index.html"','href="../index.html"']],
 };
 const soloChanged = new Set(['engine.js','match-engine.js','cpu.js','match-save.js','view.js','match-view.js','style.css','match.html','match-app.js','session.js','match-assist.js','match-rule-examples.js','match-style.css','index.html']);
-test('production tree stays 37 files; files outside the solo objective scope preserve their original lab mapping', async () => {
+test('production tree adds only two isolated diagnostic files; original game files preserve their lab mapping', async () => {
   const files = [];
   async function walk(prefix = '') { for (const item of await readdir(new URL(prefix, root), {withFileTypes:true})) { if (item.isDirectory()) await walk(prefix+item.name+'/'); else files.push(prefix+item.name); } }
-  await walk(); assert.deepEqual(files.sort(), Object.keys(mapping).sort());
+  await walk(); assert.deepEqual(files.sort(), [...Object.keys(mapping), 'diagnostics/stopped.html', 'diagnostics/stopped.js'].sort());
   for (const [path, source] of Object.entries(mapping)) {
     let expected = await readFile(new URL(source, oldRoot));
     if (replacements[path]) {
@@ -135,4 +135,359 @@ test('actual relocated selector creates six production URLs without network or s
 });
 test('toybox remains unlisted for Garden', async () => {
   const toybox=await readFile(new URL('../toybox/index.html',import.meta.url),'utf8'); assert.doesNotMatch(toybox,/floating-garden|浮遊庭園/);
+});
+
+// Fixed stop-response diagnostic tests are offline: no provider SDK or real request is used.
+import * as stopped from '../floating-garden/diagnostics/stopped.js';
+const diagnosticKeys = new Set(['schemaVersion', 'testId', 'stage', 'startedAt', 'finishedAt', 'submitted', 'outcome', 'httpStatus', 'reason']);
+const secretFixture = 'PRIVATE_TEST_ONLY_NEVER_PERSIST';
+const stopBody = () => ({error:{status:'FAILED_PRECONDITION', details:{reason:'public-disabled'}, message:secretFixture}});
+const stopRecord = (fields = {}) => ({schemaVersion:1, testId:stopped.ATTEMPT_KEY, stage:'reserved', startedAt:1000, submitted:false, outcome:'pending', ...fields});
+function assertSafeDiagnostic(record) {
+  assert.ok(record && typeof record === 'object');
+  for (const key of Object.keys(record)) assert.ok(diagnosticKeys.has(key), `Unexpected persisted field: ${key}`);
+  assert.doesNotMatch(JSON.stringify(record), /PRIVATE_TEST_ONLY_NEVER_PERSIST|<script|Bearer /);
+  assert.equal(record.schemaVersion, 1);
+  assert.equal(record.testId, stopped.ATTEMPT_KEY);
+}
+function memoryDiagnosticStore(initial = null) {
+  let value = initial && structuredClone(initial);
+  const writes = [];
+  return {
+    writes,
+    async read() { return value && structuredClone(value); },
+    async claim(record) { if (value) return false; value = structuredClone(record); writes.push(structuredClone(record)); return true; },
+    async save(record) { value = structuredClone(record); writes.push(structuredClone(record)); },
+  };
+}
+function diagnosticOptions(store, extra = {}) {
+  return {store, now:() => 1001, getToken:async () => secretFixture, send:async () => ({status:400, body:stopBody()}), ...extra};
+}
+/** Event-driven IndexedDB double with serialized transactions and rollback, not a claim mock. */
+function diagnosticIndexedDB({openFailure = false, abortWrite = false} = {}) {
+  let records = new Map(), exists = false, running = false;
+  const pending = [], trace = [];
+  const process = () => {
+    if (running || !pending.length) return;
+    running = true;
+    const entry = pending.shift();
+    setImmediate(() => {
+      const copy = new Map(records), {tx, request, method, value} = entry;
+      let prevented = false;
+      if (method === 'add' && copy.has(value.testId)) {
+        request.error = {name:'ConstraintError', message:secretFixture};
+        request.onerror?.({preventDefault() { prevented = true; }, stopPropagation() {}});
+        if (!prevented) { running = false; tx.onabort?.(); process(); return; }
+      } else {
+        request.result = method === 'get' ? copy.get(value) : value.testId;
+        if (method !== 'get') copy.set(value.testId, structuredClone(value));
+        trace.push(`${method}:success`);
+        request.onsuccess?.();
+      }
+      setImmediate(() => {
+        if (abortWrite && method !== 'get') { trace.push(`${method}:abort`); tx.onabort?.(); }
+        else { records = copy; trace.push(`${method}:complete`); tx.oncomplete?.(); }
+        running = false; process();
+      });
+    });
+  };
+  const db = {
+    objectStoreNames:{contains:() => exists},
+    createObjectStore(name, options) { assert.equal(name, 'attempts'); assert.equal(options.keyPath, 'testId'); exists = true; },
+    close() {},
+    transaction(name, mode, options) {
+      assert.equal(name, 'attempts');
+      if (mode === 'readwrite') assert.deepEqual(options, {durability:'strict'});
+      const tx = {objectStore(storeName) {
+        assert.equal(storeName, 'attempts');
+        return Object.fromEntries(['get', 'add', 'put'].map(method => [method, value => {
+          const request = {};
+          pending.push({tx, request, method, value}); process(); return request;
+        }]));
+      }};
+      return tx;
+    },
+  };
+  return {
+    trace,
+    open(name, version) {
+      assert.equal(name, 'floating-garden-stop-diagnostic'); assert.equal(version, 1);
+      const request = {};
+      queueMicrotask(() => {
+        if (openFailure) { request.error = new Error(secretFixture); request.onerror?.(); return; }
+        request.result = db;
+        if (!exists) request.onupgradeneeded?.();
+        request.onsuccess?.();
+      });
+      return request;
+    },
+    seed(record) { records.set(stopped.ATTEMPT_KEY, structuredClone(record)); },
+    stored() { return records.get(stopped.ATTEMPT_KEY); },
+  };
+}
+function diagnosticPage(indexedDB, href = 'https://fabdemnt-dev.github.io/wa-awesome/floating-garden/diagnostics/stopped.html') {
+  const nodes = new Map(['run-check', 'status', 'result'].map(id => [id, {disabled:id === 'run-check', textContent:'', listeners:new Map(), addEventListener(type, listener) { this.listeners.set(type, listener); }}]));
+  return {location:new URL(href), navigator:{}, indexedDB, document:{getElementById:id => nodes.get(id)}, fetch:() => assert.fail('Unrequested production request'), nodes};
+}
+
+test('stop diagnostic pins its production target and accepts only the exact disabled response', () => {
+  assert.deepEqual(stopped.TARGET, {projectId:'wa-awesome', region:'asia-northeast1', name:'floatingGardenGetSnapshot', epochId:'public-production-20261023-v1', url:'https://asia-northeast1-wa-awesome.cloudfunctions.net/floatingGardenGetSnapshot'});
+  assert.ok(Object.isFrozen(stopped.TARGET));
+  assert.equal(stopped.ATTEMPT_KEY, 'garden-stop-response-20261023-v1');
+  assert.deepEqual(stopped.classifyResponse(400, stopBody()), {outcome:'stopped_verified', httpStatus:400, reason:'public-disabled'});
+  for (const [status, body] of [
+    [200, stopBody()], [401, stopBody()], [403, stopBody()], [500, stopBody()], ['400', stopBody()],
+    [400, {error:{status:'FAILED_PRECONDITION', details:{reason:'public-closed'}}}],
+    [400, {error:{status:'UNAUTHENTICATED', details:{reason:'public-disabled'}}}],
+    [400, {error:{status:'failed_precondition', details:{reason:'public-disabled'}}}],
+    [400, {result:{reason:'public-disabled'}}], [400, null], [400, secretFixture], [0, {}], [Infinity, {}],
+  ]) {
+    const result = stopped.classifyResponse(status, body);
+    assert.notEqual(result.outcome, 'stopped_verified');
+    assert.doesNotMatch(JSON.stringify(result), /PRIVATE_TEST_ONLY_NEVER_PERSIST/);
+  }
+});
+
+test('stop diagnostic atomically claims IndexedDB before proceeding and sanitizes stored records', async () => {
+  const idb = diagnosticIndexedDB(), one = stopped.createRecordStore(idb), two = stopped.createRecordStore(idb);
+  assert.equal(await one.read(), null);
+  const record = {...stopRecord(), token:secretFixture, rawError:{message:secretFixture}, extra:secretFixture};
+  assert.deepEqual((await Promise.all([one.claim(record), two.claim(record)])).sort(), [false, true]);
+  assert.equal(idb.trace.filter(event => event === 'add:success').length, 1);
+  assert.ok(idb.trace.includes('add:complete'));
+  assertSafeDiagnostic(idb.stored());
+  await one.save({...record, stage:'finished', outcome:'unknown', submitted:true, finishedAt:2000, reason:secretFixture, httpStatus:999});
+  const saved = await two.read();
+  assertSafeDiagnostic(saved); assert.equal(saved.stage, 'finished'); assert.equal(saved.submitted, true);
+  assert.equal(Object.hasOwn(saved, 'reason'), false); assert.equal(Object.hasOwn(saved, 'httpStatus'), false);
+  assert.equal(await two.claim(record), false);
+});
+
+test('stop diagnostic storage rejects unavailable, aborted and malformed records without requests', async () => {
+  assert.throws(() => stopped.createRecordStore(null), /diagnostic-unavailable/);
+  assert.throws(() => stopped.createRecordStore({}), /diagnostic-unavailable/);
+  for (const idb of [diagnosticIndexedDB({openFailure:true}), diagnosticIndexedDB({abortWrite:true})]) {
+    const result = await stopped.runDiagnostic(diagnosticOptions(stopped.createRecordStore(idb), {getToken:() => assert.fail('Token before durable reservation'), send:() => assert.fail('Request with broken storage')}));
+    assert.equal(result.outcome, 'blocked'); assert.equal(result.reason, 'storage-unavailable'); assert.equal(result.submitted, false); assertSafeDiagnostic(result);
+    assert.equal(idb.stored(), undefined);
+  }
+  const idb = diagnosticIndexedDB(), store = stopped.createRecordStore(idb);
+  for (const fields of [{schemaVersion:2}, {testId:'different-attempt'}, {stage:'retry'}, {outcome:secretFixture}, {startedAt:-1}, {startedAt:NaN}, {submitted:'true'}]) {
+    await assert.rejects(store.claim(stopRecord(fields)), /diagnostic-unavailable/);
+  }
+  idb.seed(stopRecord({stage:'tampered', token:secretFixture}));
+  await assert.rejects(store.read(), /diagnostic-unavailable/);
+});
+
+test('stop diagnostic writes reservation and submission-possible marker before its single send', async () => {
+  const store = memoryDiagnosticStore(), updates = [], order = [];
+  const result = await stopped.runDiagnostic(diagnosticOptions(store, {
+    getToken:async () => { const saved = await store.read(); assert.equal(saved.stage, 'app-check'); assert.equal(saved.submitted, false); order.push('token'); return secretFixture; },
+    send:async token => { assert.equal(token, secretFixture); const saved = await store.read(); assert.equal(saved.stage, 'request-prepared'); assert.equal(saved.submitted, true); order.push('send'); return {status:400, body:stopBody()}; },
+    onUpdate:record => updates.push(structuredClone(record)),
+  }));
+  assert.deepEqual(order, ['token', 'send']); assert.equal(result.outcome, 'stopped_verified'); assert.equal(result.submitted, true); assert.equal(result.stage, 'finished');
+  assert.equal(result.reason, 'public-disabled');
+  assert.deepEqual(store.writes.map(record => record.stage), ['reserved', 'app-check', 'request-prepared', 'finished']);
+  for (const record of [result, ...store.writes, ...updates]) assertSafeDiagnostic(record);
+});
+
+test('stop diagnostic concurrent runners and reload never repeat token retrieval or submission', async () => {
+  const idb = diagnosticIndexedDB(); let tokens = 0, sends = 0;
+  const run = () => stopped.runDiagnostic(diagnosticOptions(stopped.createRecordStore(idb), {getToken:async () => { tokens++; return secretFixture; }, send:async () => { sends++; return {status:400, body:stopBody()}; }}));
+  await Promise.all([run(), run(), run()]);
+  assert.equal(tokens, 1); assert.equal(sends, 1);
+  const previous = await run(); assert.equal(previous.outcome, 'stopped_verified'); assert.equal(tokens, 1); assert.equal(sends, 1);
+  for (const saved of [stopRecord(), stopRecord({stage:'app-check'}), stopRecord({stage:'request-prepared', submitted:true}), stopRecord({stage:'finished', submitted:true, outcome:'unknown', finishedAt:1001})]) {
+    const result = await stopped.runDiagnostic(diagnosticOptions(memoryDiagnosticStore({...saved, token:secretFixture}), {getToken:() => assert.fail('Reload obtained a token'), send:() => assert.fail('Reload repeated request')}));
+    assertSafeDiagnostic(result); assert.equal(result.stage, saved.stage); assert.equal(result.submitted, saved.submitted);
+  }
+});
+
+test('stop diagnostic fails closed on each pre-send storage failure', async () => {
+  for (const failureAt of ['claim', 'app-check', 'request-prepared', 'duplicate-read']) {
+    const original = memoryDiagnosticStore(); let tokens = 0, sends = 0;
+    const store = {...original,
+      async claim(record) { if (failureAt === 'claim') throw new Error(secretFixture); return failureAt === 'duplicate-read' ? false : original.claim(record); },
+      async read() { if (failureAt === 'duplicate-read') throw new Error(secretFixture); return original.read(); },
+      async save(record) { if (record.stage === failureAt) throw new Error(secretFixture); return original.save(record); },
+    };
+    const result = await stopped.runDiagnostic(diagnosticOptions(store, {getToken:async () => { tokens++; return secretFixture; }, send:async () => { sends++; return {status:400, body:stopBody()}; }}));
+    assert.equal(result.outcome, 'blocked', failureAt); assert.equal(result.submitted, false, failureAt); assert.equal(sends, 0, failureAt);
+    assert.equal(tokens, failureAt === 'request-prepared' ? 1 : 0, failureAt); assertSafeDiagnostic(result);
+  }
+});
+
+test('stop diagnostic token errors and invalid tokens remain redacted and never reach send', async () => {
+  for (const getToken of [async () => { throw Object.assign(new Error(secretFixture), {token:secretFixture, customData:{raw:secretFixture}}); }, async () => '', async () => null, async () => ({token:secretFixture}), async () => 'x'.repeat(16385)]) {
+    const store = memoryDiagnosticStore(), updates = [];
+    const result = await stopped.runDiagnostic(diagnosticOptions(store, {getToken, send:() => assert.fail('Invalid token was sent'), onUpdate:record => updates.push(record)}));
+    assert.equal(result.outcome, 'blocked'); assert.equal(result.reason, 'app-check-unavailable'); assert.equal(result.submitted, false);
+    for (const record of [result, ...store.writes, ...updates]) assertSafeDiagnostic(record);
+    assertSafeDiagnostic(await stopped.runDiagnostic(diagnosticOptions(store, {getToken:() => assert.fail('Blocked attempt retried')})));
+  }
+});
+
+test('stop diagnostic unknown response, network error and failed final save never authorize retry', async () => {
+  for (const mode of ['network', 'unexpected', 'finish-save']) {
+    const original = memoryDiagnosticStore(); let sends = 0;
+    const store = {...original, async save(record) { if (mode === 'finish-save' && record.stage === 'finished') throw new Error(secretFixture); return original.save(record); }};
+    const options = diagnosticOptions(store, {send:async () => { sends++; if (mode === 'network') throw Object.assign(new Error(secretFixture), {response:{raw:secretFixture}}); return {status:mode === 'unexpected' ? 200 : 400, body:{...stopBody(), token:secretFixture}}; }, onUpdate:() => { throw new Error(secretFixture); }});
+    const result = await stopped.runDiagnostic(options);
+    assert.equal(result.outcome, mode === 'unexpected' ? 'unexpected' : 'unknown'); assert.equal(result.submitted, true); assertSafeDiagnostic(result);
+    await stopped.runDiagnostic(options); assert.equal(sends, 1);
+    for (const record of original.writes) assertSafeDiagnostic(record);
+    if (mode === 'finish-save') assert.equal((await original.read()).stage, 'request-prepared');
+  }
+});
+
+test('stop diagnostic transport fixes URL, payload, App Check header and omits credentials', async () => {
+  const calls = [];
+  const post = stopped.createOneShotPost(async (...args) => { calls.push(args); return new Response(JSON.stringify(stopBody()), {status:400}); });
+  const response = await post(secretFixture);
+  assert.equal(response.status, 400); assert.equal(stopped.classifyResponse(response.status, response.body).outcome, 'stopped_verified');
+  assert.equal(calls.length, 1);
+  const [url, options] = calls[0]; assert.equal(url, stopped.TARGET.url);
+  assert.equal(options.method, 'POST'); assert.equal(options.credentials, 'omit'); assert.equal(options.redirect, 'error'); assert.equal(options.cache, 'no-store');
+  assert.deepEqual(options.headers, {'Content-Type':'application/json', 'X-Firebase-AppCheck':secretFixture});
+  assert.deepEqual(JSON.parse(options.body), {data:{epochId:'public-production-20261023-v1'}});
+  assert.ok(options.signal instanceof AbortSignal);
+  assert.equal(Object.keys(options.headers).some(key => /authorization|cookie/i.test(key)), false);
+  await assert.rejects(post(secretFixture), /diagnostic-unavailable/); assert.equal(calls.length, 1);
+});
+
+test('stop diagnostic transport consumes its allowance on invalid token, concurrent call or network failure', async () => {
+  for (const token of ['', null, {}, 'x'.repeat(16385)]) {
+    let calls = 0; const post = stopped.createOneShotPost(async () => { calls++; assert.fail('Invalid token request'); });
+    await assert.rejects(post(token)); await assert.rejects(post(secretFixture)); assert.equal(calls, 0);
+  }
+  let calls = 0;
+  const post = stopped.createOneShotPost(async () => { calls++; throw new Error(secretFixture); });
+  const results = await Promise.allSettled([post(secretFixture), post(secretFixture), post(secretFixture)]);
+  assert.ok(results.every(result => result.status === 'rejected')); assert.equal(calls, 1);
+});
+
+test('stop diagnostic bounded response rejects opaque, oversized and non-JSON bodies without retry', async () => {
+  const responses = [
+    () => ({status:0, body:null}),
+    () => new Response(secretFixture, {status:502}),
+    () => new Response(JSON.stringify({raw:'x'.repeat(8193)}), {status:400}),
+    () => ({status:400, body:{getReader:() => ({read:async () => { throw new Error(secretFixture); }})}}),
+  ];
+  for (const makeResponse of responses) {
+    let calls = 0;
+    const store = memoryDiagnosticStore(), post = stopped.createOneShotPost(async () => { calls++; return makeResponse(); });
+    const options = diagnosticOptions(store, {send:post});
+    const result = await stopped.runDiagnostic(options);
+    assert.equal(result.outcome, 'unknown'); assert.equal(result.submitted, true); assertSafeDiagnostic(result);
+    await stopped.runDiagnostic(options); await assert.rejects(post(secretFixture)); assert.equal(calls, 1);
+    for (const record of store.writes) assertSafeDiagnostic(record);
+  }
+});
+
+test('stop diagnostic timeout aborts once, retains unknown status and does not retry after reload', async () => {
+  let calls = 0, aborts = 0;
+  const post = stopped.createOneShotPost((_url, {signal}) => new Promise((_resolve, reject) => {
+    calls++; signal.addEventListener('abort', () => { aborts++; reject(Object.assign(new Error(secretFixture), {name:'AbortError'})); }, {once:true});
+  }), 5);
+  const store = memoryDiagnosticStore(), options = diagnosticOptions(store, {send:post});
+  const result = await stopped.runDiagnostic(options);
+  assert.equal(result.outcome, 'unknown'); assert.equal(result.reason, 'network-or-timeout'); assert.equal(result.submitted, true); assertSafeDiagnostic(result);
+  await stopped.runDiagnostic(options); await assert.rejects(post(secretFixture));
+  assert.equal(calls, 1); assert.equal(aborts, 1);
+});
+
+test('stop diagnostic mounting is idle, and reloading any reserved or terminal state remains disabled', async () => {
+  const page = diagnosticPage(diagnosticIndexedDB());
+  await stopped.mountDiagnostic(page);
+  assert.equal(page.nodes.get('run-check').disabled, false);
+  assert.equal(page.nodes.get('run-check').listeners.size, 1);
+  assert.equal(page.indexedDB.stored(), undefined);
+  for (const record of [stopRecord(), stopRecord({stage:'app-check'}), stopRecord({stage:'request-prepared', submitted:true}), stopRecord({stage:'finished', submitted:true, outcome:'unknown'}), stopRecord({stage:'finished', submitted:true, outcome:'stopped_verified', reason:'public-disabled'})]) {
+    const idb = diagnosticIndexedDB(); idb.seed({...record, token:secretFixture});
+    const loaded = diagnosticPage(idb); await stopped.mountDiagnostic(loaded);
+    assert.equal(loaded.nodes.get('run-check').disabled, true); assert.equal(loaded.nodes.get('run-check').listeners.size, 0);
+    assertSafeDiagnostic(JSON.parse(loaded.nodes.get('result').textContent));
+  }
+});
+
+test('stop diagnostic page refuses changed origin, path, query, hash, debug mode or service worker', async () => {
+  for (const href of [
+    'http://fabdemnt-dev.github.io/wa-awesome/floating-garden/diagnostics/stopped.html',
+    'https://wa-awesome-garden-stg.web.app/wa-awesome/floating-garden/diagnostics/stopped.html',
+    'https://fabdemnt-dev.github.io/wa-awesome/floating-garden/play/index.html',
+    'https://fabdemnt-dev.github.io/wa-awesome/floating-garden/diagnostics/stopped.html?projectId=other',
+    'https://fabdemnt-dev.github.io/wa-awesome/floating-garden/diagnostics/stopped.html#run',
+    'https://fabdemnt-dev.github.io/wa-awesome/floating-garden/diagnostics/stopped.html?',
+    'https://fabdemnt-dev.github.io/wa-awesome/floating-garden/diagnostics/stopped.html#',
+  ]) {
+    const page = diagnosticPage({open:() => assert.fail('Disallowed context used storage')}, href);
+    await stopped.mountDiagnostic(page); assert.equal(page.nodes.get('run-check').disabled, true); assert.equal(page.nodes.get('run-check').listeners.size, 0);
+  }
+  for (const mutate of [page => { page.FIREBASE_APPCHECK_DEBUG_TOKEN = false; }, page => { Object.setPrototypeOf(page, {FIREBASE_APPCHECK_DEBUG_TOKEN:undefined}); }, page => { page.navigator.serviceWorker = {controller:{}}; }]) {
+    const page = diagnosticPage({open:() => assert.fail('Disallowed context used storage')}); mutate(page);
+    await stopped.mountDiagnostic(page); assert.equal(page.nodes.get('run-check').disabled, true); assert.equal(page.nodes.get('run-check').listeners.size, 0);
+  }
+});
+
+test('stop diagnostic actual click locks immediately and repeated clicks cannot create a second attempt', async () => {
+  const page = diagnosticPage(diagnosticIndexedDB()); await stopped.mountDiagnostic(page);
+  const button = page.nodes.get('run-check'), click = button.listeners.get('click');
+  // Make the context invalid after mount, preventing real SDK loading while exercising the real click listener.
+  page.location.hash = '#invalid-after-mount';
+  const first = click(); assert.equal(button.disabled, true);
+  await Promise.all([first, click(), click()]);
+  assert.equal(page.indexedDB.trace.filter(event => event === 'add:success').length, 1);
+  assert.equal(page.indexedDB.stored().outcome, 'blocked'); assert.equal(page.indexedDB.stored().submitted, false);
+  assertSafeDiagnostic(JSON.parse(page.nodes.get('result').textContent));
+  await click(); assert.equal(page.indexedDB.trace.filter(event => event === 'add:success').length, 1);
+});
+
+test('stop diagnostic is an isolated two-file page with no automatic token/send, Auth, Firestore or config override', async () => {
+  const html = await read('diagnostics/stopped.html'), source = await read('diagnostics/stopped.js');
+  assert.deepEqual((await readdir(new URL('diagnostics/', root))).sort(), ['stopped.html', 'stopped.js']);
+  assert.match(html, /<button\b[^>]*id="run-check"[^>]*disabled/);
+  assert.match(html, /<script type="module" src="\.\/stopped\.js"><\/script>/);
+  assert.equal((html.match(/<script\b/g) || []).length, 1);
+  assert.match(html, /name="referrer" content="no-referrer"/);
+  assert.match(html, /結果不明・中断時も再実行しません/);
+  assert.doesNotMatch(html, /<form\b|<input\b|<textarea\b|<iframe\b|http-equiv="refresh"|onclick=/i);
+  assert.match(source, /firebasejs\/10\.8\.0\/firebase-app\.js/);
+  assert.match(source, /firebasejs\/10\.8\.0\/firebase-app-check\.js/);
+  assert.match(source, /getLimitedUseToken\(check\)/);
+  assert.match(source, /isTokenAutoRefreshEnabled:false/);
+  assert.match(source, /setTokenAutoRefreshEnabled\(check, false\)/);
+  assert.doesNotMatch(source, /firebase-(?:auth|firestore|functions)|signIn|httpsCallable|getFirestore|setDoc|addDoc|connect\w+Emulator|console\.|innerHTML|localStorage|sessionStorage|URLSearchParams|location\.search|serviceWorker\.register/);
+  assert.doesNotMatch(source, /FIREBASE_APPCHECK_DEBUG_TOKEN\s*=/);
+  assert.doesNotMatch(source, /checks\.getToken\(/);
+  assert.doesNotMatch(source, /wa-awesome-garden-stg|public-20261022-v1/);
+  for (const path of ['index.html', 'entrance.js', 'play/index.html', 'play/app.js']) assert.doesNotMatch(await read(path), /diagnostics\/stopped|stopped\.js/);
+});
+
+test('stop diagnostic UI leaves the button disabled for blocked or malformed storage', async () => {
+  const malformed = diagnosticIndexedDB(); malformed.seed(stopRecord({stage:'invalid', token:secretFixture}));
+  for (const idb of [null, diagnosticIndexedDB({openFailure:true}), malformed]) {
+    const page = diagnosticPage(idb); await stopped.mountDiagnostic(page);
+    assert.equal(page.nodes.get('run-check').disabled, true);
+    assert.equal(page.nodes.get('run-check').listeners.size, 0);
+    assert.doesNotMatch(page.nodes.get('result').textContent + page.nodes.get('status').textContent, /PRIVATE_TEST_ONLY_NEVER_PERSIST/);
+  }
+});
+
+test('stop diagnostic missing or invalid duplicate record fails closed without replacing it', async () => {
+  for (const existing of [null, stopRecord({testId:'other-test'}), stopRecord({stage:'invalid'})]) {
+    const store = {claim:async () => false, read:async () => existing, save:() => assert.fail('Replaced a prior reservation')};
+    const result = await stopped.runDiagnostic(diagnosticOptions(store, {getToken:() => assert.fail('Read failure fetched token'), send:() => assert.fail('Read failure sent request')}));
+    assert.equal(result.outcome, 'blocked'); assert.equal(result.reason, 'storage-unavailable'); assert.equal(result.submitted, false); assertSafeDiagnostic(result);
+  }
+});
+
+test('stop diagnostic display updates are detached from the durable request decision', async () => {
+  const store = memoryDiagnosticStore(); let sends = 0;
+  const result = await stopped.runDiagnostic(diagnosticOptions(store, {
+    onUpdate:record => { record.stage = 'bad'; record.token = secretFixture; record.submitted = false; },
+    send:async () => { sends++; const durable = await store.read(); assert.equal(durable.stage, 'request-prepared'); assert.equal(durable.submitted, true); return {status:400, body:stopBody()}; },
+  }));
+  assert.equal(result.outcome, 'stopped_verified'); assert.equal(sends, 1); assertSafeDiagnostic(result);
+  for (const record of store.writes) assertSafeDiagnostic(record);
 });

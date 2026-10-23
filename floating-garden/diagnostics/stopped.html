@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <meta name="referrer" content="no-referrer">
+  <title>庭園の停止応答確認</title>
+  <style>
+    :root{color-scheme:dark;font-family:system-ui,sans-serif;background:#071421;color:#edf5fa}
+    body{max-width:42rem;margin:2rem auto;padding:0 1rem;line-height:1.7}h1{font-size:1.5rem}
+    section{background:#112638;border:1px solid #547181;border-radius:1rem;padding:1.2rem;margin:1rem 0}
+    button{font:inherit;border:1px solid #9bcbd4;background:#d1eef1;color:#102432;border-radius:.6rem;padding:.8rem 1rem;cursor:pointer}
+    button:disabled{opacity:.55;cursor:default}button:focus-visible,a:focus-visible{outline:3px solid #ffd98a;outline-offset:4px}
+    pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:.85rem}a{color:#b8e8ed}.note{color:#d1dae2}
+  </style>
+</head>
+<body>
+  <h1>庭園の停止応答確認</h1>
+  <p>ゲームやオンライン対戦を開始せず、決まったサーバー処理の停止応答だけを確認します。</p>
+  <section>
+    <p>確認先：wa-awesome / 東京 / floatingGardenGetSnapshot</p>
+    <p class="note">通常のApp Check確認と事前通信の後、処理への送信は最大1回です。通信・ログ等の費用が発生し得ます。新しいログインや部屋は作りません。</p>
+    <p class="note">同じブラウザーでは実行予約を保存して再送を防ぎます。結果不明・中断時も再実行しません。別ブラウザーまで含む回数制限ではありません。</p>
+    <button id="run-check" type="button" disabled>停止応答を1回だけ確認する</button>
+    <p id="status" role="status" aria-live="polite">保存状態を確認しています。まだ通信試験は開始していません。</p>
+  </section>
+  <section aria-label="秘密を含まない確認結果">
+    <h2>確認記録</h2>
+    <p class="note">段階・時刻・応答の分類だけを保存します。トークン、鍵、認証情報、応答全文は表示・保存しません。</p>
+    <pre id="result">未実行</pre>
+  </section>
+  <p><a href="../index.html">庭園の入口へ戻る</a></p>
+  <script type="module" src="./stopped.js"></script>
+</body>
+</html>
