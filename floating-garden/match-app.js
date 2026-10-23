@@ -1,8 +1,8 @@
-import { applyPlacement, createTile } from './engine.js?v=20261002-match-save';
-import { createMatch, applyMatchAction, getDecision, legalActions, publicMatch } from './match-engine.js?v=20261002-match-save';
-import { chooseCpuAction } from './cpu.js?v=20261002-match-save';
-import { createMatchSaveStore, encodeMatchSave, SAVE_KEY } from './match-save.js?v=20261002-match-save';
-import { renderMatch, renderMatchSetup } from './match-view.js?v=20261002-match-save';
+import { applyPlacement, createTile } from './engine.js?v=20261023-solo-objectives-1';
+import { createMatch, applyMatchAction, getDecision, legalActions, publicMatch } from './match-engine.js?v=20261023-solo-objectives-1';
+import { chooseCpuAction } from './cpu.js?v=20261023-solo-objectives-1';
+import { createMatchSaveStore, encodeMatchSave, SAVE_KEY } from './match-save.js?v=20261023-solo-objectives-1';
+import { renderMatch, renderMatchSetup } from './match-view.js?v=20261023-solo-objectives-1';
 
 export function mountMatch(root, { seed = globalThis.crypto?.randomUUID?.() ?? `garden-${Date.now()}`, saveStore = null, now = () => Date.now() } = {}) {
   let state = null;
