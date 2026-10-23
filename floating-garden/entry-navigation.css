@@ -1,0 +1,2 @@
+/* Intentional integration-only adaptation: preserve the accepted base design. */
+.picker-options a.entry-button{display:flex;align-items:center;justify-content:center;text-align:center;text-decoration:none;cursor:pointer}
