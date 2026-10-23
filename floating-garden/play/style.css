@@ -1,0 +1,7 @@
+#trial-status { max-width: 1480px; margin: 0 auto 20px; padding: 0 24px; }
+.trial-status { border-color: #abbece; }
+.trial-status p { overflow-wrap: anywhere; }
+.trial-status label { display: block; margin: 12px 0 6px; }
+.trial-status input { width: 100%; box-sizing: border-box; font-family: monospace; }
+#online-app[aria-disabled="true"] { opacity: .68; }
+@media (max-width: 779px) { #trial-status { padding: 0 14px; } }

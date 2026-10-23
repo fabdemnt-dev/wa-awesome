@@ -1,0 +1,121 @@
+#match-app { max-width: 1070px; margin: auto; padding: 0 24px; }
+.mode-links { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 18px; font-size: .85rem; }
+.mode-links a { color: var(--gold); display: inline-flex; align-items: center; min-height: 44px; }
+.mode-links span { align-content: center; color: var(--muted); }
+.match-setup { max-width: 650px; margin: 0 auto 20px; }
+.match-setup p { margin: 12px 0; font-size: .85rem; }
+.match-options, .match-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 14px 0; }
+.match-options small { display: block; }
+.match-setup + .rules-panel { max-width: 650px; margin: auto; }
+.match-actions > button { flex: 1 1 140px; }
+/* Each recipient is an equal choice, including the last of three. */
+.match-choice-groups { display: grid; gap: 18px; margin: 14px 0; }
+.match-choice-group { min-width: 0; margin: 0; padding: 0; border: 0; }
+.match-choice-group legend { margin-bottom: 8px; padding: 0; color: var(--muted); font-size: .78rem; }
+.match-choice-buttons { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.match-own-choices .match-choice-buttons { grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr)); }
+.match-choice-buttons > button { width: 100%; min-width: 0; overflow-wrap: anywhere; }
+.match-actions .selection-preview { display: block; flex-shrink: 0; margin-left: 0; }
+.match-stones { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; width: 100%; }
+.match-controls .status { font-size: .85rem; }
+.match-controls { margin-top: 20px; }
+.decision-hint { color: var(--muted); font-size: .78rem; }
+.power-warning { color: #ffdaae; font-size: .8rem; }
+.match-results { margin-top: 18px; }
+.match-results ol { list-style: none; padding: 0; }
+.match-results li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.match-results span { color: var(--gold); }
+.match-results p { font-size: .8rem; }
+.match-log ol { max-height: 300px; overflow-y: auto; font-size: .73rem; padding-left: 1.4em; }
+.match-log li { margin-bottom: 6px; }
+.match-layout .read-only-board:not(.mini-board) .empty-star { display: grid; place-items: center; height: 100%; }
+@media (max-width: 779px) {
+  #match-app { padding: 0 14px; }
+  .match-layout .opponent-cards { grid-template-columns: repeat(var(--opponent-count), minmax(0, 1fr)); }
+  .match-layout .opponent-card { width: 100%; max-width: 160px; justify-self: center; }
+  .match-layout .card-zoom { overflow-wrap: anywhere; font-size: .6rem; }
+  .match-layout .match-controls { position: static; }
+  .match-controls .status { font-size: .78rem; }
+}
+
+.match-jump { display: inline-flex; align-items: center; min-height: 44px; padding: 6px 12px; color: var(--gold); border: 1px solid var(--line); border-radius: 10px; font-size: .8rem; }
+.match-controls { scroll-margin-top: 16px; }
+.decision-tile { display: flex; align-items: center; gap: 12px; margin: 0 0 14px; padding-bottom: 12px; border-bottom: 1px solid var(--line); font-size: .83rem; }
+.decision-tile p { color: var(--muted); font-size: .75rem; }
+
+/* Read-only scoring examples, isolated from the live board and match controls. */
+.rule-examples { margin: 18px 0; padding-top: 2px; border-top: 1px solid var(--line); min-width: 0; }
+.rule-example-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 10px 0; color: #d8e7e4; font-size: .73rem; }
+.rule-example { border-top: 1px solid #385362; }
+.rule-example > summary { padding: 9px 2px; overflow-wrap: anywhere; }
+.rule-example-summary-score { display: inline-block; margin-left: 10px; font-size: .73rem; color: var(--muted); }
+.rule-example-content { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 0 16px; align-items: start; }
+.rule-example-copy { min-width: 0; }
+.rule-example-figure { margin: 8px 0 12px; }
+.rule-example-board { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; width: 100%; max-width: 280px; margin: 0 auto; padding: 8px; border: 1px solid #496273; border-radius: 14px; background: #112330; }
+.rule-example-cell { position: relative; display: block; min-width: 0; aspect-ratio: 1; border: 1px solid #6c808e; border-radius: 7px; isolation: isolate; }
+.rule-example-cell.is-empty { border-color: #3b5465; background: #152d3a; }
+.rule-example-cell.is-counted { border: 2px solid var(--teal); box-shadow: 0 0 8px #8be0d138, inset 0 0 6px #8be0d12e; }
+.rule-example-cell.is-ignored { border-style: dashed; border-color: #b6bec8; }
+.rule-example-coordinate { position: absolute; top: 2px; left: 3px; color: #e5eff0; font-size: .61rem; line-height: 1.2; z-index: 2; }
+.rule-example-cell.is-empty .rule-example-coordinate { color: #9eafb9; }
+.rule-example-terrain { position: absolute; inset: 35% 24% 12%; display: grid; place-items: center; font: 1rem/1 serif; color: #f3f2de; z-index: 1; }
+.rule-example-cell .flow { opacity: .23; }
+.is-flow-example .rule-example-cell .flow { opacity: 1; }
+.is-flow-example .rule-example-terrain { background: #112330bb; border-radius: 50%; inset: 34% 31% 22%; font-size: .9rem; }
+.rule-example-stone { position: absolute; right: 2px; top: 2px; display: grid; place-items: center; width: 20px; height: 20px; border: 1px solid #c9dbe1; border-radius: 50%; background: #304b5b; color: #f2f1de; font-size: .9rem; line-height: 1; z-index: 3; }
+.rule-example-stone.is-focus-stone { background: #fae4ae; color: #21374c; border-color: #fff5d7; box-shadow: 0 0 7px #f3d69866; }
+.rule-example-excluded { position: absolute; right: 3px; bottom: 1px; color: #f2dcbd; font-size: .9rem; line-height: 1; z-index: 3; }
+.rule-example-figure figcaption { margin-top: 10px; text-align: center; }
+.rule-example-figure figcaption strong { color: var(--gold); font-size: .82rem; }
+.rule-example-formula { display: block; margin-top: 3px; color: #e4eeeb; font-size: .8rem; }
+.rule-example-copy > p { margin: 8px 0 12px; overflow-wrap: anywhere; }
+.rule-example-caution { padding-left: 10px; border-left: 2px solid #8399a4; color: #d1dfe1; }
+.rule-example-terrain-legend { margin-top: 10px; font-size: .73rem; color: var(--muted); }
+
+/* Reuse scoring without sharing sidebar IDs or expanding long explanations by default. */
+#match-comparison .compact-score { padding: 12px; margin-top: 12px; min-width: 0; }
+#match-comparison .compact-score .section-label { flex-wrap: wrap; gap: 4px 8px; }
+#match-comparison .compact-score h4 { margin: 0; font-size: .82rem; }
+#match-comparison .compact-score h5 { margin: 10px 0 0; color: #d7e6e6; font-size: .78rem; }
+#match-comparison .compact-score .total { margin: 4px 0 12px; }
+#match-comparison .compact-score .total > strong { font-size: 2.8rem; }
+#match-comparison .compact-score .score-summary { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+#match-comparison .compact-score .score-summary > div { display: flex; gap: 6px; }
+#match-comparison .compact-score .score-summary dt { font-size: .74rem; }
+#match-comparison .compact-score .score-summary dd { margin: 0; white-space: nowrap; }
+#match-comparison .compact-score summary { overflow-wrap: anywhere; margin-top: 6px; }
+#match-comparison .compact-score .objective { padding: 8px; margin: 8px 0; }
+#match-comparison .compact-score .objective > span { display: none; }
+@media (max-width: 599px) {
+  #match-comparison .paired-garden .compact-score { padding: 8px; }
+  #match-comparison .paired-garden .compact-score .section-label > span { display: none; }
+  #match-comparison .paired-garden .compact-score h4,
+  #match-comparison .paired-garden .compact-score summary { font-size: .72rem; }
+  #match-comparison .paired-garden .compact-score .score-summary dt { font-size: .65rem; }
+  #match-comparison .paired-garden .stone-breakdown li > div { flex-wrap: wrap; gap: 3px 6px; }
+}
+
+/* Optional CPU-only inventory aid. No hidden order or extra game controls. */
+.match-assist { margin: 0 0 14px; padding: 12px 0; border-block: 1px solid var(--line); }
+.assist-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.assist-heading small { color: var(--muted); font-size: .7rem; }
+.assist-current { margin: 12px 0 6px; color: #d1e2e3; font-size: .78rem; }
+.assist-current strong { color: var(--gold); }
+.assist-current > span { display: inline-block; margin-top: 6px; }
+.assist-inventory { width: 100%; border-collapse: collapse; font-size: .78rem; }
+.assist-inventory th, .assist-inventory td { border-bottom: 1px solid var(--line); padding: 8px 5px; text-align: right; }
+.assist-inventory th:first-child { text-align: left; }
+.assist-inventory th { color: #d1e2e3; font-weight: 400; }
+.assist-inventory td { color: var(--gold); }
+.assist-inventory small { margin-left: 4px; font-size: .65rem; }
+.assist-content .demo-note { margin-top: 10px; overflow-wrap: anywhere; }
+
+/* Save/recovery notices stay separate from decisions; never show the private deck. */
+.match-save-status { margin-bottom: 1rem; }
+.match-save-status p { margin: .35rem 0; overflow-wrap: anywhere; }
+.save-warning { border-color: var(--gold, #d8b46b); }
+.save-actions { display: flex; flex-wrap: wrap; gap: .55rem; margin: .7rem 0; }
+.save-actions button { min-height: 44px; max-width: 100%; white-space: normal; }
+.save-recovery { padding: .9rem; margin: .8rem 0 1.2rem; border: 1px solid var(--line, #425360); border-radius: 12px; }
+.save-recovery h3 { margin-top: 0; }

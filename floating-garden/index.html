@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex,nofollow">
+  <meta name="theme-color" content="#10203e">
+  <meta name="description" content="星詠みの浮遊庭園の統合準備版です。オンライン接続は無効です。">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self'; media-src 'self'; font-src 'self'; style-src 'self'; script-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>星詠みの浮遊庭園｜統合準備版</title>
+  <link rel="stylesheet" href="./entrance.css">
+  <link rel="stylesheet" href="./entry-navigation.css">
+</head>
+<body>
+  <a class="skip-link" href="#play">遊び方の選択へ</a>
+  <div class="page-shell">
+    <header class="topbar">
+      <a class="back-link" href="../toybox/">← おもちゃ箱へ</a>
+      <button id="motion-toggle" class="motion-toggle" type="button" aria-label="背景アニメーション" aria-pressed="false" hidden><span aria-hidden="true" id="motion-icon">▷</span><span id="motion-label">背景を動かす</span></button>
+    </header>
+    <main>
+      <aside class="preview-notice" id="preview-notice" aria-label="公開プレビューについて"><strong>統合準備版 · オンラインはまだ利用できません</strong><p>ひとり用は既存のゲーム本体へ進みます。オンラインは選んだ人数を次の画面へ引き継ぐ確認用で、接続・部屋作成は停止しています。</p></aside>
+      <section class="garden-card" aria-labelledby="garden-title">
+        <div class="title-block">
+          <p class="eyebrow" aria-hidden="true"><span></span> STARLIT GARDEN <span></span></p>
+          <h1 id="garden-title"><span>星詠みの</span><span>浮遊庭園</span></h1>
+          <p class="catchcopy">星の流れをつないで、<wbr>あなただけの庭を。</p>
+        </div>
+        <div class="scene" id="garden-scene" role="img" aria-label="星空に浮かぶ庭園。石のアーチと青く光る結晶、小さな滝。">
+          <img class="scene-media" src="./assets/garden-night.png" alt="" width="1280" height="720" fetchpriority="high">
+          <video id="garden-video" class="scene-media" data-src="./assets/garden-night.mp4" muted loop playsinline preload="none" aria-hidden="true" tabindex="-1"></video>
+        </div>
+        <div class="mode-list" id="play" aria-label="遊び方の選択" tabindex="-1">
+          <a class="mode-link solo" id="solo-link" href="./match.html" aria-describedby="preview-notice">
+            <span class="mode-symbol" aria-hidden="true">✧</span>
+            <span class="mode-copy"><strong>ひとりで遊ぶ</strong><small>あなた1人 ＋ CPU 1〜3人</small></span>
+            <span class="mode-arrow" aria-hidden="true">◇</span>
+          </a>
+          <details class="mode-picker" id="online-picker">
+            <summary class="mode-link online">
+              <span class="mode-symbol" aria-hidden="true">✧<span>✧</span></span>
+              <span class="mode-copy"><strong>友だちとオンライン（2〜4人）</strong><small>人数を選ぶ · オンラインは準備中</small></span>
+              <span class="mode-arrow" aria-hidden="true">◇</span>
+            </summary>
+            <div class="picker-options" aria-label="オンラインの人数・NPC構成">
+              <p>人数を選び、準備中のオンライン画面へ進めます。部屋は作成されません。</p>
+              <div id="mode-controls" hidden>
+                <label for="human-count">人間の人数</label>
+                <select id="human-count"><option value="2">2人</option><option value="3">3人</option><option value="4">4人</option></select>
+                <label for="npc-count">NPCの人数</label>
+                <select id="npc-count"><option value="0">なし</option><option value="1">1人</option><option value="2">2人</option></select>
+                <p id="mode-summary" role="status" aria-live="polite">人間2人 ＋ NPCなし · 合計2人戦</p>
+                <p class="mode-availability" id="mode-availability">確認用のため開始できません。</p>
+                <a class="entry-button" id="online-entry" href="./play/index.html#mode=2-0">この人数で次へ（準備中）</a>
+              </div>
+              <p id="mode-fallback">人数の見本：人間2人＋NPC 0〜2人／人間3人のみ（3人戦）／人間3人 ＋ NPC1人（4人戦）／人間4人のみ（4人戦）。3〜4人用は未公開の見本です。</p>
+            </div>
+          </details>
+        </div>
+        <p class="preview-mode-note">このGitHub Pages版では、オンラインは準備中です。次の画面でも接続は開始しません。</p>
+        <p class="preview-mode-note"><a href="https://wa-awesome-garden-stg.web.app/lab/floating-garden/trial/index.html">現在のオンライン版・前の部屋を開く →</a><br>人間2人＋NPC 0〜2人用。前の部屋は、作成・参加した元の端末とブラウザーで開いてください。ログイン状態や部屋の情報はこのページへ移しません。</p>
+        <div class="help-area">
+          <button class="howto-button" id="howto-open" type="button" hidden><span aria-hidden="true">?</span> はじめての遊び方</button>
+          <a class="howto-fallback" id="howto-fallback" href="#howto-static">はじめての遊び方 ↓</a>
+          <details class="online-note">
+            <summary>ゲーム本体の人数・部屋について（参考）</summary>
+            <p>現在公開中のゲーム本体は人間2人用で、NPCを0〜2人追加できます。この準備版にある人間3人・人間3人＋NPC1人・人間4人のモードは準備中で、まだ公開していません。</p>
+            <p>新しく作れる部屋は公開版全体で20部屋まで。各部屋は作成から24時間使えます。上限に達した場合、新しい部屋は作れません。</p>
+          </details>
+        </div>
+        <p class="save-note">ゲーム本体のひとり用は、同じ端末・ブラウザーなら<br class="small-break">最新1試合を続きから遊べます。<span>※ ゲーム本体でブラウザーの保存機能が使える場合。この確認ページは保存しません。</span></p>
+      </section>
+      <section id="howto-static" class="howto-static" aria-labelledby="howto-static-title">
+        <h2 id="howto-static-title">小さな庭から、星の流れを。</h2>
+<p class="dialog-lead">タイルをつなぎ、石を置く。4×4の庭で、流れ・石・共通のお題の合計点を競います。得点が一番高い人の勝ち。同点は同順位です。</p>
+        <h3>手番の流れ</h3>
+        <ol><li>保管した1枚を使うか、山札から1枚引きます。自分で使う・未完成の相手へ譲る・1枚保管する、を選びます。</li><li>自分の庭に1枚置くまで進めます。タイルは回転・仮置きしてから確定。確定後の移動・回転・上書きはできません。</li><li>最後に手入れを1回。瞑想で力を1増やすか、力3で石を1個置きます。力は初期4、上限6です。</li></ol>
+        <details><summary>譲る・保管する・招く</summary><p>譲る相手は同じ手番に1人だけ。受け取ってもらうと力が2増え、自分には代わりの1枚を引いて配置します。断られたら自用か保管へ進みます。</p><p>保管は1枚まで。新しい1枚を保管すると、以前の保管タイルを使います。保管から取り出したタイルは再保管できません。</p><p>自分で使うタイルは、未完成の相手が力3で「招く」ことがあります。希望者が複数なら公開優先順で決定。持主は力2で自分の庭に迎えるか、渡します。渡した場合は自分の代わりの1枚を配置します。配置済みの庭は奪われません。</p></details>
+        <h3>庭の完成と得点</h3>
+        <p>通常12巡のあと、必要なら最大4巡の仕上げを行います。仕上げでは保管タイルを先に使い、なければ山札から引いて必ず配置します。譲渡・保管・招きは行いません。全員の庭が完成した巡も、最後の席まで手入れをします。最後に各自、残った力で石を最大1個置くかパスして採点します。残った力・保管タイルは得点になりません。</p>
+        <ul><li>流れ：上下左右で流れがつながる1辺につき1点。地形が違っても向きが合えば得点。</li><li>石：月読みは足元を含む同じ横列の湖、風守は上下左右の雲海、彩りは上下左右の地形の種類、共鳴は同じ縦横の別の石を数えます。各対象の数×2点で、石1個につき上限6点。同じ種類の石は庭に1個までです。</li><li>共通のお題「四隅異なる地形」：四隅がすべて埋まり、4種類すべて異なる地形なら4点。ゲーム本体の画面で内訳と配置のお手本を確認できます。</li></ul>
+        <details><summary>人数・保存・オンラインの部屋</summary><p>ひとり用は、あなた1人 ＋ CPU 1〜3人。CPUは「CPUの手を進める」まで待ちます。同じ端末・ブラウザーで最新1試合を続きから遊べます（保存機能が使える場合）。この確認ページは保存しません。</p><p>現在公開中のゲーム本体は人間2人 ＋ NPC 0〜2人。人間3人・人間3人＋NPC1人・人間4人のモードは準備中で、まだ公開していません。オンラインは招待コードで参加します。</p><p>新しく作れる部屋は公開版全体で20部屋まで。各部屋は作成から24時間使えます。上限後は新規作成だけ停止します。</p></details>
+        <a href="#play">遊び方の選択へ戻る ↑</a>
+      </section>
+    </main>
+    <footer class="page-footer">ひとつの星空、みんなの庭。</footer>
+  </div>
+  <dialog id="howto-dialog" aria-labelledby="howto-title">
+    <div class="dialog-heading"><p class="eyebrow">HOW TO PLAY</p><button id="howto-close" class="close-button" type="button" aria-label="遊び方を閉じる" autofocus>×</button></div>
+    <h2 id="howto-title">小さな庭から、<br>星の流れを。</h2>
+<p class="dialog-lead">タイルをつなぎ、石を置く。4×4の庭で、流れ・石・共通のお題の合計点を競います。得点が一番高い人の勝ち。同点は同順位です。</p>
+        <h3>手番の流れ</h3>
+        <ol><li>保管した1枚を使うか、山札から1枚引きます。自分で使う・未完成の相手へ譲る・1枚保管する、を選びます。</li><li>自分の庭に1枚置くまで進めます。タイルは回転・仮置きしてから確定。確定後の移動・回転・上書きはできません。</li><li>最後に手入れを1回。瞑想で力を1増やすか、力3で石を1個置きます。力は初期4、上限6です。</li></ol>
+        <details><summary>譲る・保管する・招く</summary><p>譲る相手は同じ手番に1人だけ。受け取ってもらうと力が2増え、自分には代わりの1枚を引いて配置します。断られたら自用か保管へ進みます。</p><p>保管は1枚まで。新しい1枚を保管すると、以前の保管タイルを使います。保管から取り出したタイルは再保管できません。</p><p>自分で使うタイルは、未完成の相手が力3で「招く」ことがあります。希望者が複数なら公開優先順で決定。持主は力2で自分の庭に迎えるか、渡します。渡した場合は自分の代わりの1枚を配置します。配置済みの庭は奪われません。</p></details>
+        <h3>庭の完成と得点</h3>
+        <p>通常12巡のあと、必要なら最大4巡の仕上げを行います。仕上げでは保管タイルを先に使い、なければ山札から引いて必ず配置します。譲渡・保管・招きは行いません。全員の庭が完成した巡も、最後の席まで手入れをします。最後に各自、残った力で石を最大1個置くかパスして採点します。残った力・保管タイルは得点になりません。</p>
+        <ul><li>流れ：上下左右で流れがつながる1辺につき1点。地形が違っても向きが合えば得点。</li><li>石：月読みは足元を含む同じ横列の湖、風守は上下左右の雲海、彩りは上下左右の地形の種類、共鳴は同じ縦横の別の石を数えます。各対象の数×2点で、石1個につき上限6点。同じ種類の石は庭に1個までです。</li><li>共通のお題「四隅異なる地形」：四隅がすべて埋まり、4種類すべて異なる地形なら4点。ゲーム本体の画面で内訳と配置のお手本を確認できます。</li></ul>
+        <details><summary>人数・保存・オンラインの部屋</summary><p>ひとり用は、あなた1人 ＋ CPU 1〜3人。CPUは「CPUの手を進める」まで待ちます。同じ端末・ブラウザーで最新1試合を続きから遊べます（保存機能が使える場合）。この確認ページは保存しません。</p><p>現在公開中のゲーム本体は人間2人 ＋ NPC 0〜2人。人間3人・人間3人＋NPC1人・人間4人のモードは準備中で、まだ公開していません。オンラインは招待コードで参加します。</p><p>新しく作れる部屋は公開版全体で20部屋まで。各部屋は作成から24時間使えます。上限後は新規作成だけ停止します。</p></details>
+    <button id="howto-done" class="done-button" type="button">遊び方を選ぶ</button>
+  </dialog>
+  <script type="module" src="./entrance.js"></script>
+</body>
+</html>
