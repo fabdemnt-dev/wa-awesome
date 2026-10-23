@@ -3,7 +3,7 @@
 // separately gated; this local flag is not proof of a successful live App Check or Auth test.
 export default Object.freeze({
   "schemaVersion": 1,
-  "enabled": true,
+  "enabled": false,
   "projectId": "wa-awesome",
   "region": "asia-northeast1",
   "origin": "https://fabdemnt-dev.github.io",
