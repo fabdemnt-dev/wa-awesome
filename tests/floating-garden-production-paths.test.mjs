@@ -165,7 +165,13 @@ const limitedTrialTransforms = {
     ]
   ]
 };
-const limitedTrialFiles = Object.keys(limitedTrialSourceHashes).map(path => 'limited-trial/' + path);
+// Local, isolated seat-assist exception. Original binding hashes above stay intact.
+// No controller, transport, policy, runtime or normal-screen exception is allowed.
+const limitedTrialAssistHashes = {
+  "online/mount.js": "d9178750ce8025baae91301731bbf947532d95334d90ea73947134cbcbedb0cc",
+  "online/seat-assist.js": "3896a947cfaab145e040db65e0e82256fd8b3ec6733c7987166d59ee38fda1a0",
+};
+const limitedTrialFiles = [...new Set([...Object.keys(limitedTrialSourceHashes), ...Object.keys(limitedTrialAssistHashes)])].map(path => 'limited-trial/' + path);
 const unchangedNormalHashes = {
   "index.html": "aabbae9b6067318b8b7cf81ad5aecbc3bcecc176652bfa01a78b4f7a30735ec1",
   "entrance.js": "32f9757bc9ebe6acc8c73e8a843840155fdb785a37412e717e8d3d4d06653ab4",
@@ -213,7 +219,7 @@ test('all HTML/CSS/static-module resource dependencies resolve inside production
       pending.push(target.href.slice(root.href.length));
     }
   }
-  assert.equal(seen.size,53);
+  assert.equal(seen.size,54); // One isolated limited-trial seat-assist module.
 });
 test('entrance, solo, online and legacy navigation use intentional exact destinations', async () => {
   const entrance=await read('index.html'), solo=await read('match.html'), online=await read('play/index.html');
@@ -289,10 +295,13 @@ test('toybox remains unlisted for Garden', async () => {
   const toybox=await readFile(new URL('../toybox/index.html',import.meta.url),'utf8'); assert.doesNotMatch(toybox,/floating-garden|浮遊庭園/);
 });
 
-test('limited trial is exactly the reviewed source with enumerated reversible changes only', async () => {
+test('limited trial preserves reviewed bindings with only the explicit local seat-assist exception', async () => {
   assert.equal(Object.keys(limitedTrialSourceHashes).filter(path => path.startsWith('play/')).length, 9);
   assert.equal(Object.keys(limitedTrialSourceHashes).filter(path => path.startsWith('online/')).length, 7);
+  assert.deepEqual(Object.keys(limitedTrialAssistHashes).sort(), ['online/mount.js', 'online/seat-assist.js']);
+  for (const [path, hash] of Object.entries(limitedTrialAssistHashes)) assert.equal(createHash('sha256').update(await read('limited-trial/' + path)).digest('hex'), hash, path);
   for (const [path, expectedHash] of Object.entries(limitedTrialSourceHashes)) {
+    if (path === 'online/mount.js') continue; // Exact new mount hash asserted above.
     let original = await read('limited-trial/' + path);
     for (const [before, after] of [...(limitedTrialTransforms[path] || [])].reverse()) {
       assert.equal(original.split(after).length, 2, `${path}: exact allowed replacement`);
