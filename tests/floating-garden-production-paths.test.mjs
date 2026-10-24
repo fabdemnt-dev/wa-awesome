@@ -16,7 +16,7 @@ import { bootstrapTrial as bootstrapLimitedTrial, createPublicStorage as createL
 import { createTrialFirebaseTransport as createLimitedTransport } from '../floating-garden/limited-trial/play/firebase.js';
 import { THREE_HUMAN_MODES_READY as LIMITED_THREE_READY, FOUR_HUMAN_MODES_READY as LIMITED_FOUR_READY } from '../floating-garden/limited-trial/online/runtime-modes.js';
 import { validateEntryMode as validateLimitedMode, parseEntryMode as parseLimitedMode } from '../floating-garden/limited-trial/online/entry-mode.js';
-import { ONLINE_SAVE_KEY as LIMITED_SAVE_KEY } from '../floating-garden/limited-trial/online/controller.js';
+import { ONLINE_SAVE_KEY as LIMITED_SAVE_KEY, ONLINE_PARKED_KEY as LIMITED_PARKED_KEY } from '../floating-garden/limited-trial/online/controller.js';
 import * as oldSave from '../lab/floating-garden/match-save.js';
 import * as newSave from '../floating-garden/match-save.js';
 import { createMatch, MATCH_VERSION, SOLO_MATCH_VERSION } from '../floating-garden/match-engine.js';
@@ -165,11 +165,15 @@ const limitedTrialTransforms = {
     ]
   ]
 };
-// Local, isolated seat-assist exception. Original binding hashes above stay intact.
-// No controller, transport, policy, runtime or normal-screen exception is allowed.
+// Explicit limited-trial room-switch and seat-assist sources. Transport,
+// policies, runtime flags and every normal-screen source retain their pins.
+// Bootstrap changes only scope the retained-room storage key and its events.
 const limitedTrialAssistHashes = {
-  "online/mount.js": "d9178750ce8025baae91301731bbf947532d95334d90ea73947134cbcbedb0cc",
+  "online/controller.js": "38e9a1c020e414f183de49cbab9225c66405d3ac21bc86a50307640a8f38a381",
+  "online/mount.js": "4536e71bc5f991f2182db44f6722960b2166952604255b8b4ab81730ee2f3d00",
+  "online/view.js": "077de4d9f3a626938d8c9d5ec8a1cba886772f83cfedcd664e7a74fbbc519a03",
   "online/seat-assist.js": "3896a947cfaab145e040db65e0e82256fd8b3ec6733c7987166d59ee38fda1a0",
+  "play/bootstrap.js": "69246c7416f1ac46ed6ae8f24275d2689f455cac695376b08c8ad1ce4b95bec0",
 };
 const limitedTrialFiles = [...new Set([...Object.keys(limitedTrialSourceHashes), ...Object.keys(limitedTrialAssistHashes)])].map(path => 'limited-trial/' + path);
 const unchangedNormalHashes = {
@@ -295,13 +299,13 @@ test('toybox remains unlisted for Garden', async () => {
   const toybox=await readFile(new URL('../toybox/index.html',import.meta.url),'utf8'); assert.doesNotMatch(toybox,/floating-garden|浮遊庭園/);
 });
 
-test('limited trial preserves reviewed bindings with only the explicit local seat-assist exception', async () => {
+test('limited trial preserves reviewed bindings with only explicit local room-switch and seat-assist exceptions', async () => {
   assert.equal(Object.keys(limitedTrialSourceHashes).filter(path => path.startsWith('play/')).length, 9);
   assert.equal(Object.keys(limitedTrialSourceHashes).filter(path => path.startsWith('online/')).length, 7);
-  assert.deepEqual(Object.keys(limitedTrialAssistHashes).sort(), ['online/mount.js', 'online/seat-assist.js']);
+  assert.deepEqual(Object.keys(limitedTrialAssistHashes).sort(), ['online/controller.js', 'online/mount.js', 'online/seat-assist.js', 'online/view.js', 'play/bootstrap.js']);
   for (const [path, hash] of Object.entries(limitedTrialAssistHashes)) assert.equal(createHash('sha256').update(await read('limited-trial/' + path)).digest('hex'), hash, path);
   for (const [path, expectedHash] of Object.entries(limitedTrialSourceHashes)) {
-    if (path === 'online/mount.js') continue; // Exact new mount hash asserted above.
+    if (Object.hasOwn(limitedTrialAssistHashes, path)) continue; // Exact local candidate pins asserted above.
     let original = await read('limited-trial/' + path);
     for (const [before, after] of [...(limitedTrialTransforms[path] || [])].reverse()) {
       assert.equal(original.split(after).length, 2, `${path}: exact allowed replacement`);
@@ -353,6 +357,9 @@ test('limited trial uses exact production profile, Auth namespace and recovery s
   const calls = [], storage = createLimitedStorage({getItem:key => { calls.push(['get', key]); return null; }, setItem:(key, value) => calls.push(['set', key, value])}, 'wa-awesome', limitedRuntime.epochId);
   storage.getItem(LIMITED_SAVE_KEY); storage.setItem(LIMITED_SAVE_KEY, 'saved');
   assert.deepEqual(calls, [['get', limitedRecoveryKey('wa-awesome', limitedRuntime.epochId)], ['set', limitedRecoveryKey('wa-awesome', limitedRuntime.epochId), 'saved']]);
+  storage.setItem(LIMITED_PARKED_KEY, 'archive'); storage.getItem(LIMITED_PARKED_KEY);
+  const archiveKey = `${limitedRecoveryKey('wa-awesome', limitedRuntime.epochId)}:${LIMITED_PARKED_KEY}`;
+  assert.deepEqual(calls.slice(-2), [['set', archiveKey, 'archive'], ['get', archiveKey]]);
   assert.throws(() => storage.getItem('floating-garden-cpu-match'));
   assert.throws(() => storage.setItem('unrelated', 'saved'));
 });

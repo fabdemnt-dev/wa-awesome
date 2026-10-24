@@ -1,6 +1,6 @@
 import { parseEntryMode } from '../online/entry-mode.js';
 import { THREE_HUMAN_MODES_READY, FOUR_HUMAN_MODES_READY } from '../online/runtime-modes.js?v=20261022-human4-1';
-import { createOnlineController, ONLINE_SAVE_KEY } from '../online/controller.js?v=20261023-shared-objectives-1';
+import { createOnlineController, ONLINE_SAVE_KEY, ONLINE_PARKED_KEY } from '../online/controller.js?v=20261023-shared-objectives-1';
 import { mountOnline } from '../online/mount.js?v=20261023-shared-objectives-1';
 import { escape } from '../online/view.js?v=20261023-shared-objectives-1';
 import { resolvePublicEnvironment, PRODUCTION_PROJECT_ID } from './config.js';
@@ -14,7 +14,7 @@ export function publicRecoveryKey(projectId, epochId) {
 }
 export function createPublicStorage(storage, projectId, epochId) {
   const scopedKey = publicRecoveryKey(projectId, epochId);
-  const mapKey = (key) => { if (key !== ONLINE_SAVE_KEY) throw new Error('未対応の復帰情報キーです'); return scopedKey; };
+  const mapKey = (key) => { if (key === ONLINE_SAVE_KEY) return scopedKey; if (key === ONLINE_PARKED_KEY) return `${scopedKey}:${ONLINE_PARKED_KEY}`; throw new Error('未対応の復帰情報キーです'); };
   return storage && Object.freeze({ getItem: (key) => storage.getItem(mapKey(key)), setItem: (key, value) => storage.setItem(mapKey(key), value) });
 }
 export async function bootstrapTrial(root, statusRoot, runtime, {
@@ -34,7 +34,7 @@ export async function bootstrapTrial(root, statusRoot, runtime, {
     notice = '接続を確認できないため停止しました。確認待ちの操作は消さずに保存しています。'; showStatus();
     root.inert = true; root.setAttribute('aria-disabled', 'true');
   };
-  const onStorage = (event) => { if (event.key === publicRecoveryKey(config.projectId, config.epochId)) controller?.storageChanged(); };
+  const onStorage = (event) => { if ([publicRecoveryKey(config.projectId, config.epochId), `${publicRecoveryKey(config.projectId, config.epochId)}:${ONLINE_PARKED_KEY}`].includes(event.key)) controller?.storageChanged(); };
   const connect = () => {
     if (disposed || blocked) return Promise.resolve(null);
     if (connectFlight) return connectFlight;

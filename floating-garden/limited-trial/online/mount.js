@@ -1,6 +1,6 @@
 import { validateEntryMode } from './entry-mode.js';
 import { renderOnline } from './view.js?v=20261023-shared-objectives-1';
-import { ONLINE_SAVE_KEY } from './controller.js?v=20261023-shared-objectives-1';
+import { ONLINE_SAVE_KEY, ONLINE_PARKED_KEY } from './controller.js?v=20261023-shared-objectives-1';
 import { createSeatAssist, seatAssistPanel } from './seat-assist.js?v=20261024-seat-assist-1';
 
 /** DOM lifecycle separated from Firebase so the same UI can be exercised against emulator/test services. */
@@ -67,6 +67,9 @@ export function mountOnline(root, { controller, initialMode = null } = {}) {
       return;
     }
     if (action === 'resume') return controller.resume();
+    if (action === 'park-room') return controller.requestSwitch();
+    if (action === 'restore-room') return controller.requestSwitch(target.dataset.roomId);
+    if (action === 'confirm-switch') return controller.confirmSwitch();
     if (action === 'return-entry') return controller.requestReturn();
     if (action === 'cancel-return') return controller.cancelReturn();
     if (action === 'confirm-return') return controller.returnToEntry();
@@ -97,10 +100,10 @@ export function mountOnline(root, { controller, initialMode = null } = {}) {
   }
   function onCancel(event) { if (event.target.id === 'online-comparison') { event.preventDefault(); closeComparison(); } }
   const resume = () => controller.resume();
-  const visible = () => { if (document.visibilityState === 'visible') return resume(); assist.stop('画面が非表示になったため停止しました'); };
+  const visible = () => { if (document.visibilityState === 'visible') return resume(); assist.stop('画面が非表示になったため停止しました'); controller.cancelReturn(); };
   const offline = () => { assist.stop('オフラインのため停止しました'); controller.offline(); };
   const hide = () => { assist.stop('画面を離れたため停止しました'); controller.suspend(); };
-  const storage = (event) => { if (event.key === ONLINE_SAVE_KEY || event.key === null) { assist.stop('復帰情報が変わったため停止しました'); controller.storageChanged(); } };
+  const storage = (event) => { if (event.key === ONLINE_SAVE_KEY || event.key === ONLINE_PARKED_KEY || event.key === null) { assist.stop('復帰情報が変わったため停止しました'); controller.storageChanged(); } };
   root.addEventListener('input', onInput); root.addEventListener('click', onClick); root.addEventListener('keydown', onKeydown); root.addEventListener('cancel', onCancel, true);
   document.addEventListener('visibilitychange', visible);
   for (const [name, handler] of [['online', resume], ['offline', offline], ['pageshow', resume], ['pagehide', hide], ['storage', storage]]) page?.addEventListener(name, handler);
