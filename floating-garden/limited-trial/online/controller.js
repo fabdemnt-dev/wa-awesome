@@ -4,6 +4,9 @@ import { getDecision, legalActions } from '../../match-engine.js?v=20261023-solo
 import { HUMAN4_RULES_VERSION, HUMAN3_RULES_VERSION, NPC_RULES_VERSION, OBJECTIVE_RULES_VERSION, OBJECTIVE_HUMAN3_RULES_VERSION, OBJECTIVE_HUMAN4_RULES_VERSION, isObjectiveProtocol, roomMatchVersion, roomMode } from './modes.js?v=20261023-shared-objectives-1';
 export { HUMAN4_RULES_VERSION, HUMAN3_RULES_VERSION, NPC_RULES_VERSION };
 export const ONLINE_SAVE_KEY = 'floating-garden-online-recovery-v1';
+// Older controllers only write ONLINE_SAVE_KEY. Keep retained room pointers out
+// of their reach; never delete or overwrite an existing retained room record.
+export const ONLINE_PARKED_KEY = 'floating-garden-online-retained-rooms-v1';
 const clone = (value) => structuredClone(value);
 const immutable = (value) => { Object.freeze(value); for (const child of Object.values(value)) if (child && typeof child === 'object') immutable(child); return value; };
 const freshPreview = () => ({ pending: null, rotation: 0, stone: null });
@@ -13,9 +16,11 @@ const messages = { 'permission-denied': 'この認証では部屋を開けませ
 const problem = (error) => messages[codeOf(error)] || '通信の結果を確認できません。同じ操作の結果を確認するまで、次の確定操作はできません';
 
 /** UI-independent authoritative client. api: create/join/start/getSnapshot/submit; subscribe: roomId, next, error. */
-export function createOnlineController({ api, ensureUser, subscribe = () => () => {}, storage, requestId = () => crypto.randomUUID(), isOnline = () => true, threeHumanModesReady = false, fourHumanModesReady = false } = {}) {
+export function createOnlineController({ api, ensureUser, subscribe = () => () => {}, storage, requestId = () => crypto.randomUUID(), isOnline = () => true, threeHumanModesReady = false, fourHumanModesReady = false, locks = globalThis.navigator?.locks } = {}) {
   let alive = true, generation = 0, listener = null, resuming = null, sending = null, suspended = false, queuedResume = null;
   let saved = null, storageIssue = null, returnTarget = null, returning = null;
+  let retained = null, lastRetainedRaw = null;
+  let lastRaw = null, switching = null, exclusive = null, returnVersion = 0;
   // Existing-room recovery is supported independently of new-admission readiness.
   const recoveryProtocol = OBJECTIVE_HUMAN4_RULES_VERSION;
   const clientProtocol = fourHumanModesReady === true ? OBJECTIVE_HUMAN4_RULES_VERSION : threeHumanModesReady === true ? OBJECTIVE_HUMAN3_RULES_VERSION : OBJECTIVE_RULES_VERSION;
@@ -24,26 +29,161 @@ export function createOnlineController({ api, ensureUser, subscribe = () => () =
   try {
     if (!storage) throw new Error('storage-unavailable');
     const raw = storage.getItem(ONLINE_SAVE_KEY);
+    lastRaw = raw;
     if (raw) {
       const value = JSON.parse(raw);
       if (value.version !== 1 || typeof value.uid !== 'string' || (value.roomId !== null && typeof value.roomId !== 'string') || (value.pending && (!['create', 'join', 'start', 'submit'].includes(value.pending.kind) || typeof value.pending.payload?.requestId !== 'string' || value.pending.uid !== value.uid))) throw new Error('invalid-recovery');
       if (value.pending && ['start', 'submit'].includes(value.pending.kind) && value.pending.payload.roomId !== value.roomId) throw new Error('wrong-room-recovery');
+      if (value.parked !== undefined) {
+        if (!Array.isArray(value.parked) || value.parked.length > 20) throw new Error('invalid-parked');
+        const ids = new Set();
+        for (const record of value.parked) {
+          const old = JSON.parse(record);
+          if (old.version !== 1 || old.uid !== value.uid || typeof old.roomId !== 'string' || !old.roomId || (old.pending !== null && old.pending !== undefined) || old.parked !== undefined || ids.has(old.roomId) || old.roomId === value.roomId) throw new Error('invalid-parked');
+          ids.add(old.roomId);
+        }
+      }
       saved = value;
+    }
+    lastRetainedRaw = storage.getItem(ONLINE_PARKED_KEY);
+    if (lastRetainedRaw) {
+      retained = JSON.parse(lastRetainedRaw);
+      if (retained?.version !== 1 || typeof retained.uid !== 'string' || !retained.uid || !Array.isArray(retained.rooms) || retained.rooms.length > 21 || (saved && saved.uid !== retained.uid)) throw new Error('invalid-retained');
+      const ids = new Set();
+      for (const raw of retained.rooms) {
+        const record = JSON.parse(raw);
+        if (typeof raw !== 'string' || record?.version !== 1 || record.uid !== retained.uid || typeof record.roomId !== 'string' || !record.roomId || (record.pending !== null && record.pending !== undefined) || record.parked !== undefined || ids.has(record.roomId)) throw new Error('invalid-retained-room');
+        ids.add(record.roomId);
+      }
+      saved ||= { version: 1, uid: retained.uid, roomId: null, inviteCode: null, pending: null };
+      const parked = [...(saved.parked || [])];
+      for (const raw of retained.rooms) {
+        const id = JSON.parse(raw).roomId;
+        if (id !== saved.roomId && !parked.some(item => JSON.parse(item).roomId === id)) parked.push(raw);
+      }
+      if (parked.length > 20) throw new Error('too-many-parked');
+      saved.parked = parked;
     }
   } catch { storageIssue = '復帰情報を読み込めません。ブラウザーの保存設定を確認してください。保存を上書きせず停止しています'; }
   const publish = () => { if (alive) for (const observer of observers) observer(clone(state)); };
   const status = (notice, error = false) => { state.notice = notice; state.error = error; publish(); };
   const stopListener = () => { const previous = listener; listener = null; previous?.unsubscribe?.(); };
+  function retainRecovery(record = saved, originalRaw = null) {
+    if (!record?.roomId || record.pending) return true;
+    try {
+      if (!recoveryUnchanged()) return false;
+      const archive = retained || { version: 1, uid: record.uid, rooms: [] };
+      if (archive.uid !== record.uid) throw new Error('wrong-retained-uid');
+      if (archive.rooms.some(raw => JSON.parse(raw).roomId === record.roomId)) return true;
+      if (archive.rooms.length >= 21) throw new Error('retained-limit');
+      const { parked: ignored, ...pointer } = record;
+      const next = { ...archive, rooms: [...archive.rooms, originalRaw || JSON.stringify(pointer)] };
+      const raw = JSON.stringify(next);
+      // Archive first. A failed active-pointer write may leave an extra retained
+      // pointer, but never removes the old one. A legacy write cannot touch this key.
+      storage.setItem(ONLINE_PARKED_KEY, raw);
+      retained = next; lastRetainedRaw = raw;
+      return true;
+    } catch {
+      storageIssue = '保留する復帰情報を保全できないため、切替と通信を止めています'; state.storageIssue = storageIssue;
+      status(storageIssue, true); return false;
+    }
+  }
+  function retainParked() {
+    for (const raw of saved?.parked || []) if (!retainRecovery(JSON.parse(raw), raw)) return false;
+    return true;
+  }
   function persist() {
     try {
       if (storageIssue) throw new Error(storageIssue);
-      storage.setItem(ONLINE_SAVE_KEY, JSON.stringify(saved));
+      if (!recoveryUnchanged() || !retainParked() || !retainRecovery()) return false;
+      const raw = JSON.stringify(saved);
+      storage.setItem(ONLINE_SAVE_KEY, raw); lastRaw = raw;
       state.storageIssue = null;
       return true;
     } catch {
       storageIssue ||= '復帰情報を保存できません。結果不明の操作を失わないため、通信操作を止めています';
       state.storageIssue = storageIssue; state.error = true; state.notice = storageIssue; publish(); return false;
     }
+  }
+  function recoveryUnchanged() {
+    try {
+      if (storage.getItem(ONLINE_SAVE_KEY) === lastRaw && storage.getItem(ONLINE_PARKED_KEY) === lastRetainedRaw) return true;
+      state.connection = 'conflict'; invalidateLobbyReturn();
+      status('別のタブの復帰情報が変わりました。保存を上書きせず停止しています。再読み込みしてください', true);
+    } catch {
+      storageIssue = '復帰情報を確認できないため操作を止めています'; state.storageIssue = storageIssue;
+      status(storageIssue, true);
+    }
+    return false;
+  }
+  // Cooperating tabs share one lock across authentication, persistence and the
+  // request/receipt. No queued mutation is replayed after another tab finishes.
+  function exclusiveRun(work) {
+    if (exclusive) return Promise.resolve(false);
+    if (!locks?.request) return work(); // Legacy operations still work; switching requires locks.
+    const token = generation;
+    const task = locks.request(`${ONLINE_SAVE_KEY}:${saved?.uid || state.uid || 'entry'}`, { ifAvailable: true }, async lock => {
+      if (!alive || token !== generation) return false;
+      if (!lock) { state.connection = 'conflict'; status('別のタブが操作中です。通信が終わってから再読み込みしてください', true); return false; }
+      if (!recoveryUnchanged()) return false;
+      return work();
+    }).catch(() => { if (alive) { state.connection = 'conflict'; status('タブ間の操作を確認できないため停止しています', true); } return false; })
+      .finally(() => { if (exclusive === task) exclusive = null; publish(); });
+    exclusive = task; publish();
+    return task;
+  }
+  function canSwitch() {
+    return Boolean(locks?.request && alive && !suspended && !sending && !resuming && !returning
+      && !state.busy && !state.pending && !saved?.pending && !storageIssue && !state.error
+      && state.connection === 'ready' && isOnline() && state.uid && saved?.uid === state.uid
+      && !state.ui.pending && !state.ui.stone && !state.ui.rotation
+      && (!state.room || state.room.id === saved.roomId));
+  }
+  function requestSwitch(roomId = null) {
+    if (exclusive || !canSwitch() || !recoveryUnchanged()) return false;
+    if (roomId === null ? !state.room || (saved.parked || []).length >= 20 : !(saved.parked || []).some(raw => JSON.parse(raw).roomId === roomId)) return false;
+    switching = { roomId, uid: state.uid, recovery: lastRaw, generation, room: JSON.stringify(state.room) };
+    returnTarget = null; state.ui.returnConfirm = true; state.ui.switchRoomId = roomId ?? ''; publish(); return true;
+  }
+  function confirmSwitch() {
+    const target = switching;
+    if (!target || exclusive || !canSwitch()) return Promise.resolve(false);
+    return exclusiveRun(async () => {
+      const valid = () => switching === target && target.generation === generation && target.uid === state.uid
+        && target.recovery === lastRaw && target.room === JSON.stringify(state.room) && canSwitch() && recoveryUnchanged();
+      if (!valid() || !await authenticate(target.generation) || !valid()) return false;
+      if (!retainRecovery(saved, saved.parked === undefined ? lastRaw : null)) return false;
+      // Preserve inline history from the first local candidate too, before any
+      // pointer replacement. None of these writes changes a server room.
+      if (!retainParked()) return false;
+      const previous = saved, parked = [...(saved.parked || [])];
+      let next = { version: 1, uid: state.uid, roomId: null, inviteCode: null, pending: null };
+      if (target.roomId !== null) {
+        const index = parked.findIndex(raw => JSON.parse(raw).roomId === target.roomId);
+        if (index < 0) return false;
+        next = JSON.parse(parked.splice(index, 1)[0]);
+      }
+      if (saved.roomId) {
+        const { parked: ignored, ...record } = saved;
+        parked.push(saved.parked === undefined && lastRaw ? lastRaw : JSON.stringify(record));
+      }
+      saved = { ...next, parked };
+      if (!persist()) { saved = previous; return false; }
+      generation += 1; stopListener(); switching = null; returnTarget = null;
+      state.room = null; state.self = null; state.terminal = null; state.pending = null;
+      state.ui = { ...freshPreview(), comparison: null, returnConfirm: false };
+      state.notice = '復帰情報を保留しました。部屋の記録と認証は変更していません'; state.error = false;
+      if (saved.roomId) {
+        // Restore uses the same UID and authoritative snapshot; no join or write.
+        const token = generation;
+        state.connection = 'syncing'; state.busy = true; publish();
+        try { await refresh(token); if (alive && token === generation) listen(token); }
+        catch (error) { if (alive && token === generation) { state.connection = 'error'; status(problem(error), true); } }
+        finally { if (alive && token === generation) state.busy = false; }
+      }
+      publish(); return true;
+    });
   }
   const canConfirm = () => alive && !returning && !sending && !resuming && !state.pending && !storageIssue && isOnline() && state.connection === 'ready' && Boolean(state.uid);
   // A lobby return only forgets this browser's recovery pointer. Keep a server-
@@ -60,8 +200,9 @@ export function createOnlineController({ api, ensureUser, subscribe = () => () =
   }
   const canReturnToEntry = () => Boolean(state.terminal && !state.pending && !state.busy) || canReturnLobby();
   function invalidateLobbyReturn() {
-    if (!returnTarget) return;
-    returnTarget = null; state.ui.returnConfirm = false;
+    if (!returnTarget && !switching && !state.ui.returnConfirm) return;
+    returnVersion += 1;
+    returnTarget = null; switching = null; delete state.ui.switchRoomId; state.ui.returnConfirm = false;
   }
   function returnRecoveryUnchanged(target) {
     try {
@@ -77,7 +218,7 @@ export function createOnlineController({ api, ensureUser, subscribe = () => () =
     }
   }
   function clearRecovery() {
-    const previous = saved; saved = { version: 1, uid: state.uid, roomId: null, inviteCode: null, pending: null };
+    const previous = saved; saved = { version: 1, uid: state.uid, roomId: null, inviteCode: null, pending: null, ...(saved?.parked ? { parked: saved.parked } : {}) };
     if (!persist()) { saved = previous; return false; }
     generation += 1; stopListener(); returnTarget = null; state.room = null; state.self = null; state.terminal = null;
     state.ui = { ...freshPreview(), comparison: null, returnConfirm: false }; state.busy = false;
@@ -182,7 +323,9 @@ export function createOnlineController({ api, ensureUser, subscribe = () => () =
     } catch (error) { failed(error); }
   }
   async function authenticate(token) {
+    if (!recoveryUnchanged()) return false;
     const user = await ensureUser();
+    if (!recoveryUnchanged()) return false;
     if (!alive || token !== generation) return false;
     if (!user?.uid || (saved && saved.uid !== user.uid) || (state.uid && state.uid !== user.uid)) {
       stopListener(); state.connection = 'identity-mismatch'; status('参加時と認証が異なります。席の引き継ぎはできません。元のブラウザーの認証で開いてください', true); return false;
@@ -212,6 +355,11 @@ export function createOnlineController({ api, ensureUser, subscribe = () => () =
       if (!alive || token !== generation) return false;
       if (pending.kind === 'create' || pending.kind === 'join') {
         if (!result?.roomId || ![0, 1, 2, 3].includes(result.seat) || (pending.kind === 'create' && result.seat !== 0) || (result.seat === 2 && ![HUMAN3_RULES_VERSION, HUMAN4_RULES_VERSION, OBJECTIVE_HUMAN3_RULES_VERSION, OBJECTIVE_HUMAN4_RULES_VERSION].includes(pending.payload.clientProtocol)) || (result.seat === 3 && ![HUMAN4_RULES_VERSION, OBJECTIVE_HUMAN4_RULES_VERSION].includes(pending.payload.clientProtocol))) throw new Error('invalid-receipt');
+        const retained = (saved.parked || []).find(raw => JSON.parse(raw).roomId === result.roomId);
+        if (retained) {
+          saved.inviteCode = JSON.parse(retained).inviteCode || null;
+          saved.parked = saved.parked.filter(raw => JSON.parse(raw).roomId !== result.roomId);
+        }
         saved.roomId = result.roomId;
         if (result.inviteCode) saved.inviteCode = result.inviteCode;
       }
@@ -245,7 +393,7 @@ export function createOnlineController({ api, ensureUser, subscribe = () => () =
     const task = Promise.resolve().then(async () => {
       try {
         if (storageIssue || !isOnline()) return false;
-        if (!await authenticate(token)) return false;
+        if (!await authenticate(token) || !retainParked()) return false;
         if (state.pending) return await sendPending(token);
         await refresh(token); if (alive && token === generation) listen(token); return true;
       } catch (error) { if (alive && token === generation) { state.connection = 'error'; state.notice = problem(error); state.error = true; } return false; }
@@ -254,6 +402,10 @@ export function createOnlineController({ api, ensureUser, subscribe = () => () =
     resuming = task; return task;
   }
   function mutate(kind, payload) {
+    if (exclusive) return Promise.resolve(false);
+    return exclusiveRun(() => mutateLocked(kind, payload));
+  }
+  function mutateLocked(kind, payload) {
     if (!canConfirm()) return Promise.resolve(false);
     // Observe a request saved by another tab before replacing it. Revision checking is the server's final arbiter.
     try {
@@ -261,6 +413,7 @@ export function createOnlineController({ api, ensureUser, subscribe = () => () =
       const stored = other ? JSON.parse(other) : null;
       if (stored && (stored.uid !== state.uid || stored.roomId !== saved.roomId || stored.pending)) { state.connection = 'conflict'; status('別のタブの復帰情報が変わりました。元のタブの操作を確認して、このページを再読み込みしてください', true); return Promise.resolve(false); }
     } catch { storageIssue = '復帰情報を確認できないため操作を止めています'; state.storageIssue = storageIssue; publish(); return Promise.resolve(false); }
+    invalidateLobbyReturn();
     const pending = immutable({ kind, uid: state.uid, payload: { ...clone(payload), requestId: requestId() } });
     state.pending = pending; saved.pending = clone(pending);
     if (!persist()) return Promise.resolve(false);
@@ -298,9 +451,10 @@ export function createOnlineController({ api, ensureUser, subscribe = () => () =
     state.notice = ''; state.error = false; publish(); return true;
   }
   return {
-    getState: () => ({ ...clone(state), threeHumanModesReady: threeHumanModesReady === true, fourHumanModesReady: fourHumanModesReady === true, canConfirm: canConfirm(), canReturnToEntry: canReturnToEntry(), inviteCode: saved?.inviteCode || null }),
+    getState: () => ({ ...clone(state), threeHumanModesReady: threeHumanModesReady === true, fourHumanModesReady: fourHumanModesReady === true, busy: state.busy || Boolean(exclusive), canConfirm: canConfirm() && !exclusive, canSwitch: canSwitch() && !exclusive, switchSupported: Boolean(locks?.request), parkedRooms: (saved?.parked || []).map(raw => ({ roomId: JSON.parse(raw).roomId })), canReturnToEntry: canReturnToEntry(), inviteCode: saved?.inviteCode || null }),
     observe(fn) { observers.add(fn); return () => observers.delete(fn); },
-    resume,
+    resume: () => exclusive ? exclusive : exclusiveRun(resume),
+    requestSwitch, confirmSwitch,
     create(displayName, npcCount = 0, humanSeatCount = 2) {
       if (saved?.roomId || ![2, 3, 4].includes(humanSeatCount) || (humanSeatCount === 3 && threeHumanModesReady !== true) || (humanSeatCount === 4 && fourHumanModesReady !== true) || !Number.isInteger(npcCount) || npcCount < 0 || npcCount > 2 || humanSeatCount + npcCount > 4) return Promise.resolve(false);
       // New creates opt in explicitly. Previously saved pending payloads remain untouched.
@@ -316,17 +470,22 @@ export function createOnlineController({ api, ensureUser, subscribe = () => () =
     suspend() { suspended = true; generation += 1; stopListener(); state.connection = 'syncing'; invalidatePreview(); invalidateLobbyReturn(); state.busy = false; publish(); },
     storageChanged() { state.connection = 'conflict'; invalidatePreview(); invalidateLobbyReturn(); status('別のタブで復帰情報が更新されました。通信が終わったらこのページを再読み込みしてください', true); },
     requestReturn() {
-      if (!canReturnToEntry() || returning) return false;
+      if (!canReturnToEntry() || returning || exclusive) return false;
+      switching = null; delete state.ui.switchRoomId; returnVersion += 1;
       returnTarget = state.terminal ? null : { uid: state.uid, room: JSON.stringify(state.room), self: JSON.stringify(state.self), recovery: JSON.stringify(saved) };
       if (returnTarget && !returnRecoveryUnchanged(returnTarget)) return false;
       state.ui.returnConfirm = true; publish(); return true;
     },
-    cancelReturn() { returnTarget = null; state.ui.returnConfirm = false; publish(); },
+    cancelReturn() { returnVersion += 1; returnTarget = null; switching = null; delete state.ui.switchRoomId; state.ui.returnConfirm = false; publish(); },
     returnToEntry() {
-      if (!state.ui.returnConfirm || returning) return false;
-      if (returnTarget) return confirmLobbyReturn(returnTarget);
-      if (!state.terminal || state.pending || state.busy || storageIssue) return false;
-      return clearRecovery();
+      if (!state.ui.returnConfirm || switching || returning || exclusive) return false;
+      const confirmation = returnVersion;
+      return exclusiveRun(() => {
+        if (confirmation !== returnVersion || !state.ui.returnConfirm || switching) return false;
+        if (returnTarget) return confirmLobbyReturn(returnTarget);
+        if (!state.terminal || state.pending || state.busy || storageIssue) return false;
+        return clearRecovery();
+      });
     },
     dispose() { alive = false; generation += 1; stopListener(); observers.clear(); },
   };
