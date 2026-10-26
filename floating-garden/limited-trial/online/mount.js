@@ -99,8 +99,8 @@ export function mountOnline(root, { controller, initialMode = null } = {}) {
     else controller.preview('cancel');
   }
   function onCancel(event) { if (event.target.id === 'online-comparison') { event.preventDefault(); closeComparison(); } }
-  const resume = () => controller.resume();
-  const visible = () => { if (document.visibilityState === 'visible') return resume(); assist.stop('画面が非表示になったため停止しました'); controller.cancelReturn(); };
+  const resume = () => controller.resume({ automatic: true });
+  const visible = () => { if (document.visibilityState === 'visible') return resume(); assist.stop('画面が非表示になったため停止しました'); controller.cancelLockWait?.(); controller.cancelReturn(); };
   const offline = () => { assist.stop('オフラインのため停止しました'); controller.offline(); };
   const hide = () => { assist.stop('画面を離れたため停止しました'); controller.suspend(); };
   const storage = (event) => { if (event.key === ONLINE_SAVE_KEY || event.key === ONLINE_PARKED_KEY || event.key === null) { assist.stop('復帰情報が変わったため停止しました'); controller.storageChanged(); } };
@@ -108,7 +108,7 @@ export function mountOnline(root, { controller, initialMode = null } = {}) {
   document.addEventListener('visibilitychange', visible);
   for (const [name, handler] of [['online', resume], ['offline', offline], ['pageshow', resume], ['pagehide', hide], ['storage', storage]]) page?.addEventListener(name, handler);
   render();
-  return { controller, ready: controller.resume(), unmount() {
+  return { controller, ready: resume(), unmount() {
     assist.dispose();
     mounted = false; renderEpoch += 1; unobserve(); controller.dispose(); root.querySelector('#online-comparison')?.close?.(); restorePage();
     root.removeEventListener('input', onInput); root.removeEventListener('click', onClick); root.removeEventListener('keydown', onKeydown); root.removeEventListener('cancel', onCancel, true);

@@ -3,6 +3,7 @@ import { getDecision, legalActions } from '../../match-engine.js?v=20261023-solo
 
 import { HUMAN4_RULES_VERSION, HUMAN3_RULES_VERSION, NPC_RULES_VERSION, OBJECTIVE_RULES_VERSION, OBJECTIVE_HUMAN3_RULES_VERSION, OBJECTIVE_HUMAN4_RULES_VERSION, isObjectiveProtocol, roomMatchVersion, roomMode } from './modes.js?v=20261023-shared-objectives-1';
 export { HUMAN4_RULES_VERSION, HUMAN3_RULES_VERSION, NPC_RULES_VERSION };
+export const LOCK_WAIT_MILLIS = 12000;
 export const ONLINE_SAVE_KEY = 'floating-garden-online-recovery-v1';
 // Older controllers only write ONLINE_SAVE_KEY. Keep retained room pointers out
 // of their reach; never delete or overwrite an existing retained room record.
@@ -16,11 +17,13 @@ const messages = { 'permission-denied': 'この認証では部屋を開けませ
 const problem = (error) => messages[codeOf(error)] || '通信の結果を確認できません。同じ操作の結果を確認するまで、次の確定操作はできません';
 
 /** UI-independent authoritative client. api: create/join/start/getSnapshot/submit; subscribe: roomId, next, error. */
-export function createOnlineController({ api, ensureUser, subscribe = () => () => {}, storage, requestId = () => crypto.randomUUID(), isOnline = () => true, threeHumanModesReady = false, fourHumanModesReady = false, locks = globalThis.navigator?.locks } = {}) {
+export function createOnlineController({ api, ensureUser, subscribe = () => () => {}, storage, requestId = () => crypto.randomUUID(), isOnline = () => true, threeHumanModesReady = false, fourHumanModesReady = false, locks = globalThis.navigator?.locks, setTimer = setTimeout, clearTimer = clearTimeout, clock = () => globalThis.performance?.now() ?? Date.now() } = {}) {
   let alive = true, generation = 0, listener = null, resuming = null, sending = null, suspended = false, queuedResume = null;
   let saved = null, storageIssue = null, returnTarget = null, returning = null;
   let retained = null, lastRetainedRaw = null;
   let lastRaw = null, switching = null, exclusive = null, returnVersion = 0;
+  let lockWait = null, lockWaitStopped = false;
+  const diagnostics = { lock: locks?.request ? 'idle' : 'unsupported', render: 'ok', workStarted: false, unstartedWorkDiscarded: false };
   // Existing-room recovery is supported independently of new-admission readiness.
   const recoveryProtocol = OBJECTIVE_HUMAN4_RULES_VERSION;
   const clientProtocol = fourHumanModesReady === true ? OBJECTIVE_HUMAN4_RULES_VERSION : threeHumanModesReady === true ? OBJECTIVE_HUMAN3_RULES_VERSION : OBJECTIVE_RULES_VERSION;
@@ -65,7 +68,14 @@ export function createOnlineController({ api, ensureUser, subscribe = () => () =
       saved.parked = parked;
     }
   } catch { storageIssue = '復帰情報を読み込めません。ブラウザーの保存設定を確認してください。保存を上書きせず停止しています'; }
-  const publish = () => { if (alive) for (const observer of observers) observer(clone(state)); };
+  const publish = () => {
+    if (alive) for (const observer of observers) {
+      try { observer(clone(state)); }
+      catch { diagnostics.render = 'failed'; throw new Error('VIEW_NOTIFICATION_FAILED'); }
+    }
+  };
+  // Cleanup must settle even when a view cannot render. No exception text is retained.
+  const publishCleanup = () => { try { publish(); } catch { /* getDiagnostics remains readable. */ } };
   const status = (notice, error = false) => { state.notice = notice; state.error = error; publish(); };
   const stopListener = () => { const previous = listener; listener = null; previous?.unsubscribe?.(); };
   function retainRecovery(record = saved, originalRaw = null) {
@@ -119,22 +129,58 @@ export function createOnlineController({ api, ensureUser, subscribe = () => () =
   }
   // Cooperating tabs share one lock across authentication, persistence and the
   // request/receipt. No queued mutation is replayed after another tab finishes.
+  function cancelLockWait(reason = 'cancelled') {
+    const wait = lockWait;
+    if (!wait || wait.started || wait.cancelled) return false;
+    wait.cancelled = true; lockWait = null; lockWaitStopped = true;
+    clearTimer(wait.timer);
+    diagnostics.lock = reason; diagnostics.unstartedWorkDiscarded = true;
+    if (exclusive === wait.task) exclusive = null;
+    state.connection = 'error'; state.notice = '接続処理の開始を確認できません。未開始の処理を停止しています'; state.error = true;
+    wait.resolve(false); publishCleanup(); return true;
+  }
   function exclusiveRun(work) {
-    if (exclusive) return Promise.resolve(false);
+    if (!alive || exclusive || lockWaitStopped || diagnostics.render === 'failed') return Promise.resolve(false);
     if (!locks?.request) return work(); // Legacy operations still work; switching requires locks.
     const token = generation;
-    const task = locks.request(`${ONLINE_SAVE_KEY}:${saved?.uid || state.uid || 'entry'}`, { ifAvailable: true }, async lock => {
-      if (!alive || token !== generation) return false;
-      if (!lock) { state.connection = 'conflict'; status('別のタブが操作中です。通信が終わってから再読み込みしてください', true); return false; }
-      if (!recoveryUnchanged()) return false;
-      return work();
-    }).catch(() => { if (alive) { state.connection = 'conflict'; status('タブ間の操作を確認できないため停止しています', true); } return false; })
-      .finally(() => { if (exclusive === task) exclusive = null; publish(); });
-    exclusive = task; publish();
-    return task;
+    const wait = { started: false, cancelled: false, deadline: clock() + LOCK_WAIT_MILLIS };
+    wait.task = new Promise(resolve => { wait.resolve = resolve; });
+    lockWait = wait; exclusive = wait.task;
+    diagnostics.lock = 'waiting'; diagnostics.workStarted = false; diagnostics.unstartedWorkDiscarded = false;
+    wait.timer = setTimer(() => cancelLockWaitFor(wait), LOCK_WAIT_MILLIS);
+    function cancelLockWaitFor(expected) { if (lockWait === expected) cancelLockWait('timed-out'); }
+    const finish = result => {
+      clearTimer(wait.timer);
+      if (wait.cancelled) return; // A late completion must not clear a newer attempt.
+      if (lockWait === wait) lockWait = null;
+      if (exclusive === wait.task) exclusive = null;
+      if (diagnostics.lock === 'running') diagnostics.lock = 'settled';
+      wait.resolve(result); publishCleanup();
+    };
+    try { publish(); }
+    catch { cancelLockWait('cancelled'); return wait.task; }
+    // A deferred call also handles synchronous throws from unsupported lock implementations.
+    Promise.resolve().then(() => {
+      if (wait.cancelled) return false;
+      return locks.request(`${ONLINE_SAVE_KEY}:${saved?.uid || state.uid || 'entry'}`, { ifAvailable: true }, async lock => {
+        if (wait.cancelled) return false;
+        // Check elapsed time even if a background browser delayed the timer itself.
+        if (clock() >= wait.deadline) { cancelLockWaitFor(wait); return false; }
+        if (!alive || token !== generation) { cancelLockWait('suspended'); return false; }
+        wait.started = true; clearTimer(wait.timer);
+        if (!lock) { diagnostics.lock = 'unavailable'; state.connection = 'conflict'; status('別のタブが操作中です。通信が終わってから再読み込みしてください', true); return false; }
+        diagnostics.lock = 'running'; diagnostics.workStarted = true;
+        if (!recoveryUnchanged()) return false;
+        return work(); // Keep the owned lock until work really settles; never time out an in-flight write here.
+      });
+    }).then(finish, () => {
+      if (!wait.cancelled && alive) { diagnostics.lock = 'failed'; state.connection = 'conflict'; state.notice = 'タブ間の操作を確認できないため停止しています'; state.error = true; }
+      finish(false);
+    });
+    return wait.task;
   }
   function canSwitch() {
-    return Boolean(locks?.request && alive && !suspended && !sending && !resuming && !returning
+    return Boolean(diagnostics.render !== 'failed' && !lockWaitStopped && locks?.request && alive && !suspended && !sending && !resuming && !returning
       && !state.busy && !state.pending && !saved?.pending && !storageIssue && !state.error
       && state.connection === 'ready' && isOnline() && state.uid && saved?.uid === state.uid
       && !state.ui.pending && !state.ui.stone && !state.ui.rotation
@@ -177,20 +223,20 @@ export function createOnlineController({ api, ensureUser, subscribe = () => () =
       if (saved.roomId) {
         // Restore uses the same UID and authoritative snapshot; no join or write.
         const token = generation;
-        state.connection = 'syncing'; state.busy = true; publish();
-        try { await refresh(token); if (alive && token === generation) listen(token); }
+        state.connection = 'syncing'; state.busy = true;
+        try { publish(); await refresh(token); if (alive && token === generation) listen(token); }
         catch (error) { if (alive && token === generation) { state.connection = 'error'; status(problem(error), true); } }
         finally { if (alive && token === generation) state.busy = false; }
       }
       publish(); return true;
     });
   }
-  const canConfirm = () => alive && !returning && !sending && !resuming && !state.pending && !storageIssue && isOnline() && state.connection === 'ready' && Boolean(state.uid);
+  const canConfirm = () => diagnostics.render !== 'failed' && !lockWaitStopped && alive && !returning && !sending && !resuming && !state.pending && !storageIssue && isOnline() && state.connection === 'ready' && Boolean(state.uid);
   // A lobby return only forgets this browser's recovery pointer. Keep a server-
   // confirmed, solitary host and its exact confirmation separate from terminal recovery.
   function canReturnLobby(checking = false) {
     const { room, self } = state;
-    return alive && !suspended && !sending && !resuming && (!returning || checking)
+    return diagnostics.render !== 'failed' && !lockWaitStopped && alive && !suspended && !sending && !resuming && (!returning || checking)
       && (!state.busy || checking) && !state.pending && !saved?.pending && !storageIssue && !state.error
       && isOnline() && state.connection === 'ready' && Boolean(state.uid) && saved?.uid === state.uid
       && Boolean(room) && room.id === saved?.roomId && room.status === 'waiting'
@@ -243,7 +289,7 @@ export function createOnlineController({ api, ensureUser, subscribe = () => () =
         return false;
       } finally {
         if (returning === task) returning = null;
-        if (alive && (token === generation || !state.room)) { state.busy = false; publish(); }
+        if (alive && (token === generation || !state.room)) { state.busy = false; publishCleanup(); }
       }
     });
     returning = task; publish(); return task;
@@ -389,15 +435,17 @@ export function createOnlineController({ api, ensureUser, subscribe = () => () =
     }
     suspended = false;
     const token = ++generation; stopListener(); invalidatePreview(); invalidateLobbyReturn();
-    state.connection = isOnline() ? 'syncing' : 'offline'; state.busy = true; state.storageIssue = storageIssue; publish();
+    state.connection = isOnline() ? 'syncing' : 'offline'; state.busy = true; state.storageIssue = storageIssue;
     const task = Promise.resolve().then(async () => {
       try {
+        // Render failures must take the same cleanup path as authentication failures.
+        publish();
         if (storageIssue || !isOnline()) return false;
         if (!await authenticate(token) || !retainParked()) return false;
         if (state.pending) return await sendPending(token);
         await refresh(token); if (alive && token === generation) listen(token); return true;
       } catch (error) { if (alive && token === generation) { state.connection = 'error'; state.notice = problem(error); state.error = true; } return false; }
-      finally { if (resuming === task) resuming = null; if (alive && token === generation) { state.busy = false; publish(); } }
+      finally { if (resuming === task) resuming = null; if (alive && token === generation) { state.busy = false; publishCleanup(); } }
     });
     resuming = task; return task;
   }
@@ -417,9 +465,10 @@ export function createOnlineController({ api, ensureUser, subscribe = () => () =
     const pending = immutable({ kind, uid: state.uid, payload: { ...clone(payload), requestId: requestId() } });
     state.pending = pending; saved.pending = clone(pending);
     if (!persist()) return Promise.resolve(false);
-    state.busy = true; state.connection = 'syncing'; publish();
+    state.busy = true; state.connection = 'syncing';
+    try { publish(); } catch { state.busy = false; return Promise.resolve(false); }
     const token = generation;
-    const task = sendPending(token).finally(() => { if (sending === task) sending = null; if (alive && token === generation) { state.busy = false; publish(); } });
+    const task = sendPending(token).finally(() => { if (sending === task) sending = null; if (alive && token === generation) { state.busy = false; publishCleanup(); } });
     sending = task; return task;
   }
   function ownAction(type, extra = {}) {
@@ -453,7 +502,15 @@ export function createOnlineController({ api, ensureUser, subscribe = () => () =
   return {
     getState: () => ({ ...clone(state), threeHumanModesReady: threeHumanModesReady === true, fourHumanModesReady: fourHumanModesReady === true, busy: state.busy || Boolean(exclusive), canConfirm: canConfirm() && !exclusive, canSwitch: canSwitch() && !exclusive, switchSupported: Boolean(locks?.request), parkedRooms: (saved?.parked || []).map(raw => ({ roomId: JSON.parse(raw).roomId })), canReturnToEntry: canReturnToEntry(), inviteCode: saved?.inviteCode || null }),
     observe(fn) { observers.add(fn); return () => observers.delete(fn); },
-    resume: () => exclusive ? exclusive : exclusiveRun(resume),
+    getDiagnostics: () => ({ ...diagnostics }),
+    // Only an explicit recovery request may acknowledge an unstarted wait stop.
+    // Lifecycle notifications never acknowledge it or replay retained pending work.
+    resume: ({ automatic = false } = {}) => {
+      if (!alive || diagnostics.render === 'failed') return Promise.resolve(false);
+      if (lockWaitStopped) { if (automatic) return Promise.resolve(false); lockWaitStopped = false; }
+      return exclusive ? exclusive : exclusiveRun(resume);
+    },
+    cancelLockWait: () => cancelLockWait(),
     requestSwitch, confirmSwitch,
     create(displayName, npcCount = 0, humanSeatCount = 2) {
       if (saved?.roomId || ![2, 3, 4].includes(humanSeatCount) || (humanSeatCount === 3 && threeHumanModesReady !== true) || (humanSeatCount === 4 && fourHumanModesReady !== true) || !Number.isInteger(npcCount) || npcCount < 0 || npcCount > 2 || humanSeatCount + npcCount > 4) return Promise.resolve(false);
@@ -467,7 +524,7 @@ export function createOnlineController({ api, ensureUser, subscribe = () => () =
     compare(seat, pair = false) { if (!state.room?.match?.players.some((player) => player.seat === seat && player.seat !== state.self?.seat)) return false; state.ui.comparison = { seat, pair }; publish(); return true; },
     closeComparison() { state.ui.comparison = null; publish(); },
     offline() { state.connection = 'offline'; invalidatePreview(); invalidateLobbyReturn(); publish(); },
-    suspend() { suspended = true; generation += 1; stopListener(); state.connection = 'syncing'; invalidatePreview(); invalidateLobbyReturn(); state.busy = false; publish(); },
+    suspend() { suspended = true; generation += 1; cancelLockWait('suspended'); stopListener(); state.connection = 'syncing'; invalidatePreview(); invalidateLobbyReturn(); state.busy = false; publishCleanup(); },
     storageChanged() { state.connection = 'conflict'; invalidatePreview(); invalidateLobbyReturn(); status('別のタブで復帰情報が更新されました。通信が終わったらこのページを再読み込みしてください', true); },
     requestReturn() {
       if (!canReturnToEntry() || returning || exclusive) return false;
@@ -476,7 +533,7 @@ export function createOnlineController({ api, ensureUser, subscribe = () => () =
       if (returnTarget && !returnRecoveryUnchanged(returnTarget)) return false;
       state.ui.returnConfirm = true; publish(); return true;
     },
-    cancelReturn() { returnVersion += 1; returnTarget = null; switching = null; delete state.ui.switchRoomId; state.ui.returnConfirm = false; publish(); },
+    cancelReturn() { returnVersion += 1; returnTarget = null; switching = null; delete state.ui.switchRoomId; state.ui.returnConfirm = false; publishCleanup(); },
     returnToEntry() {
       if (!state.ui.returnConfirm || switching || returning || exclusive) return false;
       const confirmation = returnVersion;
@@ -487,6 +544,6 @@ export function createOnlineController({ api, ensureUser, subscribe = () => () =
         return clearRecovery();
       });
     },
-    dispose() { alive = false; generation += 1; stopListener(); observers.clear(); },
+    dispose() { alive = false; generation += 1; cancelLockWait('disposed'); stopListener(); observers.clear(); },
   };
 }

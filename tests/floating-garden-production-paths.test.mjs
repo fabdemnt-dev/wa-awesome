@@ -169,8 +169,8 @@ const limitedTrialTransforms = {
 // policies, runtime flags and every normal-screen source retain their pins.
 // Bootstrap changes only scope the retained-room storage key and its events.
 const limitedTrialAssistHashes = {
-  "online/controller.js": "38e9a1c020e414f183de49cbab9225c66405d3ac21bc86a50307640a8f38a381",
-  "online/mount.js": "4536e71bc5f991f2182db44f6722960b2166952604255b8b4ab81730ee2f3d00",
+  "online/controller.js": "a1c1acbe6a0d5a2d10e712ab0796cc42c5fc2cb2bb4254382046b5a7a39d1e32",
+  "online/mount.js": "d0987080bf4197282e4147d945f0a5a50a512a5a51441a00d5248029debc8120",
   "online/view.js": "077de4d9f3a626938d8c9d5ec8a1cba886772f83cfedcd664e7a74fbbc519a03",
   "online/seat-assist.js": "3896a947cfaab145e040db65e0e82256fd8b3ec6733c7987166d59ee38fda1a0",
   "play/bootstrap.js": "69246c7416f1ac46ed6ae8f24275d2689f455cac695376b08c8ad1ce4b95bec0",
