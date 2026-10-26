@@ -7,9 +7,9 @@ import { fileURLToPath } from 'node:url';
 import { modeRoute, parseEntryMode } from '../floating-garden/online/entry-mode.js';
 import { bootstrapTrial } from '../floating-garden/play/bootstrap.js';
 import runtime from '../floating-garden/play/trialruntime.js';
-import stoppedLimitedRuntime from '../floating-garden/limited-trial/play/trialruntime.js';
-// Enabled profiles below are offline fixtures only; the published runtime stays stopped.
-const limitedRuntime = Object.freeze({...stoppedLimitedRuntime, enabled:true});
+import limitedRuntime from '../floating-garden/limited-trial/play/trialruntime.js';
+// Disabled profile remains an offline fixture for the stop guard.
+const stoppedLimitedRuntime = Object.freeze({...limitedRuntime, enabled:false});
 import { PUBLIC_POLICY as LIMITED_POLICY } from '../floating-garden/limited-trial/play/public-policy.js';
 import { resolvePublicEnvironment as resolveLimitedEnvironment, PRODUCTION_AUTH_APP_NAME } from '../floating-garden/limited-trial/play/config.js';
 import { bootstrapTrial as bootstrapLimitedTrial, createPublicStorage as createLimitedStorage, publicRecoveryKey as limitedRecoveryKey } from '../floating-garden/limited-trial/play/bootstrap.js';
@@ -126,6 +126,10 @@ const limitedTrialTransforms = {
     [
       "// Public identifiers copied explicitly from reviewed main, never imported from its resolver.\n// Existing App Check key registration matches, but domain allowlist and token issuance are\n// unverified for this Garden profile. No anonymous Auth or SDK load is allowed while disabled.",
       "// Public identifiers copied explicitly from reviewed main, never imported from its resolver.\n// Enabled only for this isolated limited-trial source. Publication and live testing remain\n// separately gated; this local flag is not proof of a successful live App Check or Auth test."
+    ],
+    [
+      "\"enabled\": false",
+      "\"enabled\": true"
     ],
     [
       "\"verified\": false",
@@ -323,7 +327,7 @@ test('normal entrance and disabled play bytes remain unchanged and no normal pag
     if (['.html', '.js', '.css'].includes(extname(path))) assert.doesNotMatch(await read(path), /limited-trial/);
   }
   assert.equal(runtime.enabled, false);
-  assert.equal(stoppedLimitedRuntime.enabled, false);
+  assert.equal(limitedRuntime.enabled, true);
   assert.equal(LIMITED_POLICY.enabled, true);
   assert.equal(limitedRuntime.appCheck.verified, true);
   assert.equal(LIMITED_THREE_READY, false);
@@ -406,7 +410,7 @@ function limitedTrialPage() {
   const root = {innerHTML:'', ownerDocument:{defaultView:page}, addEventListener:(name, listener) => events.set(name, listener), removeEventListener:name => events.delete(name), setAttribute(){}};
   return {root, page, events, status:{innerHTML:''}};
 }
-for (const mode of ['2-0', '2-1', '2-2']) test(`stopped limited trial actual app ${mode} offers no connection and touches no SDK/network/storage`, async () => {
+for (const mode of ['2-0', '2-1', '2-2']) test(`limited trial actual app ${mode} remains idle until explicit connection without SDK/network/storage`, async () => {
   const {root, status, events} = limitedTrialPage(), selection = {}, touched = [];
   const values = {document:{value:{querySelector:selector => selector === '#online-app' ? root : selector === '#trial-status' ? status : selection}}, location:{value:new URL(limitedUrl + '#mode=' + mode)}};
   for (const name of ['fetch','XMLHttpRequest','WebSocket','EventSource']) values[name] = {value:() => { touched.push(name); assert.fail('idle ' + name); }};
@@ -414,13 +418,12 @@ for (const mode of ['2-0', '2-1', '2-2']) test(`stopped limited trial actual app
   await withGlobals(values, () => import(new URL(`../floating-garden/limited-trial/play/app.js?offline-test=${mode}`, import.meta.url)));
   assert.deepEqual(touched, []);
   assert.match(selection.textContent, /選択した構成/);
-  assert.match(root.innerHTML, /庭園への接続を開始できません/);
-  assert.doesNotMatch(root.innerHTML, /data-public-connect/);
-  assert.equal(status.innerHTML, '');
-  assert.equal(events.size, 0);
+  assert.match(root.innerHTML, /data-public-connect/);
+  assert.match(status.innerHTML, /限定オンライン試験/);
+  assert.equal(events.size, 1);
 });
 
-test('published stopped trial runtime blocks bootstrap and SDK before authentication or storage', async () => {
+test('disabled trial runtime fixture blocks bootstrap and SDK before authentication or storage', async () => {
   assert.equal(stoppedLimitedRuntime.enabled, false);
   assert.throws(() => resolveLimitedEnvironment(stoppedLimitedRuntime, limitedUrl));
   await assert.rejects(() => createLimitedTransport(stoppedLimitedRuntime, limitedUrl, {loadSdk:() => assert.fail('stopped runtime loaded SDK')}));
