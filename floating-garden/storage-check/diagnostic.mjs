@@ -3,7 +3,8 @@ export const ORIGIN = 'https://fabdemnt-dev.github.io';
 export const KEY = 'floating-garden-public:wa-awesome:public-production-20261023-v1:floating-garden-online-recovery-v1';
 export const ARCHIVE = KEY + ':floating-garden-online-retained-rooms-v1';
 export const KEYS = Object.freeze([KEY, ARCHIVE]);
-const unknown = () => 'unknown';
+const unknown = () => null;
+export const FLAGS = Object.freeze(['activeRoom','pending','parked','retained']);
 const obj = x => x !== null && typeof x === 'object' && !Array.isArray(x);
 const text = x => typeof x === 'string' && x.length > 0;
 const allowed = (x, keys) => obj(x) && Object.keys(x).every(k => keys.includes(k));
@@ -57,30 +58,37 @@ export function inspect(storage) {
   try {
     const a = storage.getItem(KEY), b = storage.getItem(ARCHIVE);
     require(a === storage.getItem(KEY) && b === storage.getItem(ARCHIVE));
-    const active = a === null ? null : record(parse(a));
-    let present = active?.present || false;
+    const value = a === null ? null : parse(a);
+    const active = a === null ? null : record(value);
+    let retained = false;
     if (b !== null) {
       const archive = parse(b);
       require(allowed(archive,['version','uid','rooms']) && archive.version === 1 && text(archive.uid) && (!active || active.uid === archive.uid) && Array.isArray(archive.rooms) && archive.rooms.length <= 21);
       const seen = new Set(), combined = new Set(active?.ids || []);
       for (const raw of archive.rooms) { const old=parse(raw); record(old,archive.uid,true); require(!seen.has(old.roomId)); seen.add(old.roomId); if(old.roomId!==active?.roomId)combined.add(old.roomId); }
-      require(combined.size <= 20); present ||= seen.size > 0;
+      require(combined.size <= 20); retained = seen.size > 0;
     }
-    return present ? 'present' : 'absent';
+    return {activeRoom:!!active?.roomId, pending:active !== null && value.pending !== null, parked:(active?.ids.size || 0) > 0, retained};
   } catch { return unknown(); }
 }
 function browserRead() {
   try { if (globalThis.location.origin !== ORIGIN) return unknown(); return inspect(globalThis.localStorage); }
   catch { return unknown(); }
 }
-const messages = Object.freeze({absent:'残っていない',present:'残っている',unknown:'確認できない'});
+const labels = Object.freeze({activeRoom:'現在の部屋参照',pending:'未確定操作',parked:'旧保存の部屋参照',retained:'別キーの保留部屋参照'});
+function validFlags(value) {
+  return obj(value) && Object.keys(value).length === FLAGS.length && FLAGS.every(k => Object.hasOwn(value,k) && typeof value[k] === 'boolean');
+}
 export function mount(root, read = browserRead) {
   const doc=root.ownerDocument;
   const button=doc.createElement('button');button.type='button';button.textContent='保存の有無を確認';
-  const result=doc.createElement('p');result.setAttribute('role','status');result.textContent='未確認';
-  const note=doc.createElement('p');note.textContent='この端末・ブラウザーの指定された庭園保存だけを読みます。値は表示・送信せず、保存を変更しません。「残っていない」でも試験開始の許可や、他の保存・認証・サーバー状態の確認にはなりません。';
-  const run=()=>{let state='unknown';try{state=read();}catch{}result.textContent=messages[state] || messages.unknown;};
-  const invalidate=()=>{result.textContent='確認できない';};
+  const result=doc.createElement('div');result.setAttribute('role','status');
+  const rows=Object.fromEntries(FLAGS.map(key=>{const row=doc.createElement('p');row.dataset.flag=key;result.append(row);return [key,row];}));
+  const show=(value,initial=false)=>{const valid=validFlags(value);for(const key of FLAGS)rows[key].textContent=labels[key]+'：'+(initial?'未確認':valid?(value[key]?'あり':'なし'):'確認できない');};
+  show(null,true);
+  const note=doc.createElement('p');note.textContent='この端末・ブラウザーの指定された庭園保存だけを読みます。値は表示・送信せず、保存を変更しません。4項目が「なし」でも試験開始の許可や、他の保存・認証・サーバー状態の確認にはなりません。';
+  const run=()=>{let value=null;try{value=read();if(!validFlags(value))value=null;}catch{value=null;}show(value);};
+  const invalidate=()=>show(null);
   const onStorage=e=>{if(e.key===null || KEYS.includes(e.key))invalidate();};
   button.addEventListener('click',run);root.replaceChildren(note,button,result);
   doc.defaultView?.addEventListener('pagehide',invalidate);doc.defaultView?.addEventListener('storage',onStorage);
