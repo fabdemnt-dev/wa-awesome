@@ -193,7 +193,7 @@ const soloChanged = new Set(['engine.js','match-engine.js','cpu.js','match-save.
 test('production tree adds only exact diagnostic and isolated limited-trial files; original game files preserve their lab mapping', async () => {
   const files = [];
   async function walk(prefix = '') { for (const item of await readdir(new URL(prefix, root), {withFileTypes:true})) { if (item.isDirectory()) await walk(prefix+item.name+'/'); else files.push(prefix+item.name); } }
-  await walk(); assert.deepEqual(files.sort(), [...Object.keys(mapping), 'diagnostics/stopped.html', 'diagnostics/stopped.js', ...limitedTrialFiles].sort());
+  await walk(); assert.deepEqual(files.sort(), [...Object.keys(mapping), 'diagnostics/stopped.html', 'diagnostics/stopped.js', 'storage-check/index.html', 'storage-check/entry.mjs', 'storage-check/diagnostic.mjs', ...limitedTrialFiles].sort());
   for (const [path, source] of Object.entries(mapping)) {
     let expected = await readFile(new URL(source, oldRoot));
     if (replacements[path]) {
