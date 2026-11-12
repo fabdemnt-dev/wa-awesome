@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="ja">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'none'; img-src 'none'; worker-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>庭園の独立保存確認</title>
+<link rel="stylesheet" href="./style.css">
+<h1>庭園の独立保存確認</h1>
+<p>試験専用の自己マーカーだけを読み書きします。既存の庭園保存・認証・cookie は読みません。Firebase SDK、認証作成、ゲーム通信はありません。</p>
+<p>同じ URL を空の試験用 A/B で使います。A で空を確認して A を記入 → B で空を確認して B を記入 → A/B を再読み込みして、それぞれ自身の文字だけが残ることを確認します。B で A が見えた場合や片方だけ一致する場合は停止します。</p>
+<main></main>
+<p>これは保存分離の確認用です。2人参加、Firebase 認証、接続成功や、試験開始の許可を意味しません。再読み込み後の確認を含む両 profile の結果がそろうまでは独立性は未確認です。</p>
+<script type="module" src="./entry.mjs"></script>
+</html>
