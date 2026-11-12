@@ -1,3 +1,4 @@
+import {allowlistedCode} from './error-taxonomy.js';
 // Pure coordinator. Construction performs no storage access, SDK loading, or network.
 export const MARKER = 'floating-garden-auth-preparation:wa-awesome:v1';
 export const LOCK = 'floating-garden-auth-preparation:wa-awesome';
@@ -8,9 +9,9 @@ export function isExpectedOrigin(href) {
 }
 export function createPreparation({enabled=false,allowCreate=false,href='',getStorage,locks,loadSession,onDiagnostic=()=>{},timeoutMs=12000,setTimer=setTimeout,clearTimer=clearTimeout}={}) {
   let flight=null,stopped=false,diagnosticOpen=false;
-  const stages=new Set(['preflight','storage','sdk_load','appcheck','auth_ready','persistence','existing_check','attempt_mark','create_invoked','result_check','completion_mark']);
-  let stage='preflight',failure=null,createInvoked=false;
-  const emit=()=>{try{Promise.resolve(onDiagnostic(Object.freeze({stage,failure,create_invoked:createInvoked}))).catch(()=>{});}catch{}};
+  const stages=new Set(['preflight','storage','sdk_load','appcheck','appcheck_provider','appcheck_initialize','appcheck_token','appcheck_validate','auth_ready','persistence','existing_check','attempt_mark','create_invoked','result_check','completion_mark']);
+  let stage='preflight',failure=null,createInvoked=false,sdkCode=null;
+  const emit=()=>{try{Promise.resolve(onDiagnostic(Object.freeze({stage,failure,create_invoked:createInvoked,...(sdkCode===null?{}:{sdk_error_code:sdkCode})}))).catch(()=>{});}catch{}};
   const mark=value=>{if(diagnosticOpen&&stages.has(value)){stage=value;emit();}};
   const classified=(code,kind)=>Object.assign(problem(code),{failure:kind});
   const safeFailure=e=>['timeout','rejected','stopped','mismatch','storage'].includes(e?.failure)?e.failure:e?.code==='stopped'?'stopped':e?.code==='storage'||['storage','attempt_mark','completion_mark'].includes(stage)?'storage':'rejected';
@@ -23,14 +24,14 @@ export function createPreparation({enabled=false,allowCreate=false,href='',getSt
     if(stopped)return rejectBefore('stopped');
     if(flight)return flight;
     if(!locks?.request)return rejectBefore('storage');
-    stage='preflight';failure=null;createInvoked=false;diagnosticOpen=true;flight=Promise.resolve().then(()=>locks.request(LOCK,{mode:'exclusive',ifAvailable:true},async lock=>{
+    stage='preflight';failure=null;createInvoked=false;sdkCode=null;diagnosticOpen=true;flight=Promise.resolve().then(()=>locks.request(LOCK,{mode:'exclusive',ifAvailable:true},async lock=>{
       if(!lock)throw problem('busy');active();
       let storage,session,attempted=false;
       try {
         mark('storage');storage=getStorage();
         const previous=storage.getItem(MARKER);
         let acceptSession=true;
-        const loading=Promise.resolve().then(()=>loadSession({isCurrent:()=>acceptSession&&!stopped,onStage:value=>{if(acceptSession&&!stopped)mark(value);}}));
+        const loading=Promise.resolve().then(()=>loadSession({isCurrent:()=>acceptSession&&!stopped,onStage:value=>{if(acceptSession&&!stopped)mark(value);},onErrorCode:value=>{if(acceptSession&&!stopped&&diagnosticOpen)sdkCode=allowlistedCode(value);}}));
         loading.then(s=>{if(!acceptSession)Promise.resolve(s.dispose()).catch(()=>{});},()=>{});
         mark('sdk_load');try{session=await timed(loading);}catch(e){acceptSession=false;throw e;}
         active();
