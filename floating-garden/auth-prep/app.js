@@ -4,7 +4,7 @@ import {createAuthSession} from './adapter.js';
 const status=document.querySelector('#status');
 const existing=document.querySelector('#existing'),create=document.querySelector('#create');
 // Neither SDK nor storage is touched on page load, including when controls are enabled.
-const prep=createPreparation({...runtime,href:location.href,getStorage:()=>localStorage,locks:navigator.locks,loadSession:controls=>createAuthSession(controls)});
+const prep=createPreparation({...runtime,href:location.href,getStorage:()=>localStorage,locks:navigator.locks,loadSession:controls=>createAuthSession(controls),onDiagnostic:d=>{document.querySelector('#diagnostic').textContent=JSON.stringify(d);}});
 if(runtime.enabled)document.querySelector('#intro').textContent='承認された範囲で匿名認証だけを準備します。庭園の受付は開きません。';
 existing.disabled=!runtime.enabled;create.disabled=!runtime.enabled||!runtime.allowCreate;
 async function act(wantsCreate){existing.disabled=true;create.disabled=true;status.textContent='匿名認証だけを確認しています。庭園には接続しません。';
