@@ -25,10 +25,10 @@ export async function createAuthSession({loadSdk=loadAuthSdk,environment=globalT
     stage('appcheck_token');active();const token=await appCheckSdk.getToken(check,false);active();
     stage('appcheck_validate');active();
     if(typeof token?.token!=='string'||!token.token)throw Object.assign(new Error('App Checkが確認できません。'),{code:'appcheck'});
-    inAppCheck=false;stage('auth_ready');auth=authSdk.getAuth(app);
+    inAppCheck=false;stage('auth_ready');active();auth=authSdk.getAuth(app);
     await auth.authStateReady();active();
     if(auth.currentUser && auth.currentUser.isAnonymous!==true)throw Object.assign(new Error('匿名認証ではないため停止しました。'),{code:'nonanonymous'});
-    stage('persistence');await authSdk.setPersistence(auth,authSdk.browserLocalPersistence);localPersistence=true;active();
+    stage('persistence');active();await authSdk.setPersistence(auth,authSdk.browserLocalPersistence);localPersistence=true;active();
     return {get localPersistence(){return localPersistence;},ready:()=>auth.authStateReady(),currentUser:()=>auth.currentUser,createAnonymous:async()=>{const result=await authSdk.signInAnonymously(auth);return result.user;},dispose};
   }catch(error){if(inAppCheck){try{Promise.resolve(onErrorCode(classifyAppCheckError(error))).catch(()=>{});}catch{}}try{await dispose();}catch{}throw error;}
 }
